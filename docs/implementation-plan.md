@@ -22,6 +22,11 @@ invalid resource references, secrets, and environment precedence. Read seed file
 without shell execution or checkout writes. Do not pull in an application-specific
 framework. Finalize schema decisions in an ADR.
 
+Milestone 1 editor follow-up: committed project and machine JSON Schema artifacts
+are generated from `api/v1` with deterministic drift checks and validated example
+YAML. See [editor setup and limits](../schemas/README.md); this does not change
+runtime acceptance or implement later milestones.
+
 ## 2. Local daemon and durable identity
 
 Implement daemon serve/start/stop/status behavior, the permissioned socket,

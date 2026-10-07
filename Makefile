@@ -1,7 +1,7 @@
 GOLANGCI_LINT_VERSION := v2.14.0
 LINT := .tools/bin/golangci-lint-$(GOLANGCI_LINT_VERSION)
 
-.PHONY: build fmt fmt-check vet test race tools lint adr-create adr-verify adr-test check
+.PHONY: build fmt fmt-check vet test race tools lint adr-create adr-verify adr-test schema-generate schema-check check
 
 build:
 	go build -o bin/backlot ./cmd/backlot
@@ -42,4 +42,10 @@ adr-verify:
 adr-test:
 	go test ./internal/adr ./cmd/adr
 
-check: fmt-check vet lint race adr-verify build
+schema-generate:
+	go run ./cmd/schema
+
+schema-check:
+	go run ./cmd/schema -check
+
+check: schema-check fmt-check vet lint race adr-verify build

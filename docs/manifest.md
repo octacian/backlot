@@ -21,6 +21,15 @@ and diagnostics go to stderr. Errors include a code, field context and recovery
 instruction. Argument-parser failures before entering the plan action follow the
 CLI library's normal diagnostic behavior.
 
+## Editor completion and validation
+
+Use the committed [JSON Schemas and editor setup](../schemas/README.md) for
+project Manifest and MachineConfig YAML/JSON completion, hover help and local
+validation. YAML in VSCode requires the Red Hat YAML extension. The example
+modelines resolve to local schemas in this checkout before merge; no runtime
+schema fetch is required. Editor schemas assist authoring; the strict decoder
+and `backlot plan` remain authoritative.
+
 ## Discovery and configuration
 
 Without `--project`, search the working directory and parents, including the

@@ -29,7 +29,9 @@ Run these from the repository root:
 | `make adr-create TITLE="Decision title"` | Create a proposed ADR without overwriting records |
 | `make adr-verify` | Verify all ADR records |
 | `make adr-test` | Run ADR tooling tests |
-| `make check` | Run formatting, vet, lint, race tests, ADR verification, and build |
+| `make schema-generate` | Regenerate committed editor schemas from `api/v1` |
+| `make schema-check` | Reject stale generated schemas without writing |
+| `make check` | Run schema drift checks, formatting, vet, lint, race tests, ADR verification, and build |
 
 Before committing scaffold or Go/tooling changes, run `make check`. Documentation
 changes require ADR verification when records change and manual checking of
@@ -44,6 +46,10 @@ portability evidence, not a Linux runtime support claim. A Windows cross-build
 checks compilation only, not process lifecycle, networking, or installation.
 The workflow runs on every PR and push to `main`, without path filters that
 could leave required checks missing.
+
+Schema tests use a maintained JSON Schema validator on the real YAML examples
+and negative/variant cases, in addition to checking deterministic generated output.
+See [schema generation and editor setup](../schemas/README.md).
 
 Tests exercise strict manifest/config decoding, graph/reference validity, offline
 CLI JSON/errors, environment precedence, read-only seeds, secret redaction, tool

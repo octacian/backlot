@@ -71,6 +71,15 @@ without running it. Provider settings are validated locally without health check
 Return shared `PlanResponse` or actionable `ErrorResponse`; add no HTTP endpoint
 until there is a real client/server implementation.
 
+### Editor artifacts
+
+Publish self-contained project and machine JSON Schemas derived from these same
+named Go contracts for editor completion, descriptions and local validation.
+The [schema guide](../../schemas/README.md) records the chosen libraries, draft,
+source annotations/hooks, regeneration, editor association and boundaries.
+Committed artifacts are drift-checked in the Go-only repository checks; editor
+assistance does not replace the strict decoder or graph/planning validation.
+
 ## Consequences
 
 Projects can review selected work, environment mappings, dependencies and owned

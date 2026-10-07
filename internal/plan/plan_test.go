@@ -289,6 +289,7 @@ func TestSecretSafetyAndProviderSelection(t *testing.T) {
 }
 
 func TestSeedSecurityAndDiscovery(t *testing.T) {
+	noDefaultConfig(t)
 	for _, data := range []string{"export TOKEN=secret-canary", "TOKEN=secret-canary\nTOKEN=second", "broken secret-canary", "TOKEN=bad\x00value"} {
 		if _, err := parseSeed([]byte(data), "seed"); err == nil || strings.Contains(err.Error(), "secret-canary") {
 			t.Fatalf("unsafe seed error: %v", err)

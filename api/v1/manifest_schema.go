@@ -127,13 +127,30 @@ func (Resource) JSONSchemaExtend(s *jsonschema.Schema) {
 	schemaProperty(s, "kind").Enum = schemaEnum("port", "volume", "directory", "secret", "network", "origin").Enum
 }
 
+// JSONSchemaExtend constrains output serialization identifiers.
+func (Output) JSONSchemaExtend(s *jsonschema.Schema) {
+	schemaProperty(s, "concurrency_group").Pattern = schemaIdentifier
+}
+
+// schemaProbeTarget restricts reference discriminators while retaining ordinary
+// literal targets. Resource declaration lookup remains runtime validation.
+func schemaProbeTarget(field string, kinds ...string) *jsonschema.Schema {
+	return schemaProperties(map[string]*jsonschema.Schema{
+		"target": schemaProperties(map[string]*jsonschema.Schema{
+			"ref": schemaProperties(map[string]*jsonschema.Schema{
+				"kind": schemaEnum(kinds...), "field": {Const: field},
+			}),
+		}),
+	})
+}
+
 // JSONSchemaExtend enforces network versus command probe shapes.
 func (Probe) JSONSchemaExtend(s *jsonschema.Schema) {
 	schemaProperty(s, "kind").Enum = schemaEnum("tcp", "http", "command").Enum
 	s.AllOf = []*jsonschema.Schema{
 		schemaWhen("kind", "command", &jsonschema.Schema{AllOf: []*jsonschema.Schema{schemaRequire("command"), schemaForbid("target")}}),
-		schemaWhen("kind", "tcp", &jsonschema.Schema{AllOf: []*jsonschema.Schema{schemaRequire("target"), schemaForbid("command")}}),
-		schemaWhen("kind", "http", &jsonschema.Schema{AllOf: []*jsonschema.Schema{schemaRequire("target"), schemaForbid("command")}}),
+		schemaWhen("kind", "tcp", &jsonschema.Schema{AllOf: []*jsonschema.Schema{schemaRequire("target"), schemaForbid("command"), schemaProbeTarget("port", "service", "resource")}}),
+		schemaWhen("kind", "http", &jsonschema.Schema{AllOf: []*jsonschema.Schema{schemaRequire("target"), schemaForbid("command"), schemaProbeTarget("url", "resource")}}),
 	}
 }
 
@@ -223,7 +240,11 @@ func (Dependency) JSONSchemaExtend(s *jsonschema.Schema) {
 // JSONSchemaExtend constrains publication routes and aggregate probe kind.
 func (Publication) JSONSchemaExtend(s *jsonschema.Schema) {
 	schemaProperty(s, "routes").MinItems = schemaOne()
-	s.AllOf = []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"probe": schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "http"}})})}
+	s.AllOf = []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{
+		"probe": schemaProperties(map[string]*jsonschema.Schema{
+			"kind": {Const: "http"}, "target": schemaRequire("ref"),
+		}),
+	})}
 }
 
 // JSONSchemaExtend adds useful local socket guidance without contacting Docker.
@@ -235,7 +256,8 @@ func (DockerConfig) JSONSchemaExtend(s *jsonschema.Schema) {
 
 // JSONSchemaExtend adds local gateway shape constraints; planning validates full URLs/domains.
 func (CaddyConfig) JSONSchemaExtend(s *jsonschema.Schema) {
-	schemaProperty(s, "endpoint").Pattern = `^https?://[^/?#@]+[^?#]*$`
+	// Match Go's case-insensitive schemes and zero-valued query/fragment delimiters.
+	schemaProperty(s, "endpoint").Pattern = `^[Hh][Tt][Tt][Pp][Ss]?://[^/?#@]+(/[^?#]*)?\??#?$`
 	schemaProperty(s, "scope").Pattern = schemaIdentifier
 	schemaProperty(s, "domain_suffix").Pattern = `^[a-z0-9-]+(\.[a-z0-9-]+)+$`
 	schemaProperty(s, "host_address").Pattern = "^[^/\x00 \n\r]+$"

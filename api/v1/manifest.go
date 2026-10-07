@@ -205,5 +205,5 @@ type CaddyConfig struct {
 type StorageConfig struct {
 	Directory      string `json:"directory" yaml:"directory" jsonschema:"minLength=1" jsonschema_description:"Future daemon state and evidence directory."`
 	RetentionAge   string `json:"retention_age" yaml:"retention_age" jsonschema:"minLength=1" jsonschema_description:"Positive Go duration; for example 168h. Planning checks duration syntax."`
-	RetentionBytes int64  `json:"retention_bytes" yaml:"retention_bytes" jsonschema:"minimum=1" jsonschema_description:"Positive evidence retention size in bytes."`
+	RetentionBytes int64  `json:"retention_bytes" yaml:"retention_bytes" jsonschema:"minimum=1,maximum=9223372036854775807" jsonschema_description:"Positive evidence retention size in bytes."`
 }

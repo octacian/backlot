@@ -80,7 +80,7 @@ capabilities, and maintained parsers/clients for external formats and engines.
 The scaffold uses the stable maintained YAML v3 line for ADR metadata; YAML v4 is
 still a release candidate after the milestone 1 reassessment. The manifest parser
 reuses v3; see the
-[schema proposal](adr/20261007T055849866Z-define-versioned-offline-scene-planning-contracts.md).
+[accepted schema decision](adr/20261007T055849866Z-define-versioned-offline-scene-planning-contracts.md).
 Do not add unused runtime dependencies to the scaffold.
 
 Keep platform-specific supervision and socket operations separate from domain

@@ -8,7 +8,7 @@
         "endpoint": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^https?://[^/?#@]+[^?#]*$",
+          "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^/?#@]+(/[^?#]*)?\\??#?$",
           "description": "Local Docker unix socket URL or Caddy HTTP(S) admin URL."
         },
         "scope": {
@@ -118,6 +118,7 @@
         },
         "retention_bytes": {
           "type": "integer",
+          "maximum": 9223372036854775807,
           "minimum": 1,
           "description": "Positive evidence retention size in bytes."
         }

@@ -16,9 +16,9 @@ read-only seed/tool checks; allocation-dependent values remain typed symbolic
 references and ordinary output redacts secrets. This makes milestone 1 useful
 without pretending the daemon or providers already execute scenes.
 
-This proposal concretizes the accepted environment/container and lifecycle
+This decision concretizes the accepted environment/container and lifecycle
 choices; it does not replace them. The [manifest guide](../manifest.md) is the
-schema and command reference. Review acceptance determines schema acceptance.
+schema and command reference.
 
 ## Context
 

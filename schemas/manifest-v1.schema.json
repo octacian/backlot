@@ -650,6 +650,7 @@
         "concurrency_group": {
           "type": "string",
           "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
           "description": "Named serialization group for overlapping checkout outputs."
         }
       },
@@ -723,6 +724,28 @@
                     }
                   }
                 ]
+              },
+              {
+                "properties": {
+                  "target": {
+                    "properties": {
+                      "ref": {
+                        "properties": {
+                          "field": {
+                            "const": "port"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "service",
+                              "resource"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
               }
             ]
           }
@@ -755,6 +778,27 @@
                     }
                   }
                 ]
+              },
+              {
+                "properties": {
+                  "target": {
+                    "properties": {
+                      "ref": {
+                        "properties": {
+                          "field": {
+                            "const": "url"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "resource"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
               }
             ]
           }
@@ -800,6 +844,11 @@
               "properties": {
                 "kind": {
                   "const": "http"
+                },
+                "target": {
+                  "required": [
+                    "ref"
+                  ]
                 }
               }
             }

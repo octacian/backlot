@@ -105,7 +105,7 @@ cost before adding dependencies:
   Module requirements include development/assertion/diff tooling as well as
   `swaggest/refl`; module requirements are not all production imports.
 - [Santhosh Tekuri/jsonschema v6.0.3](https://github.com/santhosh-tekuri/jsonschema/tree/v6.0.3)
-  (Apache-2.0; June 2026 release) provides standards validation and meta-schema
+  (Apache-2.0) provides standards validation and meta-schema
   checks for 2020-12. It is used by tests only, with resources loaded from bytes
   and no HTTP loader. Its production `x/text` dependency is already present;
   `dlclark/regexp2` is upstream test tooling.

@@ -370,7 +370,95 @@ func TestContainerTerminalAndOutputEscape(t *testing.T) {
 	if err := os.Symlink(t.TempDir(), filepath.Join(root, "dist")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Resolve(v1.PlanRequest{ProjectPath: root, Scene: "dev"}); err == nil || !strings.Contains(err.Error(), "output symlink escapes") {
-		t.Fatalf("output escape accepted: %v", err)
+	for _, path := range []string{"dist", "dist/new/deep"} {
+		m.Outputs["build"] = v1.Output{Path: path, ConcurrencyGroup: "build"}
+		encoded, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(root, "backlot.yaml"), encoded)
+		if _, err := Resolve(v1.PlanRequest{ProjectPath: root, Scene: "dev"}); err == nil || !strings.Contains(err.Error(), "output symlink escapes") {
+			t.Fatalf("output escape accepted for %s: %v", path, err)
+		}
+		if _, err := Resolve(v1.PlanRequest{ProjectPath: root, ConfigPath: config, Scene: "test"}); err != nil {
+			t.Fatalf("unselected output blocked planning: %v", err)
+		}
+	}
+}
+
+func TestOutputCanonicalOverlap(t *testing.T) {
+	noDefaultConfig(t)
+	for _, tc := range []struct {
+		name, first, second                 string
+		sameGroup, separateScenes, existing bool
+		conflict                            bool
+	}{
+		{name: "equal missing suffix", first: "real/new/deep", second: "alias/new/deep", conflict: true},
+		{name: "nested missing suffix", first: "real/new", second: "alias/new/deep", conflict: true},
+		{name: "reverse nested", first: "alias/new/deep", second: "real/new", conflict: true},
+		{name: "chained alias", first: "real/new", second: "chain/new", conflict: true},
+		{name: "ordinary missing ancestors", first: "missing/one/deep", second: "alias/new"},
+		{name: "existing equal", first: "real", second: "alias", existing: true, conflict: true},
+		{name: "separate scenes", first: "real/new", second: "alias/new", separateScenes: true, conflict: true},
+		{name: "same group equal", first: "real/new", second: "alias/new", sameGroup: true},
+		{name: "same group nested", first: "real/new", second: "alias/new/deep", sameGroup: true},
+		{name: "distinct siblings", first: "real/new", second: "alias/newer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := fixture(t)
+			if err := os.Mkdir(filepath.Join(root, "real"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("real", filepath.Join(root, "alias")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("alias", filepath.Join(root, "chain")); err != nil {
+				t.Fatal(err)
+			}
+			group := "two"
+			if tc.sameGroup {
+				group = "one"
+			}
+			m := v1.Manifest{
+				Version: v1.ManifestVersion, Project: "aliases", Tools: map[string]string{"go": "go"},
+				Outputs: map[string]v1.Output{"first": {Path: tc.first, ConcurrencyGroup: "one"}, "second": {Path: tc.second, ConcurrencyGroup: group}},
+				Components: map[string]v1.Component{
+					"first":  {Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "go"}, Outputs: []string{"first"}},
+					"second": {Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "go"}, Outputs: []string{"second"}},
+				},
+				Scenes: map[string]v1.Scene{"both": {Lifetime: v1.Persistent, Components: []string{"first", "second"}}},
+			}
+			scenes := []string{"both"}
+			if tc.separateScenes {
+				m.Scenes = map[string]v1.Scene{"first": {Lifetime: v1.Persistent, Components: []string{"first"}}, "second": {Lifetime: v1.Persistent, Components: []string{"second"}}}
+				scenes = []string{"first", "second"}
+			}
+			encoded, err := json.Marshal(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			write(t, filepath.Join(root, "backlot.yaml"), encoded)
+			for _, scene := range scenes {
+				result, err := Resolve(v1.PlanRequest{ProjectPath: root, Scene: scene})
+				if tc.conflict {
+					var planErr *v1.PlanError
+					if !errors.As(err, &planErr) || planErr.Code != "invalid_output" || !strings.HasPrefix(planErr.Field, "outputs.") || !strings.Contains(planErr.Message, "share a concurrency group") {
+						t.Fatalf("expected actionable canonical overlap error, got %v", err)
+					}
+				} else {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if result.Outputs["first"] != m.Outputs["first"] || result.Outputs["second"] != m.Outputs["second"] {
+						t.Fatalf("output declarations changed: %+v", result.Outputs)
+					}
+				}
+			}
+			if !tc.existing {
+				if _, err := os.Lstat(filepath.Join(root, "real", "new")); !os.IsNotExist(err) {
+					t.Fatalf("planner created output: %v", err)
+				}
+			}
+		})
 	}
 }

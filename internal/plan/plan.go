@@ -99,6 +99,15 @@ func Resolve(request v1.PlanRequest) (v1.PlanResponse, error) {
 	if err != nil {
 		return v1.PlanResponse{}, err
 	}
+	selectedOutputs := map[string]bool{}
+	for _, name := range order {
+		for _, output := range m.Components[name].Outputs {
+			selectedOutputs[output] = true
+		}
+	}
+	if err := validateOutputs(project, m.Outputs, selectedOutputs); err != nil {
+		return v1.PlanResponse{}, err
+	}
 	for _, name := range order {
 		c := m.Components[name]
 		if c.Runtime == v1.Container && config.Docker == nil {
@@ -123,9 +132,6 @@ func Resolve(request v1.PlanRequest) (v1.PlanResponse, error) {
 			}
 		}
 		for _, o := range c.Outputs {
-			if err := validateOutput(project, m.Outputs[o].Path); err != nil {
-				return v1.PlanResponse{}, err
-			}
 			result.Outputs[o] = m.Outputs[o]
 		}
 		env, err := resolveEnvironment(m, config, c, project, result)

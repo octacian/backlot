@@ -83,10 +83,12 @@ with persistent storage; the offline planner does not generate or rotate them.
 
 `outputs` maps names to `{path: web/dist, concurrency_group: web-build}`. Paths
 are safe project-relative paths, without traversal, backslashes or drive names.
-Overlapping paths must share a group. Selected existing output ancestors cannot
-escape the project through symlinks. Components list their outputs. A future
-executor must serialize these groups per canonical checkout across scenes and
-runs; a plan is not a lock. Backlot cannot infer undeclared command side effects.
+Overlapping paths must share a group, including canonical aliases through
+symlinks and missing suffixes, across scene declarations. Selected existing output
+ancestors cannot escape the project through symlinks. Components list their
+outputs. A future executor must serialize these groups per canonical checkout
+across scenes and runs; a plan is not a lock. Backlot cannot infer undeclared
+command side effects.
 
 ## Components and scenes
 

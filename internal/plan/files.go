@@ -149,29 +149,58 @@ func containedFile(root, relative string) (string, error) {
 	return file, nil
 }
 
-// validateOutput follows existing ancestors without creating the output directory.
-func validateOutput(root, relative string) error {
+// canonicalOutput resolves existing ancestors and retains the missing suffix without
+// creating directories. The resulting storage path must stay inside the project.
+func canonicalOutput(root, relative string) (string, error) {
 	candidate := filepath.Join(root, filepath.FromSlash(relative))
 	for {
 		_, err := os.Lstat(candidate)
 		if err == nil {
 			resolved, err := canonical(candidate)
 			if err != nil {
-				return problem("invalid_output", relative, "cannot resolve output ancestor")
+				return "", problem("invalid_output", relative, "cannot resolve output ancestor")
 			}
 			rel, err := filepath.Rel(root, resolved)
 			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-				return problem("invalid_output", relative, "output symlink escapes project directory")
+				return "", problem("invalid_output", relative, "output symlink escapes project directory")
 			}
-			return nil
+			suffix, err := filepath.Rel(candidate, filepath.Join(root, filepath.FromSlash(relative)))
+			if err != nil {
+				return "", problem("invalid_output", relative, "cannot resolve output suffix")
+			}
+			return filepath.Join(resolved, suffix), nil
 		}
 		if !os.IsNotExist(err) {
-			return problem("invalid_output", relative, "cannot inspect output ancestor")
+			return "", problem("invalid_output", relative, "cannot inspect output ancestor")
 		}
 		parent := filepath.Dir(candidate)
 		if parent == candidate {
-			return problem("invalid_output", relative, "cannot resolve output ancestor")
+			return "", problem("invalid_output", relative, "cannot resolve output ancestor")
 		}
 		candidate = parent
 	}
+}
+
+// validateOutputs compares reusable declarations across scenes so separate plans
+// cannot assign different groups to the same storage. Unavailable unselected
+// paths do not block planning; selected paths still require containment checks.
+func validateOutputs(root string, outputs map[string]v1.Output, selected map[string]bool) error {
+	paths := map[string]string{}
+	for name, output := range outputs {
+		resolved, err := canonicalOutput(root, output.Path)
+		if err != nil {
+			if selected[name] {
+				return err
+			}
+			continue
+		}
+		for existing, group := range paths {
+			separator := string(filepath.Separator)
+			if (resolved == existing || strings.HasPrefix(resolved, existing+separator) || strings.HasPrefix(existing, resolved+separator)) && group != output.ConcurrencyGroup {
+				return problem("invalid_output", "outputs."+name, "overlapping canonical output paths must share a concurrency group; update concurrency_group")
+			}
+		}
+		paths[resolved] = output.ConcurrencyGroup
+	}
+	return nil
 }

@@ -86,7 +86,7 @@ type Reference struct {
 	Kind  string `json:"kind" yaml:"kind" jsonschema_description:"Explicit discriminator; see the supported values and conditional fields."`
 	Name  string `json:"name,omitempty" yaml:"name,omitempty" jsonschema_description:"Declared identifier used by this reference; graph lookup happens in backlot plan."`
 	Field string `json:"field,omitempty" yaml:"field,omitempty" jsonschema_description:"Bounded field selected from the referenced object."`
-	Port  string `json:"port,omitempty" yaml:"port,omitempty" jsonschema:"minLength=1" jsonschema_description:"Named service port, required by service port references."`
+	Port  string `json:"port,omitempty" yaml:"port,omitempty" jsonschema_description:"Named service port, required by service port references."`
 }
 
 // Resource declares an instance-owned allocation; planning never provisions it.
@@ -122,8 +122,8 @@ type Probe struct {
 
 // Mount connects declared storage or checkout output to a container path.
 type Mount struct {
-	Resource string `json:"resource,omitempty" yaml:"resource,omitempty" jsonschema:"minLength=1" jsonschema_description:"Declared resource name; selection and kind are checked by backlot plan."`
-	Output   string `json:"output,omitempty" yaml:"output,omitempty" jsonschema:"minLength=1" jsonschema_description:"Declared checkout output name attached to the component."`
+	Resource string `json:"resource,omitempty" yaml:"resource,omitempty" jsonschema_description:"Declared resource name; selection and kind are checked by backlot plan."`
+	Output   string `json:"output,omitempty" yaml:"output,omitempty" jsonschema_description:"Declared checkout output name attached to the component."`
 	Target   string `json:"target" yaml:"target" jsonschema:"minLength=1" jsonschema_description:"Probe destination or absolute mount target, according to this contract."`
 	ReadOnly bool   `json:"read_only,omitempty" yaml:"read_only,omitempty" jsonschema_description:"Mount the declared source read-only."`
 }

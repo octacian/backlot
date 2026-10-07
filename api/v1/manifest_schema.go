@@ -39,6 +39,16 @@ func schemaForbid(fields ...string) *jsonschema.Schema {
 	}
 	return s
 }
+
+// schemaEmpty matches runtime scalar zero-value checks: omission and empty are equivalent.
+func schemaEmpty(fields ...string) *jsonschema.Schema {
+	values := make(map[string]*jsonschema.Schema, len(fields))
+	for _, field := range fields {
+		values[field] = &jsonschema.Schema{Const: ""}
+	}
+	return schemaProperties(values)
+}
+
 func schemaWhen(field, value string, then *jsonschema.Schema) *jsonschema.Schema {
 	predicate := schemaProperties(map[string]*jsonschema.Schema{field: {Const: value}})
 	predicate.Required = []string{field}
@@ -103,11 +113,11 @@ func (Reference) JSONSchemaExtend(s *jsonschema.Schema) {
 		return p
 	}
 	s.OneOf = []*jsonschema.Schema{
-		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "input"}}), named(), schemaForbid("field", "port")}},
-		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "instance"}, "field": schemaEnum("id", "checkout", "project", "scene")}), schemaRequire("field"), schemaForbid("name", "port")}},
-		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "resource"}, "field": schemaEnum("port", "path", "name", "value", "url")}), named("field"), schemaForbid("port")}},
-		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "output"}, "field": {Const: "path"}}), named("field"), schemaForbid("port")}},
-		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "service"}, "field": {Const: "host"}}), named("field"), schemaForbid("port")}},
+		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "input"}}), named(), schemaEmpty("field", "port")}},
+		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "instance"}, "field": schemaEnum("id", "checkout", "project", "scene")}), schemaRequire("field"), schemaEmpty("name", "port")}},
+		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "resource"}, "field": schemaEnum("port", "path", "name", "value", "url")}), named("field"), schemaEmpty("port")}},
+		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "output"}, "field": {Const: "path"}}), named("field"), schemaEmpty("port")}},
+		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "service"}, "field": {Const: "host"}}), named("field"), schemaEmpty("port")}},
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "service"}, "field": {Const: "port"}, "port": {Pattern: schemaIdentifier}}), named("field", "port")}},
 	}
 }
@@ -129,7 +139,10 @@ func (Probe) JSONSchemaExtend(s *jsonschema.Schema) {
 
 // JSONSchemaExtend enforces exactly one mount source.
 func (Mount) JSONSchemaExtend(s *jsonschema.Schema) {
-	s.OneOf = []*jsonschema.Schema{schemaRequire("resource"), schemaRequire("output")}
+	s.OneOf = []*jsonschema.Schema{
+		{AllOf: []*jsonschema.Schema{schemaRequire("resource"), schemaProperties(map[string]*jsonschema.Schema{"resource": {MinLength: schemaOne()}}), schemaEmpty("output")}},
+		{AllOf: []*jsonschema.Schema{schemaRequire("output"), schemaProperties(map[string]*jsonschema.Schema{"output": {MinLength: schemaOne()}}), schemaEmpty("resource")}},
+	}
 	schemaProperty(s, "target").Pattern = "^/"
 }
 
@@ -215,7 +228,9 @@ func (Publication) JSONSchemaExtend(s *jsonschema.Schema) {
 
 // JSONSchemaExtend adds useful local socket guidance without contacting Docker.
 func (DockerConfig) JSONSchemaExtend(s *jsonschema.Schema) {
-	schemaProperty(s, "endpoint").Pattern = `^unix:///[^?#]+$`
+	// Accept absolute paths with or without an empty authority, but no host.
+	// Go also accepts a case-insensitive scheme and empty query/fragment delimiters.
+	schemaProperty(s, "endpoint").Pattern = `^[Uu][Nn][Ii][Xx]:(/([^/?#][^?#]*)?|///[^?#]*)\??#?$`
 }
 
 // JSONSchemaExtend adds local gateway shape constraints; planning validates full URLs/domains.

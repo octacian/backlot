@@ -567,25 +567,59 @@
     "Mount": {
       "oneOf": [
         {
-          "required": [
-            "resource"
+          "allOf": [
+            {
+              "required": [
+                "resource"
+              ]
+            },
+            {
+              "properties": {
+                "resource": {
+                  "minLength": 1
+                }
+              }
+            },
+            {
+              "properties": {
+                "output": {
+                  "const": ""
+                }
+              }
+            }
           ]
         },
         {
-          "required": [
-            "output"
+          "allOf": [
+            {
+              "required": [
+                "output"
+              ]
+            },
+            {
+              "properties": {
+                "output": {
+                  "minLength": 1
+                }
+              }
+            },
+            {
+              "properties": {
+                "resource": {
+                  "const": ""
+                }
+              }
+            }
           ]
         }
       ],
       "properties": {
         "resource": {
           "type": "string",
-          "minLength": 1,
           "description": "Declared resource name; selection and kind are checked by backlot plan."
         },
         "output": {
           "type": "string",
-          "minLength": 1,
           "description": "Declared checkout output name attached to the component."
         },
         "target": {
@@ -822,22 +856,14 @@
               ]
             },
             {
-              "allOf": [
-                {
-                  "not": {
-                    "required": [
-                      "field"
-                    ]
-                  }
+              "properties": {
+                "field": {
+                  "const": ""
                 },
-                {
-                  "not": {
-                    "required": [
-                      "port"
-                    ]
-                  }
+                "port": {
+                  "const": ""
                 }
-              ]
+              }
             }
           ]
         },
@@ -865,22 +891,14 @@
               ]
             },
             {
-              "allOf": [
-                {
-                  "not": {
-                    "required": [
-                      "name"
-                    ]
-                  }
+              "properties": {
+                "name": {
+                  "const": ""
                 },
-                {
-                  "not": {
-                    "required": [
-                      "port"
-                    ]
-                  }
+                "port": {
+                  "const": ""
                 }
-              ]
+              }
             }
           ]
         },
@@ -915,15 +933,11 @@
               ]
             },
             {
-              "allOf": [
-                {
-                  "not": {
-                    "required": [
-                      "port"
-                    ]
-                  }
+              "properties": {
+                "port": {
+                  "const": ""
                 }
-              ]
+              }
             }
           ]
         },
@@ -951,15 +965,11 @@
               ]
             },
             {
-              "allOf": [
-                {
-                  "not": {
-                    "required": [
-                      "port"
-                    ]
-                  }
+              "properties": {
+                "port": {
+                  "const": ""
                 }
-              ]
+              }
             }
           ]
         },
@@ -987,15 +997,11 @@
               ]
             },
             {
-              "allOf": [
-                {
-                  "not": {
-                    "required": [
-                      "port"
-                    ]
-                  }
+              "properties": {
+                "port": {
+                  "const": ""
                 }
-              ]
+              }
             }
           ]
         },
@@ -1051,7 +1057,6 @@
         },
         "port": {
           "type": "string",
-          "minLength": 1,
           "description": "Named service port, required by service port references."
         }
       },

@@ -106,7 +106,9 @@ work requires `command`; container work requires `image` and optionally direct
 `args`. Native work cannot declare container `image`, `args` or `mounts`.
 Containers use declared `resources` and `mounts`: each mount names exactly one
 attached `resource` (volume/directory) or `output`, an absolute unique `target`,
-and optional `read_only`. No external volume/container adoption is implied.
+and optional `read_only`. The unused source may be omitted or an empty string;
+exactly one source must have a nonempty value. No external volume/container
+adoption is implied.
 
 Services declare named `ports`, each with an attached port `resource`, and an
 explicit `readiness` probe. Container ports additionally require `container_port`
@@ -167,7 +169,9 @@ service port, `port`. Supported shapes are:
 | `output` | Attached output | `path` | Resolve project-relative output path |
 
 Resource fields are `port.port`, `directory.path`, `volume.name`, `network.name`,
-`secret.value`, and `origin.url`. Unused/extra reference fields are rejected.
+`secret.value`, and `origin.url`. Unused reference fields may be omitted or
+empty strings; nonempty extra values are rejected. Prefer omission when authoring
+manifests.
 There are no concatenation, expressions, variable substitutions or embedded
 `${...}` references. Literal strings retain their literal characters.
 
@@ -204,7 +208,8 @@ Machine configuration uses the same version and may declare:
 
 - `tools`: declared tool executable overrides.
 - `inputs`: declared input values, including machine-held credentials.
-- `docker`: `endpoint` as a local `unix:///...` socket URL.
+- `docker`: `endpoint` as a local Unix socket URL (canonical `unix:///...`;
+  `unix:/...` is also accepted).
 - `caddy`: HTTP(S) admin `endpoint` without credentials/query/fragment, owned
   identifier `scope`, concrete `domain_suffix`, and gateway-reachable `host_address`.
 - `storage`: `directory`, positive duration `retention_age` and positive integer

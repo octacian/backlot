@@ -539,3 +539,93 @@ func TestContainerPublishedPreparationRequiresNoProviders(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestInFlightReplacementRejectsSnapshotBeforeDurableAcceptance(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		name := "checkout"
+		if nested {
+			name = "project_inside_git_checkout"
+		}
+		t.Run(name, func(t *testing.T) {
+			checkout := shortTemp(t)
+			project := checkout
+			if nested {
+				git(t, checkout, "init", "-q")
+				project = filepath.Join(checkout, "project")
+				if err := os.Mkdir(project, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			config := writeFixture(t, project)
+			alias := filepath.Join(shortTemp(t), "alias")
+			if err := os.Symlink(project, alias); err != nil {
+				t.Fatal(err)
+			}
+			state, err := openStore(shortTemp(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := state.db.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			moved := filepath.Join(shortTemp(t), "original")
+			checkpointReached := false
+			svc := &service{store: state, lease: time.Second, resolve: func(source plan.Source, req v1.PlanRequest) (plan.Snapshot, error) {
+				// Resolve real input bytes, then replace the source before returning control
+				// to the coordinator. Capturing identity after resolution must fail this
+				// test: it would observe the replacement and accept the original snapshot.
+				snapshot, err := plan.Prepare(source, req)
+				if err != nil {
+					return snapshot, err
+				}
+				checkpointReached = true
+				// A nested project replacement leaves checkout/Git identity unchanged.
+				if err := os.Rename(project, moved); err != nil {
+					return snapshot, err
+				}
+				if err := os.Mkdir(project, 0700); err != nil {
+					return snapshot, err
+				}
+				changed := strings.Replace(fixtureManifest, `"version"]`, `"env"]`, 1)
+				if err := os.WriteFile(filepath.Join(project, "backlot.json"), []byte(changed), 0600); err != nil {
+					return snapshot, err
+				}
+				if err := os.WriteFile(filepath.Join(project, "seed.env"), []byte("SEED=replacement-fixture-secret\n"), 0600); err != nil {
+					return snapshot, err
+				}
+				return snapshot, nil
+			}}
+			_, err = svc.prepare(context.Background(), request(alias, config, "dev"))
+			code(t, err, "checkout_changed")
+			if !checkpointReached {
+				t.Fatal("controlled replacement did not run")
+			}
+			if err := state.db.View(func(tx *bolt.Tx) error {
+				for _, name := range []string{"instances", "checkouts", "paths", "persistent", "snapshots", "secrets"} {
+					if tx.Bucket([]byte(name)).Stats().KeyN != 0 {
+						t.Fatalf("changed source durably accepted into %s", name)
+					}
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			// A separate preparation from the now-stable replacement can be recorded,
+			// and must contain only the replacement's own resolved snapshot.
+			svc.resolve = nil
+			prepared, err := svc.prepare(context.Background(), request(alias, config, "dev"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			current, err := identify(prepared.Instance.Plan.Checkout)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if prepared.Instance.Checkout.ID != current.ID || prepared.Instance.Plan.Components[0].Command.Args[0] != "env" {
+				t.Fatal("replacement adopted the original snapshot")
+			}
+		})
+	}
+}

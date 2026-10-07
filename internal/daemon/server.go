@@ -294,7 +294,7 @@ func writeError(w http.ResponseWriter, err error) {
 		status = http.StatusInternalServerError
 	case "not_found":
 		status = http.StatusNotFound
-	case "conflict", "checkout_moved", "checkout_replaced", "lease_expired", "shutting_down":
+	case "conflict", "checkout_moved", "checkout_replaced", "checkout_changed", "lease_expired", "shutting_down":
 		status = http.StatusConflict
 	case "api_version":
 		status = http.StatusUpgradeRequired

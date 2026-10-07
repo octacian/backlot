@@ -10,11 +10,12 @@ type Snapshot struct {
 	Secrets  map[string]v1.PlannedValue `json:"-"`
 }
 
-// Prepare resolves immutable metadata without requiring provider configuration.
+// Prepare resolves a source returned by Locate without rediscovering its paths.
+// It reads snapshot inputs but does not require provider configuration.
 // The caller must protect the returned manifest and secrets, never serialize them publicly.
-func Prepare(request v1.PlanRequest) (Snapshot, error) {
+func Prepare(source Source, request v1.PlanRequest) (Snapshot, error) {
 	snapshot := Snapshot{Secrets: map[string]v1.PlannedValue{}}
-	_, err := resolve(request, &snapshot)
+	_, err := resolve(request, &snapshot, source)
 	return snapshot, err
 }
 

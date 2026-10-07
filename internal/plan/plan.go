@@ -16,19 +16,17 @@ import (
 // Resolve reads and validates a scene, checking required files and executables.
 // No application command or provider is executed; values requiring allocation stay symbolic.
 func Resolve(request v1.PlanRequest) (v1.PlanResponse, error) {
-	return resolve(request, nil)
+	source, err := Locate(request.ProjectPath)
+	if err != nil {
+		return v1.PlanResponse{}, err
+	}
+	return resolve(request, nil, source)
 }
 
-func resolve(request v1.PlanRequest, snapshot *Snapshot) (v1.PlanResponse, error) {
+func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.PlanResponse, error) {
 	var result v1.PlanResponse
-	cwd, err := os.Getwd()
-	if err != nil {
-		return result, problem("discovery", "project", "cannot read working directory")
-	}
-	file, project, err := Discover(cwd, request.ProjectPath)
-	if err != nil {
-		return result, err
-	}
+	file, project := source.ManifestPath, source.ProjectPath
+
 	data, err := readFile(file)
 	if err != nil {
 		return result, err
@@ -92,7 +90,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot) (v1.PlanResponse, error
 			return result, problem("config", "config.inputs."+name, "value names an undeclared project input")
 		}
 	}
-	result = v1.PlanResponse{APIVersion: v1.Version, Project: m.Project, Checkout: checkoutRoot(project), ManifestPath: file, ManifestDigest: digest(data), ConfigDigest: configDigest, Scene: request.Scene, Lifetime: scene.Lifetime, TerminalJob: scene.TerminalJob, Resources: map[string]v1.Resource{}, Outputs: map[string]v1.Output{}, Publish: scene.Publish}
+	result = v1.PlanResponse{APIVersion: v1.Version, Project: m.Project, Checkout: source.CheckoutPath, ManifestPath: file, ManifestDigest: digest(data), ConfigDigest: configDigest, Scene: request.Scene, Lifetime: scene.Lifetime, TerminalJob: scene.TerminalJob, Resources: map[string]v1.Resource{}, Outputs: map[string]v1.Output{}, Publish: scene.Publish}
 	for _, name := range scene.Resources {
 		result.Resources[name] = m.Resources[name]
 	}

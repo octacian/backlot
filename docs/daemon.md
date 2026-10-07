@@ -52,6 +52,9 @@ Persistent duplicates converge on project + checkout + scene, including concurre
 requests and symlink aliases. Every disposable preparation gets a new instance and
 operation ID. Canonical checkout identity combines filesystem identity for the
 checkout and its Git directory (when present); two real Git worktrees differ.
+Snapshot reads bind to canonical project/checkout identities captured before reading
+manifest, configuration or seed inputs. Acceptance rechecks both identities and
+paths; an in-flight replacement is rejected before any durable intent is recorded.
 Branch/HEAD text is provenance, never ownership. A moved checkout or replaced
 checkout path is rejected with a typed error, preserving old records; use a
 separate checkout rather than implicitly adopting old state. Non-Git projects use

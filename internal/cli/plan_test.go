@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	"go.yaml.in/yaml/v3"
 )
 
 func TestPlanCLIForwardingAndJSONErrors(t *testing.T) {
@@ -81,5 +82,88 @@ func TestPlanArguments(t *testing.T) {
 	}
 	if !jsonMode || request.ProjectPath != "a b" || request.ConfigPath != "machine.yaml" || !reflect.DeepEqual(request.TerminalArgs, []string{"--project", "forwarded", ""}) {
 		t.Fatalf("request=%+v", request)
+	}
+}
+
+func TestPlanUnsafeKeyAndConfigVersionErrors(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("APPDATA", root)
+	data, err := os.ReadFile("../../examples/adoption/backlot.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "backlot.yaml"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, format := range []string{".json", ".yaml"} {
+		for _, key := range []string{"\x1b[31msecret-canary\nFORGED", strings.Repeat("secret-canary", 1000)} {
+			t.Run(format+key[:3], func(t *testing.T) {
+				config := filepath.Join(root, "machine"+format)
+				// Use each serializer so YAML mapping keys exercise YAML syntax too.
+				encoded, err := json.Marshal(map[string]any{"version": "backlot/v1", "inputs": map[string]any{key: 23}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if format == ".yaml" {
+					encoded, err = yaml.Marshal(map[string]any{"version": "backlot/v1", "inputs": map[string]any{key: 23}})
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.WriteFile(config, encoded, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				for _, jsonMode := range []bool{false, true} {
+					var stdout, stderr bytes.Buffer
+					args := []string{"backlot", "plan", "test", "--project", root, "--config", config}
+					if jsonMode {
+						args = append(args, "--json")
+					}
+					err := NewCommand(v1.VersionResponse{}, &stdout, &stderr).Run(context.Background(), args)
+					if err == nil {
+						t.Fatal("unsafe key succeeded")
+					}
+					// main prints the returned error to human stderr.
+					stderr.WriteString(err.Error() + "\n")
+					if strings.Contains(stderr.String(), "secret-canary") || strings.ContainsAny(stderr.String(), "\x1b\r") || strings.Count(stderr.String(), "\n") != 1 || stderr.Len() > 512 {
+						t.Fatalf("unsafe stderr: %q", stderr.String())
+					}
+					if jsonMode {
+						var envelope v1.ErrorResponse
+						decoder := json.NewDecoder(&stdout)
+						decoder.DisallowUnknownFields()
+						if err := decoder.Decode(&envelope); err != nil {
+							t.Fatal(err)
+						}
+						if err := decoder.Decode(&envelope); !errors.Is(err, io.EOF) {
+							t.Fatal("expected exactly one error envelope")
+						}
+						for _, field := range []string{envelope.Error.Code, envelope.Error.Field, envelope.Error.Message} {
+							if strings.Contains(field, "secret-canary") || strings.ContainsAny(field, "\x1b\n\r") || len(field) > 512 {
+								t.Fatalf("unsafe envelope: %+v", envelope)
+							}
+						}
+					}
+				}
+			})
+		}
+		config := filepath.Join(root, "machine"+format)
+		if err := os.WriteFile(config, []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		err := NewCommand(v1.VersionResponse{}, &stdout, &stderr).Run(context.Background(), []string{"backlot", "plan", "test", "--project", root, "--config", config, "--json"})
+		var envelope v1.ErrorResponse
+		if err == nil {
+			t.Fatal("unversioned config succeeded")
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if envelope.Error.Field != "config.version" {
+			t.Fatalf("unexpected error: %+v", envelope)
+		}
 	}
 }

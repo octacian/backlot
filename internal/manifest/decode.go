@@ -109,7 +109,7 @@ func convert(n *yaml.Node, typ reflect.Type, path string, depth int) (any, error
 					return fail("unknown field (field names are case-sensitive)")
 				}
 			}
-			child, err := convert(n.Content[i+1], childType, path+"."+key.Value, depth+1)
+			child, err := convert(n.Content[i+1], childType, path+"."+diagnosticKey(key.Value), depth+1)
 			if err != nil {
 				return nil, err
 			}
@@ -163,4 +163,13 @@ func convert(n *yaml.Node, typ reflect.Type, path string, depth int) (any, error
 	default:
 		return fail("unsupported document node")
 	}
+}
+
+// diagnosticKey retains ordinary identifiers while withholding malformed or long
+// keys: keys are untrusted document data, and errors must not disclose them.
+func diagnosticKey(key string) string {
+	if len(key) <= 63 && (identifier.MatchString(key) || envKey.MatchString(key)) {
+		return key
+	}
+	return "[invalid-key]"
 }

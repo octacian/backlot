@@ -6,6 +6,7 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -143,7 +144,7 @@ func environment(m v1.Manifest, e v1.Environment, field string) error {
 		if !envKey.MatchString(key) {
 			return invalid(field+".assign", "invalid environment variable name")
 		}
-		if err := value(m, v, field+".assign."+key); err != nil {
+		if err := value(m, v, field+".assign."+diagnosticKey(key)); err != nil {
 			return err
 		}
 	}
@@ -226,13 +227,13 @@ func probe(m v1.Manifest, p *v1.Probe, field string) error {
 			}
 		} else if p.Kind == "tcp" {
 			_, port, err := net.SplitHostPort(*p.Target.Literal)
-			if err != nil || port == "" {
-				return invalid(field, "TCP probe target must be host:port")
+			if err != nil || !validNetworkPort(port) {
+				return invalid(field, "TCP probe target must be host:port with a numeric port in 1..65535")
 			}
 		} else {
 			u, err := url.Parse(*p.Target.Literal)
-			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
-				return invalid(field, "HTTP probe target must be an HTTP(S) URL without credentials")
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || !validURLPort(u) {
+				return invalid(field, "HTTP probe target must be an HTTP(S) URL without credentials and with any explicit port in 1..65535")
 			}
 		}
 		return nil
@@ -526,7 +527,7 @@ func Order(m v1.Manifest, s v1.Scene) ([]string, error) {
 	var visit func(string) error
 	visit = func(n string) error {
 		if state[n] == 1 {
-			return invalid("components."+n+".depends_on", "dependency cycle detected")
+			return invalid("components."+diagnosticKey(n)+".depends_on", "dependency cycle detected")
 		}
 		if state[n] == 2 {
 			return nil
@@ -578,8 +579,8 @@ func ValidateMachine(c v1.MachineConfig) error {
 	}
 	if c.Caddy != nil {
 		u, err := url.Parse(c.Caddy.Endpoint)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-			return invalid("config.caddy.endpoint", "provide an HTTP(S) admin URL without credentials, query or fragment")
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || !validURLPort(u) || u.RawQuery != "" || u.Fragment != "" {
+			return invalid("config.caddy.endpoint", "provide an HTTP(S) admin URL without credentials, query or fragment and with any explicit port in 1..65535")
 		}
 		if !identifier.MatchString(c.Caddy.Scope) || !validDomain(c.Caddy.DomainSuffix) || c.Caddy.HostAddress == "" || strings.ContainsAny(c.Caddy.HostAddress, "/\x00 \n\r") {
 			return invalid("config.caddy", "declare owned scope, domain_suffix and gateway-reachable host_address")
@@ -609,4 +610,19 @@ func validDomain(value string) bool {
 		}
 	}
 	return true
+}
+
+// validNetworkPort accepts numeric destinations only, without service lookup.
+func validNetworkPort(port string) bool {
+	number, err := strconv.ParseUint(port, 10, 16)
+	return err == nil && number > 0
+}
+
+// validURLPort allows HTTP(S) defaults but rejects an explicitly empty port.
+// url.Parse has already checked the authority and nonnumeric port syntax.
+func validURLPort(u *url.URL) bool {
+	if u.Port() == "" {
+		return !strings.HasSuffix(u.Host, ":")
+	}
+	return validNetworkPort(u.Port())
 }

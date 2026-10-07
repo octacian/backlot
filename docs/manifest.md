@@ -105,8 +105,11 @@ in 1..65535 for the image's listener; native ports omit it. Jobs cannot declare 
 resource cannot be claimed twice in one scene. Readiness probes use `kind: tcp`,
 `http`, or `command`, and a positive `timeout` up to 24h. Command probes contain
 an explicit native tool command, whose availability is checked. Network probes
-contain a `target` value: TCP uses a symbolic port or literal `host:port`; HTTP
-uses a symbolic origin or literal HTTP(S) URL without credentials. A symbolic
+contain a `target` value: TCP uses a symbolic port or literal `host:port` with a
+numeric port in 1..65535 (TCP service-name ports are unsupported). HTTP uses a
+symbolic origin or literal HTTP(S) URL without credentials. Explicit
+HTTP(S) ports, including Caddy admin endpoint ports, must be in 1..65535; omitted
+ports retain the scheme default and an explicitly empty port is invalid. A symbolic
 service port carries enough identity for a future adapter to resolve its address;
 no numeric port is invented here.
 

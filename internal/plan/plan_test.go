@@ -462,3 +462,52 @@ func TestOutputCanonicalOverlap(t *testing.T) {
 		})
 	}
 }
+
+func TestSuppliedConfigRequiresVersion(t *testing.T) {
+	for _, location := range []string{"explicit-json", "explicit-yaml", "default-yaml"} {
+		for _, version := range []string{"absent", "", "backlot/v2", "backlot/v1"} {
+			t.Run(location+"/"+version, func(t *testing.T) {
+				noDefaultConfig(t)
+				root := fixture(t)
+				request := v1.PlanRequest{ProjectPath: root, Scene: "test"}
+				file := filepath.Join(t.TempDir(), "machine.json")
+				if location != "explicit-json" {
+					file = filepath.Join(t.TempDir(), "machine.yaml")
+				}
+				if location == "default-yaml" {
+					dir, err := os.UserConfigDir()
+					if err != nil {
+						t.Fatal(err)
+					}
+					file = filepath.Join(dir, "backlot", "config.yaml")
+				} else {
+					request.ConfigPath = file
+				}
+				data := "{}"
+				if version != "absent" {
+					encoded, err := json.Marshal(v1.MachineConfig{Version: version})
+					if err != nil {
+						t.Fatal(err)
+					}
+					data = string(encoded)
+				}
+				write(t, file, []byte(data))
+				_, err := Resolve(request)
+				if version == v1.ManifestVersion {
+					if err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					var p *v1.PlanError
+					if !errors.As(err, &p) || p.Field != "config.version" {
+						t.Fatalf("expected version failure, got %v", err)
+					}
+				}
+			})
+		}
+	}
+	noDefaultConfig(t)
+	if _, err := Resolve(v1.PlanRequest{ProjectPath: fixture(t), Scene: "test"}); err != nil {
+		t.Fatalf("absent optional config: %v", err)
+	}
+}

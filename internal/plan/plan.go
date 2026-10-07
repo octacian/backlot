@@ -48,7 +48,7 @@ func Resolve(request v1.PlanRequest) (v1.PlanResponse, error) {
 			return result, problem("invalid_arguments", "terminal_args", "NUL is not permitted")
 		}
 	}
-	config := v1.MachineConfig{Version: v1.ManifestVersion}
+	var config v1.MachineConfig
 	configFile := request.ConfigPath
 	if configFile == "" {
 		dir, err := os.UserConfigDir()

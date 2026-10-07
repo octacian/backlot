@@ -1,8 +1,9 @@
 # Architecture
 
 This is the implementation baseline for the [V1 PRD](prd.md). Runtime components
-are planned; the current scaffold contains only the executable and version
-contract plus contributor tooling.
+are planned; the executable currently implements version discovery and offline
+scene planning with shared contracts, plus contributor tooling. See the
+[manifest guide](manifest.md).
 
 ## Boundaries
 
@@ -29,8 +30,9 @@ including concurrency preconditions rather than whole-config replacement.
 
 `api/v1` is the source of truth for requests, responses, errors, status enums, and
 streamed events. CLI client and daemon handlers marshal/unmarshal these same
-named Go types. Internal state models remain private. The scaffold begins with
-`VersionResponse`; add actual endpoint contracts alongside their implementations.
+named Go types. Internal state models remain private. The executable uses
+`VersionResponse` and named planning request/result/error contracts; add actual endpoint contracts alongside their implementations. Offline
+planning does not imply an HTTP endpoint is available.
 
 Do not use stringly typed maps or duplicate anonymous structs for wire payloads.
 Use typed nested values and explicit discriminators when needed. Validate decoded
@@ -76,8 +78,10 @@ quietly adding a second state store.
 Use urfave/cli v3 for commands, Go's HTTP/JSON/slog/exec libraries for their existing
 capabilities, and maintained parsers/clients for external formats and engines.
 The scaffold uses the stable maintained YAML v3 line for ADR metadata; YAML v4 is
-currently a release candidate. Reassess its stable release before implementing
-the manifest parser. Do not add unused runtime dependencies to the scaffold.
+still a release candidate after the milestone 1 reassessment. The manifest parser
+reuses v3; see the
+[schema proposal](adr/20261007T055849866Z-define-versioned-offline-scene-planning-contracts.md).
+Do not add unused runtime dependencies to the scaffold.
 
 Keep platform-specific supervision and socket operations separate from domain
 code. macOS ARM64 is the V1 runtime acceptance platform. Linux CI and Windows

@@ -6,6 +6,11 @@ is a scaffold, not the first completed runtime milestone.
 
 ## 1. Contracts and plan validation
 
+Implemented for independent review: offline `backlot plan`, shared versioned
+contracts, strict decoding/validation and generic adoption/fullstack fixtures.
+See the [manifest guide](manifest.md). The schema ADR remains proposed until
+review acceptance; this milestone does not implement runtime execution.
+
 Define the first manifest schema and machine configuration with typed references,
 strict YAML/JSON decoding, scene lifetimes, component selection, dependency gates,
 fresh-only/each-start job policy, output concurrency groups, environment layering,

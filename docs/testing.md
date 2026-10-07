@@ -18,6 +18,7 @@ Run these from the repository root:
 | --- | --- |
 | `make build` | Build `bin/backlot` |
 | `go run ./cmd/backlot version --json` | Inspect the scaffold's typed version result |
+| `go run ./cmd/backlot plan test --project examples/adoption --json -- -run TestExample` | Validate an offline fixture plan and forward terminal arguments |
 | `make fmt` | Format Go source |
 | `make fmt-check` | Check Go formatting without editing |
 | `make vet` | Run `go vet ./...` |
@@ -44,8 +45,10 @@ checks compilation only, not process lifecycle, networking, or installation.
 The workflow runs on every PR and push to `main`, without path filters that
 could leave required checks missing.
 
-The scaffold tests exercise CLI error/JSON behavior and ADR validation. They do
-not demonstrate a daemon, Docker integration, HTTPS routing, or the V1 workflows.
+Tests exercise strict manifest/config decoding, graph/reference validity, offline
+CLI JSON/errors, environment precedence, read-only seeds, secret redaction, tool
+availability and ADR validation. They do not demonstrate a daemon, Docker
+integration, HTTPS routing, or the V1 workflows.
 The [implementation plan](implementation-plan.md) defines those later acceptance
 checks. Runtime integration tests must use owned resources and must never modify
 an operator's unrelated containers, routes, files, or databases.

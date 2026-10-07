@@ -16,9 +16,12 @@ backlot run ui-test -- <test arguments>
 Scene names are project-defined. Persistent environments return a usable URL;
 disposable runs return their outcome and retained evidence.
 
-**Status:** planning and repository scaffold. The current executable provides
-help and `backlot version [--json]` only. The daemon and scene commands above are
-V1 requirements, not implemented features. The initial release target is macOS
+**Status:** offline planning is implemented. The executable provides help,
+`backlot version [--json]`, and `backlot plan <scene> [--project PATH]
+[--config PATH] [--json] -- <terminal-job args>`. Planning validates contracts,
+files, inputs and native executables without running work or allocating resources.
+See the [manifest guide](docs/manifest.md) and generic fixtures. The daemon and
+scene execution commands above remain V1 requirements. The initial release target is macOS
 ARM64; Linux and native Windows support are architectural targets for later.
 
 ## Development

@@ -6,6 +6,11 @@ is a scaffold, not the first completed runtime milestone.
 
 ## 1. Contracts and plan validation
 
+Implemented for independent review: offline `backlot plan`, shared versioned
+contracts, strict decoding/validation and generic adoption/fullstack fixtures.
+See the [manifest guide](manifest.md). The schema ADR is accepted; this milestone
+does not implement runtime execution.
+
 Define the first manifest schema and machine configuration with typed references,
 strict YAML/JSON decoding, scene lifetimes, component selection, dependency gates,
 fresh-only/each-start job policy, output concurrency groups, environment layering,
@@ -15,7 +20,12 @@ Add a generic adoption fixture and a realistic production/dev/test manifest.
 Exercise shared definitions, unknown fields, missing tools/inputs, graph cycles,
 invalid resource references, secrets, and environment precedence. Read seed files
 without shell execution or checkout writes. Do not pull in an application-specific
-framework. Finalize schema decisions in an ADR.
+framework. The accepted schema ADR records these decisions.
+
+Milestone 1 editor follow-up: committed project and machine JSON Schema artifacts
+are generated from `api/v1` with deterministic drift checks and validated example
+YAML. See [editor setup and limits](../schemas/README.md); this does not change
+runtime acceptance or implement later milestones.
 
 ## 2. Local daemon and durable identity
 

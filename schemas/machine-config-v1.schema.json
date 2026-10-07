@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/octacian/backlot/main/schemas/machine-config-v1.schema.json",
+  "$ref": "#/$defs/MachineConfig",
+  "$defs": {
+    "CaddyConfig": {
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^/?#@]+(/[^?#]*)?\\??#?$",
+          "description": "Local Docker unix socket URL or Caddy HTTP(S) admin URL."
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "description": "Identifier of the Backlot-owned gateway scope."
+        },
+        "domain_suffix": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9-]+(\\.[a-z0-9-]+)+$",
+          "description": "Operator-managed lowercase domain suffix, including at least one dot."
+        },
+        "host_address": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^/\u0000 \n\r]+$",
+          "description": "Gateway-reachable host address for native upstreams."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "endpoint",
+        "scope",
+        "domain_suffix",
+        "host_address"
+      ],
+      "description": "CaddyConfig identifies the operator-owned gateway scope and reachability."
+    },
+    "DockerConfig": {
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[Uu][Nn][Ii][Xx]:(/([^/?#][^?#]*)?|///[^?#]*)\\??#?$",
+          "description": "Local Docker unix socket URL or Caddy HTTP(S) admin URL."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "endpoint"
+      ],
+      "description": "DockerConfig selects local engine access without contacting it during planning."
+    },
+    "MachineConfig": {
+      "properties": {
+        "version": {
+          "type": "string",
+          "const": "backlot/v1",
+          "description": "Contract version; use backlot/v1."
+        },
+        "tools": {
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object",
+          "description": "Named executables; planning checks availability without running them."
+        },
+        "inputs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object",
+          "description": "Explicit external inputs; keep machine credentials out of projects."
+        },
+        "docker": {
+          "$ref": "#/$defs/DockerConfig",
+          "description": "Local engine configuration; planning does not contact Docker."
+        },
+        "caddy": {
+          "$ref": "#/$defs/CaddyConfig",
+          "description": "Operator-owned gateway scope and reachability; no health check during planning."
+        },
+        "storage": {
+          "$ref": "#/$defs/StorageConfig",
+          "description": "Future daemon storage and evidence retention settings."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "version"
+      ],
+      "description": "MachineConfig contains local provider settings and executable/input overrides."
+    },
+    "StorageConfig": {
+      "properties": {
+        "directory": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Future daemon state and evidence directory."
+        },
+        "retention_age": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Positive Go duration; for example 168h. Planning checks duration syntax."
+        },
+        "retention_bytes": {
+          "type": "integer",
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "description": "Positive evidence retention size in bytes."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "directory",
+        "retention_age",
+        "retention_bytes"
+      ],
+      "description": "StorageConfig describes future daemon storage and evidence retention bounds."
+    }
+  },
+  "$comment": "Generated from api/v1; run make schema-generate. Editor assistance only; backlot plan remains authoritative."
+}

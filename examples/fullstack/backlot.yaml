@@ -1,0 +1,161 @@
+# yaml-language-server: $schema=../../schemas/manifest-v1.schema.json
+version: backlot/v1
+project: fullstack
+tools: {go: go, npm: npm}
+inputs:
+  app_image: {}
+resources:
+  db_data: {kind: volume}
+  db_admin: {kind: secret}
+  db_app: {kind: secret}
+  db_port: {kind: port}
+  api_port: {kind: port}
+  web_port: {kind: port}
+  private_net: {kind: network}
+  public: {kind: origin}
+outputs:
+  web_dist: {path: web/dist, concurrency_group: web-build}
+  reports: {path: test-results, concurrency_group: reports}
+environments:
+  database_client:
+    assign:
+      DB_HOST: {ref: {kind: service, name: database, field: host}}
+      DB_PORT: {ref: {kind: service, name: database, field: port, port: sql}}
+      DB_USER: {literal: app}
+      DB_PASSWORD: {ref: {kind: resource, name: db_app, field: value}}
+    required: [DB_HOST, DB_PORT, DB_USER, DB_PASSWORD]
+  web:
+    seeds: [web.env]
+    assign:
+      APP_ORIGIN: {ref: {kind: resource, name: public, field: url}}
+components:
+  database:
+    kind: service
+    runtime: container
+    image: {literal: mariadb:11.8}
+    resources: [db_data, db_admin, db_app, db_port, private_net]
+    ports: {sql: {resource: db_port, container_port: 3306}}
+    mounts: [{resource: db_data, target: /var/lib/mysql}]
+    environment:
+      assign:
+        MARIADB_ROOT_PASSWORD: {ref: {kind: resource, name: db_admin, field: value}}
+        MARIADB_PASSWORD: {ref: {kind: resource, name: db_app, field: value}}
+        MARIADB_USER: {literal: app}
+        MARIADB_DATABASE: {literal: app}
+    readiness:
+      kind: tcp
+      target: {ref: {kind: service, name: database, field: port, port: sql}}
+      timeout: 60s
+  initialize:
+    kind: job
+    runtime: native
+    policy: fresh-only
+    initializes: [db_data]
+    command: {tool: go, args: [run, ./cmd/prepare, initialize]}
+    resources: [db_data, db_app, private_net]
+    depends_on: [{component: database, condition: ready}]
+    environment_sets: [database_client]
+  migrate:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: go, args: [run, ./cmd/prepare, migrate]}
+    resources: [db_app, private_net]
+    environment_sets: [database_client]
+    depends_on: [{component: initialize, condition: completed}]
+  backend:
+    kind: service
+    runtime: native
+    command: {tool: go, args: [run, ./cmd/api]}
+    resources: [api_port, db_app, private_net, public]
+    ports: {http: {resource: api_port}}
+    environment_sets: [database_client]
+    environment:
+      assign:
+        PORT: {ref: {kind: resource, name: api_port, field: port}}
+        APP_ORIGIN: {ref: {kind: resource, name: public, field: url}}
+    depends_on: [{component: migrate, condition: completed}]
+    readiness: {kind: tcp, target: {ref: {kind: service, name: backend, field: port, port: http}}, timeout: 30s}
+  watch:
+    kind: service
+    runtime: native
+    command: {tool: npm, args: [run, dev]}
+    resources: [web_port, public]
+    ports: {http: {resource: web_port}}
+    outputs: [web_dist]
+    environment_sets: [web]
+    environment:
+      assign:
+        PORT: {ref: {kind: resource, name: web_port, field: port}}
+        NODE_ENV: {literal: development}
+    readiness: {kind: tcp, target: {ref: {kind: service, name: watch, field: port, port: http}}, timeout: 30s}
+  build:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: npm, args: [run, build]}
+    outputs: [web_dist]
+  frontend:
+    kind: service
+    runtime: container
+    image: {ref: {kind: input, name: app_image}}
+    resources: [web_port, public, private_net]
+    ports: {http: {resource: web_port, container_port: 3000}}
+    environment_sets: [web]
+    depends_on: [{component: build, condition: completed}]
+    readiness: {kind: tcp, target: {ref: {kind: service, name: frontend, field: port, port: http}}, timeout: 30s}
+  backend_test:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: go, args: [test, ./internal/integration/...]}
+    resources: [db_app, private_net]
+    outputs: [reports]
+    environment_sets: [database_client]
+    depends_on: [{component: migrate, condition: completed}]
+  ui_test:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: npm, args: [run, test:ui, --]}
+    resources: [public]
+    outputs: [reports]
+    environment_sets: [web]
+    depends_on: [{component: backend, condition: ready}, {component: frontend, condition: ready}]
+scenes:
+  dev:
+    lifetime: persistent
+    components: [database, initialize, migrate, backend, watch]
+    resources: [db_data, db_admin, db_app, db_port, api_port, web_port, private_net, public]
+    publish:
+      resource: public
+      routes:
+        - {path: /api, service: backend, port: http, prefix: preserve}
+        - {path: /, service: watch, port: http, prefix: preserve}
+      probe: {kind: http, target: {ref: {kind: resource, name: public, field: url}}, timeout: 60s}
+  production:
+    lifetime: persistent
+    components: [database, initialize, migrate, backend, build, frontend]
+    resources: [db_data, db_admin, db_app, db_port, api_port, web_port, private_net, public]
+    publish:
+      resource: public
+      routes:
+        - {path: /api, service: backend, port: http, prefix: preserve}
+        - {path: /, service: frontend, port: http, prefix: preserve}
+      probe: {kind: http, target: {ref: {kind: resource, name: public, field: url}}, timeout: 60s}
+  backend-test:
+    lifetime: disposable
+    components: [database, initialize, migrate, backend_test]
+    resources: [db_data, db_admin, db_app, db_port, private_net]
+    terminal_job: backend_test
+  ui-test:
+    lifetime: disposable
+    components: [database, initialize, migrate, backend, build, frontend, ui_test]
+    resources: [db_data, db_admin, db_app, db_port, api_port, web_port, private_net, public]
+    terminal_job: ui_test
+    publish:
+      resource: public
+      routes:
+        - {path: /api, service: backend, port: http, prefix: preserve}
+        - {path: /, service: frontend, port: http, prefix: preserve}
+      probe: {kind: http, target: {ref: {kind: resource, name: public, field: url}}, timeout: 60s}

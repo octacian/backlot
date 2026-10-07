@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../schemas/machine-config-v1.schema.json
+# Illustrative local settings, never a credential file or provisioned provider.
+version: backlot/v1
+inputs: {app_image: example/app:local}
+docker: {endpoint: 'unix:///var/run/docker.sock'}
+caddy:
+  endpoint: http://localhost:2019
+  scope: backlot
+  domain_suffix: preview.example.test
+  host_address: host.docker.internal

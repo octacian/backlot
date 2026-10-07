@@ -18,6 +18,7 @@ Run these from the repository root:
 | --- | --- |
 | `make build` | Build `bin/backlot` |
 | `go run ./cmd/backlot version --json` | Inspect the scaffold's typed version result |
+| `go run ./cmd/backlot plan test --project examples/adoption --json -- -run TestExample` | Validate an offline fixture plan and forward terminal arguments |
 | `make fmt` | Format Go source |
 | `make fmt-check` | Check Go formatting without editing |
 | `make vet` | Run `go vet ./...` |
@@ -28,7 +29,9 @@ Run these from the repository root:
 | `make adr-create TITLE="Decision title"` | Create a proposed ADR without overwriting records |
 | `make adr-verify` | Verify all ADR records |
 | `make adr-test` | Run ADR tooling tests |
-| `make check` | Run formatting, vet, lint, race tests, ADR verification, and build |
+| `make schema-generate` | Regenerate committed editor schemas from `api/v1` |
+| `make schema-check` | Reject stale generated schemas without writing |
+| `make check` | Run schema drift checks, formatting, vet, lint, race tests, ADR verification, and build |
 
 Before committing scaffold or Go/tooling changes, run `make check`. Documentation
 changes require ADR verification when records change and manual checking of
@@ -44,8 +47,14 @@ checks compilation only, not process lifecycle, networking, or installation.
 The workflow runs on every PR and push to `main`, without path filters that
 could leave required checks missing.
 
-The scaffold tests exercise CLI error/JSON behavior and ADR validation. They do
-not demonstrate a daemon, Docker integration, HTTPS routing, or the V1 workflows.
+Schema tests use a maintained JSON Schema validator on the real YAML examples
+and negative/variant cases, in addition to checking deterministic generated output.
+See [schema generation and editor setup](../schemas/README.md).
+
+Tests exercise strict manifest/config decoding, graph/reference validity, offline
+CLI JSON/errors, environment precedence, read-only seeds, secret redaction, tool
+availability and ADR validation. They do not demonstrate a daemon, Docker
+integration, HTTPS routing, or the V1 workflows.
 The [implementation plan](implementation-plan.md) defines those later acceptance
 checks. Runtime integration tests must use owned resources and must never modify
 an operator's unrelated containers, routes, files, or databases.

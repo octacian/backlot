@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=../../schemas/manifest-v1.schema.json
+version: backlot/v1
+project: adoption
+tools:
+  go: go
+resources:
+  http: {kind: port}
+  work: {kind: directory}
+outputs:
+  build: {path: dist, concurrency_group: build}
+environments:
+  app:
+    seeds: [defaults.env]
+    assign:
+      MODE: {literal: development}
+    required: [MODE]
+components:
+  build:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: go, args: [build, ./...]}
+    outputs: [build]
+  server:
+    kind: service
+    runtime: native
+    command: {tool: go, args: [run, ./cmd/server]}
+    depends_on: [{component: build, condition: completed}]
+    environment_sets: [app]
+    resources: [http]
+    ports: {http: {resource: http}}
+    environment:
+      assign:
+        PORT: {ref: {kind: resource, name: http, field: port}}
+    readiness:
+      kind: tcp
+      target: {ref: {kind: service, name: server, field: port, port: http}}
+      timeout: 30s
+  test:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: go, args: [test, ./...]}
+    resources: [work]
+    environment_sets: [app]
+    environment:
+      assign:
+        WORK_DIR: {ref: {kind: resource, name: work, field: path}}
+scenes:
+  dev:
+    lifetime: persistent
+    components: [build, server]
+    resources: [http]
+  test:
+    lifetime: disposable
+    components: [test]
+    resources: [work]
+    terminal_job: test

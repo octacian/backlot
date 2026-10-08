@@ -17,6 +17,8 @@ Run these from the repository root:
 | Command | Purpose |
 | --- | --- |
 | `make build` | Build `bin/backlot` |
+| `bin/backlot daemon start --state-dir /absolute/private/path --json` | Start an explicit local metadata daemon after building |
+| `bin/backlot doctor --state-dir /absolute/private/path --json` | Check local daemon access; provider checks deferred |
 | `go run ./cmd/backlot version --json` | Inspect the scaffold's typed version result |
 | `go run ./cmd/backlot plan test --project examples/adoption --json -- -run TestExample` | Validate an offline fixture plan and forward terminal arguments |
 | `make fmt` | Format Go source |
@@ -53,7 +55,10 @@ See [schema generation and editor setup](../schemas/README.md).
 
 Tests exercise strict manifest/config decoding, graph/reference validity, offline
 CLI JSON/errors, environment precedence, read-only seeds, secret redaction, tool
-availability and ADR validation. They do not demonstrate a daemon, Docker
+availability and ADR validation. Daemon tests additionally exercise real temporary Git worktrees and aliases,
+concurrent preparation, typed Unix-socket contracts, private snapshots, leases,
+shutdown, owned-child crashes and intent/effect recovery. See the
+[daemon guide](daemon.md). They do not demonstrate application execution, Docker
 integration, HTTPS routing, or the V1 workflows.
 The [implementation plan](implementation-plan.md) defines those later acceptance
 checks. Runtime integration tests must use owned resources and must never modify

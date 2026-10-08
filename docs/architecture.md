@@ -1,15 +1,17 @@
 # Architecture
 
-This is the implementation baseline for the [V1 PRD](prd.md). Runtime components
-are planned; the executable currently implements version discovery and offline
-scene planning with shared contracts, plus contributor tooling. See the
-[manifest guide](manifest.md).
+This is the implementation baseline for the [V1 PRD](prd.md). The executable
+implements version discovery, offline scene planning, and a local metadata daemon
+with transactional preparation/recovery. Application execution and provider
+adapters remain planned. See the [manifest guide](manifest.md) and
+[daemon guide](daemon.md).
 
 ## Boundaries
 
 One executable exposes the human/agent CLI and daemon commands. The daemon is the
-single owner of machine state and runtime mutations. The CLI is a typed client;
-it must not independently allocate ports, mutate Caddy, or clean up Docker state.
+single owner of machine state and runtime mutations. Runtime CLI actions use the
+typed local client; they must not independently allocate ports, mutate Caddy, or
+clean up Docker state.
 
 Use a per-user permissioned Unix socket for local HTTP/JSON. Socket placement,
 single-daemon locking, and stale-socket recovery belong in the platform/runtime

@@ -16,15 +16,17 @@ import (
 // Resolve reads and validates a scene, checking required files and executables.
 // No application command or provider is executed; values requiring allocation stay symbolic.
 func Resolve(request v1.PlanRequest) (v1.PlanResponse, error) {
+	source, err := Locate(request.ProjectPath)
+	if err != nil {
+		return v1.PlanResponse{}, err
+	}
+	return resolve(request, nil, source)
+}
+
+func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.PlanResponse, error) {
 	var result v1.PlanResponse
-	cwd, err := os.Getwd()
-	if err != nil {
-		return result, problem("discovery", "project", "cannot read working directory")
-	}
-	file, project, err := Discover(cwd, request.ProjectPath)
-	if err != nil {
-		return result, err
-	}
+	file, project := source.ManifestPath, source.ProjectPath
+
 	data, err := readFile(file)
 	if err != nil {
 		return result, err
@@ -88,11 +90,11 @@ func Resolve(request v1.PlanRequest) (v1.PlanResponse, error) {
 			return result, problem("config", "config.inputs."+name, "value names an undeclared project input")
 		}
 	}
-	result = v1.PlanResponse{APIVersion: v1.Version, Project: m.Project, Checkout: checkoutRoot(project), ManifestPath: file, ManifestDigest: digest(data), ConfigDigest: configDigest, Scene: request.Scene, Lifetime: scene.Lifetime, TerminalJob: scene.TerminalJob, Resources: map[string]v1.Resource{}, Outputs: map[string]v1.Output{}, Publish: scene.Publish}
+	result = v1.PlanResponse{APIVersion: v1.Version, Project: m.Project, Checkout: source.CheckoutPath, ManifestPath: file, ManifestDigest: digest(data), ConfigDigest: configDigest, Scene: request.Scene, Lifetime: scene.Lifetime, TerminalJob: scene.TerminalJob, Resources: map[string]v1.Resource{}, Outputs: map[string]v1.Output{}, Publish: scene.Publish}
 	for _, name := range scene.Resources {
 		result.Resources[name] = m.Resources[name]
 	}
-	if scene.Publish != nil && config.Caddy == nil {
+	if snapshot == nil && scene.Publish != nil && config.Caddy == nil {
 		return v1.PlanResponse{}, problem("missing_provider", "config.caddy", "published scene requires Caddy settings; supply --config PATH")
 	}
 	order, err := manifest.Order(m, scene)
@@ -110,7 +112,7 @@ func Resolve(request v1.PlanRequest) (v1.PlanResponse, error) {
 	}
 	for _, name := range order {
 		c := m.Components[name]
-		if c.Runtime == v1.Container && config.Docker == nil {
+		if snapshot == nil && c.Runtime == v1.Container && config.Docker == nil {
 			return v1.PlanResponse{}, problem("missing_provider", "config.docker", "selected container work requires local Docker settings; supply --config PATH")
 		}
 		planned := v1.PlannedComponent{Name: name, Kind: c.Kind, Runtime: c.Runtime, Command: c.Command, Args: slices.Clone(c.Args), Policy: c.Policy, Initializes: c.Initializes, DependsOn: c.DependsOn, Resources: c.Resources, Outputs: c.Outputs, Ports: c.Ports, Mounts: c.Mounts}
@@ -134,11 +136,17 @@ func Resolve(request v1.PlanRequest) (v1.PlanResponse, error) {
 		for _, o := range c.Outputs {
 			result.Outputs[o] = m.Outputs[o]
 		}
-		env, err := resolveEnvironment(m, config, c, project, result)
+		env, err := resolveEnvironmentValues(m, config, c, project, result)
 		if err != nil {
 			return v1.PlanResponse{}, err
 		}
-		planned.Environment = env
+		planned.Environment = map[string]v1.PlannedValue{}
+		for key, value := range env {
+			planned.Environment[key] = value.wire()
+			if snapshot != nil && value.secret {
+				snapshot.Secrets[name+"/environment/"+key] = value.private()
+			}
+		}
 		if c.Image != nil {
 			image, err := resolveValue(m, config, *c.Image, project, result)
 			if err != nil {
@@ -146,6 +154,9 @@ func Resolve(request v1.PlanRequest) (v1.PlanResponse, error) {
 			}
 			if image.literal != nil && *image.literal == "" {
 				return v1.PlanResponse{}, problem("missing_input", "components."+name+".image", "image must not be empty")
+			}
+			if snapshot != nil && image.secret {
+				snapshot.Secrets[name+"/image"] = image.private()
 			}
 			wire := image.wire()
 			planned.Image = &wire
@@ -165,11 +176,18 @@ func Resolve(request v1.PlanRequest) (v1.PlanResponse, error) {
 				if err != nil {
 					return v1.PlanResponse{}, err
 				}
+				if snapshot != nil && target.secret {
+					snapshot.Secrets[name+"/readiness"] = target.private()
+				}
 				wire := target.wire()
 				planned.Readiness.Target = &wire
 			}
 		}
 		result.Components = append(result.Components, planned)
+	}
+	if snapshot != nil {
+		snapshot.Manifest = m
+		snapshot.Plan = result
 	}
 	return result, nil
 }

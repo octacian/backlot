@@ -29,6 +29,12 @@ runtime acceptance or implement later milestones.
 
 ## 2. Local daemon and durable identity
 
+Implemented for independent review: explicit background/foreground daemon control,
+permissioned local typed API/client, local doctor, bbolt state, immutable private
+snapshots, checkout/operation identity, metadata-only prepare/inspect/cancel/renew,
+and bounded disposable leases. See the [daemon guide](daemon.md). `prepared` never
+claims execution/readiness; native/provider behavior remains milestone 3 onward.
+
 Implement daemon serve/start/stop/status behavior, the permissioned socket,
 single-instance locking, typed versioned client/server, and machine `doctor`.
 Explicit startup/setup is sufficient; no system service installer is required.

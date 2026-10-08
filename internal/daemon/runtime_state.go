@@ -1,12 +1,15 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 	bolt "go.etcd.io/bbolt"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -103,53 +106,70 @@ func (s *store) recoverRuntime() error {
 	}
 
 	for _, id := range ids {
-		r, err := s.runtime(id)
-		if err != nil {
-			return err
-		}
-		instance, err := s.inspect(id)
-		if err != nil {
-			return err
-		}
-		if instance.Execution == nil || (!active(instance.Status) && instance.Execution.CleanupFailure == "") {
-			continue
-		}
-		result := *instance.Execution
-		var cleanup error
-		proofMissing := r.Attempt != result.Attempt || (instance.Status == v1.RuntimeReady && len(r.Groups) == 0)
-		if proofMissing {
-			cleanup = problem("cleanup_failed", "native guardian ownership effect is absent or mismatched; preserve uncertain processes and inspect private state")
-		}
-		if r.LaunchPending {
-			cleanup = errors.Join(cleanup, problem("cleanup_failed", "native guardian launch intent lacks its ownership effect; an inactive helper may remain; preserve and diagnose this instance"))
-		}
-		var mu sync.Mutex
-		var joined sync.WaitGroup
-		for _, group := range r.Groups {
-			if proofMissing {
-				continue
-			}
-			joined.Go(func() { err := native.Stop(group, 0); mu.Lock(); cleanup = errors.Join(cleanup, err); mu.Unlock() })
-		}
-		joined.Wait()
-		result.CleanupFailure = ""
-		if cleanup != nil {
-			result.CleanupFailure = cleanup.Error()
-		}
-		for i := range result.Components {
-			result.Components[i].Status = "stopped"
-			if cleanup != nil {
-				result.Components[i].Status = "unknown"
-			}
-		}
-		result.CollectionFailure = "daemon interruption; output/status collection may contain gaps"
-		result.Failure = "daemon recovery interrupted execution; explicit restart required"
-		if _, err := s.execution(id, v1.Interrupted, &result); err != nil {
+		if err := s.recoverExecution(id); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+func (s *store) recoverExecution(id string) error {
+	r, err := s.runtime(id)
+	if err != nil {
+		return err
+	}
+	instance, err := s.inspect(id)
+	if err != nil {
+		return err
+	}
+	if instance.Execution == nil || (!active(instance.Status) && instance.Execution.CleanupFailure == "") {
+		return nil
+	}
+	result := *instance.Execution
+	var cleanup error
+	g, err := s.resources(id)
+	if err != nil {
+		return err
+	}
+	proofMissing := r.Attempt != result.Attempt || (instance.Status == v1.RuntimeReady && len(r.Groups) == 0 && len(g.Containers) == 0)
+	if proofMissing {
+		cleanup = problem("cleanup_failed", "native guardian ownership effect is absent or mismatched; preserve uncertain processes and inspect private state")
+	}
+	if r.LaunchPending {
+		cleanup = errors.Join(cleanup, problem("cleanup_failed", "native guardian launch intent lacks its ownership effect; an inactive helper may remain; preserve and diagnose this instance"))
+	}
+	var mu sync.Mutex
+	var joined sync.WaitGroup
+	for _, group := range r.Groups {
+		if proofMissing {
+			continue
+		}
+		joined.Go(func() { err := native.Stop(group, 0); mu.Lock(); cleanup = errors.Join(cleanup, err); mu.Unlock() })
+	}
+	joined.Wait()
+	cleanup = errors.Join(cleanup, s.recoverContainers(id, &g))
+	if cleanup == nil && instance.Plan.Lifetime == v1.Disposable {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cleanup = s.removeResources(cleanupCtx, id)
+		cancel()
+	}
+	result.CleanupFailure = ""
+	if cleanup != nil {
+		result.CleanupFailure = cleanup.Error()
+	}
+	for i := range result.Components {
+		result.Components[i].Status = "stopped"
+		if cleanup != nil {
+			result.Components[i].Status = "unknown"
+		}
+	}
+	result.CollectionFailure = "daemon interruption; output/status collection may contain gaps"
+	result.Failure = "daemon recovery interrupted execution; explicit restart required"
+	if _, err := s.execution(id, v1.Interrupted, &result); err != nil {
+		return err
+	}
+	return nil
+}
+
 func parseDuration(value string, fallback time.Duration) (time.Duration, error) {
 	if value == "" {
 		return fallback, nil
@@ -161,20 +181,42 @@ func parseDuration(value string, fallback time.Duration) (time.Duration, error) 
 	return d, nil
 }
 
-func (s *store) outputConflict(plan v1.PlanResponse) error {
+// outputConflict fences incompatible declarations across old/new snapshots of
+// the same checkout. Group renaming must not bypass a live output consumer.
+func (s *store) outputConflict(requestedPlan v1.PlanResponse) error {
 	return s.db.View(func(tx *bolt.Tx) error {
 		return tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
 			var r record
 			if err := decodeRecord(data, string(key), &r); err != nil {
 				return err
 			}
-			if r.Instance.Execution == nil || r.Instance.Execution.CleanupFailure == "" || r.Instance.Plan.Checkout != plan.Checkout {
+			instance := r.Instance
+			if instance.Execution == nil || instance.Plan.Checkout != requestedPlan.Checkout {
 				return nil
 			}
-			for _, owned := range r.Instance.Plan.Outputs {
-				for _, requested := range plan.Outputs {
-					if owned.ConcurrencyGroup == requested.ConcurrencyGroup {
-						return problem("cleanup_failed", "uncertain owned consumer blocks checkout output group; resolve cleanup before launching")
+			uncertain := instance.Execution.CleanupFailure != ""
+			if !active(instance.Status) && !uncertain {
+				return nil
+			}
+			for _, existing := range instance.Plan.Outputs {
+				for _, requested := range requestedPlan.Outputs {
+					if existing.ConcurrencyGroup == requested.ConcurrencyGroup {
+						if uncertain {
+							return problem("cleanup_failed", "uncertain owned consumer blocks checkout output group; resolve cleanup before launching")
+						}
+						continue
+					}
+					oldPath, err := plan.OutputPath(filepath.Dir(instance.Plan.ManifestPath), existing.Path)
+					if err != nil {
+						return err
+					}
+					newPath, err := plan.OutputPath(filepath.Dir(requestedPlan.ManifestPath), requested.Path)
+					if err != nil {
+						return err
+					}
+					separator := string(filepath.Separator)
+					if oldPath == newPath || strings.HasPrefix(oldPath, newPath+separator) || strings.HasPrefix(newPath, oldPath+separator) {
+						return problem("unsafe_drift", "overlapping checkout output declarations changed groups while another consumer is active or uncertain; stop it before launching")
 					}
 				}
 			}

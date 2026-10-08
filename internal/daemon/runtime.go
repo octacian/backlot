@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strconv"
 	"sync"
@@ -21,15 +20,19 @@ import (
 )
 
 type execution struct {
-	cancel     context.CancelFunc
-	done       chan struct{}
-	mu         sync.Mutex
-	groups     []*native.Group
-	jobs       map[string]*native.Group
-	components map[string]*native.Group
-	err        error
-	source     capturedSource
-	grace      time.Duration
+	cancel        context.CancelFunc
+	done          chan struct{}
+	mu            sync.Mutex
+	groups        []*native.Group
+	jobs          map[string]workload
+	components    map[string]workload
+	containers    []*dockerWork
+	docker        *dockerEngine
+	resources     *resourceGeneration
+	outputRelease func()
+	err           error
+	source        capturedSource
+	grace         time.Duration
 }
 type deadlines struct{ startup, job, grace time.Duration }
 
@@ -53,28 +56,29 @@ func withDeadline(ctx context.Context, d time.Duration) (context.Context, contex
 	}
 	return context.WithTimeout(ctx, d)
 }
-func nativePlan(p v1.PlanResponse) error {
+func executablePlan(p v1.PlanResponse) error {
 	if p.Publish != nil {
 		return problem("unsupported_runtime", "native slice does not execute publication")
 	}
 	for _, r := range p.Resources {
-		if r.Kind != "port" {
-			return problem("unsupported_runtime", "native slice supports only port resources")
+		if r.Kind == "origin" {
+			return problem("unsupported_runtime", "publication resources require the future gateway slice")
 		}
 	}
 	for _, c := range p.Components {
-		if c.Readiness != nil && (c.Readiness.Kind == "tcp" || c.Readiness.Kind == "http") {
+		if c.Runtime == v1.Native && c.Readiness != nil && (c.Readiness.Kind == "tcp" || c.Readiness.Kind == "http") {
 			if _, err := exec.LookPath("lsof"); err != nil {
 				return problem("missing_tool", "lsof is required to prove native listener ownership")
 			}
 		}
-		if c.Runtime != v1.Native || c.Policy == v1.FreshOnly {
-			return problem("unsupported_runtime", "selected work requires unsupported provider or fresh-only initialization")
-		}
+
 	}
 	return nil
 }
 func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceResponse, error) {
+	return s.runMode(ctx, request, false)
+}
+func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool) (v1.InstanceResponse, error) {
 	var empty v1.InstanceResponse
 	if request.InstanceID != "" && request.Plan.ConfigPath == "" {
 		previous, err := s.store.runtime(request.InstanceID)
@@ -98,13 +102,16 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 	if err != nil {
 		return empty, err
 	}
-	if err := nativePlan(snapshot.Plan); err != nil {
+	if err := executablePlan(snapshot.Plan); err != nil {
 		return empty, err
 	}
 	if request.InstanceID != "" {
 		previous, err := s.store.inspect(request.InstanceID)
 		if err != nil {
 			return empty, err
+		}
+		if previous.Status == v1.Destroyed {
+			return empty, problem("destroyed", "instance was destroyed; run the scene to create a fresh identity")
 		}
 		if previous.Plan.Project != snapshot.Plan.Project || previous.Plan.Scene != snapshot.Plan.Scene || previous.Plan.Lifetime != v1.Persistent || previous.Checkout.ID != identity.checkout.ID {
 			return empty, problem("conflict", "restart must address the same persistent project, checkout and scene")
@@ -120,12 +127,20 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 	}
 	unlock := s.lockMutation(id)
 	defer unlock()
+	response.Instance, err = s.store.inspect(id)
+	if err != nil {
+		return empty, err
+	}
+	if response.Instance.Status == v1.Destroyed {
+		return empty, problem("destroyed", "instance was destroyed during start acceptance; run the scene again for a fresh identity")
+	}
+
 	if request.InstanceID == "" {
 		snapshot, err = s.store.snapshot(id)
 		if err != nil {
 			return empty, err
 		}
-		if err := nativePlan(snapshot.Plan); err != nil {
+		if err := executablePlan(snapshot.Plan); err != nil {
 			return empty, err
 		}
 	}
@@ -133,8 +148,14 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 		if request.InstanceID != id || response.Instance.Plan.Lifetime != v1.Persistent {
 			return empty, problem("conflict", "restart must address the same persistent checkout and scene")
 		}
-		if !reflect.DeepEqual(response.Instance.Plan.Resources, snapshot.Plan.Resources) {
-			return empty, problem("unsafe_drift", "resource changes require a future reset/destroy operation; runtime preserved")
+		previous, err := s.store.snapshot(id)
+		if err != nil {
+			return empty, err
+		}
+		if !reset {
+			if err := safeRestart(previous, snapshot); err != nil {
+				return empty, err
+			}
 		}
 		if err := identity.verify(); err != nil {
 			return empty, err
@@ -146,6 +167,14 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 			}
 		}
 	}
+	if reset {
+		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cleanupErr := s.store.removeResources(cleanup, id)
+		cancel()
+		if cleanupErr != nil {
+			return empty, problem("cleanup_failed", cleanupErr.Error())
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closing {
@@ -154,7 +183,7 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 	if s.executions == nil {
 		s.executions = map[string]*execution{}
 	}
-	if existing := s.executions[id]; existing != nil && request.InstanceID == "" {
+	if existing := s.executions[id]; existing != nil && request.InstanceID == "" && response.Instance.Status != v1.Stopped {
 		instance, err := s.store.inspect(id)
 		response.Instance = instance
 		return response, err
@@ -172,12 +201,12 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 	attempt := newID()
 	result := &v1.ExecutionResult{Attempt: attempt, Components: []v1.ComponentResult{}, Ports: map[string]int{}}
 	r := runtimeRecord{Attempt: attempt, Groups: []native.Identity{}, Options: request.Options, ConfigPath: request.Plan.ConfigPath}
-	response.Instance, err = s.store.acceptExecution(id, r, result, request.InstanceID != "")
+	response.Instance, err = s.store.acceptExecution(id, r, result, request.InstanceID != "" || response.Instance.Status == v1.Stopped)
 	if err != nil {
 		return empty, err
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
-	entry := &execution{cancel: cancel, done: make(chan struct{}), jobs: map[string]*native.Group{}, components: map[string]*native.Group{}, source: identity, grace: mustGrace(request.Options)}
+	entry := &execution{cancel: cancel, done: make(chan struct{}), jobs: map[string]workload{}, components: map[string]workload{}, source: identity, grace: mustGrace(request.Options)}
 	s.executions[id] = entry
 	response.Instance, err = s.store.inspect(id)
 	if err != nil {
@@ -189,6 +218,34 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 	return response, nil
 }
 func (s *service) stopExecution(id string) (v1.Instance, error) {
+	instance, err := s.joinExecution(id)
+	var typed *v1.PlanError
+	if errors.As(err, &typed) && typed.Code == "cleanup_failed" {
+		s.mu.Lock()
+		entry := s.executions[id]
+		s.mu.Unlock()
+		if entry != nil {
+			select {
+			case <-entry.done:
+			default:
+				return instance, err
+			}
+		}
+
+		if recoveryErr := s.store.recoverExecution(id); recoveryErr != nil {
+			return instance, recoveryErr
+		}
+		instance, err = s.store.inspect(id)
+		if err == nil && instance.Execution != nil && instance.Execution.CleanupFailure != "" {
+			err = problem("cleanup_failed", instance.Execution.CleanupFailure)
+		}
+		if err == nil && entry != nil {
+			entry.releaseOutputs()
+		}
+	}
+	return instance, err
+}
+func (s *service) joinExecution(id string) (v1.Instance, error) {
 	s.mu.Lock()
 	entry := s.executions[id]
 	s.mu.Unlock()
@@ -301,9 +358,39 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 				}
 			})
 		}
+		for _, w := range entry.containers {
+			joined.Go(func() {
+				stopErr := w.Stop(d.grace)
+				exit := w.Result()
+				cleanupMu.Lock()
+				defer cleanupMu.Unlock()
+				cleanup = errors.Join(cleanup, stopErr)
+				if exit != nil && exit.CollectionFailure != "" {
+					result.CollectionFailure = exit.CollectionFailure
+					status = v1.Failed
+				}
+			})
+		}
+
 		joined.Wait()
+		if entry.resources != nil && cleanup == nil {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			cleanup = s.store.cleanupContainers(cleanupCtx, id, entry.resources, entry.docker)
+			cancel()
+		}
+		if entry.docker != nil {
+			_ = entry.docker.Close()
+		}
+		if snapshot.Plan.Lifetime == v1.Disposable && cleanup == nil {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			cleanup = s.store.removeResources(cleanupCtx, id)
+			cancel()
+		}
 		for i := range result.Components {
 			component := &result.Components[i]
+			if component.Status == "skipped" {
+				continue
+			}
 			if cleanup != nil {
 				component.Status = "unknown"
 			} else if entry.jobs[component.Name] != nil {
@@ -326,8 +413,8 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			entry.err = err
 			entry.mu.Unlock()
 		}
-		if release != nil && cleanup == nil {
-			release()
+		if cleanup == nil {
+			entry.releaseOutputs()
 		}
 	}()
 	startup, cancel := withDeadline(ctx, d.startup)
@@ -339,7 +426,16 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 	if failure != nil {
 		return
 	}
-	for name := range snapshot.Plan.Resources {
+	entry.mu.Lock()
+	entry.outputRelease = release
+	entry.mu.Unlock()
+	if failure = s.allocateResources(startup, id, snapshot, entry); failure != nil {
+		return
+	}
+	for name, resource := range snapshot.Plan.Resources {
+		if resource.Kind != "port" {
+			continue
+		}
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			failure = err
@@ -351,7 +447,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			return
 		}
 	}
-	services := map[string]*native.Group{}
+	services := map[string]workload{}
 	consumedPorts := map[string]string{}
 	for _, component := range snapshot.Plan.Components {
 		if err := startup.Err(); err != nil {
@@ -361,6 +457,10 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		if err := serviceFailure(services); err != nil {
 			failure = err
 			return
+		}
+		if component.Policy == v1.FreshOnly && entry.resources.Initialized[component.Name] {
+			result.Components = append(result.Components, v1.ComponentResult{Name: component.Name, Status: "skipped"})
+			continue
 		}
 		// Terminal execution receives its own budget after dependency startup succeeds.
 		componentCtx := startup
@@ -375,30 +475,38 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			failure = err
 			return
 		}
-		var group *native.Group
+		var group workload
 		var err error
 		for allocationAttempt := 0; allocationAttempt < 3; allocationAttempt++ {
 			if err = identity.verify(); err != nil {
 				break
 			}
-			group, err = s.launch(componentCtx, id, component.Name, component.Executable, component.Command.Args, component.Environment, snapshot, result, entry, &journal)
-			if err != nil {
-				break
+			if component.Runtime == v1.Container {
+				group, err = s.launchContainer(componentCtx, id, component, snapshot, result, entry)
+			} else {
+				group, err = s.launch(componentCtx, id, component.Name, component.Executable, component.Command.Args, component.Environment, snapshot, result, entry, &journal)
 			}
-			entry.components[component.Name] = group
-			if component.Kind != v1.Service {
-				break
+			if err == nil {
+				entry.components[component.Name] = group
+				if component.Kind != v1.Service {
+					break
+				}
+				services[component.Name] = group
+				err = s.awaitProbe(startup, id, component, snapshot, result, entry, &journal, group, services)
+			} else {
+				group = nil
 			}
-			services[component.Name] = group
-			err = s.awaitProbe(startup, id, component, snapshot, result, entry, &journal, group, services)
 			var typed *v1.PlanError
 			if !errors.As(err, &typed) || typed.Code != "port_conflict" {
 				break
 			}
-			if cleanupErr := group.Stop(d.grace); cleanupErr != nil {
-				err = cleanupErr
-				break
+			if group != nil {
+				if cleanupErr := group.Stop(d.grace); cleanupErr != nil {
+					err = cleanupErr
+					break
+				}
 			}
+
 			delete(services, component.Name)
 			if allocationAttempt == 2 {
 				break
@@ -463,6 +571,12 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 				failure = err
 				return
 			}
+			if component.Policy == v1.FreshOnly {
+				entry.resources.Initialized[component.Name] = true
+				if failure = s.store.saveResources(id, *entry.resources); failure != nil {
+					return
+				}
+			}
 		}
 		consumeComponentPorts(consumedPorts, component, snapshot)
 	}
@@ -487,7 +601,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		}
 	}
 }
-func serviceFailure(services map[string]*native.Group) error {
+func serviceFailure(services map[string]workload) error {
 	for name, g := range services {
 		if g.Result() != nil || !g.Alive() {
 			return fmt.Errorf("required service %s exited unexpectedly; explicit restart required", name)
@@ -495,7 +609,7 @@ func serviceFailure(services map[string]*native.Group) error {
 	}
 	return nil
 }
-func waitJob(ctx context.Context, g *native.Group, services map[string]*native.Group) (*native.Exit, error) {
+func waitJob(ctx context.Context, g workload, services map[string]workload) (*native.Exit, error) {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -506,7 +620,10 @@ func waitJob(ctx context.Context, g *native.Group, services map[string]*native.G
 			return exit, nil
 		}
 		if !g.Alive() {
-			return nil, errors.New("guardian exited unexpectedly")
+			if exit := g.Result(); exit != nil {
+				return exit, nil
+			}
+			return nil, errors.New("runtime owner exited without a collected result")
 		}
 		select {
 		case <-ctx.Done():
@@ -564,18 +681,10 @@ func (s *service) launch(ctx context.Context, id, name, executable string, args 
 		}
 		return nil, errors.Join(startErr, closeErr)
 	}
-	var env []string
-	for key, value := range environment {
-		if value.Redacted {
-			value = snapshot.Secrets[name+"/environment/"+key]
-		}
-		text, err := runtimeValue(value, id, snapshot.Plan, result.Ports)
-		if err != nil {
-			return nil, err
-		}
-		env = append(env, key+"="+text)
+	env, err := resolvedEnvironment(name, environment, id, snapshot, result, entry, v1.Native)
+	if err != nil {
+		return nil, err
 	}
-	sort.Strings(env)
 	if closeErr != nil {
 		return nil, closeErr
 	}
@@ -748,5 +857,15 @@ func consumeComponentPorts(consumed map[string]string, c v1.PlannedComponent, sn
 			value = snapshot.Secrets[c.Name+"/readiness"]
 		}
 		consume(value)
+	}
+}
+
+func (e *execution) releaseOutputs() {
+	e.mu.Lock()
+	release := e.outputRelease
+	e.outputRelease = nil
+	e.mu.Unlock()
+	if release != nil {
+		release()
 	}
 }

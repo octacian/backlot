@@ -512,3 +512,22 @@ func TestSuppliedConfigRequiresVersion(t *testing.T) {
 		t.Fatalf("absent optional config: %v", err)
 	}
 }
+
+func TestContainerKeepsImageEnvironmentBaseline(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TMPDIR", "/host-only/temp")
+	manifest := v1.Manifest{}
+	c := v1.Component{Runtime: v1.Container}
+	values, err := resolveEnvironmentValues(manifest, v1.MachineConfig{}, c, root, v1.PlanResponse{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := values["TMPDIR"]; exists {
+		t.Fatal("host temporary directory leaked into image")
+	}
+	c.Environment.PassThrough = []string{"TMPDIR"}
+	values, err = resolveEnvironmentValues(manifest, v1.MachineConfig{}, c, root, v1.PlanResponse{})
+	if err != nil || values["TMPDIR"].literal == nil || *values["TMPDIR"].literal != "/host-only/temp" {
+		t.Fatal("explicit pass-through was lost", err)
+	}
+}

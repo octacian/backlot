@@ -21,10 +21,10 @@ import (
 
 func runtimeCommands() []*urfave.Command {
 	commands := []*urfave.Command{}
-	for _, name := range []string{"run", "restart"} {
-		commands = append(commands, &urfave.Command{Name: name, SkipFlagParsing: true, Usage: "Execute native commands whose descendants stay in their supervised group", Flags: append(daemonFlags(false), &urfave.StringFlag{Name: "project"}, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s"}), Action: runNative})
+	for _, name := range []string{"run", "restart", "reset"} {
+		commands = append(commands, &urfave.Command{Name: name, SkipFlagParsing: true, Usage: "Execute an isolated scene; restart retains data, reset replaces it", Flags: append(daemonFlags(false), &urfave.StringFlag{Name: "project"}, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s"}), Action: runNative})
 	}
-	commands = append(commands, &urfave.Command{Name: "stop", Usage: "Stop native runtime with verified group cleanup", Flags: daemonFlags(false), Action: func(ctx context.Context, c *urfave.Command) error {
+	commands = append(commands, &urfave.Command{Name: "stop", Usage: "Stop runtime with verified group cleanup", Flags: daemonFlags(false), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
 			return fmt.Errorf("stop requires one recorded instance ID")
 		}
@@ -34,6 +34,18 @@ func runtimeCommands() []*urfave.Command {
 		}
 		defer cli.Close()
 		response, err := cli.StopExecution(ctx, c.Args().First())
+		return output(c, response, err)
+	}})
+	commands = append(commands, &urfave.Command{Name: "destroy", Usage: "Remove owned runtime and data; retain logs", Flags: daemonFlags(false), Action: func(ctx context.Context, c *urfave.Command) error {
+		if c.Args().Len() != 1 {
+			return fmt.Errorf("destroy requires one recorded instance ID")
+		}
+		cli, err := runtimeClient(c)
+		if err != nil {
+			return output(c, nil, err)
+		}
+		defer cli.Close()
+		response, err := cli.Destroy(ctx, c.Args().First())
 		return output(c, response, err)
 	}})
 	commands = append(commands, &urfave.Command{Name: "logs", Usage: "Read retained component logs", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "follow"}, &urfave.StringFlag{Name: "component"}), Action: func(ctx context.Context, c *urfave.Command) error {
@@ -123,7 +135,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 	}
 	defer cli.Close()
 	request := v1.RunRequest{APIVersion: v1.Version, Options: v1.ExecutionOptions{StartupTimeout: c.String("startup-timeout"), JobTimeout: c.String("job-timeout"), StopGrace: c.String("stop-grace")}}
-	if c.Name == "restart" {
+	if c.Name == "restart" || c.Name == "reset" {
 		previous, err := cli.Inspect(ctx, args[0])
 		if err != nil {
 			return output(c, nil, err)
@@ -150,8 +162,12 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 	signalCtx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	var response v1.InstanceResponse
-	if c.Name == "restart" {
-		response, err = cli.Restart(context.WithoutCancel(signalCtx), request)
+	if c.Name == "restart" || c.Name == "reset" {
+		if c.Name == "reset" {
+			response, err = cli.Reset(context.WithoutCancel(signalCtx), request)
+		} else {
+			response, err = cli.Restart(context.WithoutCancel(signalCtx), request)
+		}
 	} else {
 		response, err = cli.Run(context.WithoutCancel(signalCtx), request)
 	}
@@ -159,6 +175,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 		return output(c, nil, err)
 	}
 	id := response.Instance.ID
+	manifestDrift, configDrift := response.ManifestDrift, response.ConfigDrift
 	token := response.LeaseToken
 	for {
 		if signalCtx.Err() != nil {
@@ -175,7 +192,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 			if err := output(c, response, nil); err != nil {
 				return err
 			}
-			return &v1.PlanError{Code: "cancelled", Message: "native execution cancelled"}
+			return &v1.PlanError{Code: "cancelled", Message: "execution cancelled"}
 		}
 		if response.Instance.Status == v1.RuntimeReady {
 			return output(c, response, nil)
@@ -183,11 +200,11 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 		switch response.Instance.Status {
 		case v1.Succeeded:
 			return output(c, response, nil)
-		case v1.Failed, v1.Interrupted, v1.Cancelled, v1.Stopped:
+		case v1.Failed, v1.Interrupted, v1.Cancelled, v1.Stopped, v1.Destroyed:
 			if err := output(c, response, nil); err != nil {
 				return err
 			}
-			return &v1.PlanError{Code: "execution_failed", Message: "native execution failed or was interrupted; inspect execution result"}
+			return &v1.PlanError{Code: "execution_failed", Message: "execution failed or was interrupted; inspect execution result"}
 		}
 		if response.Instance.Status == v1.Stopping {
 			token = ""
@@ -229,10 +246,11 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 			if err := output(c, response, nil); err != nil {
 				return err
 			}
-			return &v1.PlanError{Code: "cancelled", Message: "native execution cancelled"}
+			return &v1.PlanError{Code: "cancelled", Message: "execution cancelled"}
 		case <-time.After(50 * time.Millisecond):
 		}
 		response, err = cli.Inspect(signalCtx, id)
+		response.ManifestDrift, response.ConfigDrift = manifestDrift, configDrift
 		if err != nil {
 			if signalCtx.Err() != nil {
 				continue
@@ -284,7 +302,7 @@ func parseRuntimeArgs(c *urfave.Command) (string, []string, error) {
 	if target == "" {
 		return "", nil, &v1.PlanError{Code: "invalid_arguments", Message: "run requires a scene; restart requires an instance ID"}
 	}
-	if c.Name == "restart" && len(terminal) > 0 {
+	if (c.Name == "restart" || c.Name == "reset") && len(terminal) > 0 {
 		return "", nil, &v1.PlanError{Code: "invalid_arguments", Message: "persistent restart does not accept terminal arguments"}
 	}
 	return target, terminal, nil

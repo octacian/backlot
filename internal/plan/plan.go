@@ -144,7 +144,11 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 		for key, value := range env {
 			planned.Environment[key] = value.wire()
 			if snapshot != nil && value.secret {
-				snapshot.Secrets[name+"/environment/"+key] = value.private()
+				privateKey := name + "/environment/" + key
+				snapshot.Secrets[privateKey] = value.private()
+				if value.implicitBaseline {
+					snapshot.ImplicitBaseline[privateKey] = true
+				}
 			}
 		}
 		if c.Image != nil {
@@ -186,6 +190,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 		result.Components = append(result.Components, planned)
 	}
 	if snapshot != nil {
+		snapshot.Docker = config.Docker
 		snapshot.Manifest = m
 		snapshot.Plan = result
 	}
@@ -220,9 +225,10 @@ func tool(m v1.Manifest, c v1.MachineConfig, name, project string) (string, erro
 }
 
 type resolvedValue struct {
-	literal  *string
-	symbolic *v1.Reference
-	secret   bool
+	literal          *string
+	symbolic         *v1.Reference
+	secret           bool
+	implicitBaseline bool
 }
 
 func (v resolvedValue) wire() v1.PlannedValue {

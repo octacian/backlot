@@ -43,3 +43,17 @@ func (c *Client) Logs(ctx context.Context, request v1.LogsRequest) (v1.LogsRespo
 	}
 	return response, err
 }
+
+// Reset replaces retained state after stopping all verified owned consumers.
+func (c *Client) Reset(ctx context.Context, request v1.RunRequest) (v1.InstanceResponse, error) {
+	var response v1.InstanceResponse
+	err := c.call(ctx, http.MethodPost, "/v1/reset", request, &response)
+	return response, err
+}
+
+// Destroy removes owned runtime/data while preserving historical evidence.
+func (c *Client) Destroy(ctx context.Context, id string) (v1.InstanceResponse, error) {
+	var response v1.InstanceResponse
+	err := c.call(ctx, http.MethodPost, "/v1/destroy", v1.InstanceRequest{APIVersion: v1.Version, InstanceID: id}, &response)
+	return response, err
+}

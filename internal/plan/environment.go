@@ -16,9 +16,13 @@ var keyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 func resolveEnvironmentValues(m v1.Manifest, config v1.MachineConfig, c v1.Component, project string, p v1.PlanResponse) (map[string]resolvedValue, error) {
 	values := map[string]resolvedValue{}
 	// The launch baseline is deliberately small; no ambient credentials are copied.
-	for _, key := range []string{"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "SystemRoot"} {
+	baseline := []string{"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "SystemRoot"}
+	if c.Runtime == v1.Container {
+		baseline = nil
+	} // Image defaults belong to the image, not the host.
+	for _, key := range baseline {
 		if value, ok := os.LookupEnv(key); ok {
-			values[key] = resolvedValue{literal: &value, secret: true}
+			values[key] = resolvedValue{literal: &value, secret: true, implicitBaseline: true}
 		}
 	}
 	layers := make([]v1.Environment, 0, len(c.EnvironmentSets)+1)

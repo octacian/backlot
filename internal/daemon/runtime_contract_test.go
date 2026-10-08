@@ -28,8 +28,8 @@ func TestExecutionBudgetsAndPreflight(t *testing.T) {
 			t.Fatal("invalid deadline accepted", options)
 		}
 	}
-	for _, plan := range []v1.PlanResponse{{Publish: &v1.Publication{}}, {Resources: map[string]v1.Resource{"data": {Kind: "directory"}}}, {Components: []v1.PlannedComponent{{Runtime: v1.Container}}}, {Components: []v1.PlannedComponent{{Runtime: v1.Native, Policy: v1.FreshOnly}}}} {
-		if err := nativePlan(plan); err == nil {
+	for _, plan := range []v1.PlanResponse{{Publish: &v1.Publication{}}, {Resources: map[string]v1.Resource{"url": {Kind: "origin"}}}} {
+		if err := executablePlan(plan); err == nil {
 			t.Fatal("unsupported selected work accepted")
 		}
 	}
@@ -42,6 +42,8 @@ func TestStrictNativeWireContracts(t *testing.T) {
 		{"/v1/run", `{"api_version":"v1","plan":{},"options":{},"extra":true}`},
 		{"/v1/run", `{"api_version":"v1","plan":{},"options":{"job_timeout":null}}`},
 		{"/v1/restart", `{"api_version":"v1","plan":{},"options":{}}`},
+		{"/v1/reset", `{"api_version":"v1","plan":{},"options":{}}`},
+		{"/v1/destroy", `{"api_version":"v1","instance_id":"bad"}`},
 		{"/v1/runtime/stop", `{"api_version":"v1","instance_id":"bad"}`},
 		{"/v1/logs", `{"api_version":"v1","instance_id":"bad","offset":-1}`},
 		{"/v1/logs", `{"api_version":"v2","instance_id":"bad","offset":0}`},

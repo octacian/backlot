@@ -66,6 +66,14 @@ ownership. Implement clear interrupted/failed states rather than auto-restart.
 
 ## 4. Generic containers and private state
 
+Implemented for independent review: official Docker Go client lifecycle, private
+networks/ports/storage/secrets, fresh-only completion records, persistent stop/run
+and restart, explicit reset/destroy, conservative pre-stop drift rejection, durable
+container logs and capability-based recovery. See the [runtime guide](containers.md).
+Provider integration is an explicit opt-in suite; final independent reviews and
+frozen-candidate checks remain gates. Publication and the broader milestone 6
+evidence/retention features remain deferred.
+
 Add the official Docker client adapter for containers, per-instance networks,
 ports, and volumes; delegate image building to existing Docker tooling. Implement
 private directory/volume/secret resources and use a MariaDB image as a generic

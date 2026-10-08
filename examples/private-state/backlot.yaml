@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=../../schemas/manifest-v1.schema.json
+version: backlot/v1
+project: private-state-example
+resources:
+  data: {kind: volume}
+  admin-password: {kind: secret}
+  app-password: {kind: secret}
+  sql: {kind: port}
+components:
+  database:
+    kind: service
+    runtime: container
+    image: {literal: "mariadb:11.4"}
+    resources: [data, admin-password, app-password, sql]
+    environment:
+      assign:
+        MARIADB_ROOT_PASSWORD:
+          ref: {kind: resource, name: admin-password, field: value}
+        MARIADB_DATABASE: {literal: app}
+        MARIADB_USER: {literal: app}
+        MARIADB_PASSWORD:
+          ref: {kind: resource, name: app-password, field: value}
+    mounts:
+      - {resource: data, target: /var/lib/mysql}
+    ports:
+      sql: {resource: sql, container_port: 3306}
+    readiness:
+      kind: tcp
+      target:
+        ref: {kind: service, name: database, field: port, port: sql}
+      timeout: 60s
+scenes:
+  dev:
+    lifetime: persistent
+    components: [database]
+    resources: [data, admin-password, app-password, sql]

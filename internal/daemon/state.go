@@ -15,14 +15,17 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-var bucketNames = []string{"meta", "instances", "checkouts", "paths", "persistent", "snapshots", "secrets", "runtime"}
+var bucketNames = []string{"meta", "instances", "checkouts", "paths", "persistent", "snapshots", "secrets", "runtime", "resources"}
 
 type record struct {
 	Instance  v1.Instance `json:"instance"`
 	LeaseHash string      `json:"lease_hash,omitempty"`
 }
 
-type store struct{ db *bolt.DB }
+type store struct {
+	db        *bolt.DB
+	directory string
+}
 
 func openStore(directory string) (*store, error) {
 	path := filepath.Join(directory, "state.db")
@@ -37,7 +40,7 @@ func openStore(directory string) (*store, error) {
 	if err != nil {
 		return nil, problem("state_unavailable", "cannot open state database; check permissions or another daemon")
 	}
-	s := &store{db: db}
+	s := &store{db: db, directory: directory}
 	err = db.Update(func(tx *bolt.Tx) error {
 		meta := tx.Bucket([]byte("meta"))
 		if meta != nil {
@@ -94,7 +97,7 @@ func decodeRecord(data []byte, id string, r *record) error {
 		return problem("state_corrupt", "invalid instance identity or operation record; preserve state for diagnosis")
 	}
 	switch i.Status {
-	case v1.Preparing, v1.Prepared, v1.Cancelled, v1.Interrupted, v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Succeeded, v1.Failed:
+	case v1.Preparing, v1.Prepared, v1.Cancelled, v1.Interrupted, v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Destroyed, v1.Succeeded, v1.Failed:
 	default:
 		return problem("state_corrupt", "invalid instance status; preserve state for diagnosis")
 	}

@@ -6,6 +6,7 @@ const (
 	RuntimeReady InstanceStatus = "ready"
 	Stopping     InstanceStatus = "stopping"
 	Stopped      InstanceStatus = "stopped"
+	Destroyed    InstanceStatus = "destroyed"
 	Succeeded    InstanceStatus = "succeeded"
 	Failed       InstanceStatus = "failed"
 )
@@ -18,7 +19,7 @@ type ExecutionOptions struct {
 	StopGrace      string `json:"stop_grace,omitempty"`
 }
 
-// RunRequest starts or explicitly restarts a validated native scene.
+// RunRequest starts or explicitly restarts a validated scene.
 type RunRequest struct {
 	APIVersion string           `json:"api_version"`
 	Plan       PlanRequest      `json:"plan"`

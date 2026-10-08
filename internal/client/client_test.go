@@ -96,18 +96,18 @@ func TestClientEncodesNamedRequestsAndDecodesResponses(t *testing.T) {
 }
 
 func TestClientRejectsIncompatibleMalformedAndOversizeResponses(t *testing.T) {
-	valid := `{"api_version":"v1","state_version":1,"status":"running","pid":1,"lease_duration":"30s"}`
+	valid := `{"api_version":"v1","state_version":2,"status":"running","pid":1,"lease_duration":"30s"}`
 	for _, test := range []struct {
 		name, body, header, code string
 		status                   int
 	}{
 		{"header", valid, "v2", "api_version", 200},
 		{"body version", strings.Replace(valid, `"v1"`, `"v2"`, 1), "v1", "api_version", 200},
-		{"state version", strings.Replace(valid, `"state_version":1`, `"state_version":99`, 1), "v1", "api_version", 200},
+		{"state version", strings.Replace(valid, `"state_version":2`, `"state_version":99`, 1), "v1", "api_version", 200},
 		{"unknown", strings.Replace(valid, `"pid":1`, `"extra":1`, 1), "v1", "invalid_response", 200},
 		{"duplicate", strings.Replace(valid, `"pid":1`, `"pid":1,"pid":2`, 1), "v1", "invalid_response", 200},
 		{"trailing", valid + ` {}`, "v1", "invalid_response", 200},
-		{"missing fields", `{"api_version":"v1","state_version":1}`, "v1", "invalid_response", 200},
+		{"missing fields", `{"api_version":"v1","state_version":2}`, "v1", "invalid_response", 200},
 		{"unknown status", strings.Replace(valid, `"running"`, `"ready"`, 1), "v1", "invalid_response", 200},
 		{"oversize", strings.Repeat(" ", manifest.MaxBytes+1), "v1", "invalid_response", 200},
 		{"typed error", `{"api_version":"v1","error":{"code":"state_version","message":"use compatible binary"}}`, "v1", "state_version", 409},

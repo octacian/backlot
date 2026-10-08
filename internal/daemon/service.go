@@ -1,5 +1,5 @@
-// Package daemon owns private preparation snapshots, native lifecycle execution,
-// leases and durable recovery. It does not contact Docker or Caddy.
+// Package daemon owns private preparation snapshots, native/container execution,
+// retained resource generations, leases and durable recovery. Publication is deferred.
 package daemon
 
 import (

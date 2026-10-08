@@ -17,7 +17,7 @@ Scene names are project-defined. Persistent environments return a usable URL;
 disposable runs return their outcome and retained evidence.
 
 **Status:** offline planning, durable metadata preparation and the native vertical
-slice are implemented for independent review.
+slice plus generic containers/private state are implemented for independent review.
 The executable provides help,
 `backlot version [--json]`, and `backlot plan <scene> [--project PATH]
 [--config PATH] [--json] -- <terminal-job args>`. Planning validates contracts,
@@ -26,10 +26,11 @@ See the [manifest guide](docs/manifest.md) and generic fixtures.
 Explicit daemon control and metadata-only `prepare`, `inspect`, `cancel`, `renew`
 and local `doctor` are described in the [daemon guide](docs/daemon.md). Prepared
 metadata never claims execution or readiness. Native `run`, `restart`, `stop`, and
-retained `logs` support persistent services and disposable finite jobs with port
-resources. Commands and all descendants must stay in their supervised process
-group; detachment and external process delegation are unsupported. Containers,
-publication and broader resource/evidence workflows remain V1 requirements. The initial release target is macOS
+`reset`, `destroy` and retained `logs` support persistent services and disposable
+finite jobs with isolated ports, networks, volumes, directories and secrets. Commands and all descendants must stay in their supervised process
+group; detachment and external process delegation are unsupported. See the
+[container/private-state guide](docs/containers.md) and runnable MariaDB fixture.
+Publication and broader evidence workflows remain V1 requirements. The initial release target is macOS
 ARM64; Linux and native Windows support are architectural targets for later.
 
 ## Development

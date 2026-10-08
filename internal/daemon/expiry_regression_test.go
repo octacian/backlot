@@ -217,3 +217,96 @@ func TestExpiryWorkerFailureReachesDaemon(t *testing.T) {
 		t.Fatal("asynchronous expiry failure hidden at shutdown")
 	}
 }
+
+func TestVerifiedCleanupReleasesOutputs(t *testing.T) {
+	f := newControlledExpiry(t)
+	f.allowError = true // Recovery truthfully retains a collection gap.
+	owner := f.owner(t, false, 0)
+	owner.release()
+	// End the controlled owner first, then simulate a durably failed cleanup with
+	// valid ownership. The explicit stop must release its retained output token.
+	owner.entry.cancel()
+	<-owner.done
+	instance, err := f.s.store.inspect(owner.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := instance.Execution
+	result.CleanupFailure = "fixture transient cleanup failure"
+	if _, err = f.s.store.execution(owner.id, v1.Failed, result); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.s.store.saveRuntime(owner.id, runtimeRecord{Attempt: result.Attempt}); err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	owner.entry.outputRelease = func() { released = true }
+	if _, err = f.s.stopExecution(owner.id); err != nil {
+		t.Fatal(err)
+	}
+	if !released {
+		t.Fatal("verified cleanup retained checkout output lock")
+	}
+}
+
+func TestOutputGroupsFenceSnapshotDrift(t *testing.T) {
+	f := newControlledExpiry(t)
+	owner := f.owner(t, false, 0)
+	snap, err := f.s.store.snapshot(owner.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Plan.Outputs = map[string]v1.Output{"build": {Path: "build", ConcurrencyGroup: "original"}}
+	if err = f.s.store.replaceSnapshot(owner.id, snap); err != nil {
+		t.Fatal(err)
+	}
+	next := snap.Plan
+	next.Outputs = map[string]v1.Output{"build": {Path: "build/subdirectory", ConcurrencyGroup: "changed"}}
+	if err = f.s.store.outputConflict(next); err == nil {
+		t.Fatal("group rename bypassed live overlapping output")
+	}
+	next.Outputs = map[string]v1.Output{"build": {Path: "build/subdirectory", ConcurrencyGroup: "original"}}
+	if err = f.s.store.outputConflict(next); err != nil {
+		t.Fatal("compatible group could not join serialization", err)
+	}
+	owner.entry.cancel()
+	owner.release()
+	<-owner.done
+	if err = f.s.store.outputConflict(next); err != nil {
+		t.Fatal("joined consumer still blocks output", err)
+	}
+}
+
+func TestDestroyedAcceptanceCannotResurrect(t *testing.T) {
+	f := newControlledExpiry(t)
+	prepared, err := f.s.prepare(context.Background(), request(f.root, f.config, "dev"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	f.gates = append(f.gates, func() { once.Do(func() { close(release) }) })
+	f.s.beforeExecution = func(string) { close(accepted); <-release }
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.s.run(context.Background(), v1.RunRequest{APIVersion: v1.Version, Plan: request(f.root, f.config, "dev").Plan})
+		done <- err
+	}()
+	<-accepted
+	if _, err = f.s.destroy(context.Background(), prepared.Instance.ID); err != nil {
+		t.Fatal(err)
+	}
+	once.Do(func() { close(release) })
+	if err = <-done; err == nil {
+		t.Fatal("destroyed preparation accepted runtime")
+	}
+	current, err := f.s.store.inspect(prepared.Instance.ID)
+	if err != nil || current.Status != v1.Destroyed {
+		t.Fatal("destroyed instance resurrected", err)
+	}
+	next, err := f.s.prepare(context.Background(), request(f.root, f.config, "dev"))
+	if err != nil || next.Instance.ID == prepared.Instance.ID {
+		t.Fatal("fresh run did not get a new identity", err)
+	}
+}

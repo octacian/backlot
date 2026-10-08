@@ -27,7 +27,7 @@ func validateInstance(response v1.InstanceResponse) error {
 		return responseError()
 	}
 	switch instance.Status {
-	case v1.Preparing, v1.Prepared, v1.Cancelled, v1.Interrupted, v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Succeeded, v1.Failed:
+	case v1.Preparing, v1.Prepared, v1.Cancelled, v1.Interrupted, v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Destroyed, v1.Succeeded, v1.Failed:
 	default:
 		return responseError()
 	}
@@ -67,7 +67,7 @@ func validateInstance(response v1.InstanceResponse) error {
 func validateExecution(instance v1.Instance) error {
 	result := instance.Execution
 	switch instance.Status {
-	case v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Succeeded, v1.Failed:
+	case v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Destroyed, v1.Succeeded, v1.Failed:
 		if result == nil {
 			return responseError()
 		}
@@ -85,7 +85,7 @@ func validateExecution(instance v1.Instance) error {
 		}
 		seen[component.Name] = true
 		switch component.Status {
-		case "starting", "running", "ready", "completed", "stopped", "unknown":
+		case "starting", "running", "ready", "completed", "stopped", "unknown", "skipped":
 		default:
 			return responseError()
 		}

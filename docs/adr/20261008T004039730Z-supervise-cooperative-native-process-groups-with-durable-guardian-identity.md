@@ -1,7 +1,7 @@
 ---
 title: 'Supervise cooperative native process groups with durable guardian identity'
 date: '2026-10-08'
-status: proposed
+status: accepted
 summary: 'Require native descendants to stay in a dedicated supervised group and retain a durable guardian identity so cleanup can fail safely on uncertain ownership.'
 tags: [native, lifecycle, ownership, deadlines]
 supersedes: []

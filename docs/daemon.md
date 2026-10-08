@@ -178,7 +178,10 @@ This adds no accept requirement or runtime privilege. Unavailable or uncertain
 socket information fails closed; IPv6-only listeners cannot satisfy IPv4 probes.
 Assigned loopback ports are observed free rather than reserved. A proven collision
 allows up to three allocation attempts, each after verified cleanup of the failed
-owned group. Other service/job failures are never automatically retried.
+owned group, while the affected port has no earlier consumer. Running services
+and completed preparation jobs keep their consumed allocations: a later conflict
+on one of those ports fails the scene with verified cleanup rather than moving
+the port or replaying work. Other service/job failures are never automatically retried.
 
 `--startup-timeout` defaults to `5m` and bounds dependency startup and each-start
 preparation jobs. `--job-timeout` defaults to `30m` for each job; the disposable
@@ -193,6 +196,10 @@ grace plus 20 seconds of bounded activation, verification and collection overhea
 a failed join reports failure and retains state ownership until the owner exits.
 Disposable clients renew the finite daemon
 lease while waiting; unlimited execution never disables lease cancellation.
+Expired runs receive independent cancellation coordinators, so one run's grace
+or lifecycle lock cannot delay cancellation of another. Sweeps remain responsive
+to later expiries and daemon shutdown; shutdown joins execution and cancellation
+owners before releasing their store, or reports failure and retains ownership.
 
 Persistent startup is daemon-owned after acceptance, so closing a client leaves
 it running. Concurrent starts join the same instance, and repeated starts report

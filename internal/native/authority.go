@@ -19,6 +19,7 @@ import (
 type cleanupRequest struct {
 	Identity Identity
 	Grace    time.Duration
+	Crash    bool
 }
 type cleanupProof struct {
 	Identity Identity
@@ -136,6 +137,29 @@ func Supervise() error {
 				}
 				if request.Identity != id || subtle.ConstantTimeCompare([]byte(request.Identity.Token), []byte(id.Token)) != 1 {
 					_ = json.NewEncoder(conn).Encode(cleanupProof{Error: "control identity mismatch"})
+					return
+				}
+				if request.Crash {
+					if os.Getenv("BACKLOT_NATIVE_TEST_FAULTS") != "1" {
+						_ = json.NewEncoder(conn).Encode(cleanupProof{Identity: id, Error: "fixture self-fault disabled"})
+						return
+					}
+					current, err := identify(os.Getpid())
+					if err != nil || current.PID != id.PID || current.Birth != id.Birth {
+						_ = json.NewEncoder(conn).Encode(cleanupProof{Identity: id, Error: "fixture receiver identity uncertain"})
+						return
+					}
+					if err := json.NewEncoder(conn).Encode(cleanupProof{Identity: id}); err != nil {
+						return
+					}
+					_ = conn.Close()
+					// Self is live while this receiver executes; this PID cannot be reused.
+					self, err := os.FindProcess(os.Getpid())
+					if err != nil {
+						return
+					}
+					_ = self.Kill()
+					_ = self.Release()
 					return
 				}
 				_ = conn.SetDeadline(time.Now().Add(request.Grace).Add(8 * time.Second))
@@ -423,4 +447,48 @@ func Anchor() error {
 	for range signals {
 	}
 	return nil
+}
+
+// CrashForTest asks an explicitly fixture-enabled private guardian to crash itself.
+// It verifies full receiver authority and original exit, never signals an observed
+// process, and never claims workload cleanup. Callers retain separate fixture
+// cleanup authority before invoking this diagnostic-only internal operation.
+func CrashForTest(id Identity) error {
+	if !supported() {
+		return errors.New("native fixture self-fault unsupported")
+	}
+	if id.PID <= 1 || id.Birth == "" || id.Control == "" || len(id.Token) != 64 {
+		return errors.New("fixture guardian authority missing")
+	}
+	conn, err := net.DialTimeout("unix", id.Control, time.Second)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.SetDeadline(time.Now().Add(time.Second))
+	if err := json.NewEncoder(conn).Encode(cleanupRequest{Identity: id, Crash: true}); err != nil {
+		return err
+	}
+	var proof cleanupProof
+	if err := json.NewDecoder(conn).Decode(&proof); err != nil {
+		return err
+	}
+	if proof.Identity != id || proof.Error != "" {
+		return errors.New("fixture self-fault rejected: " + proof.Error)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		actual, err := identify(id.PID)
+		if errors.Is(err, syscall.ESRCH) || os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if actual.Birth != id.Birth {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return errors.New("fixture guardian crash exit unverified")
 }

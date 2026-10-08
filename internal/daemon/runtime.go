@@ -352,6 +352,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		}
 	}
 	services := map[string]*native.Group{}
+	consumedPorts := map[string]string{}
 	for _, component := range snapshot.Plan.Components {
 		if err := startup.Err(); err != nil {
 			failure = err
@@ -400,6 +401,16 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			}
 			delete(services, component.Name)
 			if allocationAttempt == 2 {
+				break
+			}
+			err = nil
+			for _, port := range component.Ports {
+				if consumer := consumedPorts[port.Resource]; consumer != "" {
+					err = problem("port_conflict", "allocated port was already consumed by component "+consumer+"; stopped without reallocation or retry")
+					break
+				}
+			}
+			if err != nil {
 				break
 			}
 			for _, port := range component.Ports {
@@ -453,6 +464,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 				return
 			}
 		}
+		consumeComponentPorts(consumedPorts, component, snapshot)
 	}
 	if snapshot.Plan.Lifetime == v1.Disposable {
 		status = v1.Succeeded
@@ -670,9 +682,12 @@ func (s *service) expireRuntime(id string) error {
 func (s *service) ownerChannels() []<-chan struct{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	channels := make([]<-chan struct{}, 0, len(s.executions))
+	channels := make([]<-chan struct{}, 0, len(s.executions)+len(s.expiryWorkers))
 	for _, entry := range s.executions {
 		channels = append(channels, entry.done)
+	}
+	for _, done := range s.expiryWorkers {
+		channels = append(channels, done)
 	}
 	return channels
 }
@@ -689,5 +704,49 @@ func (s *service) ownersJoined() bool {
 func (s *service) waitOwners() {
 	for _, done := range s.ownerChannels() {
 		<-done
+	}
+}
+
+// Completed jobs and live services retain the allocation values they consumed.
+// Never replay them or silently move those resources during a later bind retry.
+func consumeComponentPorts(consumed map[string]string, c v1.PlannedComponent, snapshot plan.Snapshot) {
+	consume := func(value v1.PlannedValue) {
+		r := value.Symbolic
+		if r == nil || r.Field != "port" {
+			return
+		}
+		resource := ""
+		if r.Kind == "resource" {
+			resource = r.Name
+		}
+		if r.Kind == "service" {
+			for _, service := range snapshot.Plan.Components {
+				if service.Name == r.Name {
+					resource = service.Ports[r.Port].Resource
+					break
+				}
+			}
+		}
+		if resource != "" && consumed[resource] == "" {
+			consumed[resource] = c.Name
+		}
+	}
+	for _, port := range c.Ports {
+		if consumed[port.Resource] == "" {
+			consumed[port.Resource] = c.Name
+		}
+	}
+	for key, value := range c.Environment {
+		if value.Redacted {
+			value = snapshot.Secrets[c.Name+"/environment/"+key]
+		}
+		consume(value)
+	}
+	if c.Readiness != nil && c.Readiness.Target != nil {
+		value := *c.Readiness.Target
+		if value.Redacted {
+			value = snapshot.Secrets[c.Name+"/readiness"]
+		}
+		consume(value)
 	}
 }

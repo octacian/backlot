@@ -17,14 +17,16 @@ import (
 )
 
 type service struct {
-	store      *store
-	lease      time.Duration
-	mu         sync.Mutex
-	closing    bool
-	directory  string
-	executions map[string]*execution
-	outputs    map[string]chan struct{}
-	mutations  map[string]*sync.Mutex
+	store         *store
+	lease         time.Duration
+	mu            sync.Mutex
+	closing       bool
+	directory     string
+	executions    map[string]*execution
+	outputs       map[string]chan struct{}
+	mutations     map[string]*sync.Mutex
+	expiryWorkers map[string]chan struct{}
+	expiryErr     error
 	// checkpoint is a test-only interruption seam after durable intent/effect.
 	checkpoint func(string) error
 	// resolve lets tests control the input-read boundary while using the real planner.
@@ -111,37 +113,75 @@ func (s *service) stop() error {
 	}
 	s.mu.Unlock()
 	result := s.stopExecutions(ids)
-
-	return errors.Join(result, s.store.reconcile("daemon shutdown interrupted preparation", false), s.store.cleanupFailures())
+	// Shutdown fences acceptance before joining. Expiry coordinators retain their
+	// own channels so storage cannot close while they finish durable results.
+	result = errors.Join(result, s.joinExpiryWorkers())
+	s.mu.Lock()
+	expiryErr := s.expiryErr
+	s.mu.Unlock()
+	return errors.Join(result, expiryErr, s.store.reconcile("daemon shutdown interrupted preparation", false), s.store.cleanupFailures())
 }
+
+// expire dispatches each eligible owner independently. It never joins native
+// cleanup in the daemon event loop; later sweeps and shutdown remain responsive.
 func (s *service) expire() error {
 	s.mu.Lock()
-	var ids []string
+	defer s.mu.Unlock()
+	if s.expiryErr != nil {
+		return s.expiryErr
+	}
+	if s.closing {
+		return nil
+	}
 	for id := range s.executions {
 		instance, err := s.store.inspect(id)
 		if err != nil {
-			s.mu.Unlock()
 			return err
 		}
-		if instance.LeaseExpiresAt != "" && instance.Status != v1.Stopping {
-			expiry, err := time.Parse(time.RFC3339Nano, instance.LeaseExpiresAt)
-			if err != nil {
-				s.mu.Unlock()
-				return err
-			}
-			if !expiry.After(time.Now()) {
-				ids = append(ids, id)
-			}
+		if !active(instance.Status) || instance.Status == v1.Stopping || instance.LeaseExpiresAt == "" || s.expiryWorkers[id] != nil {
+			continue
 		}
+		expiry, err := time.Parse(time.RFC3339Nano, instance.LeaseExpiresAt)
+		if err != nil {
+			return err
+		}
+		if expiry.After(time.Now()) {
+			continue
+		}
+		if s.expiryWorkers == nil {
+			s.expiryWorkers = map[string]chan struct{}{}
+		}
+		done := make(chan struct{})
+		s.expiryWorkers[id] = done
+		go func() {
+			err := s.expireRuntime(id) // recheck lease/eligibility under instance authority
+			s.mu.Lock()
+			s.expiryErr = errors.Join(s.expiryErr, err)
+			close(done)
+			delete(s.expiryWorkers, id)
+			s.mu.Unlock()
+		}()
+	}
+	return s.store.reconcile("", true)
+}
+
+func (s *service) joinExpiryWorkers() error {
+	s.mu.Lock()
+	var channels []<-chan struct{}
+	for _, done := range s.expiryWorkers {
+		channels = append(channels, done)
 	}
 	s.mu.Unlock()
-	var expiryErr error
-	for _, id := range ids {
-		expiryErr = errors.Join(expiryErr, s.expireRuntime(id))
+	budget := time.NewTimer(20 * time.Second)
+	defer budget.Stop()
+	for _, done := range channels {
+		select {
+		case <-done:
+		case <-budget.C:
+			return problem("cleanup_failed", "lease cancellation coordinator did not join; state ownership retained")
+		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return errors.Join(expiryErr, s.store.reconcile("", true))
+	return nil
 }
 
 func (s *service) stopExecutions(ids []string) error {
@@ -149,7 +189,13 @@ func (s *service) stopExecutions(ids []string) error {
 	var mu sync.Mutex
 	var joined sync.WaitGroup
 	for _, id := range ids {
-		joined.Go(func() { _, err := s.stopRuntime(id); mu.Lock(); result = errors.Join(result, err); mu.Unlock() })
+		joined.Go(func() { // closing fences all new owner registrations. Shutdown can cancel/join
+			// independently of an expiry coordinator already holding this instance lock.
+			_, err := s.stopExecution(id)
+			mu.Lock()
+			result = errors.Join(result, err)
+			mu.Unlock()
+		})
 	}
 	joined.Wait()
 	return result

@@ -39,6 +39,14 @@ func TestNativeFixtureProcess(t *testing.T) {
 			break
 		}
 	}
+	if path := os.Getenv("JOBPIDFILE"); path != "" {
+		if err := os.WriteFile(path, []byte(fmt.Sprintf("%d %d", os.Getpid(), syscall.Getpgrp())), 0600); err != nil {
+			os.Exit(25)
+		}
+	}
+	if value := os.Getenv("BACKEND_PORT"); value != "" {
+		fmt.Println("BACKEND_PORT=" + value)
+	}
 	fmt.Println("fixture", mode, "stdout")
 	fmt.Fprintln(os.Stderr, "fixture stderr")
 	switch mode {
@@ -72,7 +80,7 @@ func TestNativeFixtureProcess(t *testing.T) {
 	if err := child.Start(); err != nil {
 		os.Exit(20)
 	}
-	if err := os.WriteFile(os.Getenv("PIDFILE"), []byte(fmt.Sprintf("%d %d", os.Getpid(), child.Process.Pid)), 0600); err != nil {
+	if err := os.WriteFile(os.Getenv("PIDFILE"), []byte(fmt.Sprintf("%d %d %d", os.Getpid(), child.Process.Pid, syscall.Getpgrp())), 0600); err != nil {
 		os.Exit(21)
 	}
 	if mode == "parent-exit" {
@@ -98,8 +106,28 @@ func TestNativeFixtureProcess(t *testing.T) {
 				var request fixtureControl
 				_ = json.NewDecoder(conn).Decode(&request)
 				if request.Token == os.Getenv("FIXTURE_TOKEN") {
-					if request.Action == "kill" {
+					switch request.Action {
+					case "kill":
 						_ = syscall.Kill(-syscall.Getpgrp(), syscall.SIGKILL)
+					case "root-crash":
+						if err := json.NewEncoder(conn).Encode(syscall.Getpgrp()); err != nil {
+							_ = conn.Close()
+							continue
+						}
+						_ = conn.Close()
+						_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
+						continue
+					case "child-crash":
+						if err := child.Process.Kill(); err != nil {
+							_ = json.NewEncoder(conn).Encode(-1)
+							_ = conn.Close()
+							continue
+						}
+						if _, ok := child.Wait().(*exec.ExitError); !ok {
+							_ = json.NewEncoder(conn).Encode(-1)
+							_ = conn.Close()
+							continue
+						}
 					}
 					_ = json.NewEncoder(conn).Encode(syscall.Getpgrp())
 				}
@@ -131,6 +159,8 @@ type nativeHarness struct {
 	waited                     bool
 	cleanupUnverified          bool
 	control, controlToken      string
+	extraPIDFiles              []string
+	faultMode                  bool
 	manifest                   v1.Manifest
 	tokens                     map[string]string
 	daemonLog                  bytes.Buffer
@@ -139,6 +169,10 @@ type nativeHarness struct {
 func (h *nativeHarness) start() {
 	h.t.Helper()
 	h.process = exec.Command(h.binary, "daemon", "serve", "--state-dir", h.dir, "--lease-duration", h.lease)
+	h.process.Env = append(os.Environ(), "BACKLOT_NATIVE_TEST_FAULTS=0")
+	if h.faultMode {
+		h.process.Env = append(h.process.Env, "BACKLOT_NATIVE_TEST_FAULTS=1")
+	}
 	h.process.Stdout = io.Discard
 	if strings.Contains(h.daemonLog.String(), "DATA RACE") {
 		h.t.Fatal("race-instrumented daemon reported a data race", h.daemonLog.String())
@@ -215,31 +249,48 @@ func (h *nativeHarness) state(id string, want ...v1.InstanceStatus) v1.InstanceR
 }
 func (h *nativeHarness) absent() {
 	h.t.Helper()
-	data, err := os.ReadFile(h.pids)
-	if os.IsNotExist(err) {
-		return
-	}
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	for _, text := range strings.Fields(string(data)) {
-		pid, err := strconv.Atoi(text)
+	for _, path := range append([]string{h.pids}, h.extraPIDFiles...) {
+		data, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
+		}
 		if err != nil {
-			h.t.Fatal(err)
-		}
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) {
-			if syscall.Kill(pid, 0) == syscall.ESRCH {
-				break
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		if syscall.Kill(pid, 0) != syscall.ESRCH {
 			h.cleanupUnverified = true
-			h.t.Errorf("fixture PID %d survives acknowledged cleanup; preserving %s", pid, h.dir)
+			h.t.Error(err)
+			continue
+		}
+		fields := strings.Fields(string(data))
+		for _, text := range fields {
+			pid, err := strconv.Atoi(text)
+			if err != nil {
+				h.cleanupUnverified = true
+				h.t.Error(err)
+				continue
+			}
+			deadline := time.Now().Add(2 * time.Second)
+			for syscall.Kill(pid, 0) != syscall.ESRCH && time.Now().Before(deadline) {
+				time.Sleep(20 * time.Millisecond)
+			}
+			if syscall.Kill(pid, 0) != syscall.ESRCH {
+				h.cleanupUnverified = true
+				h.t.Errorf("fixture PID %d survives acknowledged cleanup; preserving %s", pid, h.dir)
+			}
+		}
+		if len(fields) > 0 {
+			pgid, err := strconv.Atoi(fields[len(fields)-1])
+			if err != nil || pgid <= 1 {
+				h.cleanupUnverified = true
+				h.t.Error("invalid fixture group witness", path)
+				continue
+			}
+			if syscall.Kill(-pgid, 0) != syscall.ESRCH {
+				h.cleanupUnverified = true
+				h.t.Error("fixture group absence unverified", pgid, "preserving", h.dir)
+			}
 		}
 	}
 }
+
 func (h *nativeHarness) close() {
 	h.t.Helper()
 	_, stopErr := h.cli.Stop(context.Background())
@@ -266,6 +317,18 @@ func (h *nativeHarness) close() {
 }
 func newNativeHarness(t *testing.T, binary string, lease ...string) *nativeHarness {
 	t.Helper()
+	budget := "2s"
+	if len(lease) > 0 {
+		budget = lease[0]
+	}
+	return newNativeHarnessConfigured(t, binary, budget, false)
+}
+func newNativeFaultHarness(t *testing.T, binary string) *nativeHarness {
+	t.Helper()
+	return newNativeHarnessConfigured(t, binary, "2s", true)
+}
+func newNativeHarnessConfigured(t *testing.T, binary, budget string, faults bool) *nativeHarness {
+	t.Helper()
 	root, err := os.MkdirTemp("/tmp", "bl-native-")
 	if err != nil {
 		t.Fatal(err)
@@ -280,11 +343,7 @@ func newNativeHarness(t *testing.T, binary string, lease ...string) *nativeHarne
 			t.Error(err)
 		}
 	})
-	budget := "2s"
-	if len(lease) > 0 {
-		budget = lease[0]
-	}
-	h = &nativeHarness{t: t, binary: binary, lease: budget, dir: filepath.Join(root, "state"), project: filepath.Join(root, "project"), pids: filepath.Join(root, "pids")}
+	h = &nativeHarness{t: t, binary: binary, lease: budget, faultMode: faults, dir: filepath.Join(root, "state"), project: filepath.Join(root, "project"), pids: filepath.Join(root, "pids")}
 	if err := os.Mkdir(h.project, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -425,6 +484,54 @@ func TestNativeRuntime(t *testing.T) {
 			h.absent()
 		})
 	}
+	for _, kind := range []string{"service", "job"} {
+		for _, reference := range []string{"resource", "service"} {
+			t.Run("consumed-port-conflict-"+kind+"-"+reference, func(t *testing.T) { testConsumedPortConflict(t, binary, kind, reference) })
+		}
+	}
+	for _, action := range []string{"expiry", "shutdown"} {
+		t.Run("independent-expiry-"+action, func(t *testing.T) { testIndependentNativeExpiry(t, binary, action) })
+	}
+	t.Run("self-fault-rejects-disabled-and-mismatched-authority", func(t *testing.T) {
+		disabled := newNativeHarness(t, binary)
+		c := disabled.manifest.Components["server"]
+		c.Environment.Assign["BACKLOT_NATIVE_TEST_FAULTS"] = v1.Value{Literal: ptr("1")}
+		disabled.manifest.Components["server"] = c
+		disabled.write()
+		a := disabled.run("dev")
+		disabled.state(a.Instance.ID, v1.RuntimeReady)
+		enabled := newNativeFaultHarness(t, binary)
+		b := enabled.run("dev")
+		enabled.state(b.Instance.ID, v1.RuntimeReady)
+		disabled.retainFixtureCleanup()
+		enabled.retainFixtureCleanup()
+		first := disabled.guardianCapability(a.Instance.ID)
+		second := enabled.guardianCapability(b.Instance.ID)
+		if err := native.CrashForTest(first); err == nil {
+			t.Fatal("workload activation enabled default-disabled guardian fault")
+		}
+		attempts := []native.Identity{second, second, second, first}
+		attempts[0].Token = first.Token
+		attempts[1].Birth = "stale"
+		attempts[2].PID = first.PID
+		attempts[3].Control = second.Control
+		for _, identity := range attempts {
+			if err := native.CrashForTest(identity); err == nil {
+				t.Fatal("mismatched fault authority accepted")
+			}
+		}
+		for _, pair := range []struct {
+			h  *nativeHarness
+			id string
+		}{{disabled, a.Instance.ID}, {enabled, b.Instance.ID}} {
+			pair.h.state(pair.id, v1.RuntimeReady)
+			pair.h.fixtureAction("inspect")
+			if _, err := pair.h.cli.StopExecution(context.Background(), pair.id); err != nil {
+				t.Fatal(err)
+			}
+			pair.h.absent()
+		}
+	})
 	t.Run("persistent-concurrent-logs-stop-restart", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
 		var wg sync.WaitGroup
@@ -769,19 +876,13 @@ func TestNativeRuntime(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(current.Instance.Execution.Components) == 2 {
+			if len(current.Instance.Execution.Components) == 2 && current.Instance.Execution.Components[1].Status == "running" {
 				break
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		data, err := os.ReadFile(h.pids)
-		if err != nil {
-			t.Fatal(err)
-		}
-		pid, _ := strconv.Atoi(strings.Fields(string(data))[0])
-		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-			t.Fatal(err)
-		}
+		h.retainGuardianCleanup(r.Instance.ID)
+		h.fixtureAction("root-crash")
 		final := h.state(r.Instance.ID, v1.Failed)
 		if final.Instance.Execution.Components[1].ExitCode == nil {
 			t.Fatal("cancelled job original status missing")
@@ -789,7 +890,7 @@ func TestNativeRuntime(t *testing.T) {
 		h.absent()
 	})
 	t.Run("guardian-crash-preserves-uncertain-descendants", func(t *testing.T) {
-		h := newNativeHarness(t, binary)
+		h := newNativeFaultHarness(t, binary)
 		r := h.run("dev")
 		h.state(r.Instance.ID, v1.RuntimeReady)
 		data, err := os.ReadFile(h.pids)
@@ -801,16 +902,9 @@ func TestNativeRuntime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		parentData, err := exec.Command("/bin/ps", "-o", "ppid=", "-p", strconv.Itoa(pgid)).Output()
-		if err != nil {
-			t.Fatal(err)
-		}
-		guardian, err := strconv.Atoi(strings.TrimSpace(string(parentData)))
-		if err != nil || guardian <= 1 {
-			t.Fatal("fixture guardian unavailable", err)
-		}
+		identity := h.guardianCapability(r.Instance.ID)
 		h.retainFixtureCleanup()
-		if err := syscall.Kill(guardian, syscall.SIGKILL); err != nil {
+		if err := native.CrashForTest(identity); err != nil {
 			t.Fatal(err)
 		}
 		final := h.state(r.Instance.ID, v1.Failed)
@@ -948,14 +1042,8 @@ func TestNativeRuntime(t *testing.T) {
 		h := newNativeHarness(t, binary)
 		r := h.run("dev")
 		h.state(r.Instance.ID, v1.RuntimeReady)
-		data, err := os.ReadFile(h.pids)
-		if err != nil {
-			t.Fatal(err)
-		}
-		child, _ := strconv.Atoi(strings.Fields(string(data))[1])
-		if err := syscall.Kill(child, syscall.SIGKILL); err != nil {
-			t.Fatal(err)
-		}
+		h.retainGuardianCleanup(r.Instance.ID)
+		h.fixtureAction("child-crash") // root owns and joins its unreaped direct child
 		time.Sleep(100 * time.Millisecond)
 		h.state(r.Instance.ID, v1.RuntimeReady)
 		if _, err := h.cli.StopExecution(context.Background(), r.Instance.ID); err != nil {
@@ -1126,7 +1214,7 @@ func TestNativeUncertaintyCleanupFailurePath(t *testing.T) {
 	if binary == "" {
 		return
 	}
-	h := newNativeHarness(t, binary)
+	h := newNativeFaultHarness(t, binary)
 	r := h.run("dev")
 	h.state(r.Instance.ID, v1.RuntimeReady)
 	pgid := h.retainFixtureCleanup()
@@ -1134,20 +1222,70 @@ func TestNativeUncertaintyCleanupFailurePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent, err := exec.Command("/bin/ps", "-o", "ppid=", "-p", strconv.Itoa(pgid)).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	guardian, err := strconv.Atoi(strings.TrimSpace(string(parent)))
-	if err != nil || guardian <= 1 {
-		t.Fatal("guardian unavailable", err)
-	}
+	identity := h.guardianCapability(r.Instance.ID)
+	guardian := identity.PID // absence witness only, never a signal target
 	record := fmt.Sprintf("%s\n%d %d %s", filepath.Dir(h.dir), pgid, guardian, data)
 	if err := os.WriteFile(os.Getenv("BACKLOT_FAILURE_RECORD"), []byte(record), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := syscall.Kill(guardian, syscall.SIGKILL); err != nil {
+	if err := native.CrashForTest(identity); err != nil {
 		t.Fatal(err)
 	}
 	t.Fatal("intentional assertion after guardian fault")
+}
+
+func (h *nativeHarness) fixtureAction(action string) int {
+	h.t.Helper()
+	conn, err := net.DialTimeout("unix", h.control, time.Second)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	if err := json.NewEncoder(conn).Encode(fixtureControl{h.controlToken, action}); err != nil {
+		h.t.Fatal(err)
+	}
+	var group int
+	if err := json.NewDecoder(conn).Decode(&group); err != nil || group <= 1 {
+		h.t.Fatal("fixture action rejected", action, err)
+	}
+	return group
+}
+
+// Tests settle the graph before copying private owner state. The copy may be
+// stale or inconsistent and is never signal authority by itself: the live receiver
+// must authenticate its full identity/capability before self-fault. A failed
+// copy/read refuses injection; no observed process is a signal target.
+func (h *nativeHarness) guardianCapability(id string) native.Identity {
+	h.t.Helper()
+	data, err := os.ReadFile(filepath.Join(h.dir, "state.db"))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	directory := h.t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "state.db"), data, 0600); err != nil {
+		h.t.Fatal(err)
+	}
+	snapshot, err := openStore(directory)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer func() { _ = snapshot.db.Close() }()
+	journal, err := snapshot.runtime(id)
+	if err != nil || len(journal.Groups) < 1 {
+		h.t.Fatal("private fixture guardian capability unavailable", err)
+	}
+	return journal.Groups[0]
+}
+
+func (h *nativeHarness) retainGuardianCleanup(id string) {
+	h.t.Helper()
+	identity := h.guardianCapability(id)
+	h.t.Cleanup(func() {
+		if err := native.Stop(identity, 0); err != nil {
+			h.cleanupUnverified = true
+			h.t.Error("retained fixture guardian cleanup", err)
+		}
+		h.absent()
+	})
 }

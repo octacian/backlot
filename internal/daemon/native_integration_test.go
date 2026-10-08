@@ -981,6 +981,31 @@ func TestNativeRuntime(t *testing.T) {
 		h.state(r.Instance.ID, v1.Failed)
 		h.absent()
 	})
+	t.Run("inactive-guardian-stop-status", func(t *testing.T) {
+		output, err := os.CreateTemp(t.TempDir(), "guardian-output")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = output.Close() })
+		group, err := native.Start(binary, output, output)
+		if group != nil {
+			t.Cleanup(func() {
+				if err := group.Stop(0); err != nil {
+					t.Error("inactive guardian cleanup", err)
+				}
+			})
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := group.Stop(0); err != nil {
+			t.Fatal(err)
+		}
+		result := group.Result()
+		if result == nil || result.CollectionFailure != "" || result.Code != -1 || group.PGID() != 0 || group.Alive() {
+			t.Fatal("inactive cancellation lost status or launched work", result)
+		}
+	})
 	t.Run("cli-sigint-sigterm-cancel-unlimited-terminal", func(t *testing.T) {
 		for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
 			t.Run(sig.String(), func(t *testing.T) {

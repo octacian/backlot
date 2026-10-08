@@ -135,6 +135,21 @@ func TestNativeFixtureProcess(t *testing.T) {
 			}
 		}()
 	}
+	// The test owns the listener and releases binding by closing the accepted
+	// connection. Startup output and the PID witness precede this handshake;
+	// cancellation still terminates this blocked root through its guardian.
+	if path := os.Getenv("FIXTURE_BIND_GATE"); path != "" {
+		connection, err := net.DialTimeout("unix", path, time.Second)
+		if err != nil {
+			os.Exit(26)
+		}
+		var release [1]byte
+		_, err = connection.Read(release[:])
+		_ = connection.Close()
+		if err != io.EOF {
+			os.Exit(27)
+		}
+	}
 	host := os.Getenv("BIND_HOST")
 	if host == "" {
 		host = "127.0.0.1"

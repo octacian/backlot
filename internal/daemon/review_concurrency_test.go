@@ -61,7 +61,13 @@ func testConsumedPortConflict(t *testing.T, binary, kind, reference string) {
 	h.manifest.Components["ahead"] = first
 	server := h.manifest.Components["server"]
 	server.Environment = cloneFixtureEnvironment(server.Environment)
-	server.Environment.Assign["DELAY_BIND"] = v1.Value{Literal: ptr("1")}
+	gatePath := filepath.Join(h.project, "bind-gate.sock")
+	gate, err := net.ListenUnix("unix", &net.UnixAddr{Name: gatePath, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gate.Close() })
+	server.Environment.Assign["FIXTURE_BIND_GATE"] = v1.Value{Literal: ptr(gatePath)}
 	server.DependsOn = []v1.Dependency{{Component: "ahead", Condition: condition}}
 	h.manifest.Components["server"] = server
 	h.manifest.Scenes["dev"] = v1.Scene{Lifetime: v1.Persistent, Components: []string{"ahead", "server"}, Resources: resources}
@@ -86,11 +92,51 @@ func testConsumedPortConflict(t *testing.T, binary, kind, reference string) {
 	if originalPort == 0 {
 		t.Fatal("allocation not observed")
 	}
+	// Hold the real root before bind, rather than assuming that activation has
+	// emitted output when allocation first becomes visible. An early conflict
+	// may legitimately cancel a root before its first application instruction.
+	if err := gate.SetDeadline(time.Now().Add(4 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := gate.AcceptUnix()
+	if err != nil {
+		t.Fatal("late server did not reach its bind gate", err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	fixtureNumbers(t, h.pids)
+	witnessDeadline := time.NewTimer(4 * time.Second)
+	defer witnessDeadline.Stop()
+	witnessPoll := time.NewTicker(10 * time.Millisecond)
+	defer witnessPoll.Stop()
+	for {
+		logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: response.Instance.ID, Component: "server"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var text strings.Builder
+		for _, record := range logs.Records {
+			text.WriteString(record.Message)
+		}
+		if strings.Contains(text.String(), "fixture server stdout") {
+			break
+		}
+		select {
+		case <-witnessDeadline.C:
+			t.Fatal("late server startup output not collected before conflict")
+		case <-witnessPoll.C:
+		}
+	}
 	sentinel, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(originalPort)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = sentinel.Close() }()
+	// EOF explicitly releases the private bind gate after the sentinel owns the
+	// port. Readiness may already cancel the root; closing our retained connection
+	// is safe in either ordering and never signals an observed process identity.
+	if err := connection.Close(); err != nil {
+		t.Fatal(err)
+	}
 	final := h.state(response.Instance.ID, v1.Failed)
 	result := final.Instance.Execution
 	if result.Ports["port"] != originalPort || !strings.Contains(result.Failure, "already consumed") || result.CleanupFailure != "" || result.CollectionFailure != "" {

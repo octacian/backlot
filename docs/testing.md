@@ -116,6 +116,7 @@ only when their opt-in settings are absent. Pre-pull the pinned gateway fixture
 image outside Backlot runtime (there are no implicit image pulls):
 
 ```sh
+go test -race ./internal/gateway/testdata/fixture -count=1 -v
 docker pull caddy:2.11.6
 docker pull alpine:3.21
 BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
@@ -136,6 +137,10 @@ pre-pulled `alpine:3.21` (including standard public CA roots);
 cleanup verifies ownership and removes fixture images/containers/networks and
 private state, preserving uncertain residuals. Shared pre-pulled images remain.
 No fixture uses the operator's gateway ports 443/2019 or installs global trust.
+The fixture uses Coder's WebSocket implementation for protocol validation and
+buffered upgrades. Contract tests reject fixed/corrupted echoes, require actual
+variable-payload echoes and reject malformed frames; they also run through the
+gateway package during `make check`.
 
 The gateway suite covers real native/container Caddy, TLS-verified host/container
 consumers, native API/container SSR, literal routing, WebSockets, redirects/cookies,

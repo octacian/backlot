@@ -1,8 +1,8 @@
 package gateway
 
 import (
-	"bufio"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	ws "github.com/coder/websocket"
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/gateway/gatewaytest"
@@ -109,22 +111,26 @@ func testHTTPSMixed(t *testing.T, containerGateway bool) {
 	if response.StatusCode != 302 || response.Header.Get("Location") != origin+"/ssr" || !strings.Contains(response.Header.Get("Set-Cookie"), "Secure") {
 		t.Fatal("redirect/cookie origin changed", response.Header)
 	}
-	conn, err := tls.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(f.Port)), &tls.Config{ServerName: "fixture.test", RootCAs: f.Pool, MinVersion: tls.VersionTLS12})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	connection, _, err := ws.Dial(ctx, origin+"/ws", &ws.DialOptions{HTTPClient: client})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("WebSocket upgrade", err)
 	}
-	defer func() { _ = conn.Close() }()
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	_, _ = fmt.Fprintf(conn, "GET /ws HTTP/1.1\r\nHost: fixture.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
-	reader := bufio.NewReader(conn)
-	upgrade, err := http.ReadResponse(reader, nil)
-	if err != nil || upgrade.StatusCode != 101 {
-		t.Fatal("WebSocket upgrade", upgrade, err)
-	}
-	_, _ = conn.Write([]byte{0x81, 0x85, 0, 0, 0, 0, 'h', 'e', 'l', 'l', 'o'})
-	frame := make([]byte, 7)
-	if _, err := io.ReadFull(reader, frame); err != nil || string(frame[2:]) != "hello" {
-		t.Fatal("WebSocket roundtrip", frame, err)
+	defer func() { _ = connection.CloseNow() }()
+	for i := range 3 {
+		var nonce [16]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			t.Fatal(err)
+		}
+		payload := fmt.Sprintf("host-%x-%d", nonce, i)
+		if err := connection.Write(ctx, ws.MessageText, []byte(payload)); err != nil {
+			t.Fatal(err)
+		}
+		kind, echoed, err := connection.Read(ctx)
+		if err != nil || kind != ws.MessageText || string(echoed) != payload {
+			t.Fatalf("WebSocket payload changed: got %q want %q error=%v", echoed, payload, err)
+		}
 	}
 	// An independent container client verifies the same certificate and SSR path.
 	clientID := gatewaytest.OwnedContainer(t, endpoint, image, "--add-host", "fixture.test:host-gateway", "-v", f.Cert+":/cert.pem:ro", "-e", "CERT=/cert.pem", "-e", "ORIGIN="+origin, "-e", "CLIENT=1")

@@ -2,20 +2,19 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha1"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"time"
+
+	ws "github.com/coder/websocket"
 )
 
 func client() *http.Client {
@@ -63,7 +62,9 @@ func main() {
 		if err != nil || response.StatusCode != 200 || string(body) != "ssr:api:/value" {
 			panic(fmt.Sprintf("HTTPS SSR failed: status=%d body=%s error=%v", response.StatusCode, body, err))
 		}
-		websocket(https, origin)
+		if err := verifyWebSocket(https, origin); err != nil {
+			panic(err)
+		}
 		https.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
 		redirect, err := https.Get(origin + "/redirect")
 		if err != nil {
@@ -92,19 +93,7 @@ func main() {
 			http.SetCookie(w, &http.Cookie{Name: "fixture", Value: "yes", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, Path: "/"})
 			http.Redirect(w, r, os.Getenv("ORIGIN")+"/ssr", 302)
 		case "/ws":
-			conn, _, err := w.(http.Hijacker).Hijack()
-			if err != nil {
-				return
-			}
-			defer func() { _ = conn.Close() }()
-			_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-			accept := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
-			_, _ = fmt.Fprintf(conn, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", base64.StdEncoding.EncodeToString(accept[:]))
-			// Receive the known masked 'hello' test frame and return an unmasked frame.
-			frame := make([]byte, 11)
-			if _, err := io.ReadFull(conn, frame); err == nil {
-				_, _ = conn.Write([]byte{0x81, 5, 'h', 'e', 'l', 'l', 'o'})
-			}
+			echoWebSocket(w, r)
 		default:
 			_, _ = fmt.Fprintf(w, "%s:%s", os.Getenv("ROLE"), r.URL.Path)
 		}
@@ -116,41 +105,52 @@ func main() {
 	}
 }
 
-func websocket(client *http.Client, origin string) {
-	u, err := url.Parse(origin)
+// The maintained protocol implementation validates masks/opcodes/control frames
+// and preserves bytes already buffered by HTTP Hijack during the upgrade.
+func echoWebSocket(w http.ResponseWriter, r *http.Request) {
+	connection, err := ws.Accept(w, r, nil)
 	if err != nil {
-		panic(err)
+		return
 	}
-	address := u.Host
-	if u.Port() == "" {
-		address = net.JoinHostPort(u.Hostname(), "443")
+	defer func() { _ = connection.CloseNow() }()
+	connection.SetReadLimit(1024)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for {
+		kind, payload, err := connection.Read(ctx)
+		if err != nil {
+			return
+		}
+		if err := connection.Write(ctx, kind, payload); err != nil {
+			return
+		}
 	}
-	if fixtureAddress := os.Getenv("GATEWAY_ADDRESS"); fixtureAddress != "" {
-		address = fixtureAddress
-	}
-	config := client.Transport.(*http.Transport).TLSClientConfig.Clone()
-	config.ServerName = u.Hostname()
-	connection, err := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", address, config)
+}
+
+func verifyWebSocket(client *http.Client, origin string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	connection, _, err := ws.Dial(ctx, origin+"/ws", &ws.DialOptions{HTTPClient: client})
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("TLS WebSocket upgrade: %w", err)
 	}
-	defer func() { _ = connection.Close() }()
-	_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
-	var nonce [16]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		panic(err)
+	defer func() { _ = connection.CloseNow() }()
+	for i := range 3 {
+		var nonce [16]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			return err
+		}
+		payload := []byte(fmt.Sprintf("probe-%x-%d", nonce, i))
+		if err := connection.Write(ctx, ws.MessageText, payload); err != nil {
+			return err
+		}
+		kind, echoed, err := connection.Read(ctx)
+		if err != nil {
+			return err
+		}
+		if kind != ws.MessageText || !bytes.Equal(echoed, payload) {
+			return fmt.Errorf("TLS WebSocket payload changed: got %q want %q", echoed, payload)
+		}
 	}
-	key := base64.StdEncoding.EncodeToString(nonce[:])
-	accept := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
-	_, _ = fmt.Fprintf(connection, "GET /ws HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\n\r\n", u.Host, key)
-	reader := bufio.NewReader(connection)
-	response, err := http.ReadResponse(reader, nil)
-	if err != nil || response.StatusCode != 101 || response.Header.Get("Sec-WebSocket-Accept") != base64.StdEncoding.EncodeToString(accept[:]) {
-		panic("TLS WebSocket upgrade failed")
-	}
-	_, _ = connection.Write([]byte{0x81, 0x85, 0, 0, 0, 0, 'h', 'e', 'l', 'l', 'o'})
-	frame := make([]byte, 7)
-	if _, err := io.ReadFull(reader, frame); err != nil || frame[0] != 0x81 || frame[1] != 5 || string(frame[2:]) != "hello" {
-		panic("TLS WebSocket frame roundtrip failed")
-	}
+	return nil
 }

@@ -52,7 +52,10 @@ func output(c *urfave.Command, value any, err error) error {
 	case v1.DaemonStatusResponse:
 		_, err = fmt.Fprintf(c.Writer, "Daemon %s (API %s, state %d, PID %d)\n", result.Status, result.APIVersion, result.StateVersion, result.PID)
 	case v1.InstanceResponse:
-		_, err = fmt.Fprintf(c.Writer, "Instance %s: %s\nOperation: %s\nMetadata only; no application work executed or readiness observed.\n", result.Instance.ID, result.Instance.Status, result.Instance.Operation.ID)
+		_, err = fmt.Fprintf(c.Writer, "Instance %s: %s\nOperation: %s\n", result.Instance.ID, result.Instance.Status, result.Instance.Operation.ID)
+		if result.Instance.Execution == nil && err == nil {
+			_, err = fmt.Fprintln(c.Writer, "Metadata only; no application work executed or readiness observed.")
+		}
 		if err == nil && (result.ManifestDrift || result.ConfigDrift) {
 			_, err = fmt.Fprintln(c.Writer, "Manifest/config drift detected; the original snapshot is preserved.")
 		}

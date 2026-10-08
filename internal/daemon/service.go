@@ -1,10 +1,11 @@
-// Package daemon owns local metadata preparation and durable recovery. It never
-// executes application work or contacts Docker/Caddy in milestone 2.
+// Package daemon owns private preparation snapshots, native lifecycle execution,
+// leases and durable recovery. It does not contact Docker or Caddy.
 package daemon
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,10 +17,14 @@ import (
 )
 
 type service struct {
-	store   *store
-	lease   time.Duration
-	mu      sync.Mutex
-	closing bool
+	store      *store
+	lease      time.Duration
+	mu         sync.Mutex
+	closing    bool
+	directory  string
+	executions map[string]*execution
+	outputs    map[string]chan struct{}
+	mutations  map[string]*sync.Mutex
 	// checkpoint is a test-only interruption seam after durable intent/effect.
 	checkpoint func(string) error
 	// resolve lets tests control the input-read boundary while using the real planner.
@@ -97,7 +102,60 @@ func validID(id string) bool {
 }
 func (s *service) stop() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.closing = true
-	return s.store.reconcile("daemon shutdown interrupted preparation", false)
+	var ids []string
+	for id := range s.executions {
+		ids = append(ids, id)
+	}
+	s.mu.Unlock()
+	result := s.stopExecutions(ids)
+
+	return errors.Join(result, s.store.reconcile("daemon shutdown interrupted preparation", false), s.store.cleanupFailures())
+}
+func (s *service) expire() error {
+	s.mu.Lock()
+	var ids []string
+	for id := range s.executions {
+		instance, err := s.store.inspect(id)
+		if err != nil {
+			s.mu.Unlock()
+			return err
+		}
+		if instance.LeaseExpiresAt != "" && instance.Status != v1.Stopping {
+			expiry, err := time.Parse(time.RFC3339Nano, instance.LeaseExpiresAt)
+			if err != nil {
+				s.mu.Unlock()
+				return err
+			}
+			if !expiry.After(time.Now()) {
+				ids = append(ids, id)
+			}
+		}
+	}
+	s.mu.Unlock()
+	if err := s.stopExecutions(ids); err != nil {
+		return err
+	}
+
+	return s.store.reconcile("", true)
+}
+
+func (s *service) stopExecutions(ids []string) error {
+	s.mu.Lock()
+	for _, id := range ids {
+		if entry := s.executions[id]; entry != nil {
+			entry.mu.Lock()
+			entry.cancel()
+			entry.mu.Unlock()
+		}
+	}
+	s.mu.Unlock()
+	var result error
+	var mu sync.Mutex
+	var joined sync.WaitGroup
+	for _, id := range ids {
+		joined.Go(func() { _, err := s.stopExecution(id); mu.Lock(); result = errors.Join(result, err); mu.Unlock() })
+	}
+	joined.Wait()
+	return result
 }

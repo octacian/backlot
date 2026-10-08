@@ -117,7 +117,7 @@ type Probe struct {
 	Kind    string   `json:"kind" yaml:"kind" jsonschema_description:"Explicit discriminator; see the supported values and conditional fields."`
 	Target  *Value   `json:"target,omitempty" yaml:"target,omitempty" jsonschema_description:"Probe destination or absolute mount target, according to this contract."`
 	Command *Command `json:"command,omitempty" yaml:"command,omitempty" jsonschema_description:"Explicit native executable tool and argument vector."`
-	Timeout string   `json:"timeout" yaml:"timeout" jsonschema:"minLength=1" jsonschema_description:"Positive Go duration, at most 24h; for example 30s or 1m30s. Planning checks the bound."`
+	Timeout string   `json:"timeout" yaml:"timeout" jsonschema:"minLength=1" jsonschema_description:"Nonnegative Go duration, at most 24h; 0s is unlimited subject to other execution budgets."`
 }
 
 // Mount connects declared storage or checkout output to a container path.

@@ -4,6 +4,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -30,7 +31,7 @@ func New(socket string) *Client {
 		}
 		return (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "unix", socket)
 	}}
-	return &Client{http: &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}, transport: transport}
+	return &Client{http: &http.Client{Transport: transport, Timeout: 20 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}, transport: transport}
 }
 
 // Close releases idle socket connections without affecting accepted preparations.
@@ -56,7 +57,13 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 	if request != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	res, err := c.http.Do(req)
+	httpClient := *c.http
+	// Cleanup/restart can use a configured grace exceeding the transport default.
+	// The daemon bounds cleanup; callers retain context cancellation authority.
+	if path == "/v1/runtime/stop" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
+		httpClient.Timeout = 0
+	}
+	res, err := httpClient.Do(req)
 	if err != nil {
 		var detail *v1.PlanError
 		if errors.As(err, &detail) {
@@ -86,6 +93,26 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 		return &v1.PlanError{Code: "invalid_response", Message: "invalid daemon response contract"}
 	}
 	switch value := response.(type) {
+	case *v1.LogsResponse:
+		if value.APIVersion != v1.Version || value.NextOffset < 0 {
+			return responseError()
+		}
+		for _, record := range value.Records {
+			if !validID(record.InstanceID) || !validID(record.Attempt) || record.Component == "" || (record.Stream != "stdout" && record.Stream != "stderr") {
+				return responseError()
+			}
+			if record.Data != "" {
+				if record.Message != "" {
+					return responseError()
+				}
+				if _, err := base64.StdEncoding.DecodeString(record.Data); err != nil {
+					return responseError()
+				}
+			}
+			if _, err := time.Parse(time.RFC3339Nano, record.Time); err != nil {
+				return responseError()
+			}
+		}
 	case *v1.DaemonStatusResponse:
 		if value.APIVersion != v1.Version || value.StateVersion != v1.StateVersion {
 			return &v1.PlanError{Code: "api_version", Message: "incompatible daemon API or state format"}

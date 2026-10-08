@@ -27,7 +27,7 @@ func validateInstance(response v1.InstanceResponse) error {
 		return responseError()
 	}
 	switch instance.Status {
-	case v1.Preparing, v1.Prepared, v1.Cancelled, v1.Interrupted:
+	case v1.Preparing, v1.Prepared, v1.Cancelled, v1.Interrupted, v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Succeeded, v1.Failed:
 	default:
 		return responseError()
 	}
@@ -50,7 +50,7 @@ func validateInstance(response v1.InstanceResponse) error {
 			return responseError()
 		}
 	case v1.Disposable:
-		active := instance.Status == v1.Prepared || instance.Status == v1.Preparing
+		active := instance.Status == v1.Prepared || instance.Status == v1.Preparing || instance.Status == v1.Starting || instance.Status == v1.RuntimeReady || instance.Status == v1.Stopping
 		if active {
 			if _, err := time.Parse(time.RFC3339Nano, instance.LeaseExpiresAt); err != nil {
 				return responseError()
@@ -59,6 +59,46 @@ func validateInstance(response v1.InstanceResponse) error {
 			return responseError()
 		}
 	default:
+		return responseError()
+	}
+	return validateExecution(instance)
+}
+
+func validateExecution(instance v1.Instance) error {
+	result := instance.Execution
+	switch instance.Status {
+	case v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Succeeded, v1.Failed:
+		if result == nil {
+			return responseError()
+		}
+	}
+	if result == nil {
+		return nil
+	}
+	if !validID(result.Attempt) {
+		return responseError()
+	}
+	seen := map[string]bool{}
+	for _, component := range result.Components {
+		if component.Name == "" || seen[component.Name] {
+			return responseError()
+		}
+		seen[component.Name] = true
+		switch component.Status {
+		case "starting", "running", "ready", "completed", "stopped", "unknown":
+		default:
+			return responseError()
+		}
+		if component.ExitCode != nil && (*component.ExitCode < -1 || *component.ExitCode > 255) {
+			return responseError()
+		}
+	}
+	for _, port := range result.Ports {
+		if port < 1 || port > 65535 {
+			return responseError()
+		}
+	}
+	if instance.Status == v1.Succeeded && (result.Cancelled || result.Failure != "" || result.CleanupFailure != "" || result.CollectionFailure != "") {
 		return responseError()
 	}
 	return nil

@@ -58,8 +58,15 @@ CLI JSON/errors, environment precedence, read-only seeds, secret redaction, tool
 availability and ADR validation. Daemon tests additionally exercise real temporary Git worktrees and aliases,
 concurrent preparation, typed Unix-socket contracts, private snapshots, leases,
 shutdown, owned-child crashes and intent/effect recovery. See the
-[daemon guide](daemon.md). They do not demonstrate application execution, Docker
-integration, HTTPS routing, or the V1 workflows.
+[daemon guide](daemon.md). Native integration tests additionally build the real CLI, launch private fixture
+daemons and native descendants, and exercise readiness, cancellation, retained
+logs, leases, compatible restart and crash/uncertain-ownership recovery. They do
+not demonstrate Docker integration, HTTPS publication, or all V1 workflows.
 The [implementation plan](implementation-plan.md) defines those later acceptance
 checks. Runtime integration tests must use owned resources and must never modify
 an operator's unrelated containers, routes, files, or databases.
+
+The race gate disables Go test result caching with `-count=1`. Native integration
+builds and executes a separate CLI/guardian binary; changes to that subprocess's
+private helper code may leave the parent test binary unchanged, so cached results
+cannot validate the current runtime. `make check` and CI execute this suite fresh.

@@ -155,7 +155,7 @@ func TestManifestFailures(t *testing.T) {
 		"seed-traversal":           func(m *v1.Manifest) { m.Environments["app"] = v1.Environment{Seeds: []string{"../secret"}} },
 		"fresh-without-generation": func(m *v1.Manifest) { c := m.Components["test"]; c.Policy = v1.FreshOnly; m.Components["test"] = c },
 		"readiness":                func(m *v1.Manifest) { c := m.Components["server"]; c.Readiness = nil; m.Components["server"] = c },
-		"deadline":                 func(m *v1.Manifest) { c := m.Components["server"]; c.Readiness.Timeout = "0s" },
+		"deadline":                 func(m *v1.Manifest) { c := m.Components["server"]; c.Readiness.Timeout = "-1s" },
 		"probe-type": func(m *v1.Manifest) {
 			c := m.Components["server"]
 			c.Readiness.Target.Ref.Field = "host"
@@ -271,5 +271,14 @@ func TestResourceConflictsAndPorts(t *testing.T) {
 				t.Fatal("invalid resource contract accepted")
 			}
 		})
+	}
+}
+
+func TestUnlimitedReadinessDeadline(t *testing.T) {
+	m := adoption(t)
+	c := m.Components["server"]
+	c.Readiness.Timeout = "0s"
+	if err := Validate(m); err != nil {
+		t.Fatal(err)
 	}
 }

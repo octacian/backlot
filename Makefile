@@ -19,8 +19,10 @@ vet:
 test:
 	go test ./...
 
+# The native integration suite builds an external CLI; its sources are not
+# dependencies of Go's cached parent test binary. Always execute this gate.
 race:
-	go test -race ./...
+	go test -race -count=1 ./...
 
 tools: $(LINT)
 

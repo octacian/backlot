@@ -1,9 +1,9 @@
-# Local metadata daemon
+# Local daemon and native execution
 
 Milestone 2 adds explicit local daemon control and durable metadata preparation.
 `prepared` means a validated snapshot was recorded. It never means an application
-was executed, a resource was reserved, or readiness was observed. Native execution,
-Docker, Caddy, logs and application lifecycle commands remain later milestones.
+was executed, a resource was reserved, or readiness was observed. Native execution and retained logs are documented below; Docker, Caddy, broader
+resources and evidence retention remain later milestones.
 
 ## Commands
 
@@ -24,8 +24,8 @@ bin/backlot daemon stop --state-dir /absolute/private/backlot --json
 
 `daemon start` backgrounds this executable's `daemon serve` and waits for a typed
 handshake. `daemon serve` runs in the foreground until SIGINT, SIGTERM or an API
-stop request. `daemon stop` acknowledges `stopping`; socket removal marks completed
-shutdown. There is no service installer. Use the same `--state-dir` on each command;
+stop request. `daemon stop` joins native cleanup before acknowledging `stopping`; cleanup or
+collection failure returns nonzero. Socket removal marks completed shutdown. There is no service installer. Use the same `--state-dir` on each command;
 without it, the directory is `backlot/daemon` below Go's `os.UserConfigDir()`.
 State storage in this milestone uses that explicit flag/default; the manifest's
 machine `storage` retention settings remain intent for later evidence storage.
@@ -62,7 +62,8 @@ the project directory's filesystem identity.
 
 Repeated persistent preparation reports manifest/config digest drift and returns
 the original record without overwriting its snapshot, including cancelled or
-interrupted records. This milestone has no restart/reset/destroy/adoption operation.
+interrupted records. Metadata preparation itself never restarts runtime; native restart is described
+below. Reset/destroy/adoption remain later operations.
 Inspection addresses a recorded instance ID and does not read a changed checkout.
 Ordinary views contain only the redacted plan. The daemon stores the validated
 manifest privately and resolved sensitive values in a separate protected database
@@ -88,7 +89,7 @@ allocation intent with an ownership token. A separate transaction records the
 private snapshot, resolved secrets and effect, then completion marks `prepared`.
 Interruption before or after the effect leaves recoverable records, never a false
 success. Recovery preserves intent/effect details and marks unfinished preparation
-`interrupted`. No external resources exist to reconcile in this milestone.
+`interrupted`. Metadata-only preparations have no external resources to reconcile.
 
 Graceful shutdown joins handlers, interrupts unfinished preparations and active
 disposable preparations, and preserves all records. Crash recovery does the same
@@ -129,3 +130,95 @@ the daemon. Failed local checks return nonzero with a typed diagnostic result.
 Docker/Caddy checks are explicitly `deferred`; their absence is not a failure and
 neither is contacted. A daemon that rejects state at startup reports the actionable
 startup error in foreground output or the private `daemon.log` for background start.
+
+
+## Native execution
+
+Build with `make build`, then explicitly start a private daemon as above. Native
+commands and **all descendants** must remain in Backlot's supervised process
+group, including readiness commands. Do not use setsid, change descendant groups,
+or delegate work to an unrelated supervisor. Deliberate escape detection and
+kernel containment are not provided. The [supervision ADR](adr/20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md)
+explains the ownership and recovery boundary.
+
+```sh
+bin/backlot run dev --state-dir /absolute/private/backlot --project /absolute/project --json
+bin/backlot run test --state-dir /absolute/private/backlot --project /absolute/project --json -- -run TestExample
+bin/backlot logs --state-dir /absolute/private/backlot --json --follow INSTANCE_ID
+bin/backlot logs --state-dir /absolute/private/backlot --json --component server INSTANCE_ID
+bin/backlot stop --state-dir /absolute/private/backlot --json INSTANCE_ID
+bin/backlot restart INSTANCE_ID --state-dir /absolute/private/backlot --json
+```
+
+`run` and `restart` accept flags before or after the target. Arguments after `--`
+are forwarded only to a disposable terminal job. The finite JSON result is one
+`InstanceResponse`; the original terminal-job exit code is under
+`instance.execution.components[].exit_code`. Any orchestration, cancellation,
+collection or cleanup failure returns nonzero. Following logs emits one typed
+`LogRecord` per NDJSON line, identifying instance, component, UTC collection time,
+stream and execution attempt. Non-UTF8 chunks use the optional base64 `data`
+field instead of text `message`, preserving raw bytes. Application stdout/stderr is captured as emitted;
+do not write secrets to those streams. Logs persist outside runtime across stop
+and restart. There is no configurable retention policy, artifact collection or
+keep-on-failure in this milestone.
+
+Selected containers, publication, non-port resources and fresh-only jobs are
+rejected before application launch. Metadata `prepare` retains its allocation-free
+semantics for all supported manifest declarations. TCP/HTTP probes additionally
+require `lsof` on the daemon PATH, to prove the listener belongs to the supervised
+group; an unrelated listener never satisfies readiness and is never killed.
+Assigned loopback ports are observed free rather than reserved. A proven collision
+allows up to three allocation attempts, each after verified cleanup of the failed
+owned group. Other service/job failures are never automatically retried.
+
+`--startup-timeout` defaults to `5m` and bounds dependency startup and each-start
+preparation jobs. `--job-timeout` defaults to `30m` for each job; the disposable
+terminal job receives its own job budget after dependencies are ready.
+Manifest readiness `timeout` adds a probe budget. Each execution/probe budget can
+be `0s` for unlimited; any other applicable finite budget still limits execution.
+Negative durations are rejected. API execution options use the same duration
+strings. `--stop-grace` accepts any finite nonnegative duration and defaults to `10s`;
+zero means immediate escalation. Verification and collection have separate finite
+budgets after the configured grace. Disposable clients renew the finite daemon
+lease while waiting; unlimited execution never disables lease cancellation.
+
+Persistent startup is daemon-owned after acceptance, so closing a client leaves
+it running. Concurrent starts join the same instance, and repeated starts report
+manifest/config drift without replacing the accepted private snapshot. Failed,
+interrupted and stopped instances require explicit `restart`, which revalidates
+checkout identity, applies compatible command/environment/graph/probe drift, and
+retains logical identity. Resource contract changes are rejected before stopping
+old work; reset/destroy remain later milestones. Instance mutations and declared
+checkout-output groups serialize across scenes/runs. Ctrl-C/SIGTERM during a CLI
+run cancels and joins the supervised work. Ordinary persistent client disconnect
+does not cancel accepted startup; disposable client loss expires its lease.
+
+An outside guardian owns a separate anchor child in a distinct process group.
+The guardian starts and waits for the application root in that anchor group,
+reports its original result, and retains the separate anchor until group cleanup. The guardian signals only that pinned group and
+does not reap the anchor until no other member remains and the anchor has exited.
+No observed member PID is signaled. After anchor join, a kernel signal-0 group
+query must prove ESRCH; enumeration alone cannot acknowledge absence. Successful
+stop also requires joined log/status
+collectors, a private authenticated cleanup receipt, and verified guardian exit.
+Control sockets and receipts live in random mode-0700 `/tmp/blctl-*` directories;
+their paths and random capabilities stay in the private runtime journal. Missing
+root PIDs, EOF and closed listeners do not establish cleanup. Graceful daemon
+shutdown stops owned work. Recovery requests cleanup through the same authority
+and marks interrupted with an explicit collection gap; it never resumes work.
+Missing or mismatched control authority is a cleanup failure that preserves
+uncertain survivors. Inspect the private ownership journal before manual action.
+
+Additional typed POST endpoints (same strict v1 negotiation and JSON rules):
+
+| Endpoint | Named request | Named response |
+| --- | --- | --- |
+| `/v1/run` | `RunRequest` | `InstanceResponse` (accepted startup) |
+| `/v1/restart` | `RunRequest` with `instance_id` | `InstanceResponse` |
+| `/v1/runtime/stop` | `InstanceRequest` | `InstanceResponse` after verified cleanup |
+| `/v1/logs` | `LogsRequest` | `LogsResponse` (bounded page and next offset) |
+
+The CLI waits for persistent ready or disposable terminal status through inspect;
+raw API callers must renew disposable capabilities while polling. Logs pages use
+an absolute unfiltered record offset, so component filtering preserves cursor
+progress. Inspect and cancel remain shared across metadata and native execution.

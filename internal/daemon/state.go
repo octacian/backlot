@@ -15,7 +15,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-var bucketNames = []string{"meta", "instances", "checkouts", "paths", "persistent", "snapshots", "secrets"}
+var bucketNames = []string{"meta", "instances", "checkouts", "paths", "persistent", "snapshots", "secrets", "runtime"}
 
 type record struct {
 	Instance  v1.Instance `json:"instance"`
@@ -94,7 +94,7 @@ func decodeRecord(data []byte, id string, r *record) error {
 		return problem("state_corrupt", "invalid instance identity or operation record; preserve state for diagnosis")
 	}
 	switch i.Status {
-	case v1.Preparing, v1.Prepared, v1.Cancelled, v1.Interrupted:
+	case v1.Preparing, v1.Prepared, v1.Cancelled, v1.Interrupted, v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Succeeded, v1.Failed:
 	default:
 		return problem("state_corrupt", "invalid instance status; preserve state for diagnosis")
 	}
@@ -218,7 +218,9 @@ func terminal(r *record, status v1.InstanceStatus, reason string) {
 	r.Instance.LeaseExpiresAt = ""
 	r.LeaseHash = ""
 }
-func active(status v1.InstanceStatus) bool { return status == v1.Preparing || status == v1.Prepared }
+func active(status v1.InstanceStatus) bool {
+	return status == v1.Preparing || status == v1.Prepared || status == v1.Starting || status == v1.RuntimeReady || status == v1.Stopping
+}
 
 func (s *store) cancel(id string) (v1.Instance, error) {
 	var instance v1.Instance
@@ -253,7 +255,13 @@ func (s *store) renew(id, token string, lease time.Duration) (v1.Instance, error
 		if err != nil || !active(r.Instance.Status) {
 			return problem("conflict", "preparation is no longer active")
 		}
+		if r.Instance.Status == v1.Stopping {
+			return problem("conflict", "execution is stopping; its lease cannot be renewed")
+		}
 		if !expiry.After(now) {
+			if r.Instance.Execution != nil {
+				return problem("lease_expired", "client lease expired; cancellation is pending verified cleanup")
+			}
 			terminal(&r, v1.Cancelled, "client lease expired")
 			instance = r.Instance
 			return put(tx, "instances", id, r)
@@ -282,6 +290,9 @@ func (s *store) reconcile(reason string, expiryOnly bool) error {
 				return nil
 			}
 			if expiryOnly {
+				if r.Instance.Execution != nil {
+					return nil
+				} // Native leases cancel through the lifecycle owner and join before terminal state.
 				if r.Instance.Plan.Lifetime != v1.Disposable {
 					return nil
 				}

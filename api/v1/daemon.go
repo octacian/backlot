@@ -3,7 +3,7 @@ package v1
 // StateVersion identifies the supported durable database format.
 const StateVersion = 1
 
-// InstanceStatus describes metadata preparation without claiming execution/readiness.
+// InstanceStatus distinguishes metadata preparation from observed native execution.
 type InstanceStatus string
 
 // Supported preparation states.
@@ -63,9 +63,10 @@ type Operation struct {
 	Allocations []AllocationRecord `json:"allocations"`
 }
 
-// Instance is the redacted durable public view of preparation metadata.
+// Instance is the redacted durable public view of preparation and optional execution.
 type Instance struct {
 	ID             string           `json:"id"`
+	Execution      *ExecutionResult `json:"execution,omitempty"`
 	Checkout       CheckoutIdentity `json:"checkout"`
 	Status         InstanceStatus   `json:"status"`
 	Operation      Operation        `json:"operation"`

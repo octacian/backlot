@@ -4,8 +4,11 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"crypto/sha1"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
@@ -95,7 +98,8 @@ func main() {
 			}
 			defer func() { _ = conn.Close() }()
 			_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-			_, _ = io.WriteString(conn, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n")
+			accept := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+			_, _ = fmt.Fprintf(conn, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", base64.StdEncoding.EncodeToString(accept[:]))
 			// Receive the known masked 'hello' test frame and return an unmasked frame.
 			frame := make([]byte, 11)
 			if _, err := io.ReadFull(conn, frame); err == nil {
@@ -132,10 +136,16 @@ func websocket(client *http.Client, origin string) {
 	}
 	defer func() { _ = connection.Close() }()
 	_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
-	_, _ = fmt.Fprintf(connection, "GET /ws HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n", u.Host)
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		panic(err)
+	}
+	key := base64.StdEncoding.EncodeToString(nonce[:])
+	accept := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+	_, _ = fmt.Fprintf(connection, "GET /ws HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\n\r\n", u.Host, key)
 	reader := bufio.NewReader(connection)
 	response, err := http.ReadResponse(reader, nil)
-	if err != nil || response.StatusCode != 101 || response.Header.Get("Sec-WebSocket-Accept") != "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" {
+	if err != nil || response.StatusCode != 101 || response.Header.Get("Sec-WebSocket-Accept") != base64.StdEncoding.EncodeToString(accept[:]) {
 		panic("TLS WebSocket upgrade failed")
 	}
 	_, _ = connection.Write([]byte{0x81, 0x85, 0, 0, 0, 0, 'h', 'e', 'l', 'l', 'o'})

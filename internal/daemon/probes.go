@@ -64,11 +64,15 @@ func (s *service) awaitProbe(ctx context.Context, id string, c v1.PlannedCompone
 				return err
 			}
 			if c.Runtime == v1.Container {
-				if err := containerProbeOwned(probeCtx, entry.docker, group.(*dockerWork), c, value, result.Ports); err != nil {
+				if err := containerProbeOwned(probeCtx, entry.docker, group.(*dockerWork), c, value, result.Ports, publishAddress(snapshot.Docker)); err != nil {
 					return err
 				}
+				address := mappedAddress(snapshot.Docker)
+				pinned := net.JoinHostPort(address.String(), target)
+				ready, err = probeDestination(probeCtx, c.Readiness.Kind, target, pinned)
+			} else {
+				ready, err = networkProbe(probeCtx, c.Readiness.Kind, target, group.PGID())
 			}
-			ready, err = networkProbe(probeCtx, c.Readiness.Kind, target, group.PGID())
 			var typed *v1.PlanError
 			if errors.As(err, &typed) && typed.Code == "port_conflict" && value.Symbolic == nil {
 				return problem("readiness_unowned", "literal probe target has an unrelated listener; owned runtime stopped without retry")
@@ -143,6 +147,10 @@ func networkProbe(ctx context.Context, kind, target string, pgid int) (bool, err
 		}
 		return false, nil
 	}
+	return probeDestination(ctx, kind, target, pinned)
+}
+
+func probeDestination(ctx context.Context, kind, target, pinned string) (bool, error) {
 	attempt, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 	if kind == "tcp" {

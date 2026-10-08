@@ -2,7 +2,10 @@ package client
 
 import (
 	"encoding/hex"
+	"net/url"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -77,6 +80,29 @@ func validateExecution(instance v1.Instance) error {
 	}
 	if !validID(result.Attempt) {
 		return responseError()
+	}
+	if result.Origin != "" {
+		origin, err := url.Parse(result.Origin)
+		if err != nil || origin.Scheme != "https" || origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" || !strings.HasPrefix(origin.Hostname(), "bl-"+instance.ID[:40]+".") || origin.Port() == "" && strings.Contains(origin.Host, ":") {
+			return responseError()
+		}
+		if origin.Port() != "" {
+			port, err := strconv.Atoi(origin.Port())
+			if err != nil || port < 1 || port > 65535 {
+				return responseError()
+			}
+		}
+	}
+	if instance.Status == v1.RuntimeReady && instance.Plan.Publish != nil && result.Origin == "" {
+		return responseError()
+	}
+	if result.FailureDetail != nil && (result.FailureDetail.Code == "" || result.FailureDetail.Message == "" || result.Failure == "") {
+		return responseError()
+	}
+	for _, detail := range result.CleanupDetails {
+		if detail.Code == "" || detail.Message == "" || result.CleanupFailure == "" {
+			return responseError()
+		}
 	}
 	seen := map[string]bool{}
 	for _, component := range result.Components {

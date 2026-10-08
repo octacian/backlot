@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,12 +58,9 @@ func withDeadline(ctx context.Context, d time.Duration) (context.Context, contex
 	return context.WithTimeout(ctx, d)
 }
 func executablePlan(p v1.PlanResponse) error {
-	if p.Publish != nil {
-		return problem("unsupported_runtime", "native slice does not execute publication")
-	}
 	for _, r := range p.Resources {
-		if r.Kind == "origin" {
-			return problem("unsupported_runtime", "publication resources require the future gateway slice")
+		if r.Kind == "origin" && p.Publish == nil {
+			return problem("invalid_publication", "origin resources require a publication")
 		}
 	}
 	for _, c := range p.Components {
@@ -148,9 +146,18 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 		if request.InstanceID != id || response.Instance.Plan.Lifetime != v1.Persistent {
 			return empty, problem("conflict", "restart must address the same persistent checkout and scene")
 		}
+		if snapshot.Plan.Publish != nil && snapshot.Caddy == nil {
+			return empty, problem("missing_provider", "published scenes require config.caddy and an operator-installed JSON subroute scope")
+		}
 		previous, err := s.store.snapshot(id)
 		if err != nil {
 			return empty, err
+		}
+		if snapshot.Plan.Publish != nil && snapshot.Caddy != nil && response.Instance.Execution != nil && response.Instance.Execution.Origin != "" {
+			origin, err := url.Parse(response.Instance.Execution.Origin)
+			if err != nil || origin.Hostname() != "bl-"+id[:40]+"."+snapshot.Caddy.DomainSuffix {
+				return empty, problem("unsafe_drift", "published logical instance retains its hostname; use destroy for a changed domain suffix")
+			}
 		}
 		if !reset {
 			if err := safeRestart(previous, snapshot); err != nil {
@@ -200,6 +207,18 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 	}
 	attempt := newID()
 	result := &v1.ExecutionResult{Attempt: attempt, Components: []v1.ComponentResult{}, Ports: map[string]int{}}
+	if previous := response.Instance.Execution; previous != nil {
+		result.Origin = previous.Origin
+	}
+	if snapshot.Plan.Publish != nil {
+		if snapshot.Caddy == nil {
+			return empty, problem("missing_provider", "published scenes require config.caddy and an operator-installed JSON subroute scope")
+		}
+		result.Origin = "https://bl-" + id[:40] + "." + snapshot.Caddy.DomainSuffix
+		if snapshot.Caddy.HTTPSPort != nil && *snapshot.Caddy.HTTPSPort != 443 {
+			result.Origin += ":" + strconv.Itoa(*snapshot.Caddy.HTTPSPort)
+		}
+	}
 	r := runtimeRecord{Attempt: attempt, Groups: []native.Identity{}, Options: request.Options, ConfigPath: request.Plan.ConfigPath}
 	response.Instance, err = s.store.acceptExecution(id, r, result, request.InstanceID != "" || response.Instance.Status == v1.Stopped)
 	if err != nil {
@@ -338,6 +357,10 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		}
 		if failure != nil {
 			result.Failure = failure.Error()
+			var detail *v1.PlanError
+			if errors.As(failure, &detail) {
+				result.FailureDetail = detail
+			}
 			if ctx.Err() == nil {
 				status = v1.Failed
 			}
@@ -346,6 +369,14 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		var cleanup error
 		var cleanupMu sync.Mutex
 		var joined sync.WaitGroup
+		joined.Go(func() {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cleanupCancel()
+			err := s.store.removeGateway(cleanupCtx, id, &journal)
+			cleanupMu.Lock()
+			defer cleanupMu.Unlock()
+			cleanup = errors.Join(cleanup, err)
+		})
 		for _, group := range entry.groups {
 			joined.Go(func() {
 				err := group.Stop(d.grace)
@@ -406,6 +437,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		}
 		if cleanup != nil {
 			result.CleanupFailure = cleanup.Error()
+			result.CleanupDetails = cleanupDetails(cleanup)
 			status = v1.Failed
 		}
 		if err := save(status); err != nil {
@@ -449,6 +481,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 	}
 	services := map[string]workload{}
 	consumedPorts := map[string]string{}
+	published := false
 	for _, component := range snapshot.Plan.Components {
 		if err := startup.Err(); err != nil {
 			failure = err
@@ -465,6 +498,11 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		// Terminal execution receives its own budget after dependency startup succeeds.
 		componentCtx := startup
 		if component.Name == snapshot.Plan.TerminalJob {
+			if snapshot.Plan.Publish != nil {
+				if failure = awaitPublication(startup, result.Origin, snapshot.Plan.Publish.Probe.Timeout, services); failure != nil {
+					return
+				}
+			}
 			componentCtx = ctx
 		}
 		jobCtx, jobCancel := withDeadline(componentCtx, d.job)
@@ -579,6 +617,17 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			}
 		}
 		consumeComponentPorts(consumedPorts, component, snapshot)
+		if !published && snapshot.Plan.Publish != nil && routesReady(*snapshot.Plan.Publish, services) {
+			if failure = s.publish(startup, id, snapshot, result, &journal); failure != nil {
+				return
+			}
+			published = true
+		}
+	}
+	if snapshot.Plan.Publish != nil && snapshot.Plan.Lifetime == v1.Persistent {
+		if failure = awaitPublication(startup, result.Origin, snapshot.Plan.Publish.Probe.Timeout, services); failure != nil {
+			return
+		}
 	}
 	if snapshot.Plan.Lifetime == v1.Disposable {
 		status = v1.Succeeded

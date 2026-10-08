@@ -171,8 +171,8 @@ and restart. There is no configurable retention policy, artifact collection or
 keep-on-failure in this milestone.
 
 Generic containers, private volumes/directories/secrets/networks and fresh-only
-jobs follow the [private-state lifecycle](containers.md). Publication remains
-deferred. Metadata `prepare` retains its allocation-free semantics for all
+jobs follow the [private-state lifecycle](containers.md). Publication follows the
+[HTTPS guide](https.md). Metadata `prepare` retains its allocation-free semantics for all
 supported declarations. Native TCP/HTTP probes additionally require `lsof` on the
 daemon PATH, to prove the listener belongs to the supervised group at the actual
 dialed destination; an unrelated listener never satisfies

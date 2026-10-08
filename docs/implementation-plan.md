@@ -86,6 +86,13 @@ preservation of unrelated resources. Never introduce SQL-aware provisioning here
 
 ## 5. Published HTTPS and mixed execution
 
+Implemented for independent review: configured existing Caddy JSON subroute
+publication with optimistic concurrency, private intent/effect recovery, stable
+hostnames and mixed upstream/client contexts. See the [HTTPS guide](https.md).
+Owned real-gateway fixture evidence and real-domain trusted-certificate acceptance
+are separate gates; independent reviews and final frozen-candidate checks remain
+required before readiness. DNS/certificates/trust remain operator-owned.
+
 Add the Caddy adapter for a bounded, owned route scope, unique stable hostnames,
 path routing, and concurrent configuration edits. Missing Caddy blocks only scenes
 that publish an origin. Add host-native and containerized consumers behind the

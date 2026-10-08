@@ -23,6 +23,8 @@ Before planning or editing, read:
 
 The [local daemon guide](daemon.md) documents preparation and native execution.
 The [container/private-state guide](containers.md) documents milestone 4.
+The [HTTPS/mixed execution guide](https.md) documents configured gateway setup,
+publication ownership and milestone 5.
 
 The [manifest and offline planning guide](manifest.md) documents milestone 1.
 

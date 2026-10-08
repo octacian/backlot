@@ -1143,6 +1143,7 @@
         "path": {
           "type": "string",
           "minLength": 1,
+          "pattern": "^/([A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*)?$",
           "description": "Checkout-relative output path or absolute route path, according to this contract."
         },
         "service": {
@@ -1172,7 +1173,7 @@
         "port",
         "prefix"
       ],
-      "description": "Route is a bounded path route to a selected service port."
+      "description": "Route is a case-sensitive literal segment-prefix route to a selected service port."
     },
     "Scene": {
       "allOf": [

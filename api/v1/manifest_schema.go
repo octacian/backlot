@@ -238,6 +238,11 @@ func (Dependency) JSONSchemaExtend(s *jsonschema.Schema) {
 }
 
 // JSONSchemaExtend constrains publication routes and aggregate probe kind.
+func (Route) JSONSchemaExtend(s *jsonschema.Schema) {
+	schemaProperty(s, "path").Pattern = LiteralRoutePathPattern
+}
+
+// JSONSchemaExtend constrains publication routes and aggregate probe kind.
 func (Publication) JSONSchemaExtend(s *jsonschema.Schema) {
 	schemaProperty(s, "routes").MinItems = schemaOne()
 	s.AllOf = []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{

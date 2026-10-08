@@ -191,6 +191,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 	}
 	if snapshot != nil {
 		snapshot.Docker = config.Docker
+		snapshot.Caddy = config.Caddy
 		snapshot.Manifest = m
 		snapshot.Plan = result
 	}

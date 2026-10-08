@@ -153,7 +153,10 @@ type Component struct {
 	Readiness       *Probe                 `json:"readiness,omitempty" yaml:"readiness,omitempty" jsonschema_description:"Required service probe; process liveness alone is insufficient."`
 }
 
-// Route is a bounded path route to a selected service port.
+// LiteralRoutePathPattern bounds publication paths to literal URL segments.
+const LiteralRoutePathPattern = `^/([A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*)?$`
+
+// Route is a case-sensitive literal segment-prefix route to a selected service port.
 type Route struct {
 	Path    string `json:"path" yaml:"path" jsonschema:"minLength=1" jsonschema_description:"Checkout-relative output path or absolute route path, according to this contract."`
 	Service string `json:"service" yaml:"service" jsonschema:"minLength=1" jsonschema_description:"Selected service name receiving this route."`
@@ -190,11 +193,14 @@ type MachineConfig struct {
 
 // DockerConfig selects local engine access without contacting it during planning.
 type DockerConfig struct {
-	Endpoint string `json:"endpoint" yaml:"endpoint" jsonschema:"minLength=1" jsonschema_description:"Local Docker unix socket URL or Caddy HTTP(S) admin URL."`
+	Endpoint       string `json:"endpoint" yaml:"endpoint" jsonschema:"minLength=1" jsonschema_description:"Local Docker unix socket URL or Caddy HTTP(S) admin URL."`
+	HostAddress    string `json:"host_address,omitempty" yaml:"host_address,omitempty" jsonschema_description:"Container-reachable host address for native service references; native apps must bind a reachable interface."`
+	PublishAddress string `json:"publish_address,omitempty" yaml:"publish_address,omitempty" jsonschema_description:"Numeric host address for mapped container ports; defaults to 127.0.0.1. Exposure is explicitly operator-selected."`
 }
 
 // CaddyConfig identifies the operator-owned gateway scope and reachability.
 type CaddyConfig struct {
+	HTTPSPort    *int   `json:"https_port,omitempty" yaml:"https_port,omitempty" jsonschema:"minimum=1,maximum=65535" jsonschema_description:"Explicit HTTPS listener port; defaults to 443. Nondefault ports appear in the canonical origin."`
 	Endpoint     string `json:"endpoint" yaml:"endpoint" jsonschema:"minLength=1" jsonschema_description:"Local Docker unix socket URL or Caddy HTTP(S) admin URL."`
 	Scope        string `json:"scope" yaml:"scope" jsonschema:"minLength=1" jsonschema_description:"Identifier of the Backlot-owned gateway scope."`
 	DomainSuffix string `json:"domain_suffix" yaml:"domain_suffix" jsonschema:"minLength=1" jsonschema_description:"Operator-managed lowercase domain suffix, including at least one dot."`

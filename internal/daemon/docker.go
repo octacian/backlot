@@ -417,7 +417,7 @@ func (s *service) launchContainer(ctx context.Context, id string, c v1.PlannedCo
 			return nil, err
 		}
 		config.ExposedPorts[p] = struct{}{}
-		host.PortBindings[p] = []network.PortBinding{{HostIP: netip.MustParseAddr("127.0.0.1"), HostPort: strconv.Itoa(result.Ports[port.Resource])}}
+		host.PortBindings[p] = []network.PortBinding{{HostIP: publishAddress(snap.Docker), HostPort: strconv.Itoa(result.Ports[port.Resource])}}
 	}
 	for _, m := range c.Mounts {
 		x := mount.Mount{Target: m.Target, ReadOnly: m.ReadOnly, Type: mount.TypeBind}
@@ -477,7 +477,7 @@ func (s *service) launchContainer(ctx context.Context, id string, c v1.PlannedCo
 	if _, err = entry.docker.ContainerStart(ctx, r.ID, client.ContainerStartOptions{}); err != nil {
 		conflict := false
 		for _, port := range c.Ports {
-			listener, bindErr := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(result.Ports[port.Resource])))
+			listener, bindErr := net.Listen("tcp", net.JoinHostPort(publishAddress(snap.Docker).String(), strconv.Itoa(result.Ports[port.Resource])))
 			if bindErr != nil {
 				conflict = true
 			} else {
@@ -585,6 +585,12 @@ func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, re
 		value = snap.Secrets[key]
 	}
 	r := value.Symbolic
+	if r != nil && r.Kind == "resource" && r.Field == "url" {
+		if snap.Plan.Publish == nil || r.Name != snap.Plan.Publish.Resource || result.Origin == "" {
+			return "", problem("invalid_publication", "origin reference requires the scene publication")
+		}
+		return result.Origin, nil
+	}
 	if r != nil && r.Kind == "resource" && r.Field != "port" {
 		resource, ok := entry.resources.Resources[r.Name]
 		if !ok {
@@ -596,22 +602,35 @@ func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, re
 		return resource.Name, nil
 	}
 	if r != nil && r.Kind == "service" && runtime == v1.Container {
-		if r.Field == "host" {
-			return r.Name, nil
-		}
 		for _, c := range snap.Plan.Components {
 			if c.Name == r.Name {
 				if c.Runtime != v1.Container {
-					return "", problem("unsupported_runtime", "container to native service references require future host networking support")
+					if snap.Docker == nil || snap.Docker.HostAddress == "" {
+						return "", problem("missing_host_address", "container-to-native references require config.docker.host_address and a native listener bound to a reachable interface")
+					}
+					if r.Field == "host" {
+						return snap.Docker.HostAddress, nil
+					}
+					return strconv.Itoa(result.Ports[c.Ports[r.Port].Resource]), nil
+				}
+				if r.Field == "host" {
+					return r.Name, nil
 				}
 				return strconv.Itoa(c.Ports[r.Port].ContainerPort), nil
+			}
+		}
+	}
+	if r != nil && r.Kind == "service" && r.Field == "host" && runtime == v1.Native {
+		for _, component := range snap.Plan.Components {
+			if component.Name == r.Name && component.Runtime == v1.Container {
+				return mappedAddress(snap.Docker).String(), nil
 			}
 		}
 	}
 	return runtimeValue(value, id, snap.Plan, result.Ports)
 }
 
-func containerProbeOwned(ctx context.Context, d *dockerEngine, w *dockerWork, c v1.PlannedComponent, value v1.PlannedValue, ports map[string]int) error {
+func containerProbeOwned(ctx context.Context, d *dockerEngine, w *dockerWork, c v1.PlannedComponent, value v1.PlannedValue, ports map[string]int, address netip.Addr) error {
 	r := value.Symbolic
 	resource := ""
 	if r != nil && r.Kind == "service" && r.Name == c.Name && r.Field == "port" {
@@ -642,12 +661,31 @@ func containerProbeOwned(ctx context.Context, d *dockerEngine, w *dockerWork, c 
 	}
 	if inspect.Container.NetworkSettings != nil {
 		for _, binding := range inspect.Container.NetworkSettings.Ports[p] {
-			if binding.HostIP == netip.MustParseAddr("127.0.0.1") && binding.HostPort == strconv.Itoa(ports[resource]) {
+			if binding.HostIP == address && binding.HostPort == strconv.Itoa(ports[resource]) {
 				return nil
 			}
 		}
 	}
 	return problem("readiness_unowned", "Docker port binding does not match owned allocation")
+}
+
+func publishAddress(config *v1.DockerConfig) netip.Addr {
+	if config != nil && config.PublishAddress != "" {
+		return netip.MustParseAddr(config.PublishAddress)
+	}
+	return netip.MustParseAddr("127.0.0.1")
+}
+
+// A wildcard bind is dialed through loopback in its own address family.
+func mappedAddress(config *v1.DockerConfig) netip.Addr {
+	address := publishAddress(config)
+	if address.IsUnspecified() {
+		if address.Is6() {
+			return netip.MustParseAddr("::1")
+		}
+		return netip.MustParseAddr("127.0.0.1")
+	}
+	return address
 }
 
 // Recovery stops only containers bearing the recorded capability; output gaps

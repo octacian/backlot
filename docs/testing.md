@@ -108,3 +108,44 @@ a configured but unavailable provider is a failure. The complete suite must pass
 the frozen feature candidate after independent reviews; `make check` alone does not
 prove Docker integration. Logs and exact source/image/config provenance belong in
 the feature evidence ledger.
+
+## HTTPS/mixed integration
+
+Use an explicit native Caddy binary and local Docker endpoint; both suites skip
+only when their opt-in settings are absent. Pre-pull the pinned gateway fixture
+image outside Backlot runtime (there are no implicit image pulls):
+
+```sh
+docker pull caddy:2.11.6
+docker pull alpine:3.21
+BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/gateway -count=1 -v
+BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^TestHTTPSRuntime$' -count=1 -v
+```
+
+Run suites serially with exclusive fixture mutation ownership. Gateway fixtures
+use private cert/config/storage, dynamic ports, exact owned route effects and
+retained child handles or labeled containers. The container gateway is pinned to
+the Caddy 2.11.6 multi-platform digest
+`sha256:3422ce6de165df66534f9b9ba50efaf457114ec961763cc52f5dbdaac2972d73`.
+Each suite builds a unique image from the generic static Go fixture source and
+pre-pulled `alpine:3.21` (including standard public CA roots);
+cleanup verifies ownership and removes fixture images/containers/networks and
+private state, preserving uncertain residuals. Shared pre-pulled images remain.
+No fixture uses the operator's gateway ports 443/2019 or installs global trust.
+
+The gateway suite covers real native/container Caddy, TLS-verified host/container
+consumers, native API/container SSR, literal routing, WebSockets, redirects/cookies,
+ambiguous mutation response recovery and preservation. The daemon suite adds real
+daemon/guardian execution, normal host `.localhost` DNS, origin-dependent terminal
+container clients, explicit fixture-only container dialing with TLS hostname
+verification, mixed service references, stop/start/restart/reset/destroy and crash
+recovery. These development fixtures do not prove real operator DNS/certificate
+setup. Frozen-candidate acceptance also requires the complete Docker suite and
+real owned-domain trusted HTTPS from macOS ARM64 host, browser and containers,
+including SSR/API/WebSockets and relevant redirects/cookies. Record commands,
+candidate revision, fixtures/config/image provenance, logs, skips/failures and
+cleanup in the delivery ledger; never substitute mock success for missing evidence.

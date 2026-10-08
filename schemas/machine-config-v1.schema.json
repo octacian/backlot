@@ -5,6 +5,12 @@
   "$defs": {
     "CaddyConfig": {
       "properties": {
+        "https_port": {
+          "type": "integer",
+          "maximum": 65535,
+          "minimum": 1,
+          "description": "Explicit HTTPS listener port; defaults to 443. Nondefault ports appear in the canonical origin."
+        },
         "endpoint": {
           "type": "string",
           "minLength": 1,
@@ -47,6 +53,14 @@
           "minLength": 1,
           "pattern": "^[Uu][Nn][Ii][Xx]:(/([^/?#][^?#]*)?|///[^?#]*)\\??#?$",
           "description": "Local Docker unix socket URL or Caddy HTTP(S) admin URL."
+        },
+        "host_address": {
+          "type": "string",
+          "description": "Container-reachable host address for native service references; native apps must bind a reachable interface."
+        },
+        "publish_address": {
+          "type": "string",
+          "description": "Numeric host address for mapped container ports; defaults to 127.0.0.1. Exposure is explicitly operator-selected."
         }
       },
       "additionalProperties": false,

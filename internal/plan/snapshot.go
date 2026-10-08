@@ -5,6 +5,7 @@ import v1 "github.com/octacian/backlot/api/v1"
 // Snapshot retains validated declarations and resolved sensitive values privately.
 // Allocation references stay symbolic; this is preparation, never execution.
 type Snapshot struct {
+	Caddy    *v1.CaddyConfig            `json:"caddy,omitempty"`
 	Docker   *v1.DockerConfig           `json:"docker,omitempty"`
 	Manifest v1.Manifest                `json:"manifest"`
 	Plan     v1.PlanResponse            `json:"plan"`

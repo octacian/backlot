@@ -212,9 +212,11 @@ Machine configuration uses the same version and may declare:
 - `tools`: declared tool executable overrides.
 - `inputs`: declared input values, including machine-held credentials.
 - `docker`: `endpoint` as a local Unix socket URL (canonical `unix:///...`;
-  `unix:/...` is also accepted).
+  `unix:/...` is also accepted), optional container-to-native `host_address` and
+  numeric mapped-port `publish_address` (default `127.0.0.1`).
 - `caddy`: HTTP(S) admin `endpoint` without credentials/query/fragment, owned
-  identifier `scope`, concrete `domain_suffix`, and gateway-reachable `host_address`.
+  identifier `scope`, concrete `domain_suffix`, gateway-reachable `host_address`
+  and optional `https_port` (default 443). See [HTTPS setup and routing](https.md).
 - `storage`: `directory`, positive duration `retention_age` and positive integer
   `retention_bytes`. These settings are validated intent for a later daemon.
 

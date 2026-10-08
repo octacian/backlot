@@ -46,6 +46,16 @@ daemon shutdown. Prove allocation-intent recovery before external resources arri
 
 ## 3. Native vertical slice
 
+Implemented for independent review: shared native run/restart/stop/log contracts,
+daemon-owned guardian activation, TCP/HTTP/command readiness, finite dependency
+jobs, deadlines including zero/unlimited, lease cancellation, durable logs and
+crash reconciliation. Commands and descendants must remain in their supervised
+group; see the [native guide](daemon.md#native-execution) and
+[supervision decision](adr/20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md).
+This milestone does not implement containers, publication, non-port resources,
+fresh-only jobs, artifact extraction, keep-on-failure or retention policy.
+Independent reviews and required final acceptance/CI remain gates.
+
 Run a native persistent fixture and finite test job end to end. Add probe deadlines,
 port-conflict handling, explicit restart, process-tree cancellation, serialized
 lifecycle operations, and owned log capture with historical/follow APIs.

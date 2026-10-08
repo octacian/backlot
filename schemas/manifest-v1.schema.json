@@ -825,7 +825,7 @@
         "timeout": {
           "type": "string",
           "minLength": 1,
-          "description": "Positive Go duration, at most 24h; for example 30s or 1m30s. Planning checks the bound."
+          "description": "Nonnegative Go duration, at most 24h; 0s is unlimited subject to other execution budgets."
         }
       },
       "additionalProperties": false,

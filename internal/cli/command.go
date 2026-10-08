@@ -23,7 +23,7 @@ func NewCommand(version apiv1.VersionResponse, stdout, stderr io.Writer) *urfave
 			}
 			return urfave.ShowAppHelp(command)
 		},
-		Commands: append(preparationCommands(), daemonCommand(), planCommand(), &urfave.Command{
+		Commands: append(append(preparationCommands(), runtimeCommands()...), daemonCommand(), planCommand(), &urfave.Command{
 			Name: "version", Usage: "Show executable and API versions",
 			Flags: []urfave.Flag{&urfave.BoolFlag{Name: "json", Usage: "Emit the shared JSON version response"}},
 			Action: func(_ context.Context, command *urfave.Command) error {

@@ -114,7 +114,8 @@ Services declare named `ports`, each with an attached port `resource`, and an
 explicit `readiness` probe. Container ports additionally require `container_port`
 in 1..65535 for the image's listener; native ports omit it. Jobs cannot declare readiness or ports. A port
 resource cannot be claimed twice in one scene. Readiness probes use `kind: tcp`,
-`http`, or `command`, and a positive `timeout` up to 24h. Command probes contain
+`http`, or `command`, and a nonnegative `timeout` up to 24h (`0s` is unlimited, subject to
+other finite execution budgets). Command probes contain
 an explicit native tool command, whose availability is checked. Network probes
 contain a `target` value: TCP uses a symbolic port or literal `host:port` with a
 numeric port in 1..65535 (TCP service-name ports are unsupported). HTTP uses a

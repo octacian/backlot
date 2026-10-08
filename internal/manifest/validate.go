@@ -202,8 +202,8 @@ func probe(m v1.Manifest, p *v1.Probe, field string) error {
 		return invalid(field, "services require an explicit readiness probe")
 	}
 	d, err := time.ParseDuration(p.Timeout)
-	if err != nil || d <= 0 || d > 24*time.Hour {
-		return invalid(field+".timeout", "provide a positive deadline at most 24h")
+	if err != nil || d < 0 || d > 24*time.Hour {
+		return invalid(field+".timeout", "provide a nonnegative deadline at most 24h (0 is unlimited)")
 	}
 	switch p.Kind {
 	case "command":

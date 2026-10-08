@@ -28,7 +28,7 @@ type Options struct {
 const DefaultLeaseDuration = 30 * time.Second
 
 // Serve owns the socket, database and lease sweeper until shutdown or cancellation.
-// Only the daemon opens state.db. No application process/provider is started.
+// Only the daemon opens state.db; it owns all accepted native execution.
 func Serve(ctx context.Context, options Options) (resultErr error) {
 	if options.LeaseDuration == 0 {
 		options.LeaseDuration = DefaultLeaseDuration
@@ -48,7 +48,12 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 		return problem("permissions", "cannot inspect daemon lock")
 	}
 	lock := flock.New(lockPath, flock.SetPermissions(0600))
-	defer func() { resultErr = errors.Join(resultErr, lock.Close()) }()
+	closeOwnership := true
+	defer func() {
+		if closeOwnership {
+			resultErr = errors.Join(resultErr, lock.Close())
+		}
+	}()
 	acquired, err := lock.TryLock()
 	if err != nil {
 		return problem("lock_unavailable", "cannot acquire daemon lock")
@@ -60,7 +65,11 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, state.db.Close()) }()
+	defer func() {
+		if closeOwnership {
+			resultErr = errors.Join(resultErr, state.db.Close())
+		}
+	}()
 	path := SocketPath(options.Directory)
 	if staleInfo, err := os.Lstat(path); err == nil {
 		if err := localipc.File(path, true); err != nil {
@@ -84,6 +93,9 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 		}
 	} else if !os.IsNotExist(err) {
 		return problem("permissions", "cannot inspect daemon socket")
+	}
+	if err := state.recoverRuntime(); err != nil {
+		return err
 	}
 	if err := state.reconcile("daemon recovery interrupted preparation", false); err != nil {
 		return err
@@ -118,11 +130,11 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	if err := os.Chmod(path, 0600); err != nil {
 		return problem("permissions", "cannot protect daemon socket")
 	}
-	svc := &service{store: state, lease: options.LeaseDuration}
+	svc := &service{store: state, lease: options.LeaseDuration, directory: options.Directory}
 	stopping := make(chan struct{})
 	var once sync.Once
 	status := v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, Status: "running", PID: os.Getpid(), LeaseDuration: options.LeaseDuration.String()}
-	server := &http.Server{Handler: handler(svc, status, func() { once.Do(func() { close(stopping) }) }), ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+	server := &http.Server{Handler: handler(svc, status, func() { once.Do(func() { close(stopping) }) }), ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 0, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 	served := make(chan error, 1)
 	go func() { served <- server.Serve(listener) }()
 	ticker := time.NewTicker(min(options.LeaseDuration/4, time.Second))
@@ -140,9 +152,7 @@ loop:
 			servedRead = true
 			break loop
 		case <-ticker.C:
-			svc.mu.Lock()
-			err := state.reconcile("", true)
-			svc.mu.Unlock()
+			err := svc.expire()
 			if err != nil {
 				serveErr = err
 				break loop
@@ -150,6 +160,13 @@ loop:
 		}
 	}
 	stopErr := svc.stop()
+	if !svc.ownersJoined() {
+		// A failed finite join must not close storage underneath its owner. Retain
+		// the database and lock until that owner finishes; shutdown remains an error.
+		closeOwnership = false
+		stopErr = errors.Join(stopErr, problem("cleanup_failed", "execution owner remains unjoined; state ownership retained"))
+		go func() { svc.waitOwners(); _ = state.db.Close(); _ = lock.Close() }()
+	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	shutdownErr := server.Shutdown(shutdownCtx)
@@ -188,6 +205,51 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/run", "/v1/restart":
+			var request v1.RunRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			if r.URL.Path == "/v1/restart" && !validID(request.InstanceID) {
+				writeError(w, problem("invalid_request", "restart requires recorded instance_id"))
+				return
+			}
+			if r.URL.Path == "/v1/run" && request.InstanceID != "" {
+				writeError(w, problem("invalid_request", "run does not accept instance_id"))
+				return
+			}
+			response, err := s.run(r.Context(), request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+		case "/v1/runtime/stop":
+			var request v1.InstanceRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			if !validID(request.InstanceID) {
+				writeError(w, problem("invalid_request", "recorded instance_id required"))
+				return
+			}
+			instance, err := s.stopRuntime(request.InstanceID)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, v1.InstanceResponse{APIVersion: v1.Version, Instance: instance})
+		case "/v1/logs":
+			var request v1.LogsRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.logs(request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
 		case "/v1/prepare":
 			var request v1.PrepareRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
@@ -208,15 +270,14 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				writeError(w, problem("invalid_request", "instance_id must be a recorded 64-character hex ID"))
 				return
 			}
-			s.mu.Lock()
+
 			var instance v1.Instance
 			var err error
 			if r.URL.Path == "/v1/cancel" {
-				instance, err = s.store.cancel(request.InstanceID)
+				instance, err = s.cancelRuntime(request.InstanceID)
 			} else {
 				instance, err = s.store.inspect(request.InstanceID)
 			}
-			s.mu.Unlock()
 			if err != nil {
 				writeError(w, err)
 				return
@@ -242,6 +303,11 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 		case "/v1/stop":
 			var request v1.ControlRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			if err := s.stop(); err != nil {
+				writeError(w, err)
+				stop()
 				return
 			}
 			response := status

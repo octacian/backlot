@@ -16,7 +16,8 @@ backlot run ui-test -- <test arguments>
 Scene names are project-defined. Persistent environments return a usable URL;
 disposable runs return their outcome and retained evidence.
 
-**Status:** offline planning and local durable metadata preparation are implemented.
+**Status:** offline planning, durable metadata preparation and the native vertical
+slice are implemented for independent review.
 The executable provides help,
 `backlot version [--json]`, and `backlot plan <scene> [--project PATH]
 [--config PATH] [--json] -- <terminal-job args>`. Planning validates contracts,
@@ -24,8 +25,11 @@ files, inputs and native executables without running work or allocating resource
 See the [manifest guide](docs/manifest.md) and generic fixtures.
 Explicit daemon control and metadata-only `prepare`, `inspect`, `cancel`, `renew`
 and local `doctor` are described in the [daemon guide](docs/daemon.md). Prepared
-metadata never claims execution or readiness; the scene execution commands above
-remain V1 requirements. The initial release target is macOS
+metadata never claims execution or readiness. Native `run`, `restart`, `stop`, and
+retained `logs` support persistent services and disposable finite jobs with port
+resources. Commands and all descendants must stay in their supervised process
+group; detachment and external process delegation are unsupported. Containers,
+publication and broader resource/evidence workflows remain V1 requirements. The initial release target is macOS
 ARM64; Linux and native Windows support are architectural targets for later.
 
 ## Development

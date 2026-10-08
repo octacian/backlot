@@ -2,7 +2,7 @@
 
 This is the implementation baseline for the [V1 PRD](prd.md). The executable
 implements version discovery, offline scene planning, and a local metadata daemon
-with transactional preparation/recovery. Application execution and provider
+with transactional preparation/recovery. Native service/job execution is implemented for review; container and gateway
 adapters remain planned. See the [manifest guide](manifest.md) and
 [daemon guide](daemon.md).
 
@@ -23,7 +23,9 @@ It owns idempotency, instance mutation locking, dependency gates, initialization
 records, cancellation, evidence, and teardown ordering. It calls narrow adapters
 for native work, containers, gateway mutations, storage, and probes.
 
-Native adapters own complete process trees, not only launcher PIDs. Docker adapters
+Native adapters own complete cooperative process groups, including descendants,
+not only launcher PIDs. Commands must not detach or delegate work outside that
+group; see the [native supervision decision](adr/20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md). Docker adapters
 use the official Go client for lifecycle/inspection and established Docker tooling
 for image builds. Gateway adapters use Caddy's HTTP API and owned route IDs/scope,
 including concurrency preconditions rather than whole-config replacement.

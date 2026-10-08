@@ -96,7 +96,8 @@ scope. Do not assume the daemon inherits directory-aware interactive shell setup
 Environment configuration is read-only seed files in `KEY=value` format plus
 explicit component assignments and selected inherited values. Seeds are not
 sourced as shell scripts. Shared environment sets require explicit inclusion.
-Apply the launch baseline, selected pass-through values, seed files in declaration
+Apply the native launch baseline (containers retain image defaults), selected
+pass-through values, seed files in declaration
 order, and explicit component assignments in that order. Resolve dynamic
 references in the assignments from the allocated instance plan. Do not dump the
 daemon's full environment into application processes.

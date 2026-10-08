@@ -2,8 +2,8 @@
 
 This is the implementation baseline for the [V1 PRD](prd.md). The executable
 implements version discovery, offline scene planning, and a local metadata daemon
-with transactional preparation/recovery. Native service/job execution is implemented for review; container and gateway
-adapters remain planned. See the [manifest guide](manifest.md) and
+with transactional preparation/recovery, native and container execution, and retained
+private resource generations. The gateway adapter remains planned. See the [manifest guide](manifest.md) and
 [daemon guide](daemon.md).
 
 ## Boundaries

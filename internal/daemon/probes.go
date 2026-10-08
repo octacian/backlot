@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-func (s *service) awaitProbe(ctx context.Context, id string, c v1.PlannedComponent, snapshot plan.Snapshot, result *v1.ExecutionResult, entry *execution, journal *runtimeRecord, group *native.Group, services map[string]*native.Group) error {
+func (s *service) awaitProbe(ctx context.Context, id string, c v1.PlannedComponent, snapshot plan.Snapshot, result *v1.ExecutionResult, entry *execution, journal *runtimeRecord, group workload, services map[string]workload) error {
 	timeout, err := parseDuration(c.Readiness.Timeout, 0)
 	if err != nil {
 		return err
@@ -27,6 +27,9 @@ func (s *service) awaitProbe(ctx context.Context, id string, c v1.PlannedCompone
 	for {
 		if err := serviceFailure(services); err != nil {
 			for _, port := range c.Ports {
+				if c.Runtime == v1.Container {
+					continue
+				}
 				conflict, checkErr := native.ListenerConflict(probeCtx, group.PGID(), result.Ports[port.Resource])
 				if checkErr != nil {
 					return checkErr
@@ -59,6 +62,11 @@ func (s *service) awaitProbe(ctx context.Context, id string, c v1.PlannedCompone
 			target, err := runtimeValue(value, id, snapshot.Plan, result.Ports)
 			if err != nil {
 				return err
+			}
+			if c.Runtime == v1.Container {
+				if err := containerProbeOwned(probeCtx, entry.docker, group.(*dockerWork), c, value, result.Ports); err != nil {
+					return err
+				}
 			}
 			ready, err = networkProbe(probeCtx, c.Readiness.Kind, target, group.PGID())
 			var typed *v1.PlanError
@@ -115,6 +123,10 @@ func networkProbe(ctx context.Context, kind, target string, pgid int) (bool, err
 	conflict := false
 	for _, ip := range addresses {
 		endpoint := net.JoinHostPort(ip.String(), portText)
+		if pgid == 0 {
+			pinned = endpoint
+			break
+		}
 		owned, unrelated, err := native.ListenerEndpoint(ctx, pgid, endpoint)
 		if err != nil {
 			return false, err

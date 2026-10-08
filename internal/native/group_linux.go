@@ -1,6 +1,7 @@
 package native
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -38,14 +39,20 @@ func groupMembers(pgid int) ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
+	return scanGroupMembers(pgid, entries, process)
+}
+
+// scanGroupMembers tolerates processes disappearing between enumeration and
+// observation. Other observation failures must still prevent cleanup proof.
+func scanGroupMembers(pgid int, entries []os.DirEntry, readProcess func(int) ([]string, error)) ([]int, error) {
 	var out []int
 	for _, entry := range entries {
 		pid, err := strconv.Atoi(entry.Name())
 		if err != nil {
 			continue
 		}
-		f, err := process(pid)
-		if os.IsNotExist(err) {
+		f, err := readProcess(pid)
+		if os.IsNotExist(err) || errors.Is(err, syscall.ESRCH) {
 			continue
 		}
 		if err != nil {

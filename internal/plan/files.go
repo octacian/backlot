@@ -149,9 +149,10 @@ func containedFile(root, relative string) (string, error) {
 	return file, nil
 }
 
-// canonicalOutput resolves existing ancestors and retains the missing suffix without
-// creating directories. The resulting storage path must stay inside the project.
-func canonicalOutput(root, relative string) (string, error) {
+// OutputPath resolves existing ancestors and retains the missing suffix without
+// creating directories. It rejects symlink escapes from the canonical project root.
+// Executors recheck it before mounting checkout output.
+func OutputPath(root, relative string) (string, error) {
 	candidate := filepath.Join(root, filepath.FromSlash(relative))
 	for {
 		_, err := os.Lstat(candidate)
@@ -187,7 +188,7 @@ func canonicalOutput(root, relative string) (string, error) {
 func validateOutputs(root string, outputs map[string]v1.Output, selected map[string]bool) error {
 	paths := map[string]string{}
 	for name, output := range outputs {
-		resolved, err := canonicalOutput(root, output.Path)
+		resolved, err := OutputPath(root, output.Path)
 		if err != nil {
 			if selected[name] {
 				return err

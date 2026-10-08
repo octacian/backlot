@@ -205,12 +205,12 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			return
 		}
 		switch r.URL.Path {
-		case "/v1/run", "/v1/restart":
+		case "/v1/run", "/v1/restart", "/v1/reset":
 			var request v1.RunRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
 				return
 			}
-			if r.URL.Path == "/v1/restart" && !validID(request.InstanceID) {
+			if (r.URL.Path == "/v1/restart" || r.URL.Path == "/v1/reset") && !validID(request.InstanceID) {
 				writeError(w, problem("invalid_request", "restart requires recorded instance_id"))
 				return
 			}
@@ -218,13 +218,13 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				writeError(w, problem("invalid_request", "run does not accept instance_id"))
 				return
 			}
-			response, err := s.run(r.Context(), request)
+			response, err := s.runMode(r.Context(), request, r.URL.Path == "/v1/reset")
 			if err != nil {
 				writeError(w, err)
 				return
 			}
 			writeJSON(w, response)
-		case "/v1/runtime/stop":
+		case "/v1/runtime/stop", "/v1/destroy":
 			var request v1.InstanceRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
 				return
@@ -233,7 +233,13 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				writeError(w, problem("invalid_request", "recorded instance_id required"))
 				return
 			}
-			instance, err := s.stopRuntime(request.InstanceID)
+			var instance v1.Instance
+			var err error
+			if r.URL.Path == "/v1/destroy" {
+				instance, err = s.destroy(r.Context(), request.InstanceID)
+			} else {
+				instance, err = s.stopRuntime(request.InstanceID)
+			}
 			if err != nil {
 				writeError(w, err)
 				return

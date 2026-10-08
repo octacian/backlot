@@ -1,9 +1,11 @@
-# Local daemon and native execution
+# Local daemon and execution
 
 Milestone 2 adds explicit local daemon control and durable metadata preparation.
 `prepared` means a validated snapshot was recorded. It never means an application
-was executed, a resource was reserved, or readiness was observed. Native execution and retained logs are documented below; Docker, Caddy, broader
-resources and evidence retention remain later milestones.
+was executed, a resource was reserved, or readiness was observed. Native execution
+and retained logs are documented below. See [containers/private state](containers.md)
+for Docker execution and retained resource lifecycle; Caddy and broader evidence
+retention remain later milestones.
 
 ## Commands
 
@@ -24,8 +26,9 @@ bin/backlot daemon stop --state-dir /absolute/private/backlot --json
 
 `daemon start` backgrounds this executable's `daemon serve` and waits for a typed
 handshake. `daemon serve` runs in the foreground until SIGINT, SIGTERM or an API
-stop request. `daemon stop` joins native cleanup before acknowledging `stopping`; cleanup or
-collection failure returns nonzero. Socket removal marks completed shutdown. There is no service installer. Use the same `--state-dir` on each command;
+stop request. `daemon stop` joins owned runtime cleanup before acknowledging
+`stopping`; cleanup or collection failure returns nonzero. Socket removal marks
+completed shutdown. There is no service installer. Use the same `--state-dir` on each command;
 without it, the directory is `backlot/daemon` below Go's `os.UserConfigDir()`.
 State storage in this milestone uses that explicit flag/default; the manifest's
 machine `storage` retention settings remain intent for later evidence storage.
@@ -63,7 +66,8 @@ the project directory's filesystem identity.
 Repeated persistent preparation reports manifest/config digest drift and returns
 the original record without overwriting its snapshot, including cancelled or
 interrupted records. Metadata preparation itself never restarts runtime; native restart is described
-below. Reset/destroy/adoption remain later operations.
+below. Reset/destroy are documented in the [private-state guide](containers.md);
+checkout adoption remains deferred.
 Inspection addresses a recorded instance ID and does not read a changed checkout.
 Ordinary views contain only the redacted plan. The daemon stores the validated
 manifest privately and resolved sensitive values in a separate protected database
@@ -105,8 +109,9 @@ through `internal/client`. Administrative HTTP is available only on `daemon.sock
 never a TCP/LAN listener. Send `X-Backlot-API-Version: v1` on every request, and
 `Content-Type: application/json` for POST bodies. POST contracts also require
 `api_version: v1`. Unknown/missing versions are rejected, independently of binary
-version. State format 1 is checked before state mutation; unsupported/missing
-formats in existing populated databases are rejected without migration.
+version. The binary's declared state format is checked before state mutation;
+unsupported/missing formats in existing populated databases are rejected without
+migration. See the [private-state guide](containers.md) for compatibility.
 
 | Endpoint | Named request | Named response |
 | --- | --- | --- |
@@ -116,6 +121,9 @@ formats in existing populated databases are rejected without migration.
 | `POST /v1/inspect` | `InstanceRequest` | `InstanceResponse` |
 | `POST /v1/cancel` | `InstanceRequest` | `InstanceResponse` |
 | `POST /v1/renew` | `LeaseRequest` | `InstanceResponse` |
+| `POST /v1/run`, `/v1/restart`, `/v1/reset` | `RunRequest` | `InstanceResponse` |
+| `POST /v1/runtime/stop`, `/v1/destroy` | `InstanceRequest` | `InstanceResponse` |
+| `POST /v1/logs` | `LogsRequest` | `LogsResponse` |
 
 Failures use `ErrorResponse` with safe code/field/message values and an HTTP error
 status. Request/response documents are bounded to 1 MiB, with strict types, exact
@@ -162,11 +170,12 @@ do not write secrets to those streams. Logs persist outside runtime across stop
 and restart. There is no configurable retention policy, artifact collection or
 keep-on-failure in this milestone.
 
-Selected containers, publication, non-port resources and fresh-only jobs are
-rejected before application launch. Metadata `prepare` retains its allocation-free
-semantics for all supported manifest declarations. TCP/HTTP probes additionally
-require `lsof` on the daemon PATH, to prove the listener belongs to the supervised
-group at the actual dialed destination; an unrelated listener never satisfies
+Generic containers, private volumes/directories/secrets/networks and fresh-only
+jobs follow the [private-state lifecycle](containers.md). Publication remains
+deferred. Metadata `prepare` retains its allocation-free semantics for all
+supported declarations. Native TCP/HTTP probes additionally require `lsof` on the
+daemon PATH, to prove the listener belongs to the supervised group at the actual
+dialed destination; an unrelated listener never satisfies
 readiness and is never killed. Targets must resolve exclusively to loopback
 addresses. Resolution is validated once per attempt and the owned numeric
 endpoint is pinned for TCP and HTTP dialing, including HTTPS hostname checks.
@@ -204,11 +213,16 @@ owners before releasing their store, or reports failure and retains ownership.
 Persistent startup is daemon-owned after acceptance, so closing a client leaves
 it running. Concurrent starts join the same instance, and repeated starts report
 manifest/config drift without replacing the accepted private snapshot. Failed,
-interrupted and stopped instances require explicit `restart`, which revalidates
+interrupted instances require explicit `restart`, which revalidates
 checkout identity, applies compatible command/environment/graph/probe drift, and
 retains logical identity. Resource contract changes are rejected before stopping
-old work; reset/destroy remain later milestones. Instance mutations and declared
-checkout-output groups serialize across scenes/runs. Ctrl-C/SIGTERM during a CLI
+old work and require explicit `reset` or `destroy`. Stop/run reuses the retained
+snapshot and storage; restart can apply safe drift. Reset removes the generation
+and starts fresh under the same identity; destroy removes it and retains historical
+results/logs. See the [private-state contract](containers.md#generations-jobs-and-drift)
+for initialization, credentials, conservative drift and cleanup behavior.
+Instance mutations and declared checkout-output groups serialize across
+scenes/runs. Ctrl-C/SIGTERM during a CLI
 run cancels and joins the supervised work. Ordinary persistent client disconnect
 does not cancel accepted startup; disposable client loss expires its lease.
 
@@ -228,16 +242,7 @@ and marks interrupted with an explicit collection gap; it never resumes work.
 Missing or mismatched control authority is a cleanup failure that preserves
 uncertain survivors. Inspect the private ownership journal before manual action.
 
-Additional typed POST endpoints (same strict v1 negotiation and JSON rules):
-
-| Endpoint | Named request | Named response |
-| --- | --- | --- |
-| `/v1/run` | `RunRequest` | `InstanceResponse` (accepted startup) |
-| `/v1/restart` | `RunRequest` with `instance_id` | `InstanceResponse` |
-| `/v1/runtime/stop` | `InstanceRequest` | `InstanceResponse` after verified cleanup |
-| `/v1/logs` | `LogsRequest` | `LogsResponse` (bounded page and next offset) |
-
 The CLI waits for persistent ready or disposable terminal status through inspect;
 raw API callers must renew disposable capabilities while polling. Logs pages use
 an absolute unfiltered record offset, so component filtering preserves cursor
-progress. Inspect and cancel remain shared across metadata and native execution.
+progress. Inspect and cancel remain shared across metadata and runtime execution.

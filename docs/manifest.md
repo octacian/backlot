@@ -181,7 +181,9 @@ A component explicitly lists `environment_sets`, then declares its own
 and `required`. Apply these phases across all included sets, in their listed
 order followed by the component environment:
 
-1. Launch baseline: existing PATH, HOME, TMPDIR, TMP, TEMP, SystemRoot only.
+1. Native launch baseline: existing PATH, HOME, TMPDIR, TMP, TEMP, SystemRoot
+   only. Containers keep image defaults; host values enter only through explicit
+   pass-throughs, seeds or assignments.
 2. Selected inherited keys from all pass-through lists.
 3. Seed files from all seed lists, in declaration order.
 4. Explicit assignments from all assignment maps; the component wins last.

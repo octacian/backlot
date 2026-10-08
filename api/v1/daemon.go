@@ -1,9 +1,9 @@
 package v1
 
 // StateVersion identifies the supported durable database format.
-const StateVersion = 1
+const StateVersion = 2
 
-// InstanceStatus distinguishes metadata preparation from observed native execution.
+// InstanceStatus distinguishes metadata preparation from observed execution.
 type InstanceStatus string
 
 // Supported preparation states.

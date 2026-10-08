@@ -981,6 +981,31 @@ func TestNativeRuntime(t *testing.T) {
 		h.state(r.Instance.ID, v1.Failed)
 		h.absent()
 	})
+	t.Run("inactive-guardian-stop-status", func(t *testing.T) {
+		output, err := os.CreateTemp(t.TempDir(), "guardian-output")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = output.Close() })
+		group, err := native.Start(binary, output, output)
+		if group != nil {
+			t.Cleanup(func() {
+				if err := group.Stop(0); err != nil {
+					t.Error("inactive guardian cleanup", err)
+				}
+			})
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := group.Stop(0); err != nil {
+			t.Fatal(err)
+		}
+		result := group.Result()
+		if result == nil || result.CollectionFailure != "" || result.Code != -1 || group.PGID() != 0 || group.Alive() {
+			t.Fatal("inactive cancellation lost status or launched work", result)
+		}
+	})
 	t.Run("cli-sigint-sigterm-cancel-unlimited-terminal", func(t *testing.T) {
 		for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
 			t.Run(sig.String(), func(t *testing.T) {
@@ -1014,15 +1039,85 @@ func TestNativeRuntime(t *testing.T) {
 			})
 		}
 	})
+	t.Run("native-private-generation-and-job-policies", func(t *testing.T) {
+		h := newNativeHarness(t, binary)
+		delete(h.manifest.Scenes, "test")
+		h.manifest.Tools["sh"] = "sh"
+		h.manifest.Resources["data"] = v1.Resource{Kind: "directory"}
+		h.manifest.Resources["password"] = v1.Resource{Kind: "secret"}
+		env := v1.Environment{Assign: map[string]v1.Value{"DATA": {Ref: &v1.Reference{Kind: "resource", Name: "data", Field: "path"}}, "SECRET": {Ref: &v1.Reference{Kind: "resource", Name: "password", Field: "value"}}}}
+		prep := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.FreshOnly, Initializes: []string{"data"}, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: []string{"-c", "printf '%s\n' \"$SECRET\" >> \"$DATA/init\""}}}
+		each := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: []string{"-c", "echo start >> \"$DATA/starts\""}}, DependsOn: []v1.Dependency{{Component: "server", Condition: v1.Ready}}}
+		server := h.manifest.Components["server"]
+		server.DependsOn = []v1.Dependency{{Component: "prep", Condition: v1.Completed}}
+		h.manifest.Components["server"] = server
+		h.manifest.Components["prep"] = prep
+		h.manifest.Components["each"] = each
+		h.manifest.Scenes["dev"] = v1.Scene{Lifetime: v1.Persistent, Resources: []string{"port", "data", "password"}, Components: []string{"prep", "server", "each"}}
+		h.write()
+		id := h.run("dev").Instance.ID
+		t.Cleanup(func() {
+			if _, err := h.cli.Destroy(context.Background(), id); err != nil {
+				h.cleanupUnverified = true
+				t.Error(err)
+			}
+		})
+		h.state(id, v1.RuntimeReady)
+		contents := func() (string, string, string) {
+			t.Helper()
+			paths, err := filepath.Glob(filepath.Join(h.dir, "data", "*", "init"))
+			if err != nil || len(paths) != 1 {
+				t.Fatal("owned directory generation missing", err)
+			}
+			init, err := os.ReadFile(paths[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			starts, err := os.ReadFile(filepath.Join(filepath.Dir(paths[0]), "starts"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return paths[0], string(init), string(starts)
+		}
+		path, secret, starts := contents()
+		if strings.Count(secret, "\n") != 1 || starts != "start\n" {
+			t.Fatal("initial job policy failed")
+		}
+		req := h.request("dev")
+		req.InstanceID = id
+		if _, err := h.cli.Restart(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+		ready := h.state(id, v1.RuntimeReady)
+		if ready.Instance.Execution.Components[0].Status != "skipped" {
+			t.Fatal("native fresh-only not skipped")
+		}
+		_, retained, starts := contents()
+		if retained != secret || starts != "start\nstart\n" {
+			t.Fatal("native retained generation lost")
+		}
+		if _, err := h.cli.Reset(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+		h.state(id, v1.RuntimeReady)
+		nextPath, nextSecret, starts := contents()
+		if nextPath == path || nextSecret == secret || starts != "start\n" {
+			t.Fatal("native reset did not replace generation")
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatal("old owned directory survived reset", err)
+		}
+	})
+
 	t.Run("selected-unsupported-rejected-before-launch", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
-		h.manifest.Resources["data"] = v1.Resource{Kind: "directory"}
+		h.manifest.Resources["data"] = v1.Resource{Kind: "origin"}
 		scene := h.manifest.Scenes["dev"]
 		scene.Resources = append(scene.Resources, "data")
 		h.manifest.Scenes["dev"] = scene
 		h.write()
 		if _, err := h.cli.Run(context.Background(), h.request("dev")); err == nil {
-			t.Fatal("non-port resource executed")
+			t.Fatal("publication resource executed")
 		}
 		if _, err := os.Stat(h.pids); !os.IsNotExist(err) {
 			t.Fatal("preflight rejection launched fixture", err)

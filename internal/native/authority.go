@@ -221,6 +221,10 @@ func Supervise() error {
 			}
 			_ = input.Close()
 			<-decodeDone
+			if workload == nil {
+				// Activation can no longer be read or executed by this authority.
+				publish(Exit{Code: -1, Error: "command cancelled before activation"})
+			}
 			data, encodeErr := json.Marshal(proof)
 			if encodeErr == nil {
 				encodeErr = os.WriteFile(filepath.Join(filepath.Dir(id.Control), "receipt.json"), data, 0600)
@@ -252,6 +256,7 @@ func Supervise() error {
 					if err := os.WriteFile(filepath.Join(filepath.Dir(id.Control), "receipt.json"), data, 0600); err != nil {
 						return err
 					}
+					publish(Exit{Code: -1, Error: "command cancelled before activation"})
 					return nil
 				}
 			}

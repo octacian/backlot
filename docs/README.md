@@ -21,7 +21,8 @@ Before planning or editing, read:
 | Commits and pull requests | [Git workflow](git-workflow.md) |
 | ADR creation or changes | [ADR guide](adr/README.md), [template](adr/template.md) |
 
-The [local metadata daemon guide](daemon.md) documents milestone 2.
+The [local daemon guide](daemon.md) documents preparation and native execution.
+The [container/private-state guide](containers.md) documents milestone 4.
 
 The [manifest and offline planning guide](manifest.md) documents milestone 1.
 

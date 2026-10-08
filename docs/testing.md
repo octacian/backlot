@@ -81,3 +81,30 @@ workload activation environment cannot enable it. Full receiver identity and
 capability checks precede self-fault. Capability data stays in private temporary
 state and is excluded from reports. Failure paths join owners and prove absence,
 or preserve diagnostic state and report residuals.
+
+## Docker/private-state integration
+
+Provider tests are explicit opt-in and require a local Docker Unix socket plus
+pre-pulled `mariadb:11.4` and `alpine:3.21` images. Backlot itself never pulls/builds
+images. Run this after the provider-independent `make check` gate:
+
+```sh
+docker pull mariadb:11.4
+docker pull alpine:3.21
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^TestDockerRuntime$' -count=1 -v
+```
+
+The suite builds the real race-instrumented CLI/daemon and uses uniquely owned
+containers, networks, volumes, private directories and loopback ports. It exercises
+MariaDB persistence/reset through CLI/daemon/Docker; drift rejection before stop;
+failed/successful fresh-only jobs; each-start jobs; real concurrent worktrees and
+disposable runs; output serialization; partial allocation and interrupted cleanup;
+owned daemon crash recovery; uncertain ownership; foreign consumer blocking and
+unrelated preservation. Faults use retained direct-child daemon handles, never
+observed PIDs. Cleanup is registered before faults and preserves uncertain residuals
+for diagnosis. Docker tests skip only when the explicit endpoint variable is absent;
+a configured but unavailable provider is a failure. The complete suite must pass on
+the frozen feature candidate after independent reviews; `make check` alone does not
+prove Docker integration. Logs and exact source/image/config provenance belong in
+the feature evidence ledger.

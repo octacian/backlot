@@ -8,6 +8,7 @@ import (
 	"github.com/octacian/backlot/internal/plan"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -96,32 +97,44 @@ func networkProbe(ctx context.Context, kind, target string, pgid int) (bool, err
 	} else if !strings.Contains(address, ":") {
 		address = net.JoinHostPort("127.0.0.1", address)
 	}
-	_, portText, err := net.SplitHostPort(address)
+	host, portText, err := net.SplitHostPort(address)
 	if err != nil {
 		return false, err
 	}
 	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return false, errors.New("invalid probe port")
+	}
+	resolveCtx, resolveCancel := context.WithTimeout(ctx, time.Second)
+	addresses, err := localProbeAddresses(resolveCtx, host, net.DefaultResolver.LookupNetIP)
+	resolveCancel()
 	if err != nil {
 		return false, err
 	}
-	owned, err := native.OwnsListener(ctx, pgid, port)
-	if err != nil {
-		return false, err
-	}
-	if !owned {
-		conflict, err := native.ListenerConflict(ctx, pgid, port)
+	pinned := ""
+	conflict := false
+	for _, ip := range addresses {
+		endpoint := net.JoinHostPort(ip.String(), portText)
+		owned, unrelated, err := native.ListenerEndpoint(ctx, pgid, endpoint)
 		if err != nil {
 			return false, err
 		}
+		if owned {
+			pinned = endpoint
+			break
+		}
+		conflict = conflict || unrelated
+	}
+	if pinned == "" {
 		if conflict {
-			return false, problem("port_conflict", "unrelated listener cannot satisfy readiness")
+			return false, problem("port_conflict", "unrelated destination listener cannot satisfy readiness")
 		}
 		return false, nil
 	}
 	attempt, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 	if kind == "tcp" {
-		conn, err := (&net.Dialer{}).DialContext(attempt, "tcp", address)
+		conn, err := (&net.Dialer{}).DialContext(attempt, "tcp", pinned)
 		if err != nil {
 			return false, nil
 		}
@@ -131,7 +144,9 @@ func networkProbe(ctx context.Context, kind, target string, pgid int) (bool, err
 	if err != nil {
 		return false, err
 	}
-	transport := &http.Transport{}
+	transport := &http.Transport{DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, pinned)
+	}}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(request)
@@ -140,4 +155,28 @@ func networkProbe(ctx context.Context, kind, target string, pgid int) (bool, err
 	}
 	closeErr := response.Body.Close()
 	return response.StatusCode >= 200 && response.StatusCode < 400, closeErr
+}
+
+// Resolve once, validate every result, then dial only the chosen numeric endpoint.
+// Hostname rebinding or remote listeners cannot substitute for local ownership.
+func localProbeAddresses(ctx context.Context, host string, lookup func(context.Context, string, string) ([]netip.Addr, error)) ([]netip.Addr, error) {
+	var addresses []netip.Addr
+	if ip, err := netip.ParseAddr(host); err == nil {
+		addresses = []netip.Addr{ip}
+	} else {
+		var err error
+		addresses, err = lookup(ctx, "ip", host)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(addresses) == 0 {
+		return nil, problem("readiness_unowned", "native readiness requires a resolved loopback destination")
+	}
+	for _, ip := range addresses {
+		if !ip.IsLoopback() || ip.Zone() != "" {
+			return nil, problem("readiness_unowned", "native readiness destinations must resolve exclusively to loopback addresses")
+		}
+	}
+	return addresses, nil
 }

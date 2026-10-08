@@ -48,7 +48,12 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 		return problem("permissions", "cannot inspect daemon lock")
 	}
 	lock := flock.New(lockPath, flock.SetPermissions(0600))
-	defer func() { resultErr = errors.Join(resultErr, lock.Close()) }()
+	closeOwnership := true
+	defer func() {
+		if closeOwnership {
+			resultErr = errors.Join(resultErr, lock.Close())
+		}
+	}()
 	acquired, err := lock.TryLock()
 	if err != nil {
 		return problem("lock_unavailable", "cannot acquire daemon lock")
@@ -60,7 +65,11 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, state.db.Close()) }()
+	defer func() {
+		if closeOwnership {
+			resultErr = errors.Join(resultErr, state.db.Close())
+		}
+	}()
 	path := SocketPath(options.Directory)
 	if staleInfo, err := os.Lstat(path); err == nil {
 		if err := localipc.File(path, true); err != nil {
@@ -151,6 +160,13 @@ loop:
 		}
 	}
 	stopErr := svc.stop()
+	if !svc.ownersJoined() {
+		// A failed finite join must not close storage underneath its owner. Retain
+		// the database and lock until that owner finishes; shutdown remains an error.
+		closeOwnership = false
+		stopErr = errors.Join(stopErr, problem("cleanup_failed", "execution owner remains unjoined; state ownership retained"))
+		go func() { svc.waitOwners(); _ = state.db.Close(); _ = lock.Close() }()
+	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	shutdownErr := server.Shutdown(shutdownCtx)
@@ -254,29 +270,14 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				writeError(w, problem("invalid_request", "instance_id must be a recorded 64-character hex ID"))
 				return
 			}
-			if r.URL.Path == "/v1/cancel" {
-				s.mu.Lock()
-				entry := s.executions[request.InstanceID]
-				s.mu.Unlock()
-				if entry != nil {
-					instance, err := s.stopRuntime(request.InstanceID)
-					if err != nil {
-						writeError(w, err)
-						return
-					}
-					writeJSON(w, v1.InstanceResponse{APIVersion: v1.Version, Instance: instance})
-					return
-				}
-			}
-			s.mu.Lock()
+
 			var instance v1.Instance
 			var err error
 			if r.URL.Path == "/v1/cancel" {
-				instance, err = s.store.cancel(request.InstanceID)
+				instance, err = s.cancelRuntime(request.InstanceID)
 			} else {
 				instance, err = s.store.inspect(request.InstanceID)
 			}
-			s.mu.Unlock()
 			if err != nil {
 				writeError(w, err)
 				return

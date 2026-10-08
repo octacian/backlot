@@ -29,6 +29,8 @@ type service struct {
 	checkpoint func(string) error
 	// resolve lets tests control the input-read boundary while using the real planner.
 	resolve func(plan.Source, v1.PlanRequest) (plan.Snapshot, error)
+	// beforeExecution gates tests between prepare and serialized acceptance.
+	beforeExecution func(string)
 }
 
 func (s *service) prepare(ctx context.Context, request v1.PrepareRequest) (v1.InstanceResponse, error) {
@@ -133,28 +135,21 @@ func (s *service) expire() error {
 		}
 	}
 	s.mu.Unlock()
-	if err := s.stopExecutions(ids); err != nil {
-		return err
+	var expiryErr error
+	for _, id := range ids {
+		expiryErr = errors.Join(expiryErr, s.expireRuntime(id))
 	}
-
-	return s.store.reconcile("", true)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return errors.Join(expiryErr, s.store.reconcile("", true))
 }
 
 func (s *service) stopExecutions(ids []string) error {
-	s.mu.Lock()
-	for _, id := range ids {
-		if entry := s.executions[id]; entry != nil {
-			entry.mu.Lock()
-			entry.cancel()
-			entry.mu.Unlock()
-		}
-	}
-	s.mu.Unlock()
 	var result error
 	var mu sync.Mutex
 	var joined sync.WaitGroup
 	for _, id := range ids {
-		joined.Go(func() { _, err := s.stopExecution(id); mu.Lock(); result = errors.Join(result, err); mu.Unlock() })
+		joined.Go(func() { _, err := s.stopRuntime(id); mu.Lock(); result = errors.Join(result, err); mu.Unlock() })
 	}
 	joined.Wait()
 	return result

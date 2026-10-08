@@ -166,7 +166,11 @@ Selected containers, publication, non-port resources and fresh-only jobs are
 rejected before application launch. Metadata `prepare` retains its allocation-free
 semantics for all supported manifest declarations. TCP/HTTP probes additionally
 require `lsof` on the daemon PATH, to prove the listener belongs to the supervised
-group; an unrelated listener never satisfies readiness and is never killed.
+group at the actual dialed destination; an unrelated listener never satisfies
+readiness and is never killed. Targets must resolve exclusively to loopback
+addresses. Resolution is validated once per attempt and the owned numeric
+endpoint is pinned for TCP and HTTP dialing, including HTTPS hostname checks.
+Remote dependency probes are outside this native contract.
 Assigned loopback ports are observed free rather than reserved. A proven collision
 allows up to three allocation attempts, each after verified cleanup of the failed
 owned group. Other service/job failures are never automatically retried.
@@ -179,7 +183,10 @@ be `0s` for unlimited; any other applicable finite budget still limits execution
 Negative durations are rejected. API execution options use the same duration
 strings. `--stop-grace` accepts any finite nonnegative duration and defaults to `10s`;
 zero means immediate escalation. Verification and collection have separate finite
-budgets after the configured grace. Disposable clients renew the finite daemon
+budgets after the configured grace. The outer owner join permits the accepted
+grace plus 20 seconds of bounded activation, verification and collection overhead;
+a failed join reports failure and retains state ownership until the owner exits.
+Disposable clients renew the finite daemon
 lease while waiting; unlimited execution never disables lease cancellation.
 
 Persistent startup is daemon-owned after acceptance, so closing a client leaves

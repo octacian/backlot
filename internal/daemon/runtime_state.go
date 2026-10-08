@@ -199,3 +199,36 @@ func (s *store) cleanupFailures() error {
 		return errors.Join(err, failures)
 	})
 }
+
+// acceptExecution rechecks eligibility and lease in the same transaction as launch
+// acceptance. Cached preparation responses never authorize resurrection.
+func (s *store) acceptExecution(id string, journal runtimeRecord, result *v1.ExecutionResult, restart bool) (v1.Instance, error) {
+	var instance v1.Instance
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		r, err := load(tx, id)
+		if err != nil {
+			return err
+		}
+		if !restart && r.Instance.Status != v1.Prepared {
+			return problem("restart_required", "instance is no longer prepared; explicit restart required")
+		}
+		if restart && (r.Instance.Plan.Lifetime != v1.Persistent || (active(r.Instance.Status) && r.Instance.Status != v1.Prepared)) {
+			return problem("conflict", "restart requires joined persistent execution")
+		}
+		if r.Instance.Plan.Lifetime == v1.Disposable {
+			expiry, err := time.Parse(time.RFC3339Nano, r.Instance.LeaseExpiresAt)
+			if err != nil || r.LeaseHash == "" || !expiry.After(time.Now()) {
+				return problem("lease_expired", "disposable lease is not valid for execution acceptance")
+			}
+		}
+		r.Instance.Status = v1.Starting
+		r.Instance.Operation.Status = v1.Starting
+		r.Instance.Execution = result
+		if err := put(tx, "runtime", id, journal); err != nil {
+			return err
+		}
+		instance = r.Instance
+		return put(tx, "instances", id, r)
+	})
+	return instance, err
+}

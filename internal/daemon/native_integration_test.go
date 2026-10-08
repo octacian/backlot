@@ -5,6 +5,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -80,6 +81,32 @@ func TestNativeFixtureProcess(t *testing.T) {
 	if os.Getenv("DELAY_BIND") == "1" {
 		time.Sleep(300 * time.Millisecond)
 	}
+	// Private fixture authority survives a deliberate guardian crash. Cleanup asks
+	// this live member to kill its own group; the test never signals an observed PGID.
+	if control := os.Getenv("FIXTURE_CONTROL"); control != "" {
+		_ = os.Remove(control)
+		socket, err := net.Listen("unix", control)
+		if err != nil {
+			os.Exit(24)
+		}
+		go func() {
+			for {
+				conn, err := socket.Accept()
+				if err != nil {
+					return
+				}
+				var request fixtureControl
+				_ = json.NewDecoder(conn).Decode(&request)
+				if request.Token == os.Getenv("FIXTURE_TOKEN") {
+					if request.Action == "kill" {
+						_ = syscall.Kill(-syscall.Getpgrp(), syscall.SIGKILL)
+					}
+					_ = json.NewEncoder(conn).Encode(syscall.Getpgrp())
+				}
+				_ = conn.Close()
+			}
+		}()
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:"+os.Getenv("PORT"))
 	if err != nil {
 		os.Exit(22)
@@ -89,6 +116,8 @@ func TestNativeFixtureProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+type fixtureControl struct{ Token, Action string }
+
 type nativeHarness struct {
 	t                          *testing.T
 	binary, dir, project, pids string
@@ -96,6 +125,8 @@ type nativeHarness struct {
 	cli                        *client.Client
 	process                    *exec.Cmd
 	waited                     bool
+	cleanupUnverified          bool
+	control, controlToken      string
 	manifest                   v1.Manifest
 	tokens                     map[string]string
 	daemonLog                  bytes.Buffer
@@ -200,7 +231,8 @@ func (h *nativeHarness) absent() {
 			time.Sleep(20 * time.Millisecond)
 		}
 		if syscall.Kill(pid, 0) != syscall.ESRCH {
-			h.t.Errorf("fixture PID %d survives acknowledged cleanup", pid)
+			h.cleanupUnverified = true
+			h.t.Errorf("fixture PID %d survives acknowledged cleanup; preserving %s", pid, h.dir)
 		}
 	}
 }
@@ -215,7 +247,7 @@ func (h *nativeHarness) close() {
 			if err != nil && stopErr == nil {
 				h.t.Error("daemon failed after successful shutdown request", err)
 			}
-		case <-time.After(16 * time.Second):
+		case <-time.After(40 * time.Second):
 			_ = h.process.Process.Kill()
 			<-done
 			h.t.Error("daemon shutdown exceeded budget")
@@ -234,7 +266,12 @@ func newNativeHarness(t *testing.T, binary string, lease ...string) *nativeHarne
 	if err != nil {
 		t.Fatal(err)
 	}
+	var h *nativeHarness
 	t.Cleanup(func() {
+		if h != nil && h.cleanupUnverified {
+			t.Log("preserved unverified fixture state", root)
+			return
+		}
 		if err := os.RemoveAll(root); err != nil {
 			t.Error(err)
 		}
@@ -243,16 +280,18 @@ func newNativeHarness(t *testing.T, binary string, lease ...string) *nativeHarne
 	if len(lease) > 0 {
 		budget = lease[0]
 	}
-	h := &nativeHarness{t: t, binary: binary, lease: budget, dir: filepath.Join(root, "state"), project: filepath.Join(root, "project"), pids: filepath.Join(root, "pids")}
+	h = &nativeHarness{t: t, binary: binary, lease: budget, dir: filepath.Join(root, "state"), project: filepath.Join(root, "project"), pids: filepath.Join(root, "pids")}
 	if err := os.Mkdir(h.project, 0700); err != nil {
 		t.Fatal(err)
 	}
+	h.control = filepath.Join(root, "fixture.sock")
+	h.controlToken = fmt.Sprintf("%x", mustFixtureToken(t))
 	literal := func(s string) v1.Value { return v1.Value{Literal: &s} }
 	port := v1.Value{Ref: &v1.Reference{Kind: "resource", Name: "port", Field: "port"}}
 	command := func(mode string) *v1.Command {
 		return &v1.Command{Tool: "fixture", Args: []string{"-test.run=TestNativeFixtureProcess", "--", mode}}
 	}
-	env := v1.Environment{Assign: map[string]v1.Value{"BACKLOT_NATIVE_FIXTURE": literal("1"), "PORT": port, "PIDFILE": literal(h.pids)}}
+	env := v1.Environment{Assign: map[string]v1.Value{"BACKLOT_NATIVE_FIXTURE": literal("1"), "PORT": port, "PIDFILE": literal(h.pids), "FIXTURE_CONTROL": literal(h.control), "FIXTURE_TOKEN": literal(h.controlToken)}}
 	server := v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: command("server"), Resources: []string{"port"}, Ports: map[string]v1.ServicePort{"http": {Resource: "port"}}, Environment: env, Readiness: &v1.Probe{Kind: "tcp", Target: &port, Timeout: "2s"}}
 	job := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: command("job"), Resources: []string{"port"}, Environment: env, DependsOn: []v1.Dependency{{Component: "server", Condition: v1.Ready}}}
 	self, err := os.Executable()
@@ -272,6 +311,88 @@ func TestNativeRuntime(t *testing.T) {
 	build := exec.Command("go", "build", "-race", "-o", binary, "../../cmd/backlot")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, output)
+	}
+	t.Run("uncertainty-cleanup-after-fatal", func(t *testing.T) {
+		record := filepath.Join(t.TempDir(), "record")
+		self, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		command := exec.Command(self, "-test.run=^TestNativeUncertaintyCleanupFailurePath$", "-test.v")
+		command.Env = append(os.Environ(), "BACKLOT_FAILURE_BINARY="+binary, "BACKLOT_FAILURE_RECORD="+record)
+		output, err := command.CombinedOutput()
+		if err == nil || !strings.Contains(string(output), "intentional assertion after guardian fault") {
+			t.Fatalf("expected intentional subprocess failure: %v %s", err, output)
+		}
+		if strings.Contains(string(output), "DATA RACE") || strings.Contains(string(output), "unverified") || strings.Contains(string(output), "survives acknowledged") {
+			t.Fatalf("fixture cleanup failed: %s", output)
+		}
+		data, err := os.ReadFile(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.SplitN(string(data), "\n", 2)
+		if _, err := os.Stat(lines[0]); !os.IsNotExist(err) {
+			t.Fatal("verified fixture state not removed", err, string(output))
+		}
+		numbers := strings.Fields(lines[1])
+		pgid, _ := strconv.Atoi(numbers[0])
+		if syscall.Kill(-pgid, 0) != syscall.ESRCH {
+			t.Fatal("failure path left group", pgid)
+		}
+		for _, text := range numbers[1:] {
+			pid, _ := strconv.Atoi(text)
+			if syscall.Kill(pid, 0) != syscall.ESRCH {
+				t.Fatal("failure path left process", pid)
+			}
+		}
+	})
+	for _, action := range []string{"stop", "restart", "shutdown"} {
+		t.Run("accepted-16s-grace-"+action, func(t *testing.T) {
+			h := newNativeHarness(t, binary)
+			request := h.request("dev")
+			request.Options.StopGrace = "16s"
+			r, err := h.cli.Run(context.Background(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.state(r.Instance.ID, v1.RuntimeReady)
+			oldPIDs, err := os.ReadFile(h.pids)
+			if err != nil {
+				t.Fatal(err)
+			}
+			started := time.Now()
+			switch action {
+			case "stop":
+				_, err = h.cli.StopExecution(context.Background(), r.Instance.ID)
+			case "restart":
+				request.InstanceID = r.Instance.ID
+				request.Options.StopGrace = "0s"
+				_, err = h.cli.Restart(context.Background(), request)
+			case "shutdown":
+				_, err = h.cli.Stop(context.Background())
+				if err == nil {
+					err = h.process.Wait()
+					h.waited = true
+				}
+			}
+			elapsed := time.Since(started)
+			if err != nil {
+				t.Fatal(action, elapsed, err)
+			}
+			if elapsed < 16*time.Second || elapsed > 36*time.Second {
+				t.Fatal("accepted grace not honored", elapsed)
+			}
+			for _, text := range strings.Fields(string(oldPIDs)) {
+				pid, _ := strconv.Atoi(text)
+				if syscall.Kill(pid, 0) != syscall.ESRCH {
+					t.Fatal("old owned process remains", pid)
+				}
+			}
+			if action == "restart" {
+				h.state(r.Instance.ID, v1.RuntimeReady)
+			}
+		})
 	}
 	t.Run("persistent-concurrent-logs-stop-restart", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
@@ -496,11 +617,19 @@ func TestNativeRuntime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer func() { _ = store.db.Close() }()
 		journal, err := store.runtime(r.Instance.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		original := journal.Groups[0]
+		t.Cleanup(func() {
+			if err := native.Stop(original, 0); err != nil {
+				h.cleanupUnverified = true
+				t.Error("retained fixture authority cleanup", err)
+			}
+			h.absent()
+		})
 		journal.Groups[0].Birth = "mismatch"
 		if err := store.saveRuntime(r.Instance.ID, journal); err != nil {
 			t.Fatal(err)
@@ -649,6 +778,7 @@ func TestNativeRuntime(t *testing.T) {
 		if err != nil || guardian <= 1 {
 			t.Fatal("fixture guardian unavailable", err)
 		}
+		h.retainFixtureCleanup()
 		if err := syscall.Kill(guardian, syscall.SIGKILL); err != nil {
 			t.Fatal(err)
 		}
@@ -663,10 +793,7 @@ func TestNativeRuntime(t *testing.T) {
 		if err != nil || actual != pgid {
 			t.Fatal("fixture identity changed", err)
 		}
-		if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil {
-			t.Fatal(err)
-		}
-		h.absent()
+		// Cleanup is registered before the fault and uses retained fixture authority.
 	})
 	t.Run("daemon-crash-during-startup", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
@@ -817,11 +944,21 @@ func TestNativeRuntime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer func() { _ = store.db.Close() }()
 		journal, err := store.runtime(r.Instance.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		original := append([]native.Identity(nil), journal.Groups...)
+		t.Cleanup(func() {
+			for _, id := range original {
+				if err := native.Stop(id, 0); err != nil {
+					h.cleanupUnverified = true
+					t.Error("retained fixture authority cleanup", err)
+				}
+			}
+			h.absent()
+		})
 		journal.Groups = nil
 		if err := store.saveRuntime(r.Instance.ID, journal); err != nil {
 			t.Fatal(err)
@@ -902,4 +1039,84 @@ func newNativeComponent(h *nativeHarness) v1.Component {
 	c := h.manifest.Components["server"]
 	c.Command.Args[len(c.Command.Args)-1] = "server"
 	return c
+}
+
+func mustFixtureToken(t *testing.T) []byte {
+	t.Helper()
+	token := make([]byte, 32)
+	if _, err := rand.Read(token); err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+// Retain before injecting a fault, so Fatal and early returns still join cleanup.
+func (h *nativeHarness) retainFixtureCleanup() int {
+	h.t.Helper()
+	request := func(action string) (int, error) {
+		conn, err := net.DialTimeout("unix", h.control, time.Second)
+		if err != nil {
+			return 0, err
+		}
+		defer func() { _ = conn.Close() }()
+		_ = conn.SetDeadline(time.Now().Add(time.Second))
+		if err := json.NewEncoder(conn).Encode(fixtureControl{h.controlToken, action}); err != nil {
+			return 0, err
+		}
+		var group int
+		err = json.NewDecoder(conn).Decode(&group)
+		return group, err
+	}
+	pgid, err := request("inspect")
+	if err != nil || pgid <= 1 {
+		h.t.Fatal("fixture cleanup authority unavailable", pgid, err)
+	}
+	h.t.Cleanup(func() {
+		if syscall.Kill(-pgid, 0) != syscall.ESRCH {
+			_, _ = request("kill")
+		}
+		deadline := time.Now().Add(3 * time.Second)
+		for syscall.Kill(-pgid, 0) != syscall.ESRCH && time.Now().Before(deadline) {
+			time.Sleep(20 * time.Millisecond)
+		}
+		if syscall.Kill(-pgid, 0) != syscall.ESRCH {
+			h.cleanupUnverified = true
+			h.t.Error("fixture group absence unverified; preserving", h.dir)
+		}
+		h.absent()
+	})
+	return pgid
+}
+
+// This subprocess deliberately fails after fault injection. Its parent verifies
+// that testing cleanup still runs and removes state only after process absence.
+func TestNativeUncertaintyCleanupFailurePath(t *testing.T) {
+	binary := os.Getenv("BACKLOT_FAILURE_BINARY")
+	if binary == "" {
+		return
+	}
+	h := newNativeHarness(t, binary)
+	r := h.run("dev")
+	h.state(r.Instance.ID, v1.RuntimeReady)
+	pgid := h.retainFixtureCleanup()
+	data, err := os.ReadFile(h.pids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := exec.Command("/bin/ps", "-o", "ppid=", "-p", strconv.Itoa(pgid)).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	guardian, err := strconv.Atoi(strings.TrimSpace(string(parent)))
+	if err != nil || guardian <= 1 {
+		t.Fatal("guardian unavailable", err)
+	}
+	record := fmt.Sprintf("%s\n%d %d %s", filepath.Dir(h.dir), pgid, guardian, data)
+	if err := os.WriteFile(os.Getenv("BACKLOT_FAILURE_RECORD"), []byte(record), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(guardian, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	t.Fatal("intentional assertion after guardian fault")
 }

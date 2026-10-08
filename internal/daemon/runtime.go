@@ -29,6 +29,7 @@ type execution struct {
 	components map[string]*native.Group
 	err        error
 	source     capturedSource
+	grace      time.Duration
 }
 type deadlines struct{ startup, job, grace time.Duration }
 
@@ -114,6 +115,9 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 		return empty, err
 	}
 	id := response.Instance.ID
+	if s.beforeExecution != nil {
+		s.beforeExecution(id)
+	}
 	unlock := s.lockMutation(id)
 	defer unlock()
 	if request.InstanceID == "" {
@@ -155,9 +159,6 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 		response.Instance = instance
 		return response, err
 	}
-	if response.Instance.Status != v1.Prepared && request.InstanceID == "" {
-		return empty, problem("restart_required", "failed, stopped or interrupted instances require explicit restart")
-	}
 	if err := identity.verify(); err != nil {
 		return empty, err
 	}
@@ -171,15 +172,12 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 	attempt := newID()
 	result := &v1.ExecutionResult{Attempt: attempt, Components: []v1.ComponentResult{}, Ports: map[string]int{}}
 	r := runtimeRecord{Attempt: attempt, Groups: []native.Identity{}, Options: request.Options, ConfigPath: request.Plan.ConfigPath}
-	if err := s.store.saveRuntime(id, r); err != nil {
-		return empty, err
-	}
-	response.Instance, err = s.store.execution(id, v1.Starting, result)
+	response.Instance, err = s.store.acceptExecution(id, r, result, request.InstanceID != "")
 	if err != nil {
 		return empty, err
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
-	entry := &execution{cancel: cancel, done: make(chan struct{}), jobs: map[string]*native.Group{}, components: map[string]*native.Group{}, source: identity}
+	entry := &execution{cancel: cancel, done: make(chan struct{}), jobs: map[string]*native.Group{}, components: map[string]*native.Group{}, source: identity, grace: mustGrace(request.Options)}
 	s.executions[id] = entry
 	response.Instance, err = s.store.inspect(id)
 	if err != nil {
@@ -209,7 +207,7 @@ func (s *service) stopExecution(id string) (v1.Instance, error) {
 	entry.mu.Unlock()
 	select {
 	case <-entry.done:
-	case <-time.After(15 * time.Second):
+	case <-time.After(time.Until(time.Now().Add(entry.grace).Add(20 * time.Second))):
 		return v1.Instance{}, problem("cleanup_failed", "runtime cancellation did not join within shutdown budget")
 	}
 	entry.mu.Lock()
@@ -630,4 +628,66 @@ func (s *service) stopRuntime(id string) (v1.Instance, error) {
 	unlock := s.lockMutation(id)
 	defer unlock()
 	return s.stopExecution(id)
+}
+
+func mustGrace(options v1.ExecutionOptions) time.Duration {
+	d, _ := executionDeadlines(options)
+	return d.grace
+}
+
+func (s *service) cancelRuntime(id string) (v1.Instance, error) {
+	unlock := s.lockMutation(id)
+	defer unlock()
+	s.mu.Lock()
+	entry := s.executions[id]
+	s.mu.Unlock()
+	if entry != nil {
+		return s.stopExecution(id)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.store.cancel(id)
+}
+func (s *service) expireRuntime(id string) error {
+	unlock := s.lockMutation(id)
+	defer unlock()
+	s.mu.Lock()
+	instance, err := s.store.inspect(id)
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	expiry, parseErr := time.Parse(time.RFC3339Nano, instance.LeaseExpiresAt)
+	expired := instance.LeaseExpiresAt != "" && parseErr == nil && !expiry.After(time.Now()) && active(instance.Status) && instance.Status != v1.Stopping
+	s.mu.Unlock()
+	if !expired {
+		return nil
+	}
+	_, err = s.stopExecution(id)
+	return err
+}
+
+func (s *service) ownerChannels() []<-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	channels := make([]<-chan struct{}, 0, len(s.executions))
+	for _, entry := range s.executions {
+		channels = append(channels, entry.done)
+	}
+	return channels
+}
+func (s *service) ownersJoined() bool {
+	for _, done := range s.ownerChannels() {
+		select {
+		case <-done:
+		default:
+			return false
+		}
+	}
+	return true
+}
+func (s *service) waitOwners() {
+	for _, done := range s.ownerChannels() {
+		<-done
+	}
 }

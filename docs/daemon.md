@@ -170,7 +170,12 @@ group at the actual dialed destination; an unrelated listener never satisfies
 readiness and is never killed. Targets must resolve exclusively to loopback
 addresses. Resolution is validated once per attempt and the owned numeric
 endpoint is pinned for TCP and HTTP dialing, including HTTPS hostname checks.
-Remote dependency probes are outside this native contract.
+Remote dependency probes are outside this native contract. IPv6 wildcard listeners
+can satisfy IPv4 loopback probes only when read-only socket inspection proves
+dual-stack capability: Darwin uses public process-fd socket information; Linux
+uses the observed fd inode and kernel socket-diagnostic IPv6-only attribute.
+This adds no accept requirement or runtime privilege. Unavailable or uncertain
+socket information fails closed; IPv6-only listeners cannot satisfy IPv4 probes.
 Assigned loopback ports are observed free rather than reserved. A proven collision
 allows up to three allocation attempts, each after verified cleanup of the failed
 owned group. Other service/job failures are never automatically retried.

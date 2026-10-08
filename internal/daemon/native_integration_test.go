@@ -107,7 +107,11 @@ func TestNativeFixtureProcess(t *testing.T) {
 			}
 		}()
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:"+os.Getenv("PORT"))
+	host := os.Getenv("BIND_HOST")
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort(host, os.Getenv("PORT")))
 	if err != nil {
 		os.Exit(22)
 	}
@@ -392,6 +396,33 @@ func TestNativeRuntime(t *testing.T) {
 			if action == "restart" {
 				h.state(r.Instance.ID, v1.RuntimeReady)
 			}
+		})
+	}
+	for _, kind := range []string{"tcp", "http"} {
+		t.Run("dual-stack-wildcard-"+kind, func(t *testing.T) {
+			h := newNativeHarness(t, binary)
+			c := h.manifest.Components["server"]
+			c.Environment.Assign["BIND_HOST"] = v1.Value{Literal: ptr("::")}
+			if kind == "http" {
+				listener, err := net.Listen("tcp4", "127.0.0.1:0")
+				if err != nil {
+					t.Fatal(err)
+				}
+				port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+				if err := listener.Close(); err != nil {
+					t.Fatal(err)
+				}
+				c.Environment.Assign["PORT"] = v1.Value{Literal: ptr(port)}
+				c.Readiness = &v1.Probe{Kind: "http", Target: &v1.Value{Literal: ptr("http://127.0.0.1:" + port + "/")}, Timeout: "2s"}
+			}
+			h.manifest.Components["server"] = c
+			h.write()
+			r := h.run("dev")
+			h.state(r.Instance.ID, v1.RuntimeReady)
+			if _, err := h.cli.StopExecution(context.Background(), r.Instance.ID); err != nil {
+				t.Fatal(err)
+			}
+			h.absent()
 		})
 	}
 	t.Run("persistent-concurrent-logs-stop-restart", func(t *testing.T) {

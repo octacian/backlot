@@ -19,7 +19,7 @@ import (
 func listenerState(ctx context.Context, pgid, port int, endpoint string) (bool, bool, error) {
 	query, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	command := exec.CommandContext(query, "lsof", "-nP", "-a", "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN", "-Fptn")
+	command := exec.CommandContext(query, "lsof", "-nP", "-a", "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN", "-Fpftn")
 	data, err := command.Output()
 	if err != nil {
 		var exit *exec.ExitError
@@ -30,6 +30,7 @@ func listenerState(ctx context.Context, pgid, port int, endpoint string) (bool, 
 	}
 	found := false
 	currentGroup := 0
+	currentPID, currentFD := 0, -1
 	family := ""
 	for _, line := range strings.Split(string(data), "\n") {
 		if strings.HasPrefix(line, "p") {
@@ -37,6 +38,7 @@ func listenerState(ctx context.Context, pgid, port int, endpoint string) (bool, 
 			if err != nil {
 				return false, false, err
 			}
+			currentPID, currentFD = pid, -1
 			currentGroup, err = syscall.Getpgid(pid)
 			if err != nil {
 				currentGroup = 0
@@ -46,6 +48,13 @@ func listenerState(ctx context.Context, pgid, port int, endpoint string) (bool, 
 					return false, true, nil
 				}
 				found = true
+			}
+		}
+		if strings.HasPrefix(line, "f") {
+			var err error
+			currentFD, err = strconv.Atoi(line[1:])
+			if err != nil {
+				return false, false, errors.New("listener descriptor unavailable")
 			}
 		}
 		if strings.HasPrefix(line, "t") {
@@ -61,6 +70,16 @@ func listenerState(ctx context.Context, pgid, port int, endpoint string) (bool, 
 				return false, false, err
 			}
 			matched := host == endpoint || (host == "*" && ((family == "IPv4" && wanted.Is4()) || (family == "IPv6" && wanted.Is6())))
+			if host == "*" && family == "IPv6" && wanted.Is4() {
+				if currentFD < 0 {
+					return false, false, errors.New("listener descriptor missing")
+				}
+				var err error
+				matched, err = wildcardServesIPv4(query, currentPID, currentFD, port)
+				if err != nil {
+					return false, false, err
+				}
+			}
 			if matched {
 				if currentGroup != pgid {
 					return false, true, nil

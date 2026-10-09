@@ -36,6 +36,7 @@ type harness struct {
 	fixtureRepo                          string
 	worktrees                            []string
 	cleanupUnverified                    bool
+	startupResidual                      bool
 	collectionWitness                    string
 }
 
@@ -136,22 +137,57 @@ func detail(i v1.Instance, kind string) string {
 }
 func (h *harness) start() {
 	h.t.Helper()
-	h.daemon = exec.Command(h.binary, "daemon", "serve", "--state-dir", h.state, "--lease-duration", "750ms")
-	h.daemon.Stdout = h.daemonLog
-	h.daemon.Stderr = h.daemonLog
-	if err := h.daemon.Start(); err != nil {
+	if err := h.startDaemon(10 * time.Second); err != nil {
 		h.t.Fatal(err)
 	}
+}
+
+// startDaemon owns one Wait immediately after Start. A readiness failure kills
+// only the retained child and joins it before unwinding dependent resources.
+func (h *harness) startDaemon(readinessTimeout time.Duration) (result error) {
+	if h.daemon != nil {
+		return errors.New("owned daemon already retained; explicit cleanup required")
+	}
+	command := exec.Command(h.binary, "daemon", "serve", "--state-dir", h.state, "--lease-duration", "750ms")
+	command.Stdout = h.daemonLog
+	command.Stderr = h.daemonLog
+	if err := command.Start(); err != nil {
+		return fmt.Errorf("owned daemon Start failed: %w", err)
+	}
+	h.daemon = command
 	h.daemonDone = make(chan error, 1)
-	go func(command *exec.Cmd, done chan error) { done <- command.Wait() }(h.daemon, h.daemonDone)
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := h.command("daemon", "status", "--state-dir", h.state, "--json"); err == nil {
+	go func(done chan error) { done <- command.Wait() }(h.daemonDone)
+	defer func() {
+		if result == nil {
 			return
 		}
-		time.Sleep(25 * time.Millisecond)
+		killErr := command.Process.Kill()
+		if errors.Is(killErr, os.ErrProcessDone) {
+			killErr = nil
+		}
+		select {
+		case <-h.daemonDone:
+			h.daemon = nil
+			result = errors.Join(result, killErr)
+		case <-time.After(5 * time.Second):
+			h.cleanupUnverified = true
+			h.startupResidual = true
+			result = errors.Join(result, killErr, fmt.Errorf("owned startup child unjoined; preserve forwarding/log/state resources at %s", h.root))
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), readinessTimeout)
+	defer cancel()
+	for ctx.Err() == nil {
+		status := exec.CommandContext(ctx, h.binary, "daemon", "status", "--state-dir", h.state, "--json")
+		if err := status.Run(); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(25 * time.Millisecond):
+		}
 	}
-	h.t.Fatal("owned daemon did not become ready")
+	return fmt.Errorf("owned daemon did not become ready: %w", ctx.Err())
 }
 
 // join bounds retained direct-child shutdown; observed PIDs never authorize cleanup.
@@ -202,7 +238,7 @@ func (h *harness) stopDaemon(expectedCollectionFailure bool) {
 }
 func (h *harness) stopDaemonCollection(fragment string) {
 	expectedCollectionFailure := fragment != ""
-	if h.daemon == nil {
+	if h.daemon == nil || h.startupResidual {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -271,7 +307,11 @@ func (h *harness) cleanup() {
 	} else {
 		h.t.Errorf("fixture worktrees preserved with unverified cleanup at %s", h.root)
 	}
-	_ = h.daemonLog.Close()
+	if h.daemon == nil {
+		_ = h.daemonLog.Close()
+	} else {
+		h.t.Errorf("owned child unjoined; preserve open log and state at %s", h.root)
+	}
 	h.t.Logf("private acceptance state/evidence retained at %s (do not publish raw state)", h.root)
 }
 

@@ -1,0 +1,24 @@
+=== RUN   TestReleaseWorkflows
+    release_test.go:433: candidate source: caller checkout; record git revision and dirty patch digest beside this log
+    release_test.go:507: dev instance=a66f8e6fd4d17eea3c6c1bf88c3011294d50d303f47ca5d88fd0b4bff44a63fc origin=https://bl-a66f8e6fd4d17eea3c6c1bf88c3011294d50d303.dev.thatoneguy.ca
+    release_test.go:58: command=run elapsed_ms=19 exit=<nil>
+    release_test.go:58: command=run elapsed_ms=4282 exit=<nil>
+    release_test.go:58: command=run elapsed_ms=4428 exit=<nil>
+=== RUN   TestReleaseWorkflows/public-disposable-job-observation-loss
+=== RUN   TestReleaseWorkflows/public-disposable-job-observation-loss/inspection
+    job_observation_test.go:234: public job loss cause=Docker inspection failed injected_faults=1 actual_post_stop_exit=137; overall failure retained, collection distinction preserved; unrelated cleanup inspections ignored=4
+    release_test.go:58: command=destroy elapsed_ms=60 exit=<nil>
+=== RUN   TestReleaseWorkflows/public-disposable-job-observation-loss/log-collection
+    job_observation_test.go:234: public job loss cause=container output collection failed injected_faults=1 actual_post_stop_exit=137; overall failure retained, collection distinction preserved; unrelated cleanup inspections ignored=4
+    release_test.go:58: command=destroy elapsed_ms=29 exit=<nil>
+=== NAME  TestReleaseWorkflows
+    release_test.go:58: command=destroy elapsed_ms=994 exit=<nil>
+    release_test.go:58: command=destroy elapsed_ms=1021 exit=<nil>
+    release_test.go:58: command=destroy elapsed_ms=1443 exit=<nil>
+    release_test.go:315: private acceptance state/evidence retained at /tmp/bl-public-522269472 (do not publish raw state)
+--- PASS: TestReleaseWorkflows (25.47s)
+    --- PASS: TestReleaseWorkflows/public-disposable-job-observation-loss (6.14s)
+        --- PASS: TestReleaseWorkflows/public-disposable-job-observation-loss/inspection (4.07s)
+        --- PASS: TestReleaseWorkflows/public-disposable-job-observation-loss/log-collection (2.07s)
+PASS
+ok  	github.com/octacian/backlot/internal/acceptance	26.795s

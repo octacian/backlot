@@ -130,9 +130,14 @@ func (h *harness) jobObservationFailure(collection bool) {
 		}
 		proxy.ServeHTTP(w, r)
 	})}
+	var child *harness
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	defer func() {
+		if child != nil && child.daemon != nil {
+			t.Error("owned child unjoined; forwarding resources preserved", root)
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
@@ -172,13 +177,18 @@ func (h *harness) jobObservationFailure(collection bool) {
 	m.Components["observation-job"] = v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: &image, Args: []string{"sh", "-c", `echo job-ready; while true; do echo job-tick; sleep 0.1; done`}}
 	m.Scenes["observation-job"] = v1.Scene{Lifetime: v1.Disposable, Components: []string{"observation-job"}, TerminalJob: "observation-job"}
 	h.writeManifest(m)
-	child := &harness{t: t, root: root, binary: h.binary, config: configPath, project: h.project, state: filepath.Join(root, "state")}
+	child = &harness{t: t, root: root, binary: h.binary, config: configPath, project: h.project, state: filepath.Join(root, "state")}
 	child.daemonLog, err = os.OpenFile(filepath.Join(root, "daemon.log"), os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = child.daemonLog.Close() }()
-	child.start()
+	defer func() {
+		if child.daemon == nil {
+			_ = child.daemonLog.Close()
+		} else {
+			t.Error("owned child unjoined; log preserved", root)
+		}
+	}()
 	collectionObserved := false
 	defer func() {
 		if collectionObserved {
@@ -187,6 +197,7 @@ func (h *harness) jobObservationFailure(collection bool) {
 			child.stop()
 		}
 	}()
+	child.start()
 	p := child.launch(child.project, configPath, "observation-job")
 	started := child.started(child.project, "observation-job", "observation-job", "job-ready")
 	defer func() {

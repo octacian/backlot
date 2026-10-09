@@ -54,7 +54,8 @@ Preserve and report uncertain residuals; never infer ownership from name/PID.
 
 Early real-flow and multiple public workflow checks passed (details below).
 No criterion has final frozen-candidate acceptance yet. The initial Low review, Low fix verification and initial High review have completed;
-High fix verification, frozen final validation and CI remain pending. Record exact command/revision/result/artifact evidence here as gates run;
+one High fix verification completed with H1–H3 accepted and new H4; H4 verification,
+frozen final validation and CI remain pending. Record exact command/revision/result/artifact evidence here as gates run;
 unit/fault-injection tests supplement and never replace public workflow evidence.
 
 ## Findings
@@ -623,3 +624,91 @@ runtime, complete acceptance, branch/PR publication, merge/tag/release claim.
 Exact new candidate commit and collapsed `feature-efficiency/v1` snapshot are in
 `/tmp/bl-high-fixes-skwdmt_1/high-fix-handoff.md`. Source pauses at this committed
 handoff for coordinator-owned independent High fix verification.
+
+
+## H4 owned child startup-failure correction
+
+Input candidate `29946de09e5c6e98a746ec7fdb9742cb8ef839b1`; High fix verification
+report `/tmp/backlot-review-high-fix-verification-issue8.md` confirms H1–H3 addressed
+at implementation/focused-evidence level, then finds H4 (`test_harness`, P2): the
+child shutdown defer followed the readiness handshake, so a post-Start Fatal could
+unwind forwarding/log resources without stopping/joining the retained child.
+This is an identified failure-path gap, not a claim that prior successful runs leaked.
+
+Coordinator renewed exclusive source/runtime grant for **H4 only**, focused
+verification and committed handoff. Full final suites/publication remain paused.
+The same exact owned routes, resources and preservation boundaries apply.
+
+H4 correction: register child shutdown before startup; only retain a command/channel
+after successful Start. One Wait goroutine owns the child. Readiness polling shares
+one bounded context. On readiness error, kill only the retained direct child and
+consume its single Wait result before returning; repeated stop is a guarded no-op.
+If joining fails, explicitly report/preserve the child, forwarding/log/state resources
+and prevent automatic duplicate stop. Fixture forwarding/log defers check joined
+ownership before closing. Parent log cleanup uses the same retained-handle boundary.
+No observed PID authorizes signals; no product semantics/assertion weakening.
+
+`TestOwnedDaemonStartupFailureCleanup` uses a controlled direct Go helper (shell
+wrapper execs the test binary, no detached children). It covers missing executable
+Start failure and a live helper that witnesses forwarding and Serve/status activity
+but never reports readiness. After the intentional readiness deadline, it verifies
+bounded retained-child join, open log/forwarder until join, drained single Wait and
+no duplicate stop invocation. Test resources also preserve explicit residuals.
+
+Private root `/tmp/bl-h4-q25rn54p` holds configuration, source/build/cleanup receipts
+and raw evidence. `source-receipt.json` and `focused-source` preserve exact parent
+29946de plus tracked patch/untracked source and implementation hashes. The generic
+app is unchanged from29946de (also unchanged since2bbf097); explicit app-only build
+receipt records source, Linux ARM64 binary SHA and exact run-labeled image ID.
+Browser was not built/exercised. Historical images/screenshots remain historical;
+final source-bound image rebuilds remain mandatory.
+
+Focused actual results:
+
+- Initial controlled startup regression PASS (1.01s, race package2.370s), followed
+  by final explicit residual-preservation guards in that regression's own cleanup.
+  This initial draft result is not substituted for final-source evidence.
+- Final `go test -race ./internal/acceptance -run
+  '^TestOwnedDaemonStartupFailureCleanup$' -count=1 -v`: **PASS**, 1.01s, race
+  package **2.361s**, `startup-focused-final.log`. Both intentional failure branches
+  passed their assertions; the test did not fail or leave an owned child.
+- `BACKLOT_ACCEPTANCE_CONFIG=<private>/machine.json go test -race
+  ./internal/acceptance -run
+  '^TestReleaseWorkflows$/public-disposable-job-observation-loss$' -count=1 -v`:
+  **PASS**, **25.47s**, race package **26.795s**, `public-job-observation.log`;
+  root `/tmp/bl-public-522269472`. Inspection timeout and truncated-log cases each
+  injected one fault, preserved failure/collection separation and actual post-stop
+  exit137, destroyed instances and joined child/parent daemons. This selection
+  excludes other nested cases and is **not complete public acceptance**.
+- Required frozen pre-commit `make check`: **PASS**, `make-check-h4.log`; schema,
+  notices, formatting, vet, lint, complete default race suite, six ADRs and build.
+  Implementation hashes matched `source-receipt.json` after completion. This is a
+  development check; opt-in skips do not count as final runtime acceptance. No
+  full final validation cycle has launched.
+
+Cleanup verified in `cleanup-receipt.json`/`state-audit.json`: **five destroyed
+instances** across parent/two child states; no retained allocation capabilities.
+Exact app image label and zero consumers checked before `--no-prune` removal,
+subsequent absence verified. Owned fixture repo/one/two removed by topology-verified
+harness cleanup; scoped `backlot` child count **0**. Shared bases/cache, private
+state/source/logs and both original uncertain browser directories preserved. No
+known owned runtime residual and no observed-PID signalling. H4 source is handed
+back paused after commit for independent verification, not final suite ownership.
+
+Review accounting: standard initial1/fix verification1; sensitive required,
+initial1/fix verification1 completed (H1–H3 accepted, H4 found), next H4 verification
+pending. Distinct actionable findings now product7, test_harness23, environment0,
+unknown1. Initial scope5/complexity4/size20 unchanged; cost/usage null. F4 original
+DB stop remains **open historical unknown**, with no causal reconstruction/waiver.
+Remaining final frozen provider/gateway/HTTPS/public/browser/reproducibility/license,
+F4 user disposition and eventual PR/published-CI gates are unchanged and incomplete.
+No publication, release/readiness or Linux/Windows runtime support claim.
+
+Exact H4 commit and collapsed efficiency report are recorded externally in
+`/tmp/bl-h4-q25rn54p/h4-handoff.md`, preserving the self-referential commit boundary.
+
+H4 startup helper source SHA-256:
+`227f5525b7b9b2efcc1afb8205dcd9253397b9059510f45bb1f68144c4985ce0`.
+Toolchain/host recorded in `source-receipt.json`; wrapper execs the temporary
+`go test -race` binary returned by `os.Executable`. That helper binary was not
+separately retained/hashed; source, exact test command and logs are retained.

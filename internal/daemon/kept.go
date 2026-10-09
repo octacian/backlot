@@ -38,6 +38,9 @@ func (s *service) stopKept(id string, entry *execution) (v1.Instance, error) {
 	var cleanup error
 	for _, group := range entry.groups {
 		cleanup = errors.Join(cleanup, group.Stop(entry.grace))
+		if exit := group.Result(); exit != nil && exit.CollectionFailure != "" && instance.Execution.CollectionFailure == "" {
+			instance.Execution.CollectionFailure = "retained native output/status collection could not be verified"
+		}
 	}
 	for _, work := range entry.containers {
 		cleanup = errors.Join(cleanup, work.Stop(entry.grace))

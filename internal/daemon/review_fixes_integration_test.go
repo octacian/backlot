@@ -20,6 +20,7 @@ import (
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/gateway/gatewaytest"
+	"github.com/octacian/backlot/internal/native"
 )
 
 func reviewFixBinary(t *testing.T) string {
@@ -369,5 +370,44 @@ func TestLeaseCollectorOutcomeDoesNotPoisonSweeper(t *testing.T) {
 	got, err := f.s.store.inspect(owner.id)
 	if err != nil || got.Execution.CollectionFailure != result.CollectionFailure {
 		t.Fatal("collector outcome lost", err)
+	}
+}
+
+func TestKeptGuardianLossReportsEvidenceGap(t *testing.T) {
+	binary := reviewFixBinary(t)
+	h := newNativeFaultHarness(t, binary)
+	job := h.manifest.Components["job"]
+	job.Command.Args[len(job.Command.Args)-1] = "job-fail"
+	h.manifest.Components["job"] = job
+	h.write()
+	request := h.request("test")
+	request.Options.KeepOnFailure = true
+	r, err := h.cli.Run(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	final := h.state(r.Instance.ID, v1.Failed).Instance.Execution
+	if !final.Kept || final.TerminalExitCode == nil || *final.TerminalExitCode != 17 {
+		t.Fatal("kept job result missing")
+	}
+	identity := h.guardianCapability(r.Instance.ID)
+	h.retainFixtureCleanup()
+	if err := native.CrashForTest(identity); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.cli.Destroy(context.Background(), r.Instance.ID); err == nil {
+		t.Fatal("uncertain native cleanup succeeded")
+	}
+	got, err := h.cli.Inspect(context.Background(), r.Instance.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := got.Instance.Execution
+	if result.CollectionFailure == "" || result.CleanupFailure == "" || result.TerminalExitCode == nil || *result.TerminalExitCode != 17 {
+		t.Fatal("kept collection gap or original job result lost")
+	}
+	logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID})
+	if err != nil || logs.Gap == "" {
+		t.Fatal("kept historical gap omitted", err)
 	}
 }

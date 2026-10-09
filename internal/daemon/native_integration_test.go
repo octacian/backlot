@@ -978,8 +978,21 @@ func TestNativeRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		final := h.state(r.Instance.ID, v1.Failed)
-		if final.Instance.Execution.CleanupFailure == "" {
-			t.Fatal("guardian loss hidden")
+		if final.Instance.Execution.CleanupFailure == "" || final.Instance.Execution.CollectionFailure == "" {
+			t.Fatal("guardian loss must retain independent cleanup and collection gaps")
+		}
+		for _, component := range final.Instance.Execution.Components {
+			if component.ExitCode != nil {
+				t.Fatal("lost native status invented an original exit")
+			}
+		}
+		logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID})
+		if err != nil || logs.Gap == "" {
+			t.Fatal("historical collection gap omitted", err)
+		}
+		following, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID, Offset: logs.NextOffset})
+		if err != nil || following.Gap != logs.Gap {
+			t.Fatal("following collection gap omitted", err)
 		}
 		if syscall.Kill(root, 0) != nil {
 			t.Fatal("uncertain descendant killed")

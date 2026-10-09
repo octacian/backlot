@@ -142,11 +142,8 @@ func (h *harness) inspectionFailure() {
 		t.Fatal(err)
 	}
 	path := filepath.Join(h.root, "docker-observation.sock")
-	listener, err := net.Listen("unix", path)
+	listener, provider, err := listenProvider(path, upstream.Path)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.Chmod(path, 0600); err != nil {
 		t.Fatal(err)
 	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -171,18 +168,11 @@ func (h *harness) inspectionFailure() {
 	})}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
+	dependency := h.dependency(h, provider, server, done, transport)
 	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := server.Shutdown(ctx); err != nil {
-			t.Error("owned observation proxy shutdown", err)
+		if err := dependency.finish(); err != nil {
+			t.Error("service proxy release", err)
 		}
-		select {
-		case <-done:
-		case <-ctx.Done():
-			t.Error("owned observation proxy unjoined")
-		}
-		transport.CloseIdleConnections()
 	}()
 	config.Docker.Endpoint = "unix://" + path
 	data, err := json.Marshal(config)
@@ -196,11 +186,15 @@ func (h *harness) inspectionFailure() {
 	old := h.config
 	h.config = configPath
 	defer func() { h.config = old }()
-	i := h.require("run", "dev")
+	i, runErr := h.instance("run", "dev")
+	dependency.track(i.ID)
+	if runErr != nil {
+		t.Fatal("observation service start failed", detail(i, "failure"))
+	}
 	// The engine proxy must outlive explicit public destruction even after Fatal.
 	defer func() {
 		if _, err := h.instance("destroy", i.ID); err != nil {
-			t.Error("observation fixture cleanup failed; proxy/state preserved evidence", h.root)
+			t.Error("observation fixture cleanup failed; provider dependency retained through parent recovery", h.root)
 		}
 	}()
 	httpValue(t, i.Execution.Origin, "observation-retained")

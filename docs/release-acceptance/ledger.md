@@ -54,8 +54,8 @@ Preserve and report uncertain residuals; never infer ownership from name/PID.
 
 Early real-flow and multiple public workflow checks passed (details below).
 No criterion has final frozen-candidate acceptance yet. The initial Low review, Low fix verification and initial High review have completed;
-one High fix verification completed with H1–H3 accepted and new H4; H4 verification,
-frozen final validation and CI remain pending. Record exact command/revision/result/artifact evidence here as gates run;
+two High fix verifications completed: H1–H4 accepted, with H5/H6 now requiring
+verification. Frozen final validation and CI remain pending. Record exact command/revision/result/artifact evidence here as gates run;
 unit/fault-injection tests supplement and never replace public workflow evidence.
 
 ## Findings
@@ -712,3 +712,132 @@ H4 startup helper source SHA-256:
 Toolchain/host recorded in `source-receipt.json`; wrapper execs the temporary
 `go test -race` binary returned by `os.Executable`. That helper binary was not
 separately retained/hashed; source, exact test command and logs are retained.
+
+
+## Consolidated H5/H6 ownership and provider-dependency correction
+
+Input `9b4baf1229af9ec3e36eff68eca522327c8e04a3`; independent retained High report
+`/tmp/backlot-review-high-h4-issue8.md` accepts H4 and identifies H5/H6, both P2
+`test_harness` lifetime gaps. H5 common join cleared the retained command even
+when its final join budget expired; H6 proxy closure inferred allocation cleanup
+from daemon join or unconditional scope exit. Neither finding establishes a new
+product runtime defect or a leak in prior successful executions.
+
+Coordinator renewed exclusive source/runtime ownership for **both corrections and
+focused discriminating verification through committed handoff only**. One required
+pre-commit check after focused stabilization is permitted; no full final cycle or
+publication. Original exact-child Caddy/private fixture/owned Docker boundaries,
+foreign preservation, original uncertain directories and F4 restrictions remain.
+
+H5: one generic unresolved-owner state covers startup, shutdown and crash. Retained
+command and sole Wait channel clear **only after authoritative completion is
+consumed**. Exhaustion preserves them, reports failure, blocks automatic start and
+repeated stop/join actuation, and preserves log/provider/state. A bounded explicit
+completion method can consume eventual delivery once without another Wait or signal.
+Graceful timeout followed by forced kill/join remains a reported runtime failure,
+not a passing shutdown. Startup keeps H4's bounded readiness cleanup and guarded
+Start failure. Controlled direct helpers prove graceful timeout/kill success and
+join-delivery exhaustion, retained pointer/channel, restart/automatic-stop rejection,
+live log/forwarder, eventual explicit completion and no duplicate result. The seam
+withholds delivery of the helper's single actual Wait; it is not a claim that an
+OS-killed child naturally remained unreaped.
+
+H6: parent-owned dependency records separately track known allocation IDs, verified
+public destroy responses, uncertainty and the current retained owner. Job and service
+proxies remain registered through parent cleanup. A subsequent cleanup owner can
+start only after verified prior join and uses the same recorded endpoint to retry
+public destruction. Endpoint/log release requires both verified allocation destruction
+and owner completion. First failure is not silently accepted as successful cleanup.
+Unidentified allocation state stays uncertain and retains recovery dependencies.
+
+Each private recorded provider endpoint is an owned symlink initially targeting its
+owned fault-proxy socket. If recovery remains incomplete, an explicit handoff changes
+only that proven link to the previously verified original Docker Unix socket while
+keeping existing fault-proxy connections alive. This preserves the recorded path
+beyond the Go test process without a leaked forwarding daemon or private-journal edit.
+Exact link/socket inode proofs gate removal; exclusive link creation preserves an
+intervening foreign path. The original Docker socket is never chmodded, replaced or
+deleted. A private 0600 recovery receipt records endpoint/upstream and link inode/device;
+`/_ping` verifies availability before reporting a usable handoff. Failed availability
+is reported as unverified, not usable. Proxy/socket/link closure follows verified
+cleanup/join; persistent unresolved dependencies remain explicitly reported/preserved.
+
+Native controlled tests exercise first destroy failure with a known owned allocation,
+subsequent direct cleanup owner using the still-usable recorded endpoint, persistent
+failure/reporting and provider-path handoff, eventual recovery/release, and preservation
+of a foreign replacement plus zero foreign deletion calls. Their upstream is a native
+owned Unix HTTP model, not Docker runtime acceptance. The persistent test subsequently
+repairs its injected failure and verifies safe closure; no actual unresolved provider
+handoff remained after these checks.
+
+A related late cleanup context defect (F24, test_harness) was found after the
+first required development check: a child dependency could recover after its
+subtest ended while still using that completed subtest's testing context. Parent
+cleanup now temporarily binds recovery and log release to the active parent context,
+then restores the original reference. A meaningful regression exercises the actual
+shared recovery callback with CLI-shaped direct native helpers, first destruction
+failure and provider handoff, then successful explicit recovery after the child
+subtest returns. It proves active-context use and log/dependency lifetime. These
+helpers are not Backlot runtime acceptance. Coordinator explicitly approved this
+functional correction and a new required check; no assertions were weakened.
+
+Private evidence root `/tmp/bl-lifetime-flgiuvtz` retains both implementation
+snapshots. `focused-source`/`source-receipt.json` bind the first default check to
+pre-F24 source; `final-source`/`source-receipt-final.json` bind the final focused
+checks and renewed default check to all H5/H6/F24 corrections, parent9b4baf1.
+Only ledger/evidence narration follows the final implementation freeze. App source
+is unchanged from9b4baf1/29946de/2bbf097; the exact labeled app image was explicitly
+rebuilt for each real workflow selection and removed after verified cleanup. No
+browser image or host browser was exercised. Final source-bound image rebuilds
+remain mandatory gates.
+
+Actual development checks:
+
+- Earlier controlled race selections PASS (draft package2.469s, final pre-context
+  package2.413s); complete private logs remain available. These are development
+  iterations, not full final-validation cycles.
+- Final race selection including `TestOwnedDaemonStartupFailureCleanup`,
+  `TestOwnedDaemonJoinLifetime`, `TestProviderDependencyRecovery` and
+  `TestLateProviderRecoveryContext`: **PASS**, package **7.718s**,
+  `lifetime-late-recovery.log`. Startup, forced join, exhaustion/preservation,
+  persistent/first-failure handoff, foreign preservation, explicit recovery and
+  completed-subtest context branches passed. No failing test run occurred in this
+  dispatch; expected injected failures were asserted. Product behavior is unchanged.
+- Final `BACKLOT_ACCEPTANCE_CONFIG=<private>/machine.json go test -race
+  ./internal/acceptance -run
+  '^TestReleaseWorkflows$/(public-disposable-job-observation-loss|inspection-failure-diagnosis)$' -count=1 -v`:
+  **PASS**, **33.22s**, package **34.463s**, `public-observation-final.log`, private
+  root `/tmp/bl-public-1445137978`. Real Docker inspection and truncated-log loss
+  preserve separate causes/collection results and actual owned post-stop exit137;
+  service inspection loss retains normal DB shutdown logs/data across restart.
+  Both proxy types complete destruction/join/dependency closure. Earlier real
+  selection PASS37.21s/package38.380s at `/tmp/bl-public-2908416372` remains private.
+  Filtered development evidence is not full public acceptance; F4 remains unproven.
+- First required pre-commit `make check`: **PASS**, daemon race **262.340s** on
+  pre-F24 snapshot. Renewed required check on final source: **PASS**, daemon race **261.571s**,
+  acceptance race **7.469s**, schema/notices/format/vet/lint, six ADRs and build,
+  `make-check-lifetime-final.log`. All recorded implementation hashes match after
+  completion; only ledger/evidence narration followed the freeze. Neither is a full final-validation cycle;
+  opt-in skips are not acceptance. No broad repeat solely for narration.
+
+`cleanup-final.json` verifies **twelve destroyed instances** across both real
+selections, no retained allocation capabilities, exact app-image label/zero
+consumers/removal and subsequent absence, both fixture repo/one/two removal,
+all provider links/proxy sockets gone, scoped `backlot` child count **0**. Controlled
+model/helper resources were joined/recovered/cleaned after assertions. Private raw
+state/log/source receipts, shared bases/build cache and both original uncertain
+browser directories remain preserved. No known owned runtime residual, foreign
+deletion or observed-PID signalling.
+
+Review accounting: standard initial1/fix verification1; sensitive required,
+initial1/fix verification2 completed (H1–H4 accepted; H5/H6 found), next verification
+pending. Findings product7/test_harness26/environment0/unknown1 (H5/H6 plus F24). Initial sizing
+scope5/complexity4/size20 remains unchanged. Usage/cost null. Full final-validation
+attempts0. F4 original DB stop remains **open historical unknown**, no speculation,
+causal closure or waiver. Full final provider/gateway/HTTPS/public/browser/reproducibility,
+F4 disposition and eventual publication/published CI remain incomplete. No readiness,
+Linux/Windows runtime, branch/PR publication, merge/tag/deploy/release claim.
+
+Exact committed candidate and collapsed efficiency snapshot are external at
+`/tmp/bl-lifetime-flgiuvtz/lifetime-handoff.md`; source pauses for independent High
+verification after that committed handoff.

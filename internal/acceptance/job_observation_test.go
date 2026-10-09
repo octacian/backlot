@@ -63,11 +63,8 @@ func (h *harness) jobObservationFailure(collection bool) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "engine.sock")
-	listener, err := net.Listen("unix", path)
+	listener, provider, err := listenProvider(path, upstream.Path)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.Chmod(path, 0600); err != nil {
 		t.Fatal(err)
 	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -130,25 +127,15 @@ func (h *harness) jobObservationFailure(collection bool) {
 		}
 		proxy.ServeHTTP(w, r)
 	})}
-	var child *harness
+	child := &harness{t: t, root: root, binary: h.binary, project: h.project, state: filepath.Join(root, "state")}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
+	dependency := h.dependency(child, provider, server, done, transport)
 	defer func() {
-		if child != nil && child.daemon != nil {
-			t.Error("owned child unjoined; forwarding resources preserved", root)
-			return
+		if err := dependency.finish(); err != nil {
+			t.Error("job proxy release", err)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := server.Shutdown(ctx); err != nil {
-			t.Error("job observation proxy shutdown failed", err)
-		}
-		select {
-		case <-done:
-		case <-ctx.Done():
-			t.Error("job observation proxy unjoined; preserve", root)
-		}
-		transport.CloseIdleConnections()
+		child.releaseLog()
 	}()
 	config.Docker.Endpoint = "unix://" + path
 	configPath := filepath.Join(root, "machine.json")
@@ -177,29 +164,26 @@ func (h *harness) jobObservationFailure(collection bool) {
 	m.Components["observation-job"] = v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: &image, Args: []string{"sh", "-c", `echo job-ready; while true; do echo job-tick; sleep 0.1; done`}}
 	m.Scenes["observation-job"] = v1.Scene{Lifetime: v1.Disposable, Components: []string{"observation-job"}, TerminalJob: "observation-job"}
 	h.writeManifest(m)
-	child = &harness{t: t, root: root, binary: h.binary, config: configPath, project: h.project, state: filepath.Join(root, "state")}
+	child.config = configPath
 	child.daemonLog, err = os.OpenFile(filepath.Join(root, "daemon.log"), os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if child.daemon == nil {
-			_ = child.daemonLog.Close()
-		} else {
-			t.Error("owned child unjoined; log preserved", root)
-		}
-	}()
 	collectionObserved := false
 	defer func() {
 		if collectionObserved {
-			child.stopDaemonCollection("container output collection failed")
+			dependency.collectionFragment = "container output collection failed"
+			child.stopDaemonCollection(dependency.collectionFragment)
 		} else {
 			child.stop()
 		}
 	}()
 	child.start()
+	dependency.uncertain = true
 	p := child.launch(child.project, configPath, "observation-job")
 	started := child.started(child.project, "observation-job", "observation-job", "job-ready")
+	dependency.uncertain = false
+	dependency.track(started.ID)
 	defer func() {
 		if _, err := child.instance("destroy", started.ID); err != nil {
 			t.Error("job-loss fixture destroy failed; preserve", root)

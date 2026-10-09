@@ -97,7 +97,7 @@ func TestOwnedDaemonStartupFailureCleanup(t *testing.T) {
 		retained = append(retained, h)
 		defer h.stop()
 		err := h.startDaemon(250 * time.Millisecond)
-		if err == nil || !strings.Contains(err.Error(), "Start failed") || h.daemon != nil || h.daemonDone != nil || h.startupResidual {
+		if err == nil || !strings.Contains(err.Error(), "Start failed") || h.daemon != nil || h.daemonDone != nil || h.ownerUnresolved {
 			t.Fatal("Start failure retained invalid ownership or omitted cause")
 		}
 		h.stop() // Guarded no-op; no nil Process/channel or duplicate Wait.
@@ -111,7 +111,7 @@ func TestOwnedDaemonStartupFailureCleanup(t *testing.T) {
 		if err == nil || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "did not become ready") {
 			t.Fatalf("controlled readiness failure cause lost: %v", err)
 		}
-		if time.Since(before) > 7*time.Second || h.daemon != nil || h.startupResidual || h.cleanupUnverified {
+		if time.Since(before) > 7*time.Second || h.daemon != nil || h.ownerUnresolved || h.cleanupUnverified {
 			t.Fatal("startup child was not boundedly joined or was silently left residual")
 		}
 		for _, name := range []string{"serve", "status"} {

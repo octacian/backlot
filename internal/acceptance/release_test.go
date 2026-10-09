@@ -36,7 +36,9 @@ type harness struct {
 	fixtureRepo                          string
 	worktrees                            []string
 	cleanupUnverified                    bool
-	startupResidual                      bool
+	ownerUnresolved                      bool
+	dependencies                         []*providerDependency
+	logClosed                            bool
 	collectionWitness                    string
 }
 
@@ -81,6 +83,11 @@ func (h *harness) instance(operation, target string, extra ...string) (v1.Instan
 		var envelope v1.ErrorResponse
 		if json.Unmarshal(data, &envelope) == nil && envelope.Error.Code != "" {
 			return response.Instance, fmt.Errorf("%s rejected: %s: %s", operation, envelope.Error.Code, envelope.Error.Message)
+		}
+	}
+	if operation == "destroy" && err == nil && response.Instance.Status == v1.Destroyed {
+		for _, d := range h.dependencies {
+			delete(d.pending, response.Instance.ID)
 		}
 	}
 	return response.Instance, err
@@ -165,13 +172,11 @@ func (h *harness) startDaemon(readinessTimeout time.Duration) (result error) {
 		if errors.Is(killErr, os.ErrProcessDone) {
 			killErr = nil
 		}
-		select {
-		case <-h.daemonDone:
-			h.daemon = nil
+		if h.consumeOwner(5 * time.Second).joined {
 			result = errors.Join(result, killErr)
-		case <-time.After(5 * time.Second):
+		} else {
 			h.cleanupUnverified = true
-			h.startupResidual = true
+			h.ownerUnresolved = true
 			result = errors.Join(result, killErr, fmt.Errorf("owned startup child unjoined; preserve forwarding/log/state resources at %s", h.root))
 		}
 	}()
@@ -190,43 +195,79 @@ func (h *harness) startDaemon(readinessTimeout time.Duration) (result error) {
 	return fmt.Errorf("owned daemon did not become ready: %w", ctx.Err())
 }
 
-// join bounds retained direct-child shutdown; observed PIDs never authorize cleanup.
-func (h *harness) join(expectedCollectionFailure bool) {
+type ownerJoin struct {
+	joined, forced bool
+	exit           error
+}
+
+// consumeOwner is the sole completion path, also used explicitly after exhaustion.
+// It never calls Wait again or signals a reconstructed process identity.
+func (h *harness) consumeOwner(timeout time.Duration) ownerJoin {
+	if h.daemon == nil {
+		return ownerJoin{joined: true}
+	}
 	select {
 	case err := <-h.daemonDone:
-		var exit *exec.ExitError
-		if expectedCollectionFailure && errors.As(err, &exit) && exit.ExitCode() == 1 {
-			break
-		}
-		if err != nil || expectedCollectionFailure {
-			h.cleanupUnverified = true
-			h.t.Errorf("owned daemon exit: %v; private evidence %s", err, h.root)
-		}
-	case <-time.After(10 * time.Second):
-		h.cleanupUnverified = true
-		h.t.Errorf("owned daemon did not join; killing retained direct child; evidence %s", h.root)
-		if err := h.daemon.Process.Kill(); err != nil {
-			h.t.Errorf("owned daemon kill failed; residual preserved: %v", err)
-		}
-		select {
-		case <-h.daemonDone:
-		case <-time.After(5 * time.Second):
-			h.t.Errorf("owned daemon remains unjoined; preserve %s", h.root)
-		}
+		h.daemon = nil
+		h.ownerUnresolved = false
+		return ownerJoin{joined: true, exit: err}
+	case <-time.After(timeout):
+		return ownerJoin{}
 	}
-	h.daemon = nil
+}
+func (h *harness) joinOwner(grace, afterKill time.Duration) ownerJoin {
+	if h.ownerUnresolved {
+		return ownerJoin{}
+	}
+	result := h.consumeOwner(grace)
+	if result.joined {
+		return result
+	}
+	h.cleanupUnverified = true
+	killErr := h.daemon.Process.Kill()
+	if errors.Is(killErr, os.ErrProcessDone) {
+		killErr = nil
+	}
+	result = h.consumeOwner(afterKill)
+	result.forced = true
+	result.exit = errors.Join(result.exit, killErr)
+	if !result.joined {
+		h.ownerUnresolved = true
+	}
+	return result
+}
+func (h *harness) join(expectedCollectionFailure bool) {
+	result := h.joinOwner(10*time.Second, 5*time.Second)
+	if !result.joined {
+		h.t.Errorf("owned daemon remains unjoined; retained command/Wait/log/provider/state at %s; explicit completion required", h.root)
+		return
+	}
+	if result.forced {
+		h.t.Errorf("owned daemon graceful join exhausted; retained child killed and joined; evidence %s", h.root)
+		return
+	}
+	var exit *exec.ExitError
+	if expectedCollectionFailure && errors.As(result.exit, &exit) && exit.ExitCode() == 1 {
+		return
+	}
+	if result.exit != nil || expectedCollectionFailure {
+		h.cleanupUnverified = true
+		h.t.Errorf("owned daemon exit: %v; private evidence %s", result.exit, h.root)
+	}
 }
 func (h *harness) crash() {
 	h.t.Helper()
+	if h.daemon == nil || h.ownerUnresolved {
+		h.t.Fatal("owned crash requires resolved retained child")
+	}
 	if err := h.daemon.Process.Kill(); err != nil {
 		h.t.Fatal(err)
 	}
-	select {
-	case <-h.daemonDone:
-	case <-time.After(5 * time.Second):
-		h.t.Fatal("retained daemon crash did not join")
+	if !h.consumeOwner(5 * time.Second).joined {
+		h.ownerUnresolved = true
+		h.cleanupUnverified = true
+		h.t.Fatal("retained daemon crash did not join; preserve owner/log/provider/state", h.root)
 	}
-	h.daemon = nil
 }
 func (h *harness) stop() { h.stopDaemon(false) }
 func (h *harness) stopDaemon(expectedCollectionFailure bool) {
@@ -238,7 +279,7 @@ func (h *harness) stopDaemon(expectedCollectionFailure bool) {
 }
 func (h *harness) stopDaemonCollection(fragment string) {
 	expectedCollectionFailure := fragment != ""
-	if h.daemon == nil || h.startupResidual {
+	if h.daemon == nil || h.ownerUnresolved {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -302,15 +343,18 @@ func (h *harness) cleanup() {
 		}
 	}
 	h.stop()
+	if err := h.cleanupDependencies(); err != nil {
+		h.cleanupUnverified = true
+		h.t.Errorf("provider recovery incomplete: %v; preserve %s", err, h.root)
+	}
 	if !h.cleanupUnverified {
 		h.removeWorktrees()
 	} else {
 		h.t.Errorf("fixture worktrees preserved with unverified cleanup at %s", h.root)
 	}
-	if h.daemon == nil {
-		_ = h.daemonLog.Close()
-	} else {
-		h.t.Errorf("owned child unjoined; preserve open log and state at %s", h.root)
+	h.releaseLog()
+	if !h.logClosed {
+		h.t.Errorf("owner/provider cleanup unresolved; log/state retained at %s", h.root)
 	}
 	h.t.Logf("private acceptance state/evidence retained at %s (do not publish raw state)", h.root)
 }

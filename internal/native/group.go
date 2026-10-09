@@ -38,6 +38,8 @@ type Spec struct {
 
 // Exit preserves original root status independently from collection.
 type Exit struct {
+	// Known distinguishes an observed root exit from an infrastructure observation failure.
+	Known             bool   `json:"known,omitempty"`
 	Code              int    `json:"code"`
 	Error             string `json:"error,omitempty"`
 	CollectionFailure string `json:"collection_failure,omitempty"`

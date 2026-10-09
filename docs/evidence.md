@@ -9,7 +9,9 @@ On an otherwise clean run, the executable returns the terminal job's exact exit
 code. SIGINT and SIGTERM request bounded cancellation and return 130 and 143.
 An orchestration, collection or cleanup failure returns a generic nonzero code;
 the original terminal status remains in `execution.terminal_exit_code` and the
-component result. `failure`, `collection_failure`, `cleanup_failure` and
+component result. Unknown job exit status remains absent; observation or collector
+failures never substitute an application exit code. Later verified status recovery
+preserves the observed code alongside the separate failure. `failure`, `collection_failure`, `cleanup_failure` and
 `cancelled` describe separate outcomes. Finite JSON commands emit one typed result;
 application output is available through `logs`. Backlot captures application
 stdout/stderr as emitted, including any secrets the application prints. Backlot's

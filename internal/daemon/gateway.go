@@ -104,6 +104,9 @@ func awaitPublication(ctx context.Context, origin, timeout string, services map[
 		}
 		select {
 		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return ctx.Err()
+			}
 			return &v1.PlanError{Code: "publication_unreachable", Field: "scene.publish.probe", Message: "canonical HTTPS origin did not become ready with host DNS and TLS verification; check wildcard application DNS, certificate trust, gateway listener and upstream reachability"}
 		case <-ticker.C:
 		}

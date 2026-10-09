@@ -51,7 +51,7 @@ func (s *service) awaitProbe(ctx context.Context, id string, c v1.PlannedCompone
 			if cleanupErr != nil {
 				return cleanupErr
 			}
-			if waitErr == nil && exit != nil && exit.Code == 0 && exit.Error == "" {
+			if waitErr == nil && exit != nil && exit.Known && exit.Code == 0 && exit.Error == "" {
 				ready = true
 			}
 		} else {

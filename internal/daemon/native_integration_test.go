@@ -158,7 +158,12 @@ func TestNativeFixtureProcess(t *testing.T) {
 	if err != nil {
 		os.Exit(22)
 	}
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") }), ReadHeaderTimeout: time.Second}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if os.Getenv("HTTP_STATUS") == "503" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		_, _ = io.WriteString(w, "ok")
+	}), ReadHeaderTimeout: time.Second}
 	_ = server.Serve(listener)
 	os.Exit(0)
 }

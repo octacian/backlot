@@ -490,13 +490,16 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 				component.Status = "unknown"
 			} else if keep && entry.jobs[component.Name] == nil && entry.components[component.Name] != nil && entry.components[component.Name].Alive() {
 				component.Status = "ready"
-			} else if entry.jobs[component.Name] != nil {
-				component.Status = "completed"
+			} else if job := entry.jobs[component.Name]; job != nil {
+				component.Status = "unknown"
+				if exit := job.Result(); exit != nil && exit.Known {
+					component.Status = "completed"
+				}
 			} else {
 				component.Status = "stopped"
 			}
 			if group := entry.components[component.Name]; group != nil && component.ExitCode == nil {
-				if exit := group.Result(); exit != nil {
+				if exit := group.Result(); exit != nil && exit.Known {
 					component.ExitCode = &exit.Code
 				}
 			}
@@ -679,18 +682,24 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			exit, failure = waitJob(jobCtx, group, services)
 			jobCancel()
 			if exit != nil {
-				result.Components[index].ExitCode = &exit.Code
-				result.Components[index].Status = "completed"
-				if component.Name == snapshot.Plan.TerminalJob {
-					result.TerminalExitCode = &exit.Code
+				if exit.Known {
+					result.Components[index].ExitCode = &exit.Code
+					result.Components[index].Status = "completed"
+					if component.Name == snapshot.Plan.TerminalJob {
+						result.TerminalExitCode = &exit.Code
+					}
 				}
 				if exit.CollectionFailure != "" {
 					result.CollectionFailure = "job output collection failed"
 				}
-				if exit.Code != 0 || exit.Error != "" {
+				if !exit.Known || exit.Code != 0 || exit.Error != "" {
 					status = v1.Failed
-					if component.Name != snapshot.Plan.TerminalJob || exit.Code < 0 {
-						failure = fmt.Errorf("job %s failed (exit %d)", component.Name, exit.Code)
+					if !exit.Known || component.Name != snapshot.Plan.TerminalJob || exit.Code < 0 || exit.Error != "" && exit.Code == 0 {
+						if !exit.Known {
+							failure = fmt.Errorf("job %s exit status unavailable", component.Name)
+						} else {
+							failure = fmt.Errorf("job %s failed (exit %d)", component.Name, exit.Code)
+						}
 					}
 					return
 				}
@@ -931,6 +940,22 @@ func (s *service) expireRuntime(id string) error {
 		return nil
 	}
 	_, err = s.stopExecution(id)
+	if err != nil {
+		var detail *v1.PlanError
+		if errors.As(err, &detail) && (detail.Code == "collection_failed" || detail.Code == "cleanup_failed") {
+			// Expected per-run failures are durable outcomes, not daemon-fatal
+			// sweeper failures. Persistence/unfinished-owner errors still escape.
+			current, inspectErr := s.store.inspect(id)
+			if inspectErr != nil {
+				return inspectErr
+			}
+			if current.Execution != nil && current.Execution.CompletedAt != "" &&
+				(detail.Code == "collection_failed" && current.Execution.CollectionFailure != "" ||
+					detail.Code == "cleanup_failed" && current.Execution.CleanupFailure != "") {
+				return nil
+			}
+		}
+	}
 	return err
 }
 

@@ -31,7 +31,14 @@ by this local build command.
 Ship [LICENSE](../LICENSE) and [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)
 with any copied binary. Notices include linked CLI/optional acceptance application
 modules and the Go standard library. `make notices` regenerates from downloaded
-pinned source; `make notices-check` rejects drift. The acceptance application uses
+pinned source; `make notices-check` rejects drift. Inventories label the macOS
+ARM64 CLI separately from the optional macOS/container application. Reviewed
+source-embedded notices live in `cmd/notices/supplements.json`, bound to exact
+module versions and source SHA-256; dependency/source changes require attribution
+review before regeneration. The current linked-source audit includes the wsutil
+UTF-8 decoder notice, fiat-crypto scalar notice, and ported YAML source notices.
+The inventory keeps fixture-only dependencies distinct from CLI dependencies.
+The acceptance application uses
 MPL-2.0 MySQL driver source unmodified, obtainable at its recorded module version
 with `go mod download -json github.com/go-sql-driver/mysql@v1.9.3`. Its license
 notice identifies covered source obligations; the fixture driver is not linked

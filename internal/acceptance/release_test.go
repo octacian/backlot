@@ -194,6 +194,14 @@ func (h *harness) crash() {
 }
 func (h *harness) stop() { h.stopDaemon(false) }
 func (h *harness) stopDaemon(expectedCollectionFailure bool) {
+	fragment := ""
+	if expectedCollectionFailure {
+		fragment = "collection/missing"
+	}
+	h.stopDaemonCollection(fragment)
+}
+func (h *harness) stopDaemonCollection(fragment string) {
+	expectedCollectionFailure := fragment != ""
 	if h.daemon == nil {
 		return
 	}
@@ -206,7 +214,7 @@ func (h *harness) stopDaemon(expectedCollectionFailure bool) {
 	if expectedCollectionFailure {
 		var envelope v1.ErrorResponse
 		var exit *exec.ExitError
-		if !errors.As(err, &exit) || exit.ExitCode() != 1 || json.Unmarshal(stdout.Bytes(), &envelope) != nil || envelope.Error.Code != "collection_failed" || !strings.Contains(envelope.Error.Message, "collection/missing") {
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 || json.Unmarshal(stdout.Bytes(), &envelope) != nil || envelope.Error.Code != "collection_failed" || !strings.Contains(envelope.Error.Message, fragment) {
 			h.cleanupUnverified = true
 			h.t.Errorf("shutdown did not report exact injected retained collection gap; evidence %s", h.root)
 		}
@@ -584,6 +592,8 @@ func TestReleaseWorkflows(t *testing.T) {
 		browserArtifacts(t, ui)
 	})
 
+	h.test("published-disposable-worktree-overlap", func(t *testing.T) { h.publishedOverlap(one, two, dev, production) })
+	h.test("public-disposable-job-observation-loss", func(t *testing.T) { h.jobObservationFailures() })
 	h.test("fixture-secret-boundary", func(t *testing.T) {
 		ordinary, err := h.command("fixtures", "--state-dir", h.state, "--json", dev.ID)
 		if err != nil {

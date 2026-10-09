@@ -696,7 +696,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 					status = v1.Failed
 					if !exit.Known || component.Name != snapshot.Plan.TerminalJob || exit.Code < 0 || exit.Error != "" && exit.Code == 0 {
 						if !exit.Known {
-							failure = fmt.Errorf("job %s exit status unavailable", component.Name)
+							failure = errors.Join(failure, fmt.Errorf("job %s supervision failed: %s", component.Name, exit.Error))
 						} else {
 							failure = fmt.Errorf("job %s failed (exit %d)", component.Name, exit.Code)
 						}
@@ -782,7 +782,9 @@ func waitJob(ctx context.Context, g workload, services map[string]workload) (*na
 		if exit := g.Result(); exit != nil {
 			return exit, nil
 		}
-		if !g.Alive() {
+		// Docker Result already verifies running state once per polling cycle.
+		// Native work separately verifies its guardian/group identity.
+		if _, container := g.(*dockerWork); !container && !g.Alive() {
 			if exit := g.Result(); exit != nil {
 				return exit, nil
 			}
@@ -790,7 +792,7 @@ func waitJob(ctx context.Context, g workload, services map[string]workload) (*na
 		}
 		select {
 		case <-ctx.Done():
-			return g.Result(), ctx.Err()
+			return nil, ctx.Err()
 		case <-ticker.C:
 		}
 	}

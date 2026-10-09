@@ -111,3 +111,14 @@ Container clients verify Secure/HttpOnly/SameSite/path and cookie roundtrip. The
 suite preserves historical collection failure on shutdown instead of treating
 that expected nonzero result as a clean shutdown. See the release ledger for
 actual commands, failed attempts, source/image receipts and remaining gates.
+
+The overlap case adds a temporary published disposable scene in each independent
+worktree. Its terminal hold starts only after the container HTTPS client completes;
+public inspection/log witnesses prove both stacks live together. Normal-trust API
+mutations, collected completion reports, and destruction of one stack prove peer
+and persistent dev/preview preservation. The same-checkout backend serialization
+case remains separate. Private Docker HTTP proxies exercise one inspection timeout
+and one truncated log frame for an actively running container job; the result must
+retain the original supervision/collection cause and Docker's observed post-stop
+exit, without automatic retries or an invented original exit. These owned fixture
+variants are constructed by the opt-in harness, not operator configuration changes.

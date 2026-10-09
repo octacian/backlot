@@ -1,0 +1,34 @@
+=== RUN   TestReleaseWorkflows
+    release_test.go:393: candidate source: caller checkout; record git revision and dirty patch digest beside this log
+    release_test.go:467: dev instance=43be19dfa000f5b84e4b6b04dc5eb4e5e5869fb6b886b5b6344135346d200510 origin=https://bl-43be19dfa000f5b84e4b6b04dc5eb4e5e5869fb6.dev.thatoneguy.ca
+    release_test.go:57: command=run elapsed_ms=19 exit=<nil>
+    release_test.go:57: command=run elapsed_ms=3713 exit=<nil>
+    release_test.go:57: command=run elapsed_ms=3695 exit=<nil>
+=== RUN   TestReleaseWorkflows/published-disposable-worktree-overlap
+    overlap_test.go:164: published overlap witness at=2026-10-09T20:04:10.957292Z first=5f8b2e2b04828b75f2bfbc65779d48e852bedf5b5ae93db4def534525ee1b0c4 second=66c0e7b6b428c384dc82607be22a8a8d9554ddcddd12c9c74e27def0babcb4d8 first_origin=https://bl-5f8b2e2b04828b75f2bfbc65779d48e852bedf5b.dev.thatoneguy.ca second_origin=https://bl-66c0e7b6b428c384dc82607be22a8a8d9554ddcd.dev.thatoneguy.ca; both terminal jobs running after completed real container HTTPS clients
+    release_test.go:57: command=destroy elapsed_ms=31 exit=<nil>
+    overlap_test.go:182: peer preservation witness at=2026-10-09T20:04:12.591257Z destroyed=5f8b2e2b04828b75f2bfbc65779d48e852bedf5b5ae93db4def534525ee1b0c4 live=66c0e7b6b428c384dc82607be22a8a8d9554ddcddd12c9c74e27def0babcb4d8 value=overlap-two; persistent dev/production values preserved
+    release_test.go:57: command=destroy elapsed_ms=34 exit=<nil>
+    release_test.go:57: command=destroy elapsed_ms=41 exit=<nil>
+    release_test.go:57: command=destroy elapsed_ms=28 exit=<nil>
+=== RUN   TestReleaseWorkflows/public-disposable-job-observation-loss
+=== RUN   TestReleaseWorkflows/public-disposable-job-observation-loss/inspection
+    job_observation_test.go:223: public job loss cause=Docker inspection failed injected_faults=1 actual_post_stop_exit=137; overall failure retained, collection distinction preserved; unrelated cleanup inspections ignored=4
+    release_test.go:57: command=destroy elapsed_ms=38 exit=<nil>
+=== RUN   TestReleaseWorkflows/public-disposable-job-observation-loss/log-collection
+    job_observation_test.go:223: public job loss cause=container output collection failed injected_faults=1 actual_post_stop_exit=137; overall failure retained, collection distinction preserved; unrelated cleanup inspections ignored=4
+    release_test.go:57: command=destroy elapsed_ms=27 exit=<nil>
+=== NAME  TestReleaseWorkflows
+    release_test.go:57: command=destroy elapsed_ms=922 exit=<nil>
+    release_test.go:57: command=destroy elapsed_ms=1471 exit=<nil>
+    release_test.go:57: command=destroy elapsed_ms=993 exit=<nil>
+    release_test.go:57: command=destroy elapsed_ms=26 exit=<nil>
+    release_test.go:57: command=destroy elapsed_ms=23 exit=<nil>
+    release_test.go:275: private acceptance state/evidence retained at /tmp/bl-public-4041062030 (do not publish raw state)
+--- PASS: TestReleaseWorkflows (34.55s)
+    --- PASS: TestReleaseWorkflows/published-disposable-worktree-overlap (10.34s)
+    --- PASS: TestReleaseWorkflows/public-disposable-job-observation-loss (6.14s)
+        --- PASS: TestReleaseWorkflows/public-disposable-job-observation-loss/inspection (4.04s)
+        --- PASS: TestReleaseWorkflows/public-disposable-job-observation-loss/log-collection (2.10s)
+PASS
+ok  	github.com/octacian/backlot/internal/acceptance	35.910s

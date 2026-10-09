@@ -85,3 +85,34 @@ func TestPublicationCancellationAndDeadline(t *testing.T) {
 		t.Fatal("genuine readiness deadline misclassified", err)
 	}
 }
+
+// Cancellation is triggered inside the first successful inspection. A second
+// observation would return a transient failure then a running job, reproducing
+// the former unsupported owner-exit diagnosis without timing-dependent polling.
+func TestDockerJobPollUsesOneObservation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var count atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n := count.Add(1)
+		if n == 1 {
+			cancel()
+		}
+		if n == 2 {
+			http.Error(w, "injected second-observation loss", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"Id":"owned","State":{"Running":true}}`))
+	}))
+	defer server.Close()
+	engine, err := client.New(client.WithHost(server.URL), client.WithAPIVersion("1.53"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = engine.Close() }()
+	work := &dockerWork{engine: &dockerEngine{engine}, resource: ownedResource{Kind: "container", ID: "owned"}}
+	exit, err := waitJob(ctx, work, nil)
+	if exit != nil || !errors.Is(err, context.Canceled) || count.Load() != 1 {
+		t.Fatalf("job poll duplicated observation or invented exit: requests=%d exit=%v err=%v", count.Load(), exit, err)
+	}
+}

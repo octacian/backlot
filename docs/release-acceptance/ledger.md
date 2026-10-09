@@ -53,8 +53,8 @@ Preserve and report uncertain residuals; never infer ownership from name/PID.
 ## Results and pending acceptance
 
 Early real-flow and multiple public workflow checks passed (details below).
-No criterion has final frozen-candidate acceptance yet. Reviews, frozen final
-validation and CI have not run. Record exact command/revision/result/artifact evidence here as gates run;
+No criterion has final frozen-candidate acceptance yet. The initial Low review, Low fix verification and initial High review have completed;
+High fix verification, frozen final validation and CI remain pending. Record exact command/revision/result/artifact evidence here as gates run;
 unit/fault-injection tests supplement and never replace public workflow evidence.
 
 ## Findings
@@ -515,3 +515,111 @@ after both review gates. No branch/PR published.
 The exact committed fix revision and final `feature-efficiency/v1` snapshot are
 in `/tmp/bl-review-fixes-3zx4nmiy/fix-handoff.md`; a commit cannot embed its own
 hash. Git whitespace check passed on this fix diff. Source pauses at handoff.
+
+
+## Independent High review and grouped H1–H3 corrections
+
+Reviewed input `2bbf0978a3dbcfc561a7ac042e698a47d3ee013b`; independent report
+`/tmp/backlot-review-high-issue8.md`. Coordinator confirmed the initial standard
+Low and one Low fix verification complete, then one fresh sensitive High complete.
+High fix verification is pending. The coordinator explicitly transferred exclusive
+source ownership and renewed the existing resource grant through committed
+handoff. No other editors, extra agents, publication, whole gateway/DNS/TLS changes.
+
+| Finding | Class | Implementation disposition |
+| --- | --- | --- |
+| H1 | test_harness | Added simultaneous published disposable stacks in independent real fixture worktrees, explicit running/log overlap witnesses, distinct normal-trust origins/private DB mutations, collected completion reports, one-stack destruction with live-peer and persistent dev/production preservation. Existing same-checkout output-group serialization remains. |
+| H2 | product | Docker job polling uses one fresh Result observation per cycle; native guardian checking remains. Unknown job exit preserves original inspection/log-collection cause in final failure. Deterministic ordering and public live container-job inspection/collection loss regressions verify nonzero overall result, independent collection state and actual post-stop exit provenance. No automatic retry or health grace. |
+| H3 | product | Separate linked CLI/native-fixture/container-fixture module inventories. Complete reviewed embedded UTF-8 decoder, fiat-crypto scalar and ported YAML notices are version/full-source-SHA-bound supplements; source/version drift rejects regeneration until review. Generated notices and operations instructions updated; fixture MySQL MPL/source-access distinction preserved. |
+| F22 | test_harness | Closed: the new proxy receipt initially retained the last inspected exit, including unrelated containers inspected for safe cleanup. Bind the post-stop exit witness to the same container observed running before injection. Runtime assertions were retained; actual owned exit 137 matches terminal/component result. |
+| F23 | test_harness | Closed: one-off cleanup receipt script assumed the fixture repo remained after successful harness cleanup. It stopped after verified image deletion; corrected read-only receipt checks repo/one/two absence, consistent with topology-verified harness removal. No extra deletion or ownership inference. |
+
+Private evidence root `/tmp/bl-high-fixes-skwdmt_1` contains commands/logs,
+private machine configuration, source snapshots, image/build and cleanup receipts.
+Original raw roots/config and two uncertain browser directories remain preserved;
+never publish private capabilities/secrets. Application fixture source is unchanged
+from `2bbf0978`; `image-provenance.json` records its source SHA, Linux ARM64 binary
+SHA and exact labeled app image ID. Only that app image was explicitly built here;
+browser image was not built or exercised by these focused cases. Final images
+must be rebuilt and recorded after review. Shared Alpine/MariaDB bases and build
+cache were preserved; Backlot did not pull/build implicitly.
+
+Focused commands/results (development checks, **not full frozen acceptance**):
+
+- `go test ./cmd/notices ./internal/daemon -run
+  'TestReviewedEmbeddedNoticeRejectsDrift|TestDockerJobPollUsesOneObservation|TestDockerObservationFailureDoesNotInventExit' -count=1`: PASS.
+  `go run ./cmd/notices --check`: PASS after regeneration.
+- `BACKLOT_ACCEPTANCE_CONFIG=<private>/machine.json go test -race
+  ./internal/acceptance -run '^TestReleaseWorkflows$/(published-disposable-worktree-overlap|public-disposable-job-observation-loss)$' -count=1 -v`:
+  focused-public-1.log FAILED, 38.78s: overlap passed; both job cases failed the
+  new post-stop comparison. Focused-public-2.log FAILED, 25.21s (job cases only):
+  original causes and collection distinction passed but receipt showed 128 versus
+  recorded 137. Focused-public-3.log FAILED, 21.18s (inspection only): identity
+  timeline proved 137 repeatedly for the owned job, followed by unrelated cleanup
+  inspections. Those three failures remain recorded, not counted as acceptance.
+- Corrected same owned-container witness, full two-case selection:
+  `focused-public-4.log` PASS, 34.55s (race package 35.910s), root
+  `/tmp/bl-public-4041062030`. Both real independent published stacks held their
+  terminal jobs running after successful container HTTPS clients, before mutations.
+  Overlap witnessed `2026-10-09T20:04:10.957292Z`; peer preservation witnessed
+  `2026-10-09T20:04:12.591257Z`. Each inspection/log-loss case injected exactly one
+  fault and preserved failure/collection separation; independent owned post-stop
+  Docker exit **137** matched terminal/component results and historical inspection.
+  The original exit at observation loss was not invented; direct owned unit
+  evidence verifies unknown initial exit and actual known recovery separately.
+- Exact passing implementation snapshot: `focused-public-4-source/head.txt`,
+  `tracked.patch` SHA-256
+  `aa7c2085f2bd4ada5b2be0417ff8ddb7b91a16ec096b1a2b668b22834d55fd63`, plus every
+  untracked source under that snapshot. Earlier initial source/untracked snapshot
+  is retained; intermediate diagnostic-only edits are reflected in failed logs
+  and terminal history, without claiming complete separate immutable snapshots.
+- Required frozen `make check`: **PASS**, `make-check-high-fixes.log`; complete
+  schema/notices/format/vet/lint/default race suite (daemon **262.572s**), six ADRs
+  and build. All recorded implementation file hashes were verified unchanged
+  afterward (`make-check-frozen-source/implementation-sha256.json`). Only
+  evidence/documentation updates followed launch. Opt-in provider/public suites
+  remain separate final gates; default opt-in skips are not runtime acceptance.
+
+The linked-source notice audit separately enumerated actual Darwin ARM64 CLI,
+Darwin ARM64 optional app and Linux ARM64 optional container app GoFiles/CgoFiles.
+Permission/redistribution block candidates were inspected: YAML ported source
+headers in each linked YAML version, gobwas/ws v1.4.0 `wsutil/utf8.go`, and
+filippo.io/edwards25519 v1.1.0 `scalar.go`. Supplements preserve entire reviewed
+blocks and reject exact source/version drift. Root license/NOTICE/COPYING gathering
+remains; this records the bounded audit, not an unsupported general legal claim.
+
+### High-fix cleanup and remaining gates
+
+All four focused roots report public destruction and retained-child daemon joins;
+read-only private state audit after shutdown found **23 destroyed instances** and
+no retained allocation capabilities. Exact owned app image label and zero consumers
+were verified before `--no-prune` removal; subsequent absence verified. All four
+fixture repo/one/two directories were removed by complete expected Git-topology
+cleanup. Scoped `backlot` child count **0**. Receipts: `state-audit.json`,
+`cleanup-receipt.json`, `image-provenance.json`. Shared bases/cache and raw private
+state/logs retained. Both original uncertain browser profiles remain untouched;
+no observed PID was used as signal authority. No known owned runtime residual.
+
+F4 remains **open historical unknown**. Current service/job failure regressions do
+not prove the original database stop cause. Coordinator directed no speculative
+lost-history reconstruction or silent waiver; after corrections, independent High
+verification and complete frozen success, coordinator will present any remaining
+concrete historical-uncertainty exception for explicit user disposition.
+
+Current distinct findings: product **7**, test_harness **22**, environment_resource
+**0**, unknown **1** (F4 open). Implementation corrections require independent
+verification. Review passes: standard initial **1**, fix verification **1**;
+sensitive required, initial **1**, fix verification **0**. Full final-validation
+attempts **0**. Initial sizing remains scope5/complexity4/size20; usage/cost null.
+
+Remaining gates: High fix verification, F4 disposition, final frozen complete
+`make check`, complete `TestDockerRuntime` and `TestDisposableEvidenceDocker`,
+gateway fixture/full opt-in suites and `TestHTTPSRuntime`, **complete** public
+acceptance including trusted real-domain host browser/container evidence, final
+image/source receipts and reproducibility/license verification, eventual PR
+against main closing #8 and published-revision CI. No readiness, cross-platform
+runtime, complete acceptance, branch/PR publication, merge/tag/release claim.
+
+Exact new candidate commit and collapsed `feature-efficiency/v1` snapshot are in
+`/tmp/bl-high-fixes-skwdmt_1/high-fix-handoff.md`. Source pauses at this committed
+handoff for coordinator-owned independent High fix verification.

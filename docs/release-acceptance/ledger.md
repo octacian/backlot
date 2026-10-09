@@ -354,3 +354,164 @@ SHA-256 above. Git whitespace inspection reports one inherited trailing space
 in a verbatim third-party license; the notices generator deliberately preserves
 upstream legal text rather than rewriting it. Build metadata display whitespace
 is normalized in the sanitized artifact.
+
+## Independent Low review and grouped fixes
+
+Low completed a read-only initial review of `83ff528ba2478b790cb2b1129aeea78702def162`
+(`/tmp/backlot-review-low-issue8.md`). Effective launch receipts supplied by the
+coordinator: initial implementer Codex `gpt-6.1-sol`/medium; Low reviewer Codex
+`gpt-6.1-sol`/low. Fresh sensitive High review is required. Standard initial review
+passes: 1; fix verification: 0. Sensitive passes: 0. No sizing change.
+
+| ID | Category | State | Required correction |
+| --- | --- | --- | --- |
+| R1 | test_harness | closed in implementation; review pending | Add missing public initial-start joining, regex/no-match/invalid selectors, failed fresh initialization retry/skip, deterministic consumed-port conflict, native/container unexpected exit, live NDJSON following, collection/cleanup failure, uncertain ownership and unrelated Docker/Caddy preservation. |
+| R2 | test_harness | closed in implementation; review pending | Require terminal start witness before SIGINT/client loss, same ID and completed terminal status plus truthful partial artifact. |
+| R3 | test_harness | closed in implementation; review pending | Parse retained browser result JSON, scoped DOM witnesses and actual PNG payload after teardown. |
+| R4 | test_harness | closed in implementation; review pending | Traverse list pages, fail on cleanup discovery/decode errors and bound retained direct-child daemon shutdown/join with residual reporting. |
+
+Source ownership and exclusive fixture resources renewed after Low review. Same
+operator boundary applies: exact owned children in `backlot`, no gateway restart,
+whole-config mutation, DNS or trust changes. Two historical unmarked browser
+profiles remain preserved; private earlier evidence remains outside checkout.
+
+Grouped fixes use newly labeled image tags `backlot-release-run85:fix-app` and
+`backlot-release-run85:fix-browser`, built explicitly from archived application
+source. Private source/patch/image receipts and execution logs are under
+`/tmp/bl-review-fixes-3zx4nmiy`; exact fixture image-source provenance is now
+retained there, independently from evolving acceptance-only source. No implicit
+image pull/build was introduced in Backlot.
+
+F4 remains open. A public Unix-socket Docker forwarding fixture will delay one
+post-readiness inspection while retaining real database/log/stop operations, to
+discriminate supervision failure from spontaneous database termination. This
+controlled reproduction cannot prove the unrecoverable historical cause.
+
+### Grouped fix execution checkpoint
+
+`public-fixes-1.log`: FAIL, 99.11s; private root `/tmp/bl-public-3516557673`.
+Exact tracked patch SHA-256
+`101611e893c860bbf82cfd84e1281aebc83cc9ad38f44f5b92dc485b29a5e891`;
+untracked source hashes/content saved in `public-fixes-1-receipt.json` and
+`public-fixes-1-source/`. New R1 native/container exit, deterministic consumed-port
+conflict, fresh-only failure/retry/skip, live NDJSON, collection failure and
+uncertain-directory cleanup/retry cases passed. R3 retained report/scoped HTML/PNG
+parsing passed. Docker/Caddy sentinels remained unchanged through reset/recovery.
+
+| ID | Category | State | Evidence/action |
+| --- | --- | --- | --- |
+| F16 | test_harness | closed, public regression passed | New selector/cancellation assertions read `test` instead of actual incomplete report `status`; parse the existing `status: not_completed` field and require absent completion time. |
+| F17 | product | closed, controlled public regression passed | `serviceFailure` called Docker `Result` then `Alive`, making a second inspection whose error was discarded. Docker `Result` already freshly verifies running state; eliminate that redundant observation while retaining native guardian identity checking and fail-on-supervision-loss policy. |
+| F18 | test_harness | closed, public cleanup passed | Fatal observation assertion closed its Unix proxy before public destroy; defer exact instance destruction before proxy shutdown on all paths. |
+
+One delayed post-ready Docker inspection reproduced normal database shutdown
+with a missing diagnostic cause (`unavailable without a verified exit`), despite
+real healthy DB and log/stop operations. This identifies F17 in current code; it
+still cannot establish the original historical F4 cause. No timeout retry or
+health/exit semantic change was introduced.
+
+Original first-run cleanup failure retained the proxy-backed instance. Restored
+only its exact owned socket forwarding, restarted its private daemon, destroyed
+all discovered records through public commands and joined that retained child
+(`recovery-cleanup-result-2.log`). The first private cleanup utility mistakenly
+waited twice on an already-consumed join channel and printed a false residual;
+its successful first join is recorded, and corrected repeat cleanup verifies
+clean exit with no residual (`recovery-cleanup-result-2.log`). Old failure log is
+retained. No observed PID authorized any signal. Two unmarked historical browser
+profiles remain untouched. First-run worktrees still require verified removal.
+
+Second expanded run uses `public-fixes-2.patch`, receipt and new-file snapshots;
+launched after the above causal/assertion corrections and lint passed, before
+coordinator's checkpoint follow-up was received. Further broad reruns require
+new failures or source changes. Final-validation attempts remain 0: these are
+grouped implementation diagnostics, before review fix verification and High.
+
+### Grouped fix evidence and frozen fix candidate
+
+`public-fixes-2.log`: FAIL, 107.25s, root `/tmp/bl-public-3641816203`.
+R1 negative scenarios/selectors, R2 active terminal SIGINT and killed-client lease
+expiry with same ID/nonempty terminal result/incomplete report, R3 parsed browser
+artifacts, ordinary secret/capability scans and controlled F17 inspection timeout
+all passed. Original failure was an expectation mismatch: deliberate collection
+failure remains a nonzero daemon-shutdown outcome in the same daemon session,
+explicitly required by existing `TestLeaseCollectorOutcomeDoesNotPoisonSweeper`.
+
+F19 (`test_harness`, closed): separate clean shutdown/crash evidence from deliberate
+collection injection, then require exact `collection_failed` envelope, executable
+exit 1, bounded child join and historical original exit/artifact preservation.
+No runtime collection/shutdown semantics changed. `public-focused-3.log`: PASS
+26.52s, root `/tmp/bl-public-1525732465`; clean shutdown/crash, all negative cases
+(including missing-local-image provider diagnostics) and expected collection-gap
+shutdown passed. Source receipts record exact patches and untracked source files.
+
+F20 (`test_harness`, closed): private first-root recovery utility double-waited an
+already joined channel, producing a false residual message; successful join was
+recorded before that message. Corrected repeated public cleanup exits cleanly.
+First and second failed-run Git worktrees removed only after all public destroys/
+daemon joins succeeded, socket absence and complete expected Git topology checks.
+New harness cleanup now does this automatically only after verified destruction
+and bounded daemon join; any discovery/decode/destroy/join failure preserves
+worktrees and produces a failed test with the private residual path.
+
+Initial joining is now additionally proven through actual HTTP `/v1/run` requests:
+both return the same identity/attempt in `starting`, followed by public ready
+inspection and CLI idempotent lookup. F21 (`test_harness`, closed): first direct
+API smoke omitted required `X-Backlot-API-Version` header and failed before any
+instance launch (`public-initial-api-4.log`, 2.82s); adding the contract header
+passes (`public-initial-api-5.log`, 20.59s). The latter selected no nested cases;
+Go's `[no tests to run]` warning refers to excluded subtests, while the parent
+setup/starting-state assertions/coexistence/public destruction actually ran.
+It is **initial-API setup smoke evidence only**, not complete acceptance. Final
+focused fixture-secret scan also exercises initial API and human/JSON ready-run
+outputs: `public-secret-final.log` PASS, 21.81s, root
+`/tmp/bl-public-1291136769`; only that nested boundary case was selected.
+
+F17 public regression now reports `supervision failed: Docker inspection failed`
+for exactly one delayed inspection, retains logs proving normal database shutdown,
+and explicitly restarts with retained data (`public-fixes-2.log`). Original F4
+remains unknown/open; this proves the current diagnostic failure and correction,
+not the original cause. No automatic retry or health-observation grace was added.
+
+R1–R4 implementation fixes are complete with the above focused public evidence;
+independent fix verification and full frozen post-High execution remain gates.
+Current known distinct findings: product 5 (closed), test_harness 19 (closed in
+implementation, including R1–R4), environment_resource 0, unknown 1 (F4 open).
+Standard initial reviews 1, fix verification 0; required sensitive High passes 0.
+No full final-validation cycle launched; final-validation attempts still 0.
+Exact fix candidate `make check` passed (`make-check-fix-candidate.log`):
+schema/notices/format/vet/lint, complete default race suite, ADR verification
+and build. No source changes followed its launch; result/docs updates only.
+Opt-in provider/frozen final acceptance remains separate and unexecuted.
+
+Focused final source is frozen during `make-check-fix-candidate.log`. The first
+API-only smoke was intentionally limited to parent setup and excluded every
+nested case; the subsequent named secret-boundary run also passed the same
+starting-state API assertions without a no-tests warning. No source behavior was
+changed after the full check launched. Original F4 disposition has been asked
+through coordinator protocol; no historical proof or release waiver is implied.
+
+### Fix handoff disposition and cleanup
+
+Coordinator explicitly directed: hand off the frozen fix candidate with F4 open;
+no extra speculative experiments or historical reconstruction. Low fix
+verification then fresh sensitive High must assess completeness and recommend
+evidence-based disposition; any material unresolved release exception goes
+concretely to the user before readiness. This is no waiver or readiness claim.
+
+Owned application/browser image IDs from `artifacts/fix-image-provenance.json`
+were re-inspected for exact run/dispatch labels and zero consumers, then removed
+with `--no-prune` (`cleanup-receipt.json`). Scoped `backlot` children count 0.
+All known fixture daemons/instances and verified temporary worktrees were cleaned;
+private raw state/logs/source snapshots remain at recorded roots. Two original
+unmarked browser profiles still exist and are preserved. Shared base images and
+build cache retained. No known provider runtime residual.
+
+Earlier `build-metadata.txt`/matched binary hash and browser screenshots remain
+accurate **first-candidate** observations, not evidence of this changed CLI binary
+or a post-review frozen release. Required final reproducibility, final images,
+host browser and all complete opted-in provider/gateway/public suites still run
+after both review gates. No branch/PR published.
+
+The exact committed fix revision and final `feature-efficiency/v1` snapshot are
+in `/tmp/bl-review-fixes-3zx4nmiy/fix-handoff.md`; a commit cannot embed its own
+hash. Git whitespace check passed on this fix diff. Source pauses at handoff.

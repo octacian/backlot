@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -134,6 +135,14 @@ func web() http.Handler {
 		http.SetCookie(w, &http.Cookie{Name: "fixture", Value: "yes", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 		http.Redirect(w, r, os.Getenv("ORIGIN")+"/", http.StatusFound)
 	})
+	mux.HandleFunc("/cookie", func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("fixture")
+		if err != nil || cookie.Value != "yes" {
+			http.Error(w, "cookie absent", http.StatusBadRequest)
+			return
+		}
+		_, _ = io.WriteString(w, "cookie-roundtrip")
+	})
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, nil)
 		if err != nil {
@@ -225,6 +234,16 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	switch os.Args[1] {
+	case "witness-server":
+		mux := http.NewServeMux()
+		mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ready") })
+		mux.HandleFunc("/witness", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Println("live-request-witness")
+			_, _ = io.WriteString(w, "witness")
+		})
+		mux.HandleFunc("/exit", func(_ http.ResponseWriter, _ *http.Request) { fmt.Println("requested-unexpected-exit"); os.Exit(23) })
+		fmt.Println("witness server starting")
+		return http.ListenAndServe(":"+os.Getenv("PORT"), mux)
 	case "fail":
 		return errors.New("requested preparation failure")
 	case "prepare":
@@ -306,15 +325,25 @@ func run() error {
 		}
 		return err
 	case "client":
-		client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+		jar, _ := cookiejar.New(nil)
+		client := &http.Client{Jar: jar, Timeout: 10 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 		response, err := client.Get(os.Getenv("ORIGIN") + "/redirect")
 		if err != nil {
 			return err
 		}
 		_ = response.Body.Close()
 		cookies := response.Cookies()
-		if response.StatusCode != 302 || response.Header.Get("Location") != os.Getenv("ORIGIN")+"/" || len(cookies) != 1 || !cookies[0].Secure || !cookies[0].HttpOnly {
+		if response.StatusCode != 302 || response.Header.Get("Location") != os.Getenv("ORIGIN")+"/" || len(cookies) != 1 || !cookies[0].Secure || !cookies[0].HttpOnly || cookies[0].Path != "/" || cookies[0].SameSite != http.SameSiteLaxMode {
 			return errors.New("canonical redirect/cookie failed")
+		}
+		response, err = client.Get(os.Getenv("ORIGIN") + "/cookie")
+		if err != nil {
+			return err
+		}
+		cookieBody, readErr := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if readErr != nil || response.StatusCode != http.StatusOK || string(cookieBody) != "cookie-roundtrip" {
+			return errors.New("secure cookie roundtrip failed")
 		}
 		response, err = client.Get(os.Getenv("ORIGIN") + "/")
 		if err != nil {

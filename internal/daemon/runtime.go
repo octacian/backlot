@@ -760,6 +760,12 @@ func serviceFailure(services map[string]workload) error {
 			}
 			return fmt.Errorf("required service %s exited unexpectedly (exit %d); explicit restart required", name, result.Code)
 		}
+		// Docker Result already performs a fresh running-state inspection. A second
+		// inspection through Alive could fail independently and discard its cause.
+		// Native work additionally verifies its guardian/group identity via Alive.
+		if _, container := g.(*dockerWork); container {
+			continue
+		}
 		if !g.Alive() {
 			return fmt.Errorf("required service %s is unavailable without a verified exit; explicit restart required", name)
 		}

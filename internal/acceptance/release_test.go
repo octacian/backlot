@@ -8,13 +8,17 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"image/png"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +32,11 @@ type harness struct {
 	root, binary, config, project, state string
 	daemon                               *exec.Cmd
 	daemonLog                            *os.File
+	daemonDone                           chan error
+	fixtureRepo                          string
+	worktrees                            []string
+	cleanupUnverified                    bool
+	collectionWitness                    string
 }
 
 func (h *harness) test(name string, run func(*testing.T)) {
@@ -75,6 +84,35 @@ func (h *harness) instance(operation, target string, extra ...string) (v1.Instan
 	}
 	return response.Instance, err
 }
+
+// runAPI observes asynchronous first-start acceptance directly, before readiness.
+func (h *harness) runAPI(scene string) (v1.Instance, error) {
+	request := v1.RunRequest{APIVersion: v1.Version, Plan: v1.PlanRequest{Scene: scene, ProjectPath: h.project, ConfigPath: h.config}, Options: v1.ExecutionOptions{StopGrace: "1s"}}
+	data, err := json.Marshal(request)
+	if err != nil {
+		return v1.Instance{}, err
+	}
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(h.state, "daemon.sock"))
+	}}
+	defer transport.CloseIdleConnections()
+	requestHTTP, err := http.NewRequest(http.MethodPost, "http://backlot/v1/run", bytes.NewReader(data))
+	if err != nil {
+		return v1.Instance{}, err
+	}
+	requestHTTP.Header.Set("Content-Type", "application/json")
+	requestHTTP.Header.Set("X-Backlot-API-Version", v1.Version)
+	response, err := (&http.Client{Transport: transport, Timeout: 10 * time.Second}).Do(requestHTTP)
+	if err != nil {
+		return v1.Instance{}, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	var result v1.InstanceResponse
+	if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&result) != nil {
+		return result.Instance, errors.New("public run API did not return InstanceResponse")
+	}
+	return result.Instance, nil
+}
 func (h *harness) require(operation, target string, extra ...string) v1.Instance {
 	h.t.Helper()
 	instance, err := h.instance(operation, target, extra...)
@@ -104,6 +142,8 @@ func (h *harness) start() {
 	if err := h.daemon.Start(); err != nil {
 		h.t.Fatal(err)
 	}
+	h.daemonDone = make(chan error, 1)
+	go func(command *exec.Cmd, done chan error) { done <- command.Wait() }(h.daemon, h.daemonDone)
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := h.command("daemon", "status", "--state-dir", h.state, "--json"); err == nil {
@@ -113,34 +153,192 @@ func (h *harness) start() {
 	}
 	h.t.Fatal("owned daemon did not become ready")
 }
-func (h *harness) stop() {
-	if h.daemon == nil {
-		return
-	}
-	_, err := h.command("daemon", "stop", "--state-dir", h.state, "--json")
-	if err != nil {
-		h.t.Errorf("owned daemon stop failed: %v", err)
-	}
-	if err := h.daemon.Wait(); err != nil {
-		h.t.Errorf("owned daemon exit: %v", err)
+
+// join bounds retained direct-child shutdown; observed PIDs never authorize cleanup.
+func (h *harness) join(expectedCollectionFailure bool) {
+	select {
+	case err := <-h.daemonDone:
+		var exit *exec.ExitError
+		if expectedCollectionFailure && errors.As(err, &exit) && exit.ExitCode() == 1 {
+			break
+		}
+		if err != nil || expectedCollectionFailure {
+			h.cleanupUnverified = true
+			h.t.Errorf("owned daemon exit: %v; private evidence %s", err, h.root)
+		}
+	case <-time.After(10 * time.Second):
+		h.cleanupUnverified = true
+		h.t.Errorf("owned daemon did not join; killing retained direct child; evidence %s", h.root)
+		if err := h.daemon.Process.Kill(); err != nil {
+			h.t.Errorf("owned daemon kill failed; residual preserved: %v", err)
+		}
+		select {
+		case <-h.daemonDone:
+		case <-time.After(5 * time.Second):
+			h.t.Errorf("owned daemon remains unjoined; preserve %s", h.root)
+		}
 	}
 	h.daemon = nil
 }
+func (h *harness) crash() {
+	h.t.Helper()
+	if err := h.daemon.Process.Kill(); err != nil {
+		h.t.Fatal(err)
+	}
+	select {
+	case <-h.daemonDone:
+	case <-time.After(5 * time.Second):
+		h.t.Fatal("retained daemon crash did not join")
+	}
+	h.daemon = nil
+}
+func (h *harness) stop() { h.stopDaemon(false) }
+func (h *harness) stopDaemon(expectedCollectionFailure bool) {
+	if h.daemon == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, h.binary, "daemon", "stop", "--state-dir", h.state, "--json")
+	var stdout bytes.Buffer
+	command.Stdout = &stdout
+	err := command.Run()
+	if expectedCollectionFailure {
+		var envelope v1.ErrorResponse
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 || json.Unmarshal(stdout.Bytes(), &envelope) != nil || envelope.Error.Code != "collection_failed" || !strings.Contains(envelope.Error.Message, "collection/missing") {
+			h.cleanupUnverified = true
+			h.t.Errorf("shutdown did not report exact injected retained collection gap; evidence %s", h.root)
+		}
+	} else if err != nil {
+		h.cleanupUnverified = true
+		h.t.Errorf("owned daemon stop failed: %v; evidence %s", err, h.root)
+	}
+	h.join(expectedCollectionFailure)
+}
+func (h *harness) list() ([]v1.InstanceSummary, error) {
+	var result []v1.InstanceSummary
+	after := ""
+	for {
+		args := []string{"list", "--state-dir", h.state, "--json", "--limit", "3"}
+		if after != "" {
+			args = append(args, "--after", after)
+		}
+		data, err := h.command(args...)
+		if err != nil {
+			return result, fmt.Errorf("discovery failed: %w", err)
+		}
+		var page v1.ListResponse
+		if err := json.Unmarshal(data, &page); err != nil {
+			return result, fmt.Errorf("discovery decode failed: %w", err)
+		}
+		if page.APIVersion != v1.Version {
+			return result, errors.New("discovery version mismatch")
+		}
+		result = append(result, page.Instances...)
+		if page.NextAfterID == "" {
+			return result, nil
+		}
+		if page.NextAfterID <= after || len(page.Instances) == 0 || page.Instances[len(page.Instances)-1].ID != page.NextAfterID {
+			return result, errors.New("discovery cursor did not advance")
+		}
+		after = page.NextAfterID
+	}
+}
 func (h *harness) cleanup() {
-	data, err := h.command("list", "--state-dir", h.state, "--json")
-	if err == nil {
-		var list v1.ListResponse
-		if json.Unmarshal(data, &list) == nil {
-			for _, i := range list.Instances {
-				if _, err := h.instance("destroy", i.ID); err != nil {
-					h.t.Errorf("cleanup preserved instance %s", i.ID)
-				}
-			}
+	instances, err := h.list()
+	if err != nil {
+		h.cleanupUnverified = true
+		h.t.Errorf("cleanup discovery incomplete: %v; preserve %s", err, h.root)
+	}
+	for _, i := range instances {
+		if _, err := h.instance("destroy", i.ID); err != nil {
+			h.cleanupUnverified = true
+			h.t.Errorf("cleanup preserved instance %s; evidence %s", i.ID, h.root)
 		}
 	}
 	h.stop()
+	if !h.cleanupUnverified {
+		h.removeWorktrees()
+	} else {
+		h.t.Errorf("fixture worktrees preserved with unverified cleanup at %s", h.root)
+	}
 	_ = h.daemonLog.Close()
 	h.t.Logf("private acceptance state/evidence retained at %s (do not publish raw state)", h.root)
+}
+
+type applicationReport struct {
+	Status      string    `json:"status"`
+	Test        string    `json:"test"`
+	Arguments   []string  `json:"arguments"`
+	Passed      bool      `json:"passed"`
+	StartedAt   time.Time `json:"started_at"`
+	CompletedAt time.Time `json:"completed_at"`
+}
+
+func artifactFile(t *testing.T, i v1.Instance, component, name, file string) []byte {
+	t.Helper()
+	for _, a := range i.Execution.Artifacts {
+		if a.Component == component && a.Name == name && a.Attempt == i.Execution.Attempt {
+			data, err := os.ReadFile(filepath.Join(a.Path, file))
+			if err != nil || len(data) == 0 {
+				t.Fatalf("retained %s/%s/%s empty or unreadable: %v", component, name, file, err)
+			}
+			return data
+		}
+	}
+	t.Fatalf("retained artifact missing: %s/%s", component, name)
+	return nil
+}
+func browserArtifacts(t *testing.T, i v1.Instance) {
+	t.Helper()
+	var report applicationReport
+	if json.Unmarshal(artifactFile(t, i, "ui-test", "result", "result.json"), &report) != nil || report.Test != "ui-test" || !report.Passed || !reflect.DeepEqual(report.Arguments, []string{"-run", "TestBrowser"}) || report.StartedAt.IsZero() || !report.CompletedAt.After(report.StartedAt) {
+		t.Fatal("collected browser report invalid")
+	}
+	// This fixture emits well-nested HTML. The permissive standard decoder handles
+	// HTML void elements/entities while requiring scoped body and element witnesses.
+	decoder := xml.NewDecoder(bytes.NewReader(artifactFile(t, i, "ui-test", "browser", "browser.html")))
+	decoder.Strict = false
+	decoder.AutoClose = xml.HTMLAutoClose
+	decoder.Entity = xml.HTMLEntity
+	passed := false
+	id := ""
+	text := map[string]string{}
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal("collected DOM malformed", err)
+		}
+		switch x := token.(type) {
+		case xml.StartElement:
+			id = ""
+			for _, a := range x.Attr {
+				if x.Name.Local == "body" && a.Name.Local == "data-acceptance" && a.Value == "passed" {
+					passed = true
+				}
+				if a.Name.Local == "id" {
+					id = a.Value
+				}
+			}
+		case xml.CharData:
+			if id == "ssr" || id == "result" {
+				text[id] += string(x)
+			}
+		case xml.EndElement:
+			id = ""
+		}
+	}
+	if !passed || text["ssr"] != "SSR: browser-mutated" || text["result"] != "API: browser-mutated; WebSocket verified" {
+		t.Fatal("collected scoped DOM witnesses invalid")
+	}
+	picture, err := png.Decode(bytes.NewReader(artifactFile(t, i, "ui-test", "screenshot", "browser.png")))
+	if err != nil || picture.Bounds().Dx() <= 0 || picture.Bounds().Dy() <= 0 {
+		t.Fatal("collected screenshot not a nonempty PNG", err)
+	}
 }
 func httpValue(t *testing.T, origin, mutation string) string {
 	t.Helper()
@@ -224,39 +422,47 @@ func TestReleaseWorkflows(t *testing.T) {
 	git("worktree", "add", "--detach", one, "HEAD")
 	git("worktree", "add", "--detach", two, "HEAD")
 	h.project = one
+	h.fixtureRepo = repo
+	h.worktrees = []string{one, two}
 	h.daemonLog, err = os.OpenFile(filepath.Join(root, "daemon.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(h.cleanup)
 	h.start()
-	dev := h.require("run", "dev")
-	if dev.Status != v1.RuntimeReady {
-		t.Fatal("dev not ready")
-	}
-	origin := dev.Execution.Origin
-	t.Logf("dev instance=%s origin=%s", dev.ID, origin)
-	if httpValue(t, origin, "persistent-mutation") != "persistent-mutation" {
-		t.Fatal("mutation not saved")
-	}
+	sentinels := h.sentinels()
+	defer sentinels.cleanup()
+	// All clients start before any initial ready response is available.
 	var wg sync.WaitGroup
 	duplicates := make(chan v1.Instance, 2)
 	failures := make(chan error, 2)
 	for range 2 {
-		wg.Go(func() { i, err := h.instance("run", "dev"); duplicates <- i; failures <- err })
+		wg.Go(func() { i, err := h.runAPI("dev"); duplicates <- i; failures <- err })
 	}
 	wg.Wait()
 	close(duplicates)
 	close(failures)
 	for err := range failures {
 		if err != nil {
-			t.Fatal("concurrent duplicate failed", err)
+			t.Fatal("concurrent initial start failed", err)
 		}
 	}
+	var dev v1.Instance
 	for i := range duplicates {
-		if i.ID != dev.ID {
-			t.Fatal("persistent duplicate identity")
+		if i.Status != v1.Starting || dev.ID != "" && (i.ID != dev.ID || i.Execution.Attempt != dev.Execution.Attempt) {
+			t.Fatal("concurrent public first-start requests did not join one starting attempt")
 		}
+		dev = i
+	}
+	dev = h.await(dev.ID, v1.RuntimeReady)
+	origin := dev.Execution.Origin
+	t.Logf("dev instance=%s origin=%s", dev.ID, origin)
+	if httpValue(t, origin, "persistent-mutation") != "persistent-mutation" {
+		t.Fatal("mutation not saved")
+	}
+	ready := h.require("run", "dev")
+	if ready.ID != dev.ID || ready.Execution.Attempt != dev.Execution.Attempt {
+		t.Fatal("ready lookup started new work")
 	}
 	production := h.require("run", "production")
 	if production.Execution.Origin == origin || httpValue(t, production.Execution.Origin, "") != "fresh" {
@@ -300,6 +506,24 @@ func TestReleaseWorkflows(t *testing.T) {
 			t.Fatal("disposable mutated persistent preview")
 		}
 	})
+	h.test("selector-variants", func(t *testing.T) {
+		for _, pattern := range []string{"^Test(Data|Browser)", "NoSuchTest", "["} {
+			i, err := h.instance("run", "backend-test", "--", "-run", pattern)
+			var report applicationReport
+			if json.Unmarshal(artifactFile(t, i, "backend-test", "result", "result.json"), &report) != nil {
+				t.Fatal("selector report malformed")
+			}
+			if pattern == "^Test(Data|Browser)" {
+				if err != nil || i.Status != v1.Succeeded || !report.Passed || !reflect.DeepEqual(report.Arguments, []string{"-run", pattern}) {
+					t.Fatal("regex selector failed")
+				}
+			} else {
+				if err == nil || i.Status != v1.Failed || i.Execution.TerminalExitCode == nil || *i.Execution.TerminalExitCode != 1 || report.Passed || report.Status != "not_completed" {
+					t.Fatal("invalid/no-match selector did not fail truthfully")
+				}
+			}
+		}
+	})
 	h.test("failure-evidence-and-keep", func(t *testing.T) {
 		failed, err := h.instance("run", "backend-test", "--keep-on-failure", "--", "-run", "TestDatabase", "--fail")
 		if err == nil || failed.Status != v1.Failed || !failed.Execution.Kept || failed.Execution.TerminalExitCode == nil || *failed.Execution.TerminalExitCode != 1 || len(failed.Execution.Artifacts) != 1 {
@@ -330,6 +554,7 @@ func TestReleaseWorkflows(t *testing.T) {
 			t.Fatal("reset did not replace mutable data")
 		}
 	})
+	sentinels.verify()
 	h.test("explicit-preview-update", func(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(one, "message.txt"), []byte("explicit-update-witness"), 0600); err != nil {
 			t.Fatal(err)
@@ -356,11 +581,7 @@ func TestReleaseWorkflows(t *testing.T) {
 		if ui.Status != v1.Succeeded || len(ui.Execution.Artifacts) != 3 {
 			t.Fatal("browser evidence missing")
 		}
-		for _, artifact := range ui.Execution.Artifacts {
-			if _, err := os.Stat(artifact.Path); err != nil {
-				t.Fatal("artifact unavailable after teardown")
-			}
-		}
+		browserArtifacts(t, ui)
 	})
 
 	h.test("fixture-secret-boundary", func(t *testing.T) {
@@ -378,6 +599,21 @@ func TestReleaseWorkflows(t *testing.T) {
 		}
 		if bytes.Contains(ordinary, []byte(result.Fixtures[0].Value)) {
 			t.Fatal("ordinary fixture discovery exposed secret")
+		}
+		for _, args := range [][]string{
+			{"run", "dev", "--state-dir", h.state, "--project", h.project, "--config", h.config, "--json"},
+			{"run", "dev", "--state-dir", h.state, "--project", h.project, "--config", h.config},
+			{"inspect", "--state-dir", h.state, "--json", dev.ID},
+			{"status", "--state-dir", h.state, "--json", dev.ID},
+			{"list", "--state-dir", h.state, "--json"},
+			{"logs", "--state-dir", h.state, "--json", dev.ID},
+			{"plan", "dev", "--project", h.project, "--config", h.config, "--json"},
+			{"daemon", "status", "--state-dir", h.state, "--json"},
+		} {
+			output, err := h.command(args...)
+			if err != nil || bytes.Contains(output, []byte(result.Fixtures[0].Value)) || bytes.Contains(output, []byte(`"ownership_token"`)) {
+				t.Fatalf("ordinary %s output leaked authority/secret or failed", args[0])
+			}
 		}
 		before := sha256.Sum256(secret)
 		h.require("restart", dev.ID)
@@ -411,6 +647,7 @@ func TestReleaseWorkflows(t *testing.T) {
 			reap := func() { once.Do(func() { _ = command.Process.Kill(); _ = command.Wait() }) }
 			t.Cleanup(reap)
 			id := ""
+			started := false
 			deadline := time.Now().Add(20 * time.Second)
 			for time.Now().Before(deadline) {
 				data, err := h.command("list", "--state-dir", h.state, "--json")
@@ -429,13 +666,18 @@ func TestReleaseWorkflows(t *testing.T) {
 				if id != "" {
 					logs, err := h.command("logs", "--state-dir", h.state, "--json", id)
 					if err == nil && bytes.Contains(logs, []byte("selected test started")) {
+						started = true
 						break
 					}
 				}
 				time.Sleep(50 * time.Millisecond)
 			}
-			if id == "" {
-				t.Fatal("owned test did not start")
+			if !started {
+				phase := "undiscovered"
+				if id != "" {
+					phase = string(h.require("inspect", id).Status)
+				}
+				t.Fatalf("terminal start witness absent: instance=%s phase=%s", id, phase)
 			}
 			if loss {
 				if err := command.Process.Kill(); err != nil {
@@ -463,8 +705,18 @@ func TestReleaseWorkflows(t *testing.T) {
 				}
 				time.Sleep(50 * time.Millisecond)
 			}
-			if final.Status != v1.Cancelled || final.Execution == nil || !final.Execution.Cancelled || final.Execution.CleanupFailure != "" {
+			if final.ID != id || final.Status != v1.Cancelled || final.Execution == nil || !final.Execution.Cancelled || final.Execution.CleanupFailure != "" {
 				t.Fatal("cancel/client-loss cleanup untruthful")
+			}
+			terminalObserved := false
+			for _, c := range final.Execution.Components {
+				if c.Name == "backend-test" && c.ExitCode != nil {
+					terminalObserved = true
+				}
+			}
+			var partial applicationReport
+			if !terminalObserved || json.Unmarshal(artifactFile(t, final, "backend-test", "result", "result.json"), &partial) != nil || partial.Status != "not_completed" || partial.Passed || !partial.CompletedAt.IsZero() {
+				t.Fatal("cancelled terminal/partial report untruthful")
 			}
 			if httpValue(t, origin, "") != "fresh" {
 				t.Fatal("cancellation touched persistent data")
@@ -516,6 +768,14 @@ func TestReleaseWorkflows(t *testing.T) {
 			}
 		}
 	})
+	h.test("inspection-failure-diagnosis", func(t *testing.T) {
+		old := h.project
+		h.project = two
+		defer func() { h.project = old }()
+		// Use a separate fixture scene identity by destroying its earlier worktree dev.
+		h.require("destroy", other.ID)
+		h.inspectionFailure()
+	})
 	h.test("shutdown-and-owned-crash-recovery", func(t *testing.T) {
 		httpValue(t, origin, "before-shutdown")
 		h.stop()
@@ -525,11 +785,7 @@ func TestReleaseWorkflows(t *testing.T) {
 			t.Fatal("shutdown lost retained data")
 		}
 		// Retained direct child handle authorizes this fault, never an observed PID.
-		if err := h.daemon.Process.Kill(); err != nil {
-			t.Fatal(err)
-		}
-		_ = h.daemon.Wait()
-		h.daemon = nil
+		h.crash()
 		h.start()
 		recovered := h.require("status", dev.ID)
 		if recovered.Status != v1.Interrupted || recovered.Execution.CollectionFailure == "" || recovered.Execution.CleanupFailure != "" {
@@ -540,4 +796,21 @@ func TestReleaseWorkflows(t *testing.T) {
 			t.Fatal("crash recovery lost retained data")
 		}
 	})
+	h.test("public-negative-workflows", func(t *testing.T) { h.negativeWorkflows() })
+	h.test("shutdown-with-retained-collection-gap", func(t *testing.T) {
+		if h.collectionWitness == "" {
+			t.Fatal("injected collection failure witness absent")
+		}
+		before := h.require("inspect", h.collectionWitness)
+		h.stopDaemon(true)
+		h.start()
+		after := h.require("inspect", h.collectionWitness)
+		if before.Status != v1.Destroyed || after.Status != v1.Destroyed || after.Execution.CollectionFailure != before.Execution.CollectionFailure || after.Execution.TerminalExitCode == nil || *after.Execution.TerminalExitCode != 17 {
+			t.Fatal("shutdown erased historical original/collection failure")
+		}
+		if string(artifactFile(t, after, "collection", "present", "report")) != "retained-evidence\n" {
+			t.Fatal("shutdown erased retained artifact")
+		}
+	})
+	sentinels.verify()
 }

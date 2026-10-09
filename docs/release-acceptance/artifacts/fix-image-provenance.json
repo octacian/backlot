@@ -1,0 +1,21 @@
+{
+  "base_commit": "83ff528ba2478b790cb2b1129aeea78702def162",
+  "tracked_patch_sha256": "6029eeeb3ba77f677888b595f4ab1d3df3c68a7bc297e6201c9bb07374843549",
+  "untracked_source_sha256": {
+    "internal/acceptance/negative_test.go": "c3041cc60c39c795d9a24e29272a3895940927f517fce08744678923bb1b3b01",
+    "internal/acceptance/providers_test.go": "cd8907b3dab4058497d85bc80e8beb90b83f5907d779a368dcbdafdba80f1641"
+  },
+  "platform": "linux/arm64",
+  "application_tag": "backlot-release-run85:fix-app",
+  "browser_tag": "backlot-release-run85:fix-browser",
+  "application_image_id": "sha256:f8e7150a53aefc73388ff6bcba3101eea1e1526e6c1cbde48e6b0d77c5852a2d",
+  "browser_image_id": "sha256:34ea4d53051e2ef2054701f9712224648fc1e6f06f379e330d2b8b54c6773846",
+  "application_main_sha256": "5357f210f6b12c154dafb1fb4f2fe3f88b80a3bb3074d64b9ffd5c29094b87b9",
+  "fixture_source_matches_current": true,
+  "build_commands": [
+    "CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false -o examples/release-acceptance/fixture-linux ./examples/release-acceptance",
+    "docker build --label backlot.acceptance.run=run_85d06ab1b7e9 --label backlot.acceptance.dispatch=fixes-1 -t backlot-release-run85:fix-app -f examples/release-acceptance/Dockerfile examples/release-acceptance",
+    "docker build --label backlot.acceptance.run=run_85d06ab1b7e9 --label backlot.acceptance.dispatch=fixes-1 -t backlot-release-run85:fix-browser -f examples/release-acceptance/Dockerfile.browser examples/release-acceptance"
+  ],
+  "acceptance_status": "implementation evidence before independent fix verification and High; frozen final image rebuild still required"
+}

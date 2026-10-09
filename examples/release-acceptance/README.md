@@ -101,3 +101,13 @@ BACKLOT_ACCEPTANCE_CONFIG=/private/machine.yaml \
 This opt-in suite is macOS ARM64 runtime evidence. A skip is not acceptance.
 See the [release ledger](../../docs/release-acceptance/ledger.md) for actual runs,
 remaining cases and the separate required provider/review/frozen-candidate gates.
+
+The opt-in public acceptance suite adds owned negative scenarios to temporary
+fixture manifests: failed fresh initialization/retry, consumed-port conflict,
+missing local image, native/container service exits, live NDJSON following and
+collection/uncertain cleanup failures. `witness-server` is the generic fixture
+listener for these scenarios; its explicit `/exit` fault is selected only there.
+Container clients verify Secure/HttpOnly/SameSite/path and cookie roundtrip. The
+suite preserves historical collection failure on shutdown instead of treating
+that expected nonzero result as a clean shutdown. See the release ledger for
+actual commands, failed attempts, source/image receipts and remaining gates.

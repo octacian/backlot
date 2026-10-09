@@ -20,7 +20,7 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 func TestClientEncodesNamedRequestsAndDecodesResponses(t *testing.T) {
 	id := strings.Repeat("a", 64)
 	token := strings.Repeat("b", 64)
-	instance := v1.InstanceResponse{APIVersion: v1.Version, Instance: v1.Instance{ID: id, Checkout: v1.CheckoutIdentity{ID: id, Path: "/tmp/fixture"}, Status: v1.Prepared, CreatedAt: "2026-10-07T12:00:00Z", LeaseExpiresAt: "2026-10-07T12:00:30Z", Operation: v1.Operation{ID: id, Status: v1.Prepared, Allocations: []v1.AllocationRecord{{ID: id, OwnershipToken: token, Kind: "private_snapshot", Phase: "effect"}}}, Plan: v1.PlanResponse{APIVersion: v1.Version, Project: "fixture", Scene: "test", Lifetime: v1.Disposable, Components: []v1.PlannedComponent{}}}}
+	instance := v1.InstanceResponse{APIVersion: v1.Version, Instance: v1.Instance{ID: id, Checkout: v1.CheckoutIdentity{ID: id, Path: "/tmp/fixture"}, Status: v1.Prepared, CreatedAt: "2026-10-07T12:00:00Z", LeaseExpiresAt: "2026-10-07T12:00:30Z", Operation: v1.Operation{ID: id, Status: v1.Prepared, Allocations: []v1.AllocationRecord{{ID: id, Kind: "private_snapshot", Phase: "effect"}}}, Plan: v1.PlanResponse{APIVersion: v1.Version, Project: "fixture", Scene: "test", Lifetime: v1.Disposable, Components: []v1.PlannedComponent{}}}}
 	status := v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, Status: "running", PID: 10, LeaseDuration: "30s"}
 	cli := New("unused")
 	defer cli.Close()

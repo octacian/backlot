@@ -1,0 +1,6 @@
+# Explicit fixture setup only; Backlot never invokes apk or pulls an image.
+FROM alpine:3.21
+RUN apk add --no-cache chromium=136.0.7103.113-r0
+COPY fixture-linux /fixture
+WORKDIR /work
+ENTRYPOINT ["/fixture"]

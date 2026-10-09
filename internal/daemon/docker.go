@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -272,13 +273,13 @@ func (w *dockerWork) Result() *native.Exit {
 		return &result
 	}
 	if w.logErr != nil && w.exit == nil {
-		return &native.Exit{Error: "container output collection failed", CollectionFailure: "container output collection failed"}
+		return &native.Exit{Error: fmt.Sprintf("container output collection failed: %v", w.logErr), CollectionFailure: "container output collection failed"}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	out, err := w.engine.ContainerInspect(ctx, resourceHandle(w.resource), client.ContainerInspectOptions{})
 	if err != nil {
-		return &native.Exit{Error: "Docker inspection failed"}
+		return &native.Exit{Error: fmt.Sprintf("Docker inspection failed: %v", err)}
 	}
 	if out.Container.State != nil && !out.Container.State.Running {
 		w.exit = &native.Exit{Known: true, Code: out.Container.State.ExitCode, Error: out.Container.State.Error}

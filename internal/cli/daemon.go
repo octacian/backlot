@@ -54,6 +54,9 @@ func output(c *urfave.Command, value any, err error) error {
 		_, err = fmt.Fprintf(c.Writer, "Daemon %s (API %s, state %d, PID %d)\n", result.Status, result.APIVersion, result.StateVersion, result.PID)
 	case v1.InstanceResponse:
 		_, err = fmt.Fprintf(c.Writer, "Instance %s: %s\nOperation: %s\n", result.Instance.ID, result.Instance.Status, result.Instance.Operation.ID)
+		if err == nil && result.Instance.Execution != nil && result.Instance.Execution.Origin != "" {
+			_, err = fmt.Fprintf(c.Writer, "URL: %s\n", result.Instance.Execution.Origin)
+		}
 		if result.Instance.Execution == nil && err == nil {
 			_, err = fmt.Fprintln(c.Writer, "Metadata only; no application work executed or readiness observed.")
 		}
@@ -62,6 +65,15 @@ func output(c *urfave.Command, value any, err error) error {
 		}
 		if err == nil && result.LeaseToken != "" {
 			_, err = fmt.Fprintf(c.Writer, "Disposable lease expires %s; renew using the private token returned by JSON preparation.\n", result.Instance.LeaseExpiresAt)
+		}
+	case v1.ListResponse:
+		for _, instance := range result.Instances {
+			if _, err = fmt.Fprintf(c.Writer, "%s  %s/%s  %s  %s\n", instance.ID, instance.Project, instance.Scene, instance.Status, instance.Origin); err != nil {
+				break
+			}
+		}
+		if err == nil && result.NextAfterID != "" {
+			_, err = fmt.Fprintf(c.Writer, "Continue with --after %s\n", result.NextAfterID)
 		}
 	case v1.DoctorResponse:
 		for _, check := range result.Checks {
@@ -143,7 +155,7 @@ func preparationCommands() []*urfave.Command {
 		response, err := cli.Prepare(ctx, v1.PrepareRequest{APIVersion: v1.Version, Plan: v1.PlanRequest{Scene: c.Args().First(), ProjectPath: project, ConfigPath: config}})
 		return output(c, response, err)
 	}}}
-	for _, name := range []string{"inspect", "cancel", "renew"} {
+	for _, name := range []string{"inspect", "status", "cancel", "renew"} {
 		flags := daemonFlags(false)
 		if name == "renew" {
 			flags = append(flags, &urfave.StringFlag{Name: "lease-token", Usage: "Private capability from disposable preparation"})
@@ -163,7 +175,7 @@ func preparationCommands() []*urfave.Command {
 			defer cli.Close()
 			var response v1.InstanceResponse
 			switch c.Name {
-			case "inspect":
+			case "inspect", "status":
 				response, err = cli.Inspect(ctx, c.Args().First())
 			case "cancel":
 				response, err = cli.Cancel(ctx, c.Args().First())

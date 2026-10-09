@@ -1,0 +1,15 @@
+{
+  "browser": "Chromium 136.0.7103.113-r0 in owned disposable container",
+  "trusted_https": true,
+  "initial_ssr": "fresh",
+  "ui_save_clicked": true,
+  "api_mutation_observed": true,
+  "ssr_after_reload": "browser-mutated",
+  "variable_websocket_echo": true,
+  "dom_state": "passed",
+  "source_base": "00d8ed85d974103f95d8bb631ea11e2fed7a612e",
+  "source_patch_sha256": null,
+  "provenance_note": "Exploratory source/image evidence; full patch provenance for image build unavailable, final frozen-candidate rerun required. Image IDs and native candidate patch archives are recorded in ledger.",
+  "run_log": "browser-probe-focused-3.log",
+  "artifact_file": "browser-container.png"
+}

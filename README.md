@@ -1,6 +1,6 @@
 # Backlot
 
-Backlot is a planned local development and testing stack manager for humans and
+Backlot is a local development and testing stack manager for humans and
 coding agents. A background daemon coordinates native processes, containers,
 isolated resources, and HTTPS routes from a project's declarative scenes.
 
@@ -16,22 +16,24 @@ backlot run ui-test -- <test arguments>
 Scene names are project-defined. Persistent environments return a usable URL;
 disposable runs return their outcome and retained evidence.
 
-**Status:** offline planning, durable metadata preparation and the native vertical
-slice plus generic containers/private state are implemented for independent review.
-The executable provides help,
-`backlot version [--json]`, and `backlot plan <scene> [--project PATH]
-[--config PATH] [--json] -- <terminal-job args>`. Planning validates contracts,
-files, inputs and native executables without running work or allocating resources.
-See the [manifest guide](docs/manifest.md) and generic fixtures.
-Explicit daemon control and metadata-only `prepare`, `inspect`, `cancel`, `renew`
-and local `doctor` are described in the [daemon guide](docs/daemon.md). Prepared
-metadata never claims execution or readiness. Native `run`, `restart`, `stop`, and
-`reset`, `destroy` and retained `logs` support persistent services and disposable
-finite jobs with isolated ports, networks, volumes, directories and secrets. Commands and all descendants must stay in their supervised process
-group; detachment and external process delegation are unsupported. See the
-[container/private-state guide](docs/containers.md) and runnable MariaDB fixture.
-Publication and broader evidence workflows remain V1 requirements. The initial release target is macOS
-ARM64; Linux and native Windows support are architectural targets for later.
+**Status:** native/container execution, private retained state, configured HTTPS
+publication and disposable results/evidence are implemented. Release acceptance
+is in progress; independent reviews, frozen-candidate checks and CI remain gates,
+so this is not a V1 release declaration. See the
+[release acceptance ledger](docs/release-acceptance/ledger.md).
+
+Start with [installation and operations](docs/operations.md) and the
+[runnable four-workflow fixture](examples/release-acceptance/README.md). The
+[manifest guide](docs/manifest.md) defines strict offline planning/configuration;
+the [daemon guide](docs/daemon.md), [private-state guide](docs/containers.md),
+[HTTPS guide](docs/https.md) and [evidence guide](docs/evidence.md) describe runtime
+contracts. Use `list` to discover recorded IDs and `status`/`inspect` to inspect
+them; ordinary views redact secrets and ownership authority. Prepared metadata
+never claims execution/readiness.
+
+Native commands and all descendants must stay in their supervised process group;
+detachment and external process delegation are unsupported. The release target is
+macOS ARM64; Linux and Windows compile checks are portability evidence only.
 
 ## Development
 
@@ -41,4 +43,4 @@ contributor expectations. Begin with the [V1 PRD](docs/prd.md) and
 
 ## License
 
-Backlot is BSD 3-Clause licensed. See [LICENSE](LICENSE).
+Backlot is BSD 3-Clause licensed. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).

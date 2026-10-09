@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -93,6 +94,31 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 		return &v1.PlanError{Code: "invalid_response", Message: "invalid daemon response contract"}
 	}
 	switch value := response.(type) {
+	case *v1.ListResponse:
+		if value.APIVersion != v1.Version || len(value.Instances) > 100 || value.Instances == nil {
+			return responseError()
+		}
+		last := ""
+		for _, instance := range value.Instances {
+			if !validID(instance.ID) || instance.ID <= last || instance.Project == "" || instance.Scene == "" || !filepath.IsAbs(instance.Checkout) || (instance.Lifetime != v1.Persistent && instance.Lifetime != v1.Disposable) {
+				return responseError()
+			}
+			if err := validateOrigin(instance.ID, instance.Origin); err != nil {
+				return err
+			}
+			if _, err := time.Parse(time.RFC3339Nano, instance.CreatedAt); err != nil {
+				return responseError()
+			}
+			switch instance.Status {
+			case v1.Preparing, v1.Prepared, v1.Cancelled, v1.Interrupted, v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Destroyed, v1.Succeeded, v1.Failed:
+			default:
+				return responseError()
+			}
+			last = instance.ID
+		}
+		if value.NextAfterID != "" && (last == "" || value.NextAfterID != last) {
+			return responseError()
+		}
 	case *v1.LogsResponse:
 		if value.APIVersion != v1.Version || value.NextOffset < 0 {
 			return responseError()
@@ -128,6 +154,13 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 		return validateInstance(*value)
 	}
 	return nil
+}
+
+// List discovers bounded pages of current and historical recorded instances.
+func (c *Client) List(ctx context.Context, request v1.ListRequest) (v1.ListResponse, error) {
+	var response v1.ListResponse
+	err := c.call(ctx, http.MethodPost, "/v1/instances", request, &response)
+	return response, err
 }
 
 // Status checks daemon connectivity and API/state compatibility.

@@ -49,9 +49,10 @@ type CheckoutIdentity struct {
 // AllocationRecord preserves intent/effect ownership across interruption.
 // Metadata preparation allocates only a private snapshot, never runtime resources.
 type AllocationRecord struct {
-	ID             string `json:"id"`
-	Kind           string `json:"kind"`
-	OwnershipToken string `json:"ownership_token"`
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	// OwnershipToken is private persisted state; the server removes it from public responses.
+	OwnershipToken string `json:"ownership_token,omitempty"`
 	Phase          string `json:"phase"`
 }
 
@@ -83,6 +84,32 @@ type InstanceResponse struct {
 	ManifestDrift bool     `json:"manifest_drift,omitempty"`
 	ConfigDrift   bool     `json:"config_drift,omitempty"`
 	LeaseToken    string   `json:"lease_token,omitempty"`
+}
+
+// ListRequest selects a bounded identity-ordered page, including historical instances.
+type ListRequest struct {
+	APIVersion string `json:"api_version"`
+	AfterID    string `json:"after_id,omitempty"`
+	Limit      int    `json:"limit,omitempty"`
+}
+
+// InstanceSummary discovers a recorded target without exposing its private state.
+type InstanceSummary struct {
+	ID        string         `json:"id"`
+	Project   string         `json:"project"`
+	Scene     string         `json:"scene"`
+	Checkout  string         `json:"checkout"`
+	Status    InstanceStatus `json:"status"`
+	Lifetime  Lifetime       `json:"lifetime"`
+	CreatedAt string         `json:"created_at"`
+	Origin    string         `json:"origin,omitempty"`
+}
+
+// ListResponse is one bounded page; NextAfterID is empty on the last page.
+type ListResponse struct {
+	APIVersion  string            `json:"api_version"`
+	Instances   []InstanceSummary `json:"instances"`
+	NextAfterID string            `json:"next_after_id,omitempty"`
 }
 
 // DaemonStatusResponse reports transport and state compatibility.

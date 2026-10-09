@@ -1,0 +1,839 @@
+{
+  "version": "backlot/v1",
+  "project": "release-fixture",
+  "tools": {
+    "fixture": "./fixture"
+  },
+  "inputs": {
+    "image": {},
+    "browser-image": {}
+  },
+  "resources": {
+    "data": {
+      "kind": "volume"
+    },
+    "admin": {
+      "kind": "secret"
+    },
+    "password": {
+      "kind": "secret"
+    },
+    "sql": {
+      "kind": "port"
+    },
+    "network": {
+      "kind": "network"
+    },
+    "api-port": {
+      "kind": "port"
+    },
+    "web-port": {
+      "kind": "port"
+    },
+    "origin": {
+      "kind": "origin"
+    }
+  },
+  "outputs": {
+    "dist": {
+      "path": "dist",
+      "concurrency_group": "dist"
+    },
+    "ui-dist": {
+      "path": "ui-dist",
+      "concurrency_group": "ui-dist"
+    },
+    "reports": {
+      "path": "reports",
+      "concurrency_group": "reports"
+    }
+  },
+  "environments": {
+    "database": {
+      "assign": {
+        "DB_HOST": {
+          "ref": {
+            "kind": "service",
+            "name": "database",
+            "field": "host"
+          }
+        },
+        "DB_PORT": {
+          "ref": {
+            "kind": "service",
+            "name": "database",
+            "field": "port",
+            "port": "sql"
+          }
+        },
+        "DB_PASSWORD": {
+          "ref": {
+            "kind": "resource",
+            "name": "password",
+            "field": "value"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "database": {
+      "kind": "service",
+      "runtime": "container",
+      "image": {
+        "literal": "mariadb:11.4"
+      },
+      "resources": [
+        "data",
+        "admin",
+        "password",
+        "sql",
+        "network"
+      ],
+      "ports": {
+        "sql": {
+          "resource": "sql",
+          "container_port": 3306
+        }
+      },
+      "mounts": [
+        {
+          "resource": "data",
+          "target": "/var/lib/mysql"
+        }
+      ],
+      "environment": {
+        "assign": {
+          "MARIADB_ROOT_PASSWORD": {
+            "ref": {
+              "kind": "resource",
+              "name": "admin",
+              "field": "value"
+            }
+          },
+          "MARIADB_PASSWORD": {
+            "ref": {
+              "kind": "resource",
+              "name": "password",
+              "field": "value"
+            }
+          },
+          "MARIADB_USER": {
+            "literal": "app"
+          },
+          "MARIADB_DATABASE": {
+            "literal": "app"
+          }
+        }
+      },
+      "readiness": {
+        "kind": "tcp",
+        "target": {
+          "ref": {
+            "kind": "resource",
+            "name": "sql",
+            "field": "port"
+          }
+        },
+        "timeout": "60s"
+      }
+    },
+    "prepare": {
+      "kind": "job",
+      "runtime": "native",
+      "policy": "fresh-only",
+      "initializes": [
+        "data"
+      ],
+      "command": {
+        "tool": "fixture",
+        "args": [
+          "prepare"
+        ]
+      },
+      "resources": [
+        "data",
+        "password",
+        "network"
+      ],
+      "environment_sets": [
+        "database"
+      ],
+      "depends_on": [
+        {
+          "component": "database",
+          "condition": "ready"
+        }
+      ]
+    },
+    "api": {
+      "kind": "service",
+      "runtime": "native",
+      "command": {
+        "tool": "fixture",
+        "args": [
+          "api"
+        ]
+      },
+      "resources": [
+        "api-port",
+        "password",
+        "network"
+      ],
+      "ports": {
+        "http": {
+          "resource": "api-port"
+        }
+      },
+      "environment_sets": [
+        "database"
+      ],
+      "environment": {
+        "assign": {
+          "PORT": {
+            "ref": {
+              "kind": "resource",
+              "name": "api-port",
+              "field": "port"
+            }
+          }
+        }
+      },
+      "depends_on": [
+        {
+          "component": "prepare",
+          "condition": "completed"
+        }
+      ],
+      "readiness": {
+        "kind": "tcp",
+        "target": {
+          "ref": {
+            "kind": "resource",
+            "name": "api-port",
+            "field": "port"
+          }
+        },
+        "timeout": "10s"
+      },
+      "fixtures": {
+        "user": {
+          "value": {
+            "literal": "app"
+          },
+          "description": "Restricted database account"
+        },
+        "password": {
+          "value": {
+            "ref": {
+              "kind": "resource",
+              "name": "password",
+              "field": "value"
+            }
+          },
+          "description": "Private application password"
+        }
+      }
+    },
+    "api-container": {
+      "kind": "service",
+      "runtime": "container",
+      "resources": [
+        "api-port",
+        "password",
+        "network"
+      ],
+      "ports": {
+        "http": {
+          "resource": "api-port",
+          "container_port": 8080
+        }
+      },
+      "environment_sets": [
+        "database"
+      ],
+      "environment": {
+        "assign": {
+          "PORT": {
+            "literal": "8080"
+          }
+        }
+      },
+      "depends_on": [
+        {
+          "component": "prepare",
+          "condition": "completed"
+        }
+      ],
+      "readiness": {
+        "kind": "tcp",
+        "target": {
+          "ref": {
+            "kind": "resource",
+            "name": "api-port",
+            "field": "port"
+          }
+        },
+        "timeout": "10s"
+      },
+      "fixtures": {
+        "user": {
+          "value": {
+            "literal": "app"
+          },
+          "description": "Restricted database account"
+        },
+        "password": {
+          "value": {
+            "ref": {
+              "kind": "resource",
+              "name": "password",
+              "field": "value"
+            }
+          },
+          "description": "Private application password"
+        }
+      },
+      "image": {
+        "ref": {
+          "kind": "input",
+          "name": "image"
+        }
+      },
+      "args": [
+        "api"
+      ]
+    },
+    "web": {
+      "kind": "service",
+      "runtime": "native",
+      "command": {
+        "tool": "fixture",
+        "args": [
+          "web"
+        ]
+      },
+      "resources": [
+        "web-port",
+        "origin",
+        "network"
+      ],
+      "ports": {
+        "http": {
+          "resource": "web-port"
+        }
+      },
+      "environment": {
+        "assign": {
+          "PORT": {
+            "ref": {
+              "kind": "resource",
+              "name": "web-port",
+              "field": "port"
+            }
+          },
+          "ORIGIN": {
+            "ref": {
+              "kind": "resource",
+              "name": "origin",
+              "field": "url"
+            }
+          },
+          "MESSAGE": {
+            "literal": "message.txt"
+          }
+        }
+      },
+      "depends_on": [
+        {
+          "component": "api",
+          "condition": "ready"
+        }
+      ],
+      "readiness": {
+        "kind": "tcp",
+        "target": {
+          "ref": {
+            "kind": "resource",
+            "name": "web-port",
+            "field": "port"
+          }
+        },
+        "timeout": "10s"
+      }
+    },
+    "build": {
+      "kind": "job",
+      "runtime": "native",
+      "policy": "each-start",
+      "command": {
+        "tool": "fixture",
+        "args": [
+          "build"
+        ]
+      },
+      "outputs": [
+        "dist"
+      ],
+      "environment": {
+        "assign": {
+          "DIST": {
+            "ref": {
+              "kind": "output",
+              "name": "dist",
+              "field": "path"
+            }
+          }
+        }
+      }
+    },
+    "ui-build": {
+      "kind": "job",
+      "runtime": "native",
+      "policy": "each-start",
+      "command": {
+        "tool": "fixture",
+        "args": [
+          "build"
+        ]
+      },
+      "outputs": [
+        "ui-dist"
+      ],
+      "environment": {
+        "assign": {
+          "DIST": {
+            "ref": {
+              "kind": "output",
+              "name": "ui-dist",
+              "field": "path"
+            }
+          }
+        }
+      }
+    },
+    "preview": {
+      "kind": "service",
+      "runtime": "container",
+      "resources": [
+        "web-port",
+        "origin",
+        "network"
+      ],
+      "ports": {
+        "http": {
+          "resource": "web-port",
+          "container_port": 8080
+        }
+      },
+      "environment": {
+        "assign": {
+          "PORT": {
+            "literal": "8080"
+          },
+          "ORIGIN": {
+            "ref": {
+              "kind": "resource",
+              "name": "origin",
+              "field": "url"
+            }
+          },
+          "MESSAGE": {
+            "literal": "/dist/message.txt"
+          }
+        }
+      },
+      "depends_on": [
+        {
+          "component": "api-container",
+          "condition": "ready"
+        },
+        {
+          "component": "build",
+          "condition": "completed"
+        }
+      ],
+      "readiness": {
+        "kind": "tcp",
+        "target": {
+          "ref": {
+            "kind": "resource",
+            "name": "web-port",
+            "field": "port"
+          }
+        },
+        "timeout": "10s"
+      },
+      "image": {
+        "ref": {
+          "kind": "input",
+          "name": "image"
+        }
+      },
+      "args": [
+        "web"
+      ],
+      "outputs": [
+        "dist"
+      ],
+      "mounts": [
+        {
+          "output": "dist",
+          "target": "/dist",
+          "read_only": true
+        }
+      ]
+    },
+    "ui-web": {
+      "kind": "service",
+      "runtime": "container",
+      "resources": [
+        "web-port",
+        "origin",
+        "network"
+      ],
+      "ports": {
+        "http": {
+          "resource": "web-port",
+          "container_port": 8080
+        }
+      },
+      "environment": {
+        "assign": {
+          "PORT": {
+            "literal": "8080"
+          },
+          "ORIGIN": {
+            "ref": {
+              "kind": "resource",
+              "name": "origin",
+              "field": "url"
+            }
+          },
+          "MESSAGE": {
+            "literal": "/dist/message.txt"
+          }
+        }
+      },
+      "depends_on": [
+        {
+          "component": "api-container",
+          "condition": "ready"
+        },
+        {
+          "component": "ui-build",
+          "condition": "completed"
+        }
+      ],
+      "readiness": {
+        "kind": "tcp",
+        "target": {
+          "ref": {
+            "kind": "resource",
+            "name": "web-port",
+            "field": "port"
+          }
+        },
+        "timeout": "10s"
+      },
+      "image": {
+        "ref": {
+          "kind": "input",
+          "name": "image"
+        }
+      },
+      "args": [
+        "web"
+      ],
+      "outputs": [
+        "ui-dist"
+      ],
+      "mounts": [
+        {
+          "output": "ui-dist",
+          "target": "/dist",
+          "read_only": true
+        }
+      ]
+    },
+    "backend-test": {
+      "kind": "job",
+      "runtime": "native",
+      "policy": "each-start",
+      "command": {
+        "tool": "fixture",
+        "args": [
+          "backend-test"
+        ]
+      },
+      "resources": [
+        "password",
+        "network"
+      ],
+      "environment_sets": [
+        "database"
+      ],
+      "outputs": [
+        "reports"
+      ],
+      "depends_on": [
+        {
+          "component": "prepare",
+          "condition": "completed"
+        }
+      ],
+      "artifacts": {
+        "result": {
+          "path": "reports/result.json"
+        }
+      }
+    },
+    "container-client": {
+      "kind": "job",
+      "runtime": "container",
+      "policy": "each-start",
+      "image": {
+        "ref": {
+          "kind": "input",
+          "name": "image"
+        }
+      },
+      "args": [
+        "client"
+      ],
+      "resources": [
+        "origin",
+        "network"
+      ],
+      "environment": {
+        "assign": {
+          "ORIGIN": {
+            "ref": {
+              "kind": "resource",
+              "name": "origin",
+              "field": "url"
+            }
+          }
+        }
+      },
+      "depends_on": [
+        {
+          "component": "ui-web",
+          "condition": "ready"
+        }
+      ]
+    },
+    "ui-test": {
+      "kind": "job",
+      "runtime": "container",
+      "policy": "each-start",
+      "resources": [
+        "origin"
+      ],
+      "environment": {
+        "assign": {
+          "ORIGIN": {
+            "ref": {
+              "kind": "resource",
+              "name": "origin",
+              "field": "url"
+            }
+          },
+          "BROWSER": {
+            "literal": "/usr/bin/chromium"
+          }
+        }
+      },
+      "depends_on": [
+        {
+          "component": "container-client",
+          "condition": "completed"
+        }
+      ],
+      "artifacts": {
+        "result": {
+          "path": "/work/reports/result.json"
+        },
+        "browser": {
+          "path": "/work/reports/browser.html"
+        },
+        "screenshot": {
+          "path": "/work/reports/browser.png"
+        }
+      },
+      "image": {
+        "ref": {
+          "kind": "input",
+          "name": "browser-image"
+        }
+      },
+      "args": [
+        "ui-test"
+      ]
+    }
+  },
+  "scenes": {
+    "dev": {
+      "lifetime": "persistent",
+      "components": [
+        "database",
+        "prepare",
+        "api",
+        "web"
+      ],
+      "resources": [
+        "data",
+        "admin",
+        "password",
+        "sql",
+        "network",
+        "api-port",
+        "web-port",
+        "origin"
+      ],
+      "publish": {
+        "resource": "origin",
+        "routes": [
+          {
+            "path": "/api",
+            "service": "api",
+            "port": "http",
+            "prefix": "strip"
+          },
+          {
+            "path": "/",
+            "service": "web",
+            "port": "http",
+            "prefix": "preserve"
+          }
+        ],
+        "probe": {
+          "kind": "http",
+          "target": {
+            "ref": {
+              "kind": "resource",
+              "name": "origin",
+              "field": "url"
+            }
+          },
+          "timeout": "30s"
+        }
+      }
+    },
+    "production": {
+      "lifetime": "persistent",
+      "components": [
+        "database",
+        "prepare",
+        "api-container",
+        "build",
+        "preview"
+      ],
+      "resources": [
+        "data",
+        "admin",
+        "password",
+        "sql",
+        "network",
+        "api-port",
+        "web-port",
+        "origin"
+      ],
+      "publish": {
+        "resource": "origin",
+        "routes": [
+          {
+            "path": "/api",
+            "service": "api-container",
+            "port": "http",
+            "prefix": "strip"
+          },
+          {
+            "path": "/",
+            "service": "preview",
+            "port": "http",
+            "prefix": "preserve"
+          }
+        ],
+        "probe": {
+          "kind": "http",
+          "target": {
+            "ref": {
+              "kind": "resource",
+              "name": "origin",
+              "field": "url"
+            }
+          },
+          "timeout": "30s"
+        }
+      }
+    },
+    "backend-test": {
+      "lifetime": "disposable",
+      "components": [
+        "database",
+        "prepare",
+        "backend-test"
+      ],
+      "resources": [
+        "data",
+        "admin",
+        "password",
+        "sql",
+        "network"
+      ],
+      "terminal_job": "backend-test"
+    },
+    "ui-test": {
+      "lifetime": "disposable",
+      "components": [
+        "database",
+        "prepare",
+        "api-container",
+        "ui-build",
+        "ui-web",
+        "container-client",
+        "ui-test"
+      ],
+      "resources": [
+        "data",
+        "admin",
+        "password",
+        "sql",
+        "network",
+        "api-port",
+        "web-port",
+        "origin"
+      ],
+      "terminal_job": "ui-test",
+      "publish": {
+        "resource": "origin",
+        "routes": [
+          {
+            "path": "/api",
+            "service": "api-container",
+            "port": "http",
+            "prefix": "strip"
+          },
+          {
+            "path": "/",
+            "service": "ui-web",
+            "port": "http",
+            "prefix": "preserve"
+          }
+        ],
+        "probe": {
+          "kind": "http",
+          "target": {
+            "ref": {
+              "kind": "resource",
+              "name": "origin",
+              "field": "url"
+            }
+          },
+          "timeout": "30s"
+        }
+      }
+    }
+  }
+}

@@ -1,10 +1,20 @@
 GOLANGCI_LINT_VERSION := v2.14.0
 LINT := .tools/bin/golangci-lint-$(GOLANGCI_LINT_VERSION)
 
-.PHONY: build fmt fmt-check vet test race tools lint adr-create adr-verify adr-test schema-generate schema-check check
+.PHONY: build release-build notices notices-check fmt fmt-check vet test race tools lint adr-create adr-verify adr-test schema-generate schema-check check
 
 build:
 	go build -o bin/backlot ./cmd/backlot
+
+# Fixed toolchain/module sources, no local paths, VCS dirtiness or wall clock.
+release-build: notices-check
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags='-buildid=' -o bin/backlot-darwin-arm64 ./cmd/backlot
+
+notices:
+	go run ./cmd/notices
+
+notices-check:
+	go run ./cmd/notices -check
 
 fmt:
 	go fmt ./...
@@ -50,4 +60,4 @@ schema-generate:
 schema-check:
 	go run ./cmd/schema -check
 
-check: schema-check fmt-check vet lint race adr-verify build
+check: schema-check notices-check fmt-check vet lint race adr-verify build

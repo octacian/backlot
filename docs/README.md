@@ -33,3 +33,8 @@ The [manifest and offline planning guide](manifest.md) documents milestone 1.
 
 The command reference lives in [Testing and tooling](testing.md). README and
 agent entry points link there rather than maintaining competing command lists.
+
+The [installation and operations guide](operations.md) is the user entry point.
+The [runnable release fixture](../examples/release-acceptance/README.md) implements
+all four application workflows; [release acceptance evidence](release-acceptance/ledger.md)
+records actual results and outstanding gates.

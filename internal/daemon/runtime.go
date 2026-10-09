@@ -754,8 +754,14 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 }
 func serviceFailure(services map[string]workload) error {
 	for name, g := range services {
-		if g.Result() != nil || !g.Alive() {
-			return fmt.Errorf("required service %s exited unexpectedly; explicit restart required", name)
+		if result := g.Result(); result != nil {
+			if !result.Known {
+				return fmt.Errorf("required service %s supervision failed: %s; explicit restart required", name, result.Error)
+			}
+			return fmt.Errorf("required service %s exited unexpectedly (exit %d); explicit restart required", name, result.Code)
+		}
+		if !g.Alive() {
+			return fmt.Errorf("required service %s is unavailable without a verified exit; explicit restart required", name)
 		}
 	}
 	return nil

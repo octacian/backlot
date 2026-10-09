@@ -17,9 +17,11 @@ Run these from the repository root:
 | Command | Purpose |
 | --- | --- |
 | `make build` | Build `bin/backlot` |
+| `make release-build` | Reproducible local macOS ARM64 binary |
+| `make notices`, `make notices-check` | Generate/verify linked dependency license notices |
 | `bin/backlot daemon start --state-dir /absolute/private/path --json` | Start an explicit local metadata daemon after building |
 | `bin/backlot doctor --state-dir /absolute/private/path --json` | Check local daemon access; provider checks deferred |
-| `go run ./cmd/backlot version --json` | Inspect the scaffold's typed version result |
+| `go run ./cmd/backlot version --json` | Inspect the typed version result |
 | `go run ./cmd/backlot plan test --project examples/adoption --json -- -run TestExample` | Validate an offline fixture plan and forward terminal arguments |
 | `make fmt` | Format Go source |
 | `make fmt-check` | Check Go formatting without editing |
@@ -169,3 +171,24 @@ real owned-domain trusted HTTPS from macOS ARM64 host, browser and containers,
 including SSR/API/WebSockets and relevant redirects/cookies. Record commands,
 candidate revision, fixtures/config/image provenance, logs, skips/failures and
 cleanup in the delivery ledger; never substitute mock success for missing evidence.
+
+## Public release workflows
+
+The macOS ARM64 opt-in public workflow suite uses the runnable generic fixture,
+real temporary Git worktrees, normal host/container DNS and operator-approved TLS.
+It exercises CLI operations through a private owned daemon and retains sanitized
+command timings in its test log; raw state/logs/artifacts remain private at the
+reported root. Follow [fixture setup](../examples/release-acceptance/README.md),
+then run:
+
+```sh
+BACKLOT_ACCEPTANCE_CONFIG=/absolute/private/machine.yaml \
+  go test -race ./internal/acceptance -run '^TestReleaseWorkflows$' -count=1 -v
+```
+
+The machine file must select explicitly built fixture/browser image tags. This
+suite mutates only its owned instance routes/resources, never gateway bootstrap,
+DNS or trust. An unset variable skips; a skip is not acceptance. This supplements
+the complete Docker/gateway/HTTPS suites above, which remain separate required
+frozen-candidate gates. Record exact commit/dirty patch, image/config provenance,
+failed/skipped runs, timing and cleanup in the [ledger](release-acceptance/ledger.md).

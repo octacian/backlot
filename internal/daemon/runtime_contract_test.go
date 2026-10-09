@@ -28,7 +28,7 @@ func TestExecutionBudgetsAndPreflight(t *testing.T) {
 			t.Fatal("invalid deadline accepted", options)
 		}
 	}
-	for _, plan := range []v1.PlanResponse{{Publish: &v1.Publication{}}, {Resources: map[string]v1.Resource{"url": {Kind: "origin"}}}} {
+	for _, plan := range []v1.PlanResponse{{Resources: map[string]v1.Resource{"url": {Kind: "origin"}}}} {
 		if err := executablePlan(plan); err == nil {
 			t.Fatal("unsupported selected work accepted")
 		}

@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"net"
+	"net/netip"
 	"net/url"
 	"path"
 	"regexp"
@@ -15,6 +16,7 @@ import (
 
 var identifier = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 var envKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var routePath = regexp.MustCompile(v1.LiteralRoutePathPattern)
 
 func invalid(field, message string) error {
 	return &v1.PlanError{Code: "invalid_contract", Field: field, Message: message}
@@ -457,7 +459,7 @@ func scene(m v1.Manifest, name string, s v1.Scene) error {
 		paths := map[string]bool{}
 		for _, r := range p.Routes {
 			c := m.Components[r.Service]
-			if !strings.HasPrefix(r.Path, "/") || path.Clean(r.Path) != r.Path || strings.ContainsAny(r.Path, "?#\x00") || paths[r.Path] || !slices.Contains(s.Components, r.Service) || c.Kind != v1.Service || c.Ports[r.Port].Resource == "" || (r.Prefix != "preserve" && r.Prefix != "strip") {
+			if !routePath.MatchString(r.Path) || path.Clean(r.Path) != r.Path || paths[r.Path] || !slices.Contains(s.Components, r.Service) || c.Kind != v1.Service || c.Ports[r.Port].Resource == "" || (r.Prefix != "preserve" && r.Prefix != "strip") {
 				return invalid(f+".publish.routes", "declare unique absolute paths, selected service ports and preserve/strip prefix policy")
 			}
 			paths[r.Path] = true
@@ -572,17 +574,29 @@ func ValidateMachine(c v1.MachineConfig) error {
 		}
 	}
 	if c.Docker != nil {
+		if c.Docker.HostAddress != "" && !validHostAddress(c.Docker.HostAddress) {
+			return invalid("config.docker.host_address", "use a host name or numeric IP without port, scheme or credentials")
+		}
+		if c.Docker.PublishAddress != "" {
+			address, err := netip.ParseAddr(c.Docker.PublishAddress)
+			if err != nil || address.Zone() != "" || address.IsMulticast() {
+				return invalid("config.docker.publish_address", "use a numeric host bind address without zone or port")
+			}
+		}
 		u, err := url.Parse(c.Docker.Endpoint)
 		if err != nil || u.Scheme != "unix" || u.Path == "" || u.Host != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 			return invalid("config.docker.endpoint", "use a local unix socket URL")
 		}
 	}
 	if c.Caddy != nil {
+		if c.Caddy.HTTPSPort != nil && (*c.Caddy.HTTPSPort < 1 || *c.Caddy.HTTPSPort > 65535) {
+			return invalid("config.caddy.https_port", "use a port in 1..65535")
+		}
 		u, err := url.Parse(c.Caddy.Endpoint)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || !validURLPort(u) || u.RawQuery != "" || u.Fragment != "" {
 			return invalid("config.caddy.endpoint", "provide an HTTP(S) admin URL without credentials, query or fragment and with any explicit port in 1..65535")
 		}
-		if !identifier.MatchString(c.Caddy.Scope) || !validDomain(c.Caddy.DomainSuffix) || c.Caddy.HostAddress == "" || strings.ContainsAny(c.Caddy.HostAddress, "/\x00 \n\r") {
+		if !identifier.MatchString(c.Caddy.Scope) || !validDomain(c.Caddy.DomainSuffix) || len(c.Caddy.DomainSuffix) > 209 || !validHostAddress(c.Caddy.HostAddress) {
 			return invalid("config.caddy", "declare owned scope, domain_suffix and gateway-reachable host_address")
 		}
 	}
@@ -593,6 +607,27 @@ func ValidateMachine(c v1.MachineConfig) error {
 		}
 	}
 	return nil
+}
+
+func validHostAddress(value string) bool {
+	if ip, err := netip.ParseAddr(value); err == nil {
+		return ip.Zone() == "" && !ip.IsUnspecified() && !ip.IsMulticast()
+	}
+	if len(value) == 0 || len(value) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(value, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, char := range label {
+			if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '-' {
+				continue
+			}
+			return false
+		}
+	}
+	return true
 }
 
 func validDomain(value string) bool {

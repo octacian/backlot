@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/gateway"
 	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 	bolt "go.etcd.io/bbolt"
@@ -15,6 +16,7 @@ import (
 )
 
 type runtimeRecord struct {
+	Gateway       *gateway.Intent     `json:"gateway,omitempty"`
 	LaunchPending bool                `json:"launch_pending,omitempty"`
 	ConfigPath    string              `json:"config_path,omitempty"`
 	Attempt       string              `json:"attempt"`
@@ -126,13 +128,16 @@ func (s *store) recoverExecution(id string) error {
 	}
 	result := *instance.Execution
 	var cleanup error
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	cleanup = s.removeGateway(cleanupCtx, id, &r)
+	cleanupCancel()
 	g, err := s.resources(id)
 	if err != nil {
 		return err
 	}
 	proofMissing := r.Attempt != result.Attempt || (instance.Status == v1.RuntimeReady && len(r.Groups) == 0 && len(g.Containers) == 0)
 	if proofMissing {
-		cleanup = problem("cleanup_failed", "native guardian ownership effect is absent or mismatched; preserve uncertain processes and inspect private state")
+		cleanup = errors.Join(cleanup, problem("cleanup_failed", "native guardian ownership effect is absent or mismatched; preserve uncertain processes and inspect private state"))
 	}
 	if r.LaunchPending {
 		cleanup = errors.Join(cleanup, problem("cleanup_failed", "native guardian launch intent lacks its ownership effect; an inactive helper may remain; preserve and diagnose this instance"))
@@ -153,8 +158,10 @@ func (s *store) recoverExecution(id string) error {
 		cancel()
 	}
 	result.CleanupFailure = ""
+	result.CleanupDetails = nil
 	if cleanup != nil {
 		result.CleanupFailure = cleanup.Error()
+		result.CleanupDetails = cleanupDetails(cleanup)
 	}
 	for i := range result.Components {
 		result.Components[i].Status = "stopped"
@@ -164,6 +171,7 @@ func (s *store) recoverExecution(id string) error {
 	}
 	result.CollectionFailure = "daemon interruption; output/status collection may contain gaps"
 	result.Failure = "daemon recovery interrupted execution; explicit restart required"
+	result.FailureDetail = &v1.PlanError{Code: "execution_interrupted", Message: result.Failure}
 	if _, err := s.execution(id, v1.Interrupted, &result); err != nil {
 		return err
 	}

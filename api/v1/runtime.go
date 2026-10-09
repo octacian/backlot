@@ -36,11 +36,14 @@ type ComponentResult struct {
 
 // ExecutionResult is the durable redacted runtime view.
 type ExecutionResult struct {
+	Origin            string            `json:"origin,omitempty"`
 	Attempt           string            `json:"attempt"`
 	Components        []ComponentResult `json:"components"`
 	Ports             map[string]int    `json:"ports,omitempty"`
 	Failure           string            `json:"failure,omitempty"`
+	FailureDetail     *PlanError        `json:"failure_detail,omitempty"`
 	CleanupFailure    string            `json:"cleanup_failure,omitempty"`
+	CleanupDetails    []PlanError       `json:"cleanup_details,omitempty"`
 	CollectionFailure string            `json:"collection_failure,omitempty"`
 	Cancelled         bool              `json:"cancelled,omitempty"`
 }

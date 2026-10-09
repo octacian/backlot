@@ -3,6 +3,7 @@ module github.com/octacian/backlot
 go 1.27.1
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/containerd/errdefs v1.0.0
 	github.com/gofrs/flock v0.13.1
 	github.com/invopop/jsonschema v0.14.0

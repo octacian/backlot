@@ -169,6 +169,7 @@ type nativeHarness struct {
 	t                          *testing.T
 	binary, dir, project, pids string
 	lease                      string
+	stopGrace                  time.Duration
 	cli                        *client.Client
 	process                    *exec.Cmd
 	waited                     bool
@@ -218,7 +219,11 @@ func (h *nativeHarness) write() {
 	}
 }
 func (h *nativeHarness) request(scene string) v1.RunRequest {
-	return v1.RunRequest{APIVersion: v1.Version, Plan: v1.PlanRequest{ProjectPath: h.project, Scene: scene}, Options: v1.ExecutionOptions{StartupTimeout: "3s", JobTimeout: "3s", StopGrace: "50ms"}}
+	grace := h.stopGrace
+	if grace == 0 {
+		grace = 50 * time.Millisecond
+	}
+	return v1.RunRequest{APIVersion: v1.Version, Plan: v1.PlanRequest{ProjectPath: h.project, Scene: scene}, Options: v1.ExecutionOptions{StartupTimeout: "3s", JobTimeout: "3s", StopGrace: grace.String()}}
 }
 func (h *nativeHarness) run(scene string) v1.InstanceResponse {
 	h.t.Helper()
@@ -236,10 +241,33 @@ func (h *nativeHarness) run(scene string) v1.InstanceResponse {
 }
 func (h *nativeHarness) state(id string, want ...v1.InstanceStatus) v1.InstanceResponse {
 	h.t.Helper()
-	deadline := time.Now().Add(6 * time.Second)
-	var last v1.InstanceResponse
+	last, err := h.cli.Inspect(context.Background(), id)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	budget := 6 * time.Second
+	for _, status := range want {
+		if status == v1.Starting || status == v1.RuntimeReady {
+			continue
+		}
+		options := h.request(last.Instance.Plan.Scene).Options
+		startup, _ := time.ParseDuration(options.StartupTimeout)
+		job, _ := time.ParseDuration(options.JobTimeout)
+		grace, _ := time.ParseDuration(options.StopGrace)
+		// native.Stop permits dial (1s), proof (grace+8s), authority exit
+		// (2s); Group.Stop then joins the guardian (2s) and status (1s).
+		// Jobs clean up sequentially before the final concurrent group cleanup.
+		cleanup := grace + 14*time.Second
+		budget = startup + cleanup
+		for _, component := range last.Instance.Plan.Components {
+			if component.Kind == v1.Job {
+				budget += job + cleanup
+			}
+		}
+		break
+	}
+	deadline := time.Now().Add(budget)
 	for time.Now().Before(deadline) {
-		var err error
 		last, err = h.cli.Inspect(context.Background(), id)
 		if err != nil {
 			h.t.Fatal(err)
@@ -248,6 +276,10 @@ func (h *nativeHarness) state(id string, want ...v1.InstanceStatus) v1.InstanceR
 			if last.Instance.Status == status {
 				return last
 			}
+		}
+		switch last.Instance.Status {
+		case v1.Succeeded, v1.Failed, v1.Cancelled, v1.Stopped, v1.Interrupted:
+			h.t.Fatalf("wanted %v, unexpected terminal status %s execution=%+v", want, last.Instance.Status, last.Instance.Execution)
 		}
 		if token := h.tokens[id]; token != "" && (last.Instance.Status == v1.Starting || last.Instance.Status == v1.RuntimeReady) {
 			if _, err := h.cli.Renew(context.Background(), id, token); err != nil {
@@ -259,7 +291,7 @@ func (h *nativeHarness) state(id string, want ...v1.InstanceStatus) v1.InstanceR
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	h.t.Fatalf("wanted %v, got %+v execution=%+v", want, last.Instance, last.Instance.Execution)
+	h.t.Fatalf("wanted %v within %s, got %s execution=%+v", want, budget, last.Instance.Status, last.Instance.Execution)
 	return last
 }
 func (h *nativeHarness) absent() {
@@ -873,6 +905,22 @@ func TestNativeRuntime(t *testing.T) {
 		final := h.state(r.Instance.ID, v1.Succeeded)
 		if len(final.Instance.Execution.Components) != 3 {
 			t.Fatal("completed dependency missing")
+		}
+		h.absent()
+	})
+	t.Run("terminal-state-includes-cleanup-grace", func(t *testing.T) {
+		h := newNativeHarness(t, binary)
+		// The owned service descendant ignores TERM. Its valid cleanup grace
+		// exceeds the old six-second state observation window.
+		h.stopGrace = 7 * time.Second
+		r := h.run("test")
+		started := time.Now()
+		final := h.state(r.Instance.ID, v1.Succeeded)
+		if time.Since(started) < h.stopGrace {
+			t.Fatal("terminal state preceded required descendant cleanup grace")
+		}
+		if final.Instance.Execution.CleanupFailure != "" {
+			t.Fatal("cleanup failed", final.Instance.Execution.CleanupFailure)
 		}
 		h.absent()
 	})

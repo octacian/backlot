@@ -110,6 +110,9 @@ func safeRestart(old, next plan.Snapshot) error {
 	if !reflect.DeepEqual(old.Plan.Resources, next.Plan.Resources) {
 		return unsafe()
 	}
+	if (old.Plan.Publish != nil || next.Plan.Publish != nil) && !reflect.DeepEqual(old.Caddy, next.Caddy) {
+		return unsafe()
+	}
 	if !retained(old.Plan) {
 		return nil
 	}
@@ -207,7 +210,7 @@ func (s *service) allocateResources(ctx context.Context, id string, snap plan.Sn
 	}
 	declarations := map[string]v1.Resource{}
 	for name, r := range snap.Plan.Resources {
-		if r.Kind != "port" {
+		if r.Kind != "port" && r.Kind != "origin" {
 			declarations[name] = r
 		}
 	}

@@ -4,7 +4,7 @@ Milestone 4 runs generic containers through the official Docker Go client, along
 native commands. It adds private volumes, directories, secrets and networks,
 fresh-only initialization, retained restart, reset and destroy. Metadata `prepare`
 still validates and records a snapshot without contacting Docker or allocating
-provider resources. HTTPS publication remains deferred.
+provider resources. HTTPS publication follows the [gateway guide](https.md).
 
 ## Run the MariaDB fixture
 
@@ -44,7 +44,7 @@ logic. Applications own those operations and any application-level readiness
 probe. A TCP probe observes connectivity, which may precede application setup;
 use a declared native command probe when connectivity is insufficient.
 
-The durable state format is version 2. Version 1 state is rejected without
+The durable state format is version 3. Version 1/2 state is rejected without
 modification; preserve it and use the matching older binary for its cleanup.
 There is no automatic migration in this development milestone. An older binary
 must not interpret mixed native/container ownership as native-only cleanup.
@@ -58,9 +58,11 @@ own resource capabilities and generated secrets in the private daemon database.
 Containers are recreated on start, with Docker restart policies disabled. Storage,
 network and secret generations survive persistent stop/run, restart and daemon
 shutdown. Generated credentials remain paired with their storage. Host port values
-are scoped to an attempt and bound on loopback; containers use service references
-for private DNS names and internal ports. Container-to-native service references
-are deferred until host reachability is configured by the networking milestone.
+are scoped to an attempt and bound on loopback by default; explicit machine
+`docker.publish_address` selects another numeric interface. Containers use service
+references for private DNS names and internal ports. Container-to-native references
+require explicit `docker.host_address` and reachable native listener interfaces;
+see the [HTTPS/mixed guide](https.md).
 
 A fresh-only job is skipped only after its successful exit and completion record.
 A failed initialization leaves its generation incomplete. Explicit restart can

@@ -3,6 +3,20 @@
   "$id": "https://raw.githubusercontent.com/octacian/backlot/main/schemas/manifest-v1.schema.json",
   "$ref": "#/$defs/Manifest",
   "$defs": {
+    "ArtifactSource": {
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "description": "ArtifactSource names a file or directory collected before runtime removal."
+    },
     "Command": {
       "properties": {
         "tool": {
@@ -270,6 +284,24 @@
         }
       ],
       "properties": {
+        "artifacts": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ArtifactSource"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object"
+        },
+        "fixtures": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Fixture"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object"
+        },
         "kind": {
           "type": "string",
           "enum": [
@@ -456,6 +488,22 @@
       "additionalProperties": false,
       "type": "object",
       "description": "Environment explicitly layers selected inherited values, literal seeds and assignments."
+    },
+    "Fixture": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/Value"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "value"
+      ],
+      "description": "Fixture declares a discoverable identity or credential for a component."
     },
     "Input": {
       "properties": {

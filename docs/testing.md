@@ -109,6 +109,21 @@ the frozen feature candidate after independent reviews; `make check` alone does 
 prove Docker integration. Logs and exact source/image/config provenance belong in
 the feature evidence ledger.
 
+Focused milestone 6 provider coverage (run serially with the same resource grant):
+
+```sh
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^TestDisposableEvidenceDocker$' -count=1 -v
+```
+
+This exercises container artifacts before removal, historical logs after destroy,
+exact job results, kept failure/cancellation/collection errors and healthy services,
+and injected directory-ownership cleanup failure with explicit recovery. It is
+required alongside the complete Docker runtime suite on the frozen candidate.
+The provider-independent `TestDisposableEvidenceNative` runs in `make check` and
+covers native artifacts, fixture metadata/secrets, kept cancellation and client
+loss, shutdown/crash retained data, and executable SIGINT/SIGTERM exit codes.
+
 ## HTTPS/mixed integration
 
 Use an explicit native Caddy binary and local Docker endpoint; both suites skip

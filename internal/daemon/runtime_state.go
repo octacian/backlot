@@ -98,7 +98,7 @@ func (s *store) recoverRuntime() error {
 			if err := decodeRecord(data, string(key), &r); err != nil {
 				return err
 			}
-			if r.Instance.Execution != nil && (active(r.Instance.Status) || r.Instance.Execution.CleanupFailure != "") {
+			if r.Instance.Execution != nil && (active(r.Instance.Status) || r.Instance.Execution.Kept || r.Instance.Execution.CleanupFailure != "") {
 				ids = append(ids, string(key))
 			}
 			return nil
@@ -123,7 +123,7 @@ func (s *store) recoverExecution(id string) error {
 	if err != nil {
 		return err
 	}
-	if instance.Execution == nil || (!active(instance.Status) && instance.Execution.CleanupFailure == "") {
+	if instance.Execution == nil || (!active(instance.Status) && !instance.Execution.Kept && instance.Execution.CleanupFailure == "") {
 		return nil
 	}
 	result := *instance.Execution
@@ -152,11 +152,7 @@ func (s *store) recoverExecution(id string) error {
 	}
 	joined.Wait()
 	cleanup = errors.Join(cleanup, s.recoverContainers(id, &g))
-	if cleanup == nil && instance.Plan.Lifetime == v1.Disposable {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		cleanup = s.removeResources(cleanupCtx, id)
-		cancel()
-	}
+
 	result.CleanupFailure = ""
 	result.CleanupDetails = nil
 	if cleanup != nil {
@@ -169,6 +165,8 @@ func (s *store) recoverExecution(id string) error {
 			result.Components[i].Status = "unknown"
 		}
 	}
+	result.Kept = false
+	result.CompletedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	result.CollectionFailure = "daemon interruption; output/status collection may contain gaps"
 	result.Failure = "daemon recovery interrupted execution; explicit restart required"
 	result.FailureDetail = &v1.PlanError{Code: "execution_interrupted", Message: result.Failure}
@@ -203,7 +201,7 @@ func (s *store) outputConflict(requestedPlan v1.PlanResponse) error {
 				return nil
 			}
 			uncertain := instance.Execution.CleanupFailure != ""
-			if !active(instance.Status) && !uncertain {
+			if !active(instance.Status) && !uncertain && !instance.Execution.Kept {
 				return nil
 			}
 			for _, existing := range instance.Plan.Outputs {

@@ -205,6 +205,9 @@ multiline quoting, interpolation or execution occurs. Duplicate keys inside a
 file fail; later files may override earlier files. Backlot never creates or
 rewrites application configuration files.
 
+Components may also declare named `artifacts` and `fixtures`; see the
+[disposable evidence contract](evidence.md#declared-artifacts-and-fixtures).
+
 ## Machine schema and results
 
 Machine configuration uses the same version and may declare:
@@ -218,7 +221,9 @@ Machine configuration uses the same version and may declare:
   identifier `scope`, concrete `domain_suffix`, gateway-reachable `host_address`
   and optional `https_port` (default 443). See [HTTPS setup and routing](https.md).
 - `storage`: `directory`, positive duration `retention_age` and positive integer
-  `retention_bytes`. These settings are validated intent for a later daemon.
+  `retention_bytes`. These scene configuration settings remain validated intent. Configure the running
+  daemon with `--state-dir`, `--retention-age` and `--retention-bytes`; scene input
+  never changes the daemon-wide policy.
 
 The plan records canonical checkout and manifest paths, SHA-256 digests of source
 manifest/config bytes, lifetime, terminal job, selected components/resources,

@@ -86,7 +86,7 @@ func (s *service) awaitProbe(ctx context.Context, id string, c v1.PlannedCompone
 		}
 		select {
 		case <-probeCtx.Done():
-			return errors.New("readiness/startup deadline or cancellation reached")
+			return probeCtx.Err()
 		case <-ticker.C:
 		}
 	}

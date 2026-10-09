@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -64,7 +65,7 @@ func Start(ctx context.Context, options Options) (v1.DaemonStatusResponse, error
 	if err != nil {
 		return empty, problem("permissions", "cannot open private daemon startup log")
 	}
-	command := exec.Command(executable, "daemon", "serve", "--state-dir", options.Directory, "--lease-duration", options.LeaseDuration.String())
+	command := exec.Command(executable, "daemon", "serve", "--state-dir", options.Directory, "--lease-duration", options.LeaseDuration.String(), "--retention-age", options.RetentionAge.String(), "--retention-bytes", strconv.FormatInt(options.RetentionBytes, 10))
 	command.Dir = options.Directory
 	command.Stdout = log
 	command.Stderr = log

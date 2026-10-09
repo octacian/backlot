@@ -368,7 +368,7 @@ func (h *dockerHarness) waitTerminalRunning(id string) {
 		}
 		if state.Instance.Execution != nil {
 			for _, c := range state.Instance.Execution.Components {
-				if c.Name == "each" && c.Status == "running" {
+				if c.Name == state.Instance.Plan.TerminalJob && c.Status == "running" {
 					return
 				}
 			}

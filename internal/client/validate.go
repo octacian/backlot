@@ -78,6 +78,16 @@ func validateExecution(instance v1.Instance) error {
 	if result == nil {
 		return nil
 	}
+	if result.TerminalExitCode != nil && (*result.TerminalExitCode < -1 || *result.TerminalExitCode > 255) {
+		return responseError()
+	}
+	for _, timestamp := range []string{result.CompletedAt, result.EvidenceObservedAt} {
+		if timestamp != "" {
+			if _, err := time.Parse(time.RFC3339Nano, timestamp); err != nil {
+				return responseError()
+			}
+		}
+	}
 	if !validID(result.Attempt) {
 		return responseError()
 	}

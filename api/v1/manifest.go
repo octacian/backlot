@@ -136,21 +136,23 @@ type ServicePort struct {
 
 // Component declares native or container work with explicit dependencies.
 type Component struct {
-	Kind            ComponentKind          `json:"kind" yaml:"kind" jsonschema_description:"Explicit discriminator; see the supported values and conditional fields."`
-	Runtime         Runtime                `json:"runtime" yaml:"runtime" jsonschema_description:"Native command or generic container; selects command versus image."`
-	Command         *Command               `json:"command,omitempty" yaml:"command,omitempty" jsonschema_description:"Explicit native executable tool and argument vector."`
-	Image           *Value                 `json:"image,omitempty" yaml:"image,omitempty" jsonschema_description:"Container image literal or declared input reference."`
-	Args            []string               `json:"args,omitempty" yaml:"args,omitempty" jsonschema_description:"Direct argument vector; shell expansion requires an explicit shell command."`
-	Policy          JobPolicy              `json:"policy,omitempty" yaml:"policy,omitempty" jsonschema_description:"Job scheduling policy; services omit this field."`
-	Initializes     []string               `json:"initializes,omitempty" yaml:"initializes,omitempty" jsonschema_description:"Attached volume/directory generations initialized by a fresh-only job."`
-	DependsOn       []Dependency           `json:"depends_on,omitempty" yaml:"depends_on,omitempty" jsonschema_description:"Explicit ready-service or completed-job dependencies."`
-	EnvironmentSets []string               `json:"environment_sets,omitempty" yaml:"environment_sets,omitempty" jsonschema_description:"Reusable environment sets included in this order."`
-	Environment     Environment            `json:"environment,omitempty" yaml:"environment,omitempty" jsonschema_description:"Component environment layers applied after included sets."`
-	Resources       []string               `json:"resources,omitempty" yaml:"resources,omitempty" jsonschema_description:"Instance-owned allocations selected explicitly; planning does not provision them."`
-	Outputs         []string               `json:"outputs,omitempty" yaml:"outputs,omitempty" jsonschema_description:"Checkout output paths and serialization groups."`
-	Ports           map[string]ServicePort `json:"ports,omitempty" yaml:"ports,omitempty" jsonschema_description:"Named allocated host ports with explicit container listeners when needed."`
-	Mounts          []Mount                `json:"mounts,omitempty" yaml:"mounts,omitempty" jsonschema_description:"Container storage/output mounts with exactly one source each."`
-	Readiness       *Probe                 `json:"readiness,omitempty" yaml:"readiness,omitempty" jsonschema_description:"Required service probe; process liveness alone is insufficient."`
+	Artifacts       map[string]ArtifactSource `json:"artifacts,omitempty" yaml:"artifacts,omitempty"`
+	Fixtures        map[string]Fixture        `json:"fixtures,omitempty" yaml:"fixtures,omitempty"`
+	Kind            ComponentKind             `json:"kind" yaml:"kind" jsonschema_description:"Explicit discriminator; see the supported values and conditional fields."`
+	Runtime         Runtime                   `json:"runtime" yaml:"runtime" jsonschema_description:"Native command or generic container; selects command versus image."`
+	Command         *Command                  `json:"command,omitempty" yaml:"command,omitempty" jsonschema_description:"Explicit native executable tool and argument vector."`
+	Image           *Value                    `json:"image,omitempty" yaml:"image,omitempty" jsonschema_description:"Container image literal or declared input reference."`
+	Args            []string                  `json:"args,omitempty" yaml:"args,omitempty" jsonschema_description:"Direct argument vector; shell expansion requires an explicit shell command."`
+	Policy          JobPolicy                 `json:"policy,omitempty" yaml:"policy,omitempty" jsonschema_description:"Job scheduling policy; services omit this field."`
+	Initializes     []string                  `json:"initializes,omitempty" yaml:"initializes,omitempty" jsonschema_description:"Attached volume/directory generations initialized by a fresh-only job."`
+	DependsOn       []Dependency              `json:"depends_on,omitempty" yaml:"depends_on,omitempty" jsonschema_description:"Explicit ready-service or completed-job dependencies."`
+	EnvironmentSets []string                  `json:"environment_sets,omitempty" yaml:"environment_sets,omitempty" jsonschema_description:"Reusable environment sets included in this order."`
+	Environment     Environment               `json:"environment,omitempty" yaml:"environment,omitempty" jsonschema_description:"Component environment layers applied after included sets."`
+	Resources       []string                  `json:"resources,omitempty" yaml:"resources,omitempty" jsonschema_description:"Instance-owned allocations selected explicitly; planning does not provision them."`
+	Outputs         []string                  `json:"outputs,omitempty" yaml:"outputs,omitempty" jsonschema_description:"Checkout output paths and serialization groups."`
+	Ports           map[string]ServicePort    `json:"ports,omitempty" yaml:"ports,omitempty" jsonschema_description:"Named allocated host ports with explicit container listeners when needed."`
+	Mounts          []Mount                   `json:"mounts,omitempty" yaml:"mounts,omitempty" jsonschema_description:"Container storage/output mounts with exactly one source each."`
+	Readiness       *Probe                    `json:"readiness,omitempty" yaml:"readiness,omitempty" jsonschema_description:"Required service probe; process liveness alone is insufficient."`
 }
 
 // LiteralRoutePathPattern bounds publication paths to literal URL segments.
@@ -212,4 +214,16 @@ type StorageConfig struct {
 	Directory      string `json:"directory" yaml:"directory" jsonschema:"minLength=1" jsonschema_description:"Future daemon state and evidence directory."`
 	RetentionAge   string `json:"retention_age" yaml:"retention_age" jsonschema:"minLength=1" jsonschema_description:"Positive Go duration; for example 168h. Planning checks duration syntax."`
 	RetentionBytes int64  `json:"retention_bytes" yaml:"retention_bytes" jsonschema:"minimum=1,maximum=9223372036854775807" jsonschema_description:"Positive evidence retention size in bytes."`
+}
+
+// ArtifactSource names a file or directory collected before runtime removal.
+// Native paths are checkout-relative; container paths are absolute.
+type ArtifactSource struct {
+	Path string `json:"path" yaml:"path" jsonschema:"minLength=1"`
+}
+
+// Fixture declares a discoverable identity or credential for a component.
+type Fixture struct {
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	Value       Value  `json:"value" yaml:"value"`
 }

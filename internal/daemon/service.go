@@ -17,6 +17,7 @@ import (
 )
 
 type service struct {
+	evidence      evidencePolicy
 	store         *store
 	lease         time.Duration
 	mu            sync.Mutex
@@ -125,6 +126,15 @@ func (s *service) stop() error {
 // expire dispatches each eligible owner independently. It never joins native
 // cleanup in the daemon event loop; later sweeps and shutdown remain responsive.
 func (s *service) expire() error {
+	if err := s.expireOwners(); err != nil {
+		return err
+	}
+	if err := s.pruneEvidence(); err != nil {
+		return problem("evidence_retention_failed", "evidence retention failed; preserve private state for diagnosis")
+	}
+	return nil
+}
+func (s *service) expireOwners() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.expiryErr != nil {
@@ -192,6 +202,24 @@ func (s *service) stopExecutions(ids []string) error {
 		joined.Go(func() { // closing fences all new owner registrations. Shutdown can cancel/join
 			// independently of an expiry coordinator already holding this instance lock.
 			_, err := s.stopExecution(id)
+			// Shutdown can race the executor's keep decision. After its finite owner
+			// joins, stop any retained services before releasing daemon authority.
+			s.mu.Lock()
+			entry := s.executions[id]
+			s.mu.Unlock()
+			if entry != nil {
+				select {
+				case <-entry.done:
+					entry.mu.Lock()
+					kept := entry.kept
+					entry.mu.Unlock()
+					if kept {
+						_, stopErr := s.stopKept(id, entry)
+						err = errors.Join(err, stopErr)
+					}
+				default:
+				}
+			}
 			mu.Lock()
 			result = errors.Join(result, err)
 			mu.Unlock()

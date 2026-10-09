@@ -180,6 +180,66 @@ func TestHTTPSRuntime(t *testing.T) {
 			if disposable.Instance.Execution.CleanupFailure != "" || httpsBody(t, f, disposable.Instance.Execution.Origin, "/api/value") != "unrelated sentinel" {
 				t.Fatal("disposable terminal job/route cleanup failed", disposable.Instance.Execution)
 			}
+			for _, mode := range []string{"job-failure", "cancellation"} {
+				t.Run("kept-"+mode, func(t *testing.T) {
+					original := h.manifest.Components["client"]
+					job := original
+					job.Image = ptrValue(fixtureLiteral("alpine:3.21"))
+					script := "echo kept-artifact >/tmp/report; echo kept-output; exit 17"
+					if mode == "cancellation" {
+						script = "echo kept-artifact >/tmp/report; echo kept-output; exec sleep 90"
+					}
+					job.Args = []string{"sh", "-c", script}
+					job.Artifacts = map[string]v1.ArtifactSource{"report": {Path: "/tmp/report"}}
+					h.manifest.Components["client"] = job
+					h.write()
+					request := h.request("test")
+					request.Options.KeepOnFailure = true
+					response, err := h.cli.Run(context.Background(), request)
+					if err != nil {
+						t.Fatal(err)
+					}
+					runID := response.Instance.ID
+					h.ids = append(h.ids, runID)
+					h.tokens[runID] = response.LeaseToken
+					if mode == "cancellation" {
+						h.waitTerminalRunning(runID)
+						waitComponentLog(t, h.nativeHarness, runID, "client", "kept-output")
+						if _, err := h.cli.StopExecution(context.Background(), runID); err != nil {
+							t.Fatal(err)
+						}
+					}
+					want := v1.Failed
+					if mode == "cancellation" {
+						want = v1.Cancelled
+					}
+					kept := h.state(runID, want).Instance.Execution
+					if !kept.Kept || kept.CleanupFailure != "" || len(kept.Artifacts) != 1 {
+						t.Fatal("kept result", kept)
+					}
+					if mode == "job-failure" && (kept.TerminalExitCode == nil || *kept.TerminalExitCode != 17 || kept.Failure != "") {
+						t.Fatal("original job exit lost", kept)
+					}
+					if httpsBody(t, f, kept.Origin, "/ssr") != "ssr:api:/value" {
+						t.Fatal("healthy mixed dependencies/routes removed")
+					}
+					if _, err := h.cli.Destroy(context.Background(), runID); err != nil {
+						t.Fatal(err)
+					}
+					if httpsBody(t, f, kept.Origin, "/api/value") != "unrelated sentinel" {
+						t.Fatal("explicit destroy retained owned route or disturbed unrelated route")
+					}
+					logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: runID, Component: "client"})
+					if err != nil || len(logs.Records) == 0 {
+						t.Fatal("post-destroy output missing", logs, err)
+					}
+					if _, err := os.Stat(filepath.Join(kept.Artifacts[0].Path, "report")); err != nil {
+						t.Fatal("destroy removed retained artifact", err)
+					}
+					h.manifest.Components["client"] = original
+					h.write()
+				})
+			}
 			fresh := h.state(h.run("dev").Instance.ID, v1.RuntimeReady)
 			if fresh.Instance.ID == id || fresh.Instance.Execution.Origin == origin {
 				t.Fatal("destroy reused logical identity")

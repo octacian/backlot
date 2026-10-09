@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -34,6 +35,10 @@ func main() {
 		Version: version, APIVersion: apiv1.Version, Commit: commit, BuildTime: buildTime,
 	}, os.Stdout, os.Stderr)
 	if err := command.Run(context.Background(), os.Args); err != nil {
+		var exit *cli.ExitError
+		if errors.As(err, &exit) {
+			os.Exit(exit.Code)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

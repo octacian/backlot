@@ -115,7 +115,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 		if snapshot == nil && c.Runtime == v1.Container && config.Docker == nil {
 			return v1.PlanResponse{}, problem("missing_provider", "config.docker", "selected container work requires local Docker settings; supply --config PATH")
 		}
-		planned := v1.PlannedComponent{Name: name, Kind: c.Kind, Runtime: c.Runtime, Command: c.Command, Args: slices.Clone(c.Args), Policy: c.Policy, Initializes: c.Initializes, DependsOn: c.DependsOn, Resources: c.Resources, Outputs: c.Outputs, Ports: c.Ports, Mounts: c.Mounts}
+		planned := v1.PlannedComponent{Artifacts: c.Artifacts, Name: name, Kind: c.Kind, Runtime: c.Runtime, Command: c.Command, Args: slices.Clone(c.Args), Policy: c.Policy, Initializes: c.Initializes, DependsOn: c.DependsOn, Resources: c.Resources, Outputs: c.Outputs, Ports: c.Ports, Mounts: c.Mounts}
 		if c.Command != nil {
 			executable, err := tool(m, config, c.Command.Tool, project)
 			if err != nil {
@@ -149,6 +149,19 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 				if value.implicitBaseline {
 					snapshot.ImplicitBaseline[privateKey] = true
 				}
+			}
+		}
+		if len(c.Fixtures) > 0 {
+			planned.Fixtures = map[string]v1.PlannedFixture{}
+		}
+		for key, fixture := range c.Fixtures {
+			value, err := resolveValue(m, config, fixture.Value, project, result)
+			if err != nil {
+				return v1.PlanResponse{}, err
+			}
+			planned.Fixtures[key] = v1.PlannedFixture{Description: fixture.Description, Value: value.wire()}
+			if snapshot != nil && value.secret {
+				snapshot.Secrets[name+"/fixture/"+key] = value.private()
 			}
 		}
 		if c.Image != nil {

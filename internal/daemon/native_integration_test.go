@@ -401,7 +401,9 @@ func newNativeHarnessConfigured(t *testing.T, binary, budget string, faults bool
 	command := func(mode string) *v1.Command {
 		return &v1.Command{Tool: "fixture", Args: []string{"-test.run=TestNativeFixtureProcess", "--", mode}}
 	}
-	env := v1.Environment{Assign: map[string]v1.Value{"BACKLOT_NATIVE_FIXTURE": literal("1"), "PORT": port, "PIDFILE": literal(h.pids), "FIXTURE_CONTROL": literal(h.control), "FIXTURE_TOKEN": literal(h.controlToken)}}
+	fixtureToken := literal(h.controlToken)
+	fixtureToken.Secret = true
+	env := v1.Environment{Assign: map[string]v1.Value{"BACKLOT_NATIVE_FIXTURE": literal("1"), "PORT": port, "PIDFILE": literal(h.pids), "FIXTURE_CONTROL": literal(h.control), "FIXTURE_TOKEN": fixtureToken}}
 	server := v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: command("server"), Resources: []string{"port"}, Ports: map[string]v1.ServicePort{"http": {Resource: "port"}}, Environment: env, Readiness: &v1.Probe{Kind: "tcp", Target: &port, Timeout: "2s"}}
 	job := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: command("job"), Resources: []string{"port"}, Environment: env, DependsOn: []v1.Dependency{{Component: "server", Condition: v1.Ready}}}
 	self, err := os.Executable()

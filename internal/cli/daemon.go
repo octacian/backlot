@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/client"
@@ -20,7 +21,7 @@ import (
 func daemonFlags(lease bool) []urfave.Flag {
 	flags := []urfave.Flag{&urfave.StringFlag{Name: "state-dir", Usage: "Private daemon state/socket directory (absolute path)"}, &urfave.BoolFlag{Name: "json", Usage: "Emit shared typed JSON"}}
 	if lease {
-		flags = append(flags, &urfave.DurationFlag{Name: "lease-duration", Value: daemon.DefaultLeaseDuration, Usage: "Disposable disconnect grace period (100ms to 24h)"})
+		flags = append(flags, &urfave.DurationFlag{Name: "retention-age", Value: 168 * time.Hour, Usage: "Completed evidence retention age"}, &urfave.Int64Flag{Name: "retention-bytes", Value: 1 << 30, Usage: "Daemon-wide evidence size cap"}, &urfave.DurationFlag{Name: "lease-duration", Value: daemon.DefaultLeaseDuration, Usage: "Disposable disconnect grace period (100ms to 24h)"})
 	}
 	return flags
 }
@@ -60,7 +61,7 @@ func output(c *urfave.Command, value any, err error) error {
 			_, err = fmt.Fprintln(c.Writer, "Manifest/config drift detected; the original snapshot is preserved.")
 		}
 		if err == nil && result.LeaseToken != "" {
-			_, err = fmt.Fprintf(c.Writer, "Disposable lease expires %s; renew explicitly using --lease-token %s.\n", result.Instance.LeaseExpiresAt, result.LeaseToken)
+			_, err = fmt.Fprintf(c.Writer, "Disposable lease expires %s; renew using the private token returned by JSON preparation.\n", result.Instance.LeaseExpiresAt)
 		}
 	case v1.DoctorResponse:
 		for _, check := range result.Checks {
@@ -82,7 +83,7 @@ func daemonCommand() *urfave.Command {
 			if err != nil {
 				return output(c, nil, err)
 			}
-			options := daemon.Options{Directory: dir, LeaseDuration: c.Duration("lease-duration")}
+			options := daemon.Options{Directory: dir, LeaseDuration: c.Duration("lease-duration"), RetentionAge: c.Duration("retention-age"), RetentionBytes: c.Int64("retention-bytes")}
 			if c.Name == "serve" {
 				signalCtx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 				defer cancel()

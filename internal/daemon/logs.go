@@ -11,6 +11,8 @@ import (
 )
 
 func (s *service) logs(request v1.LogsRequest) (v1.LogsResponse, error) {
+	s.evidence.mu.Lock()
+	defer s.evidence.mu.Unlock()
 	response := v1.LogsResponse{APIVersion: v1.Version, Records: []v1.LogRecord{}, NextOffset: request.Offset}
 	if !validID(request.InstanceID) || request.Offset < 0 {
 		return response, problem("invalid_request", "recorded instance_id and nonnegative log offset required")
@@ -22,6 +24,11 @@ func (s *service) logs(request v1.LogsRequest) (v1.LogsResponse, error) {
 	response.Active = instance.Status == v1.Starting || instance.Status == v1.RuntimeReady || instance.Status == v1.Stopping
 	if instance.Execution != nil {
 		response.Gap = instance.Execution.CollectionFailure
+		if instance.Execution.EvidenceExpired {
+			response.Gap = "evidence expired by retention policy"
+			return response, nil
+		}
+		response.Active = response.Active || instance.Execution.Kept || instance.Execution.CleanupFailure != ""
 	}
 	logDir := filepath.Join(s.directory, "logs")
 	if _, err := os.Lstat(logDir); os.IsNotExist(err) {

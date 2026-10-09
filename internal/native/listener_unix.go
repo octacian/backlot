@@ -22,6 +22,9 @@ func listenerState(ctx context.Context, pgid, port int, endpoint string) (bool, 
 	command := exec.CommandContext(query, "lsof", "-nP", "-a", "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN", "-Fpftn")
 	data, err := command.Output()
 	if err != nil {
+		if query.Err() != nil {
+			return false, false, query.Err()
+		}
 		var exit *exec.ExitError
 		if errors.As(err, &exit) && exit.ExitCode() == 1 && len(data) == 0 {
 			return false, false, nil

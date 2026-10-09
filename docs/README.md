@@ -26,6 +26,9 @@ The [container/private-state guide](containers.md) documents milestone 4.
 The [HTTPS/mixed execution guide](https.md) documents configured gateway setup,
 publication ownership and milestone 5.
 
+The [disposable results and evidence guide](evidence.md) documents terminal exits,
+artifacts, fixtures, cancellation, kept resources and daemon-wide retention.
+
 The [manifest and offline planning guide](manifest.md) documents milestone 1.
 
 The command reference lives in [Testing and tooling](testing.md). README and

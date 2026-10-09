@@ -47,6 +47,10 @@ func TestStrictNativeWireContracts(t *testing.T) {
 		{"/v1/runtime/stop", `{"api_version":"v1","instance_id":"bad"}`},
 		{"/v1/logs", `{"api_version":"v1","instance_id":"bad","offset":-1}`},
 		{"/v1/logs", `{"api_version":"v2","instance_id":"bad","offset":0}`},
+		{"/v1/fixtures", `{"api_version":"v1","instance_id":"bad"}`},
+		{"/v1/fixtures", `{"api_version":"v1","instance_id":"bad","secret_name":"password"}`},
+		{"/v1/fixtures/secret", `{"api_version":"v1","instance_id":"bad"}`},
+		{"/v1/fixtures/secret", `{"api_version":"v1","instance_id":"bad","component":"job","secret_name":"password","extra":true}`},
 	} {
 		t.Run(test.path+test.body, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.body))

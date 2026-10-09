@@ -57,3 +57,38 @@ func (c *Client) Destroy(ctx context.Context, id string) (v1.InstanceResponse, e
 	err := c.call(ctx, http.MethodPost, "/v1/destroy", v1.InstanceRequest{APIVersion: v1.Version, InstanceID: id}, &response)
 	return response, err
 }
+
+// Fixtures reads declared fixture metadata without exposing sensitive values.
+func (c *Client) Fixtures(ctx context.Context, request v1.FixturesRequest) (v1.FixturesResponse, error) {
+	var response v1.FixturesResponse
+	err := c.call(ctx, http.MethodPost, "/v1/fixtures", request, &response)
+	if err == nil {
+		err = validateFixtures(response, request, false)
+	}
+	return response, err
+}
+
+// FixtureSecret explicitly retrieves one declared sensitive fixture value.
+func (c *Client) FixtureSecret(ctx context.Context, request v1.FixturesRequest) (v1.FixturesResponse, error) {
+	var response v1.FixturesResponse
+	err := c.call(ctx, http.MethodPost, "/v1/fixtures/secret", request, &response)
+	if err == nil {
+		err = validateFixtures(response, request, true)
+	}
+	return response, err
+}
+
+func validateFixtures(response v1.FixturesResponse, request v1.FixturesRequest, secret bool) error {
+	if response.APIVersion != v1.Version || secret && len(response.Fixtures) != 1 {
+		return responseError()
+	}
+	seen := map[string]bool{}
+	for _, fixture := range response.Fixtures {
+		key := fixture.Component + "/" + fixture.Name
+		if fixture.Component == "" || fixture.Name == "" || seen[key] || request.Component != "" && fixture.Component != request.Component || !secret && fixture.Sensitive && fixture.Value != "" || secret && (fixture.Name != request.SecretName || !fixture.Sensitive) {
+			return responseError()
+		}
+		seen[key] = true
+	}
+	return nil
+}

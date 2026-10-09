@@ -159,6 +159,9 @@ func safeRestart(old, next plan.Snapshot) error {
 			initializers[c.Name] = c.Policy == v1.FreshOnly
 		}
 		for key, value := range snap.Secrets {
+			if strings.HasSuffix(key, "/resolved") {
+				continue
+			}
 			component, _, _ := strings.Cut(key, "/")
 			if snap.ImplicitBaseline[key] && !initializers[component] {
 				continue

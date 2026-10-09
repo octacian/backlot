@@ -87,6 +87,26 @@ func Validate(m v1.Manifest) error {
 		}
 	}
 	for name, c := range m.Components {
+		if err := names(c.Artifacts, "components."+name+".artifacts"); err != nil {
+			return err
+		}
+		if err := names(c.Fixtures, "components."+name+".fixtures"); err != nil {
+			return err
+		}
+		for _, artifact := range c.Artifacts {
+			valid := safePath(artifact.Path)
+			if c.Runtime == v1.Container {
+				valid = strings.HasPrefix(artifact.Path, "/") && safePath(strings.TrimPrefix(artifact.Path, "/"))
+			}
+			if !valid {
+				return invalid("components."+name+".artifacts", "declare a safe checkout-relative native path or absolute container path")
+			}
+		}
+		for key, fixture := range c.Fixtures {
+			if err := value(m, fixture.Value, "components."+name+".fixtures."+key); err != nil {
+				return err
+			}
+		}
 		if err := component(m, name, c); err != nil {
 			return err
 		}
@@ -480,6 +500,9 @@ func scene(m v1.Manifest, name string, s v1.Scene) error {
 
 func componentValues(m v1.Manifest, c v1.Component) []v1.Value {
 	var values []v1.Value
+	for _, fixture := range c.Fixtures {
+		values = append(values, fixture.Value)
+	}
 	for _, name := range c.EnvironmentSets {
 		for _, v := range m.Environments[name].Assign {
 			values = append(values, v)

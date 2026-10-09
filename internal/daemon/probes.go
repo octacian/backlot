@@ -51,7 +51,7 @@ func (s *service) awaitProbe(ctx context.Context, id string, c v1.PlannedCompone
 			if cleanupErr != nil {
 				return cleanupErr
 			}
-			if waitErr == nil && exit != nil && exit.Code == 0 && exit.Error == "" {
+			if waitErr == nil && exit != nil && exit.Known && exit.Code == 0 && exit.Error == "" {
 				ready = true
 			}
 		} else {
@@ -86,7 +86,7 @@ func (s *service) awaitProbe(ctx context.Context, id string, c v1.PlannedCompone
 		}
 		select {
 		case <-probeCtx.Done():
-			return errors.New("readiness/startup deadline or cancellation reached")
+			return probeCtx.Err()
 		case <-ticker.C:
 		}
 	}

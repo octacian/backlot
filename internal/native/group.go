@@ -38,6 +38,8 @@ type Spec struct {
 
 // Exit preserves original root status independently from collection.
 type Exit struct {
+	// Known distinguishes an observed root exit from an infrastructure observation failure.
+	Known             bool   `json:"known,omitempty"`
 	Code              int    `json:"code"`
 	Error             string `json:"error,omitempty"`
 	CollectionFailure string `json:"collection_failure,omitempty"`
@@ -47,15 +49,16 @@ type Exit struct {
 
 // Group joins one guardian authority and its status descriptors.
 type Group struct {
-	Identity    Identity
-	control     *os.File
-	done        chan struct{}
-	statusDone  chan struct{}
-	ready       chan struct{}
-	anchorReady chan struct{}
-	mu          sync.Mutex
-	exit        *Exit
-	pgid        int
+	Identity          Identity
+	control           *os.File
+	done              chan struct{}
+	statusDone        chan struct{}
+	ready             chan struct{}
+	anchorReady       chan struct{}
+	mu                sync.Mutex
+	exit              *Exit
+	collectionFailure string
+	pgid              int
 }
 
 // Start creates an inactive authority; no application starts before Activate.
@@ -181,10 +184,16 @@ func (g *Group) PGID() int { g.mu.Lock(); defer g.mu.Unlock(); return g.pgid }
 func (g *Group) Result() *Exit {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.exit == nil {
+	if g.exit == nil && g.collectionFailure == "" {
 		return nil
 	}
-	r := *g.exit
+	r := Exit{Error: "command status unavailable"}
+	if g.exit != nil {
+		r = *g.exit
+	}
+	if r.CollectionFailure == "" {
+		r.CollectionFailure = g.collectionFailure
+	}
 	return &r
 }
 
@@ -199,7 +208,16 @@ func (g *Group) Alive() bool {
 }
 
 // Stop obtains verified cleanup and joins this daemon's guardian descriptors.
-func (g *Group) Stop(grace time.Duration) error {
+func (g *Group) Stop(grace time.Duration) (err error) {
+	defer func() {
+		if err != nil {
+			// A failed authority/collector join cannot attest complete evidence.
+			// Keep this sticky even if a late root status later becomes available.
+			g.mu.Lock()
+			g.collectionFailure = "native output/status collection could not be verified"
+			g.mu.Unlock()
+		}
+	}()
 	_ = g.control.Close()
 	if err := Stop(g.Identity, grace); err != nil {
 		return err

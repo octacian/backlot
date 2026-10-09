@@ -159,6 +159,9 @@ func safeRestart(old, next plan.Snapshot) error {
 			initializers[c.Name] = c.Policy == v1.FreshOnly
 		}
 		for key, value := range snap.Secrets {
+			if strings.HasSuffix(key, "/resolved") {
+				continue
+			}
 			component, _, _ := strings.Cut(key, "/")
 			if snap.ImplicitBaseline[key] && !initializers[component] {
 				continue
@@ -400,6 +403,20 @@ func (s *service) destroy(ctx context.Context, id string) (v1.Instance, error) {
 	unlock := s.lockMutation(id)
 	defer unlock()
 	instance, err := s.stopExecution(id)
+	// Cancellation may create a kept owner while the finite executor joins.
+	// Destroy must join that retained owner before removing its consumers' data.
+	if instance.Execution != nil && instance.Execution.Kept {
+		s.mu.Lock()
+		entry := s.executions[id]
+		s.mu.Unlock()
+		if entry != nil {
+			var stopErr error
+			instance, stopErr = s.stopKept(id, entry)
+			if stopErr != nil {
+				return instance, stopErr
+			}
+		}
+	}
 	if err != nil {
 		var typed *v1.PlanError
 		if !errors.As(err, &typed) || typed.Code != "collection_failed" {

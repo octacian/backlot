@@ -158,7 +158,12 @@ func TestNativeFixtureProcess(t *testing.T) {
 	if err != nil {
 		os.Exit(22)
 	}
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") }), ReadHeaderTimeout: time.Second}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if os.Getenv("HTTP_STATUS") == "503" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		_, _ = io.WriteString(w, "ok")
+	}), ReadHeaderTimeout: time.Second}
 	_ = server.Serve(listener)
 	os.Exit(0)
 }
@@ -401,7 +406,9 @@ func newNativeHarnessConfigured(t *testing.T, binary, budget string, faults bool
 	command := func(mode string) *v1.Command {
 		return &v1.Command{Tool: "fixture", Args: []string{"-test.run=TestNativeFixtureProcess", "--", mode}}
 	}
-	env := v1.Environment{Assign: map[string]v1.Value{"BACKLOT_NATIVE_FIXTURE": literal("1"), "PORT": port, "PIDFILE": literal(h.pids), "FIXTURE_CONTROL": literal(h.control), "FIXTURE_TOKEN": literal(h.controlToken)}}
+	fixtureToken := literal(h.controlToken)
+	fixtureToken.Secret = true
+	env := v1.Environment{Assign: map[string]v1.Value{"BACKLOT_NATIVE_FIXTURE": literal("1"), "PORT": port, "PIDFILE": literal(h.pids), "FIXTURE_CONTROL": literal(h.control), "FIXTURE_TOKEN": fixtureToken}}
 	server := v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: command("server"), Resources: []string{"port"}, Ports: map[string]v1.ServicePort{"http": {Resource: "port"}}, Environment: env, Readiness: &v1.Probe{Kind: "tcp", Target: &port, Timeout: "2s"}}
 	job := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: command("job"), Resources: []string{"port"}, Environment: env, DependsOn: []v1.Dependency{{Component: "server", Condition: v1.Ready}}}
 	self, err := os.Executable()
@@ -971,8 +978,21 @@ func TestNativeRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		final := h.state(r.Instance.ID, v1.Failed)
-		if final.Instance.Execution.CleanupFailure == "" {
-			t.Fatal("guardian loss hidden")
+		if final.Instance.Execution.CleanupFailure == "" || final.Instance.Execution.CollectionFailure == "" {
+			t.Fatal("guardian loss must retain independent cleanup and collection gaps")
+		}
+		for _, component := range final.Instance.Execution.Components {
+			if component.ExitCode != nil {
+				t.Fatal("lost native status invented an original exit")
+			}
+		}
+		logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID})
+		if err != nil || logs.Gap == "" {
+			t.Fatal("historical collection gap omitted", err)
+		}
+		following, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID, Offset: logs.NextOffset})
+		if err != nil || following.Gap != logs.Gap {
+			t.Fatal("following collection gap omitted", err)
 		}
 		if syscall.Kill(root, 0) != nil {
 			t.Fatal("uncertain descendant killed")

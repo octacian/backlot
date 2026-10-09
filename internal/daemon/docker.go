@@ -264,22 +264,24 @@ func (w *dockerWork) PGID() int { return 0 }
 func (w *dockerWork) Result() *native.Exit {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.exit != nil {
-		return w.exit
+	if w.exit != nil && w.exit.Known {
+		result := *w.exit
+		if w.logErr != nil {
+			result.CollectionFailure = "container output collection failed"
+		}
+		return &result
 	}
-	if w.logErr != nil {
-		w.exit = &native.Exit{Code: -1, Error: "container output collection failed", CollectionFailure: "container output collection failed"}
-		return w.exit
+	if w.logErr != nil && w.exit == nil {
+		return &native.Exit{Error: "container output collection failed", CollectionFailure: "container output collection failed"}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	out, err := w.engine.ContainerInspect(ctx, resourceHandle(w.resource), client.ContainerInspectOptions{})
 	if err != nil {
-		w.exit = &native.Exit{Code: -1, Error: "Docker inspection failed"}
-		return w.exit
+		return &native.Exit{Error: "Docker inspection failed"}
 	}
 	if out.Container.State != nil && !out.Container.State.Running {
-		w.exit = &native.Exit{Code: out.Container.State.ExitCode, Error: out.Container.State.Error}
+		w.exit = &native.Exit{Known: true, Code: out.Container.State.ExitCode, Error: out.Container.State.Error}
 	}
 	return w.exit
 }
@@ -312,9 +314,7 @@ func (w *dockerWork) Stop(grace time.Duration) error {
 	w.joinLogs()
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.exit == nil {
-		w.exit = &native.Exit{Code: out.Container.State.ExitCode}
-	}
+	w.exit = &native.Exit{Known: true, Code: out.Container.State.ExitCode, Error: out.Container.State.Error}
 	if w.logErr != nil {
 		w.exit.CollectionFailure = "container output collection failed"
 	}

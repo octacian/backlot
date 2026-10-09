@@ -21,11 +21,13 @@ import (
 )
 
 type execution struct {
+	kept          bool
 	cancel        context.CancelFunc
 	done          chan struct{}
 	mu            sync.Mutex
 	groups        []*native.Group
 	jobs          map[string]workload
+	services      map[string]workload
 	components    map[string]workload
 	containers    []*dockerWork
 	docker        *dockerEngine
@@ -225,7 +227,7 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 		return empty, err
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
-	entry := &execution{cancel: cancel, done: make(chan struct{}), jobs: map[string]workload{}, components: map[string]workload{}, source: identity, grace: mustGrace(request.Options)}
+	entry := &execution{cancel: cancel, done: make(chan struct{}), jobs: map[string]workload{}, services: map[string]workload{}, components: map[string]workload{}, source: identity, grace: mustGrace(request.Options)}
 	s.executions[id] = entry
 	response.Instance, err = s.store.inspect(id)
 	if err != nil {
@@ -268,6 +270,18 @@ func (s *service) joinExecution(id string) (v1.Instance, error) {
 	s.mu.Lock()
 	entry := s.executions[id]
 	s.mu.Unlock()
+	if entry != nil {
+		select {
+		case <-entry.done:
+			entry.mu.Lock()
+			kept := entry.kept
+			entry.mu.Unlock()
+			if kept {
+				return s.stopKept(id, entry)
+			}
+		default:
+		}
+	}
 	if entry == nil {
 		instance, err := s.store.inspect(id)
 		if err != nil {
@@ -355,7 +369,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 				status = v1.Cancelled
 			}
 		}
-		if failure != nil {
+		if failure != nil && (ctx.Err() == nil || !errors.Is(failure, context.Canceled)) {
 			result.Failure = failure.Error()
 			var detail *v1.PlanError
 			if errors.As(failure, &detail) {
@@ -365,19 +379,65 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 				status = v1.Failed
 			}
 		}
+		s.mu.Lock()
+		shuttingDown := s.closing
+		s.mu.Unlock()
+		sanitizeResult(result, snapshot, entry)
 		_ = save(v1.Stopping)
+		potentialKeep := journal.Options.KeepOnFailure && snapshot.Plan.Lifetime == v1.Disposable && !shuttingDown
 		var cleanup error
 		var cleanupMu sync.Mutex
+		var stopped sync.WaitGroup
+		// Stop finite work before reading artifacts. Without investigation retention,
+		// stop services concurrently so job collection cannot delay cancellation.
+		stop := func(work workload) {
+			stopped.Go(func() {
+				err := work.Stop(d.grace)
+				exit := work.Result()
+				cleanupMu.Lock()
+				defer cleanupMu.Unlock()
+				cleanup = errors.Join(cleanup, err)
+				if exit != nil && exit.CollectionFailure != "" {
+					result.CollectionFailure = "application output collection failed"
+				}
+			})
+		}
+		for _, group := range entry.groups {
+			if !potentialKeep || !healthyService(entry, group) {
+				stop(group)
+			}
+		}
+		for _, work := range entry.containers {
+			if !potentialKeep || !healthyService(entry, work) {
+				stop(work)
+			}
+		}
+		stopped.Wait()
+
+		if err := s.collectArtifacts(id, snapshot, entry, result); err != nil {
+			result.CollectionFailure = err.Error()
+			status = v1.Failed
+		}
+		keep := potentialKeep && (failure != nil || result.Cancelled || result.TerminalExitCode != nil && *result.TerminalExitCode != 0 || result.CollectionFailure != "" || cleanup != nil) && !shuttingDown
+		result.Kept = keep
+		entry.kept = keep
+		_ = save(v1.Stopping)
 		var joined sync.WaitGroup
 		joined.Go(func() {
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cleanupCancel()
-			err := s.store.removeGateway(cleanupCtx, id, &journal)
+			var err error
+			if !keep {
+				err = s.store.removeGateway(cleanupCtx, id, &journal)
+			}
 			cleanupMu.Lock()
 			defer cleanupMu.Unlock()
 			cleanup = errors.Join(cleanup, err)
 		})
 		for _, group := range entry.groups {
+			if keep && healthyService(entry, group) {
+				continue
+			}
 			joined.Go(func() {
 				err := group.Stop(d.grace)
 				cleanupMu.Lock()
@@ -390,6 +450,9 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			})
 		}
 		for _, w := range entry.containers {
+			if keep && healthyService(entry, w) {
+				continue
+			}
 			joined.Go(func() {
 				stopErr := w.Stop(d.grace)
 				exit := w.Result()
@@ -404,15 +467,16 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		}
 
 		joined.Wait()
-		if entry.resources != nil && cleanup == nil {
+
+		if entry.resources != nil && cleanup == nil && !keep {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			cleanup = s.store.cleanupContainers(cleanupCtx, id, entry.resources, entry.docker)
 			cancel()
 		}
-		if entry.docker != nil {
+		if entry.docker != nil && !keep {
 			_ = entry.docker.Close()
 		}
-		if snapshot.Plan.Lifetime == v1.Disposable && cleanup == nil {
+		if snapshot.Plan.Lifetime == v1.Disposable && cleanup == nil && !keep && !shuttingDown {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			cleanup = s.store.removeResources(cleanupCtx, id)
 			cancel()
@@ -424,28 +488,43 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			}
 			if cleanup != nil {
 				component.Status = "unknown"
-			} else if entry.jobs[component.Name] != nil {
-				component.Status = "completed"
+			} else if keep && entry.jobs[component.Name] == nil && entry.components[component.Name] != nil && entry.components[component.Name].Alive() {
+				component.Status = "ready"
+			} else if job := entry.jobs[component.Name]; job != nil {
+				component.Status = "unknown"
+				if exit := job.Result(); exit != nil && exit.Known {
+					component.Status = "completed"
+				}
 			} else {
 				component.Status = "stopped"
 			}
 			if group := entry.components[component.Name]; group != nil && component.ExitCode == nil {
-				if exit := group.Result(); exit != nil {
+				if exit := group.Result(); exit != nil && exit.Known {
 					component.ExitCode = &exit.Code
 				}
 			}
+		}
+		for _, component := range result.Components {
+			if component.Name == snapshot.Plan.TerminalJob && component.ExitCode != nil {
+				result.TerminalExitCode = component.ExitCode
+			}
+		}
+		if result.CollectionFailure != "" {
+			status = v1.Failed
 		}
 		if cleanup != nil {
 			result.CleanupFailure = cleanup.Error()
 			result.CleanupDetails = cleanupDetails(cleanup)
 			status = v1.Failed
 		}
+		result.CompletedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		sanitizeResult(result, snapshot, entry)
 		if err := save(status); err != nil {
 			entry.mu.Lock()
 			entry.err = err
 			entry.mu.Unlock()
 		}
-		if cleanup == nil {
+		if cleanup == nil && !keep {
 			entry.releaseOutputs()
 		}
 	}()
@@ -478,6 +557,9 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			failure = err
 			return
 		}
+	}
+	if failure = s.captureFixtures(id, snapshot, result, entry); failure != nil {
+		return
 	}
 	services := map[string]workload{}
 	consumedPorts := map[string]string{}
@@ -526,6 +608,9 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			}
 			if err == nil {
 				entry.components[component.Name] = group
+				if component.Kind == v1.Job {
+					entry.jobs[component.Name] = group
+				}
 				if component.Kind != v1.Service {
 					break
 				}
@@ -587,6 +672,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			return
 		}
 		if component.Kind == v1.Service {
+			entry.services[component.Name] = group
 			services[component.Name] = group
 			jobCancel()
 			result.Components[index].Status = "ready"
@@ -596,10 +682,26 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			exit, failure = waitJob(jobCtx, group, services)
 			jobCancel()
 			if exit != nil {
-				result.Components[index].ExitCode = &exit.Code
-				result.Components[index].Status = "completed"
-				if exit.Code != 0 || exit.Error != "" {
-					failure = fmt.Errorf("job %s failed (exit %d): %s", component.Name, exit.Code, exit.Error)
+				if exit.Known {
+					result.Components[index].ExitCode = &exit.Code
+					result.Components[index].Status = "completed"
+					if component.Name == snapshot.Plan.TerminalJob {
+						result.TerminalExitCode = &exit.Code
+					}
+				}
+				if exit.CollectionFailure != "" {
+					result.CollectionFailure = "job output collection failed"
+				}
+				if !exit.Known || exit.Code != 0 || exit.Error != "" {
+					status = v1.Failed
+					if !exit.Known || component.Name != snapshot.Plan.TerminalJob || exit.Code < 0 || exit.Error != "" && exit.Code == 0 {
+						if !exit.Known {
+							failure = fmt.Errorf("job %s exit status unavailable", component.Name)
+						} else {
+							failure = fmt.Errorf("job %s failed (exit %d)", component.Name, exit.Code)
+						}
+					}
+					return
 				}
 			}
 			if failure != nil {
@@ -780,7 +882,7 @@ func runtimeValue(value v1.PlannedValue, id string, p v1.PlanResponse, ports map
 	return "", problem("unsupported_runtime", "allocation reference cannot be resolved by native slice")
 }
 
-func (s *service) lockMutation(id string) func() {
+func (s *service) mutationLock(id string) *sync.Mutex {
 	s.mu.Lock()
 	if s.mutations == nil {
 		s.mutations = map[string]*sync.Mutex{}
@@ -791,6 +893,10 @@ func (s *service) lockMutation(id string) func() {
 		s.mutations[id] = lock
 	}
 	s.mu.Unlock()
+	return lock
+}
+func (s *service) lockMutation(id string) func() {
+	lock := s.mutationLock(id)
 	lock.Lock()
 	return lock.Unlock
 }
@@ -834,6 +940,22 @@ func (s *service) expireRuntime(id string) error {
 		return nil
 	}
 	_, err = s.stopExecution(id)
+	if err != nil {
+		var detail *v1.PlanError
+		if errors.As(err, &detail) && (detail.Code == "collection_failed" || detail.Code == "cleanup_failed") {
+			// Expected per-run failures are durable outcomes, not daemon-fatal
+			// sweeper failures. Persistence/unfinished-owner errors still escape.
+			current, inspectErr := s.store.inspect(id)
+			if inspectErr != nil {
+				return inspectErr
+			}
+			if current.Execution != nil && current.Execution.CompletedAt != "" &&
+				(detail.Code == "collection_failed" && current.Execution.CollectionFailure != "" ||
+					detail.Code == "cleanup_failed" && current.Execution.CleanupFailure != "") {
+				return nil
+			}
+		}
+	}
 	return err
 }
 

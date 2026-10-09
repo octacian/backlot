@@ -14,6 +14,7 @@ const (
 // ExecutionOptions contains Go durations; omitted fields use documented defaults.
 // Zero execution deadlines are unlimited; zero stop grace escalates immediately.
 type ExecutionOptions struct {
+	KeepOnFailure  bool   `json:"keep_on_failure,omitempty"`
 	StartupTimeout string `json:"startup_timeout,omitempty"`
 	JobTimeout     string `json:"job_timeout,omitempty"`
 	StopGrace      string `json:"stop_grace,omitempty"`
@@ -36,16 +37,24 @@ type ComponentResult struct {
 
 // ExecutionResult is the durable redacted runtime view.
 type ExecutionResult struct {
-	Origin            string            `json:"origin,omitempty"`
-	Attempt           string            `json:"attempt"`
-	Components        []ComponentResult `json:"components"`
-	Ports             map[string]int    `json:"ports,omitempty"`
-	Failure           string            `json:"failure,omitempty"`
-	FailureDetail     *PlanError        `json:"failure_detail,omitempty"`
-	CleanupFailure    string            `json:"cleanup_failure,omitempty"`
-	CleanupDetails    []PlanError       `json:"cleanup_details,omitempty"`
-	CollectionFailure string            `json:"collection_failure,omitempty"`
-	Cancelled         bool              `json:"cancelled,omitempty"`
+	Fixtures         []FixtureRecord `json:"fixtures,omitempty"`
+	TerminalExitCode *int            `json:"terminal_exit_code,omitempty"`
+	Kept             bool            `json:"kept,omitempty"`
+	CompletedAt      string          `json:"completed_at,omitempty"`
+	// EvidenceObservedAt is the persisted inferred retention start for legacy results without a completion time.
+	EvidenceObservedAt string            `json:"evidence_observed_at,omitempty"`
+	EvidenceExpired    bool              `json:"evidence_expired,omitempty"`
+	Artifacts          []ArtifactRecord  `json:"artifacts,omitempty"`
+	Origin             string            `json:"origin,omitempty"`
+	Attempt            string            `json:"attempt"`
+	Components         []ComponentResult `json:"components"`
+	Ports              map[string]int    `json:"ports,omitempty"`
+	Failure            string            `json:"failure,omitempty"`
+	FailureDetail      *PlanError        `json:"failure_detail,omitempty"`
+	CleanupFailure     string            `json:"cleanup_failure,omitempty"`
+	CleanupDetails     []PlanError       `json:"cleanup_details,omitempty"`
+	CollectionFailure  string            `json:"collection_failure,omitempty"`
+	Cancelled          bool              `json:"cancelled,omitempty"`
 }
 
 // LogsRequest selects retained records by component and absolute record offset.
@@ -75,4 +84,35 @@ type LogsResponse struct {
 	NextOffset int         `json:"next_offset"`
 	Active     bool        `json:"active"`
 	Gap        string      `json:"gap,omitempty"`
+}
+
+// ArtifactRecord locates collected evidence outside runtime and data resources.
+type ArtifactRecord struct {
+	Component string `json:"component"`
+	Name      string `json:"name"`
+	Attempt   string `json:"attempt"`
+	Path      string `json:"path"`
+}
+
+// FixturesRequest selects component metadata; SecretName enables explicit access.
+type FixturesRequest struct {
+	APIVersion string `json:"api_version"`
+	InstanceID string `json:"instance_id"`
+	Component  string `json:"component,omitempty"`
+	SecretName string `json:"secret_name,omitempty"`
+}
+
+// FixtureRecord is a resolved fixture identity, redacted unless explicitly requested.
+type FixtureRecord struct {
+	Component   string `json:"component"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Value       string `json:"value,omitempty"`
+	Sensitive   bool   `json:"sensitive,omitempty"`
+}
+
+// FixturesResponse returns named fixture identities and explicitly requested secrets.
+type FixturesResponse struct {
+	APIVersion string          `json:"api_version"`
+	Fixtures   []FixtureRecord `json:"fixtures"`
 }

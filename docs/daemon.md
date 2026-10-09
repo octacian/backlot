@@ -242,6 +242,9 @@ and marks interrupted with an explicit collection gap; it never resumes work.
 Missing or mismatched control authority is a cleanup failure that preserves
 uncertain survivors. Inspect the private ownership journal before manual action.
 
+See [disposable results and evidence](evidence.md) for exact exit codes, kept
+failures, artifacts, fixture access and retention settings.
+
 The CLI waits for persistent ready or disposable terminal status through inspect;
 raw API callers must renew disposable capabilities while polling. Logs pages use
 an absolute unfiltered record offset, so component filtering preserves cursor

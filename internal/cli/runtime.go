@@ -22,7 +22,7 @@ import (
 func runtimeCommands() []*urfave.Command {
 	commands := []*urfave.Command{}
 	for _, name := range []string{"run", "restart", "reset"} {
-		commands = append(commands, &urfave.Command{Name: name, SkipFlagParsing: true, Usage: "Execute an isolated scene; restart retains data, reset replaces it", Flags: append(daemonFlags(false), &urfave.StringFlag{Name: "project"}, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s"}), Action: runNative})
+		commands = append(commands, &urfave.Command{Name: name, SkipFlagParsing: true, Usage: "Execute an isolated scene; restart retains data, reset replaces it", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "keep-on-failure"}, &urfave.StringFlag{Name: "project"}, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s"}), Action: runNative})
 	}
 	commands = append(commands, &urfave.Command{Name: "stop", Usage: "Stop runtime with verified group cleanup", Flags: daemonFlags(false), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
@@ -72,7 +72,7 @@ func runtimeCommands() []*urfave.Command {
 				if c.Bool("json") {
 					err = json.NewEncoder(c.Writer).Encode(record)
 				} else {
-					_, err = fmt.Fprintf(c.Writer, "%s %s/%s: %s", record.Time, record.Component, record.Stream, record.Message)
+					_, err = fmt.Fprintf(c.Writer, "%s %s %s %s/%s: %s", record.Time, record.InstanceID, record.Attempt, record.Component, record.Stream, record.Message)
 					if err == nil && len(record.Data) > 0 {
 						var data []byte
 						data, err = base64.StdEncoding.DecodeString(record.Data)
@@ -108,7 +108,7 @@ func runtimeCommands() []*urfave.Command {
 			}
 		}
 	}})
-	return commands
+	return append(commands, fixtureCommands()...)
 }
 func runtimeClient(c *urfave.Command) (*client.Client, error) {
 	dir, err := directory(c)
@@ -134,7 +134,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 		return output(c, nil, err)
 	}
 	defer cli.Close()
-	request := v1.RunRequest{APIVersion: v1.Version, Options: v1.ExecutionOptions{StartupTimeout: c.String("startup-timeout"), JobTimeout: c.String("job-timeout"), StopGrace: c.String("stop-grace")}}
+	request := v1.RunRequest{APIVersion: v1.Version, Options: v1.ExecutionOptions{StartupTimeout: c.String("startup-timeout"), JobTimeout: c.String("job-timeout"), StopGrace: c.String("stop-grace"), KeepOnFailure: c.Bool("keep-on-failure")}}
 	if c.Name == "restart" || c.Name == "reset" {
 		previous, err := cli.Inspect(ctx, args[0])
 		if err != nil {
@@ -159,8 +159,32 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 			return output(c, nil, err)
 		}
 	}
-	signalCtx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	signalCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	signalCode := make(chan int, 1)
+	go func() {
+		select {
+		case received := <-signals:
+			code := 130
+			if received == syscall.SIGTERM {
+				code = 143
+			}
+			signalCode <- code
+			cancel()
+		case <-signalCtx.Done():
+		}
+	}()
+	cancellationCode := func() int {
+		select {
+		case code := <-signalCode:
+			return code
+		default:
+			return 130
+		}
+	}
 	var response v1.InstanceResponse
 	if c.Name == "restart" || c.Name == "reset" {
 		if c.Name == "reset" {
@@ -192,19 +216,22 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 			if err := output(c, response, nil); err != nil {
 				return err
 			}
-			return &v1.PlanError{Code: "cancelled", Message: "execution cancelled"}
+			return cancelledExit(response.Instance, cancellationCode())
 		}
 		if response.Instance.Status == v1.RuntimeReady {
 			return output(c, response, nil)
 		}
 		switch response.Instance.Status {
 		case v1.Succeeded:
-			return output(c, response, nil)
+			if err := output(c, response, nil); err != nil {
+				return err
+			}
+			return executionExit(response.Instance)
 		case v1.Failed, v1.Interrupted, v1.Cancelled, v1.Stopped, v1.Destroyed:
 			if err := output(c, response, nil); err != nil {
 				return err
 			}
-			return &v1.PlanError{Code: "execution_failed", Message: "execution failed or was interrupted; inspect execution result"}
+			return executionExit(response.Instance)
 		}
 		if response.Instance.Status == v1.Stopping {
 			token = ""
@@ -246,7 +273,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 			if err := output(c, response, nil); err != nil {
 				return err
 			}
-			return &v1.PlanError{Code: "cancelled", Message: "execution cancelled"}
+			return cancelledExit(response.Instance, cancellationCode())
 		case <-time.After(50 * time.Millisecond):
 		}
 		response, err = cli.Inspect(signalCtx, id)
@@ -283,8 +310,8 @@ func parseRuntimeArgs(c *urfave.Command) (string, []string, error) {
 		}
 		seen[arg] = true
 		switch arg {
-		case "--json":
-			if err := c.Set("json", "true"); err != nil {
+		case "--json", "--keep-on-failure":
+			if err := c.Set(strings.TrimPrefix(arg, "--"), "true"); err != nil {
 				return "", nil, err
 			}
 		case "--state-dir", "--project", "--config", "--startup-timeout", "--job-timeout", "--stop-grace":

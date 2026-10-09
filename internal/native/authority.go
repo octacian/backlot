@@ -330,9 +330,15 @@ func startWorkload(spec Spec, publish func(Exit)) (*ownedWorkload, error) {
 		if startErr != nil {
 			result.Code = -1
 			result.Error = "native command could not start"
-		} else if err := root.Wait(); err != nil {
-			result.Code = root.ProcessState.ExitCode()
-			result.Error = "native command failed"
+		} else {
+			err := root.Wait()
+			if root.ProcessState != nil {
+				result.Known = true
+				result.Code = root.ProcessState.ExitCode()
+			}
+			if err != nil {
+				result.Error = "native command failed"
+			}
 		}
 		w.mu.Lock()
 		w.result = result

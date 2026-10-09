@@ -104,6 +104,14 @@ setup and evidence honestly; mocked HTTP tests do not satisfy this gate.
 
 ## 6. Disposable results and evidence
 
+Implemented for independent review: terminal argument forwarding and exact exits,
+separate execution/collection/cleanup/cancellation outcomes, signal and lease
+cancellation, native/container artifact collection, kept failures and explicit
+fixture secrets, retained historical/follow logs and daemon-wide evidence pruning.
+See the [evidence guide](evidence.md). Focused native and provider fixtures exercise
+failure and recovery. Independent reviews, frozen full suites and applicable
+real-domain acceptance remain gates; this is not final V1 readiness.
+
 Complete terminal-job selection, argument forwarding, exact exit-status capture,
 SIGINT/SIGTERM behavior, disconnect cancellation, failure-triggered cleanup,
 artifact extraction, `--keep-on-failure`, fixture discovery/explicit secret access,

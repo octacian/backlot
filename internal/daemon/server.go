@@ -20,8 +20,10 @@ import (
 
 // Options selects private state placement and the bounded disposable client lease.
 type Options struct {
-	Directory     string
-	LeaseDuration time.Duration
+	Directory      string
+	LeaseDuration  time.Duration
+	RetentionAge   time.Duration
+	RetentionBytes int64
 }
 
 // DefaultLeaseDuration is the disposable disconnect grace period.
@@ -30,6 +32,9 @@ const DefaultLeaseDuration = 30 * time.Second
 // Serve owns the socket, database and lease sweeper until shutdown or cancellation.
 // Only the daemon opens state.db; it owns all accepted native execution.
 func Serve(ctx context.Context, options Options) (resultErr error) {
+	if options.RetentionAge < 0 || options.RetentionBytes < 0 {
+		return problem("invalid_retention", "evidence retention limits must be positive")
+	}
 	if options.LeaseDuration == 0 {
 		options.LeaseDuration = DefaultLeaseDuration
 	}
@@ -130,7 +135,7 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	if err := os.Chmod(path, 0600); err != nil {
 		return problem("permissions", "cannot protect daemon socket")
 	}
-	svc := &service{store: state, lease: options.LeaseDuration, directory: options.Directory}
+	svc := &service{store: state, lease: options.LeaseDuration, directory: options.Directory, evidence: evidencePolicy{age: options.RetentionAge, bytes: options.RetentionBytes}}
 	stopping := make(chan struct{})
 	var once sync.Once
 	status := v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, Status: "running", PID: os.Getpid(), LeaseDuration: options.LeaseDuration.String()}
@@ -245,6 +250,17 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				return
 			}
 			writeJSON(w, v1.InstanceResponse{APIVersion: v1.Version, Instance: instance})
+		case "/v1/fixtures", "/v1/fixtures/secret":
+			var request v1.FixturesRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.fixtures(request, r.URL.Path == "/v1/fixtures/secret")
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
 		case "/v1/logs":
 			var request v1.LogsRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {

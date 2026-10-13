@@ -17,7 +17,7 @@ import (
 // The subprocess must fail, while its parent verifies the cleanup that Fatal
 // would otherwise hide from assertions in the failing test itself.
 func TestControlledFixtureUnwind(t *testing.T) {
-	for _, phase := range []string{"setup-after-allocation", "fatal-after-pending-destroy", "startup-abort-after-listen"} {
+	for _, phase := range []string{"setup-before-log-forwarder", "setup-after-allocation", "fatal-after-pending-destroy", "startup-abort-after-listen"} {
 		t.Run(phase, func(t *testing.T) {
 			report := filepath.Join(t.TempDir(), "cleanup.json")
 			binary, err := os.Executable()
@@ -38,14 +38,19 @@ func TestControlledFixtureUnwind(t *testing.T) {
 				t.Fatal("missing unwind cleanup receipt", err, string(data))
 			}
 			var receipt struct {
-				Root         string `json:"root"`
-				Closed       bool   `json:"closed"`
-				Owners       bool   `json:"owners_joined"`
-				Dependencies bool   `json:"dependencies_released"`
-				Upstreams    bool   `json:"upstreams_joined"`
+				Root               string `json:"root"`
+				Closed             bool   `json:"closed"`
+				Owners             bool   `json:"owners_joined"`
+				Dependencies       bool   `json:"dependencies_released"`
+				Upstreams          bool   `json:"upstreams_joined"`
+				LogAllocated       bool   `json:"log_allocated"`
+				ForwarderAllocated bool   `json:"forwarder_allocated"`
 			}
 			if json.Unmarshal(raw, &receipt) != nil || !receipt.Closed || !receipt.Owners || !receipt.Dependencies || !receipt.Upstreams {
 				t.Fatalf("unwind failed to recover/join/close: %s; %s", raw, data)
+			}
+			if phase == "setup-before-log-forwarder" && (receipt.LogAllocated || receipt.ForwarderAllocated || !strings.Contains(string(data), "is a directory")) {
+				t.Fatal("early setup failure did not exercise actual log allocation before log/forwarder ownership", string(data))
 			}
 			if _, err := os.Stat(receipt.Root); !os.IsNotExist(err) {
 				t.Fatal("closed fixture root remains", err)
@@ -56,6 +61,16 @@ func TestControlledFixtureUnwind(t *testing.T) {
 }
 func TestControlledFixtureUnwindHelper(t *testing.T) {
 	switch os.Getenv("BACKLOT_UNWIND_PHASE") {
+	case "setup-before-log-forwarder":
+		f := fixtureRoot(t)
+		// A proven test-owned directory forces the actual shared log OpenFile
+		// to fail before either the log or forwarding server can be allocated.
+		if err := os.Mkdir(filepath.Join(f.root, "log"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		t.Log("injected setup-before-log-forwarder")
+		f.initializeOwner(nil)
+		t.Fatal("log setup unexpectedly succeeded")
 	case "setup-after-allocation":
 		ownerFixture(t, func(*controlledFixture) error { return errors.New("injected setup-after-allocation") })
 	case "startup-abort-after-listen":

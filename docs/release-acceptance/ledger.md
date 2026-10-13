@@ -54,9 +54,9 @@ Preserve and report uncertain residuals; never infer ownership from name/PID.
 
 Early real-flow and multiple public workflow checks passed (details below).
 No criterion has final frozen-candidate acceptance yet. The initial Low review, Low fix verification and initial High review have completed;
-three High fix verifications completed per the coordinator resume record: H1–H5
-and F24 accepted, with H6 improved and N1–N3 plus resume harness corrections
-requiring verification. Frozen final validation and CI remain pending. Record exact command/revision/result/artifact evidence here as gates run;
+four High fix verifications completed: H1–H5/F24 and N1 accepted, with
+primary N2/N3 fixes supported and two P3 residual paths corrected below for
+retained High verification. H6 remains qualified until that verification. Frozen final validation and CI remain pending. Record exact command/revision/result/artifact evidence here as gates run;
 unit/fault-injection tests supplement and never replace public workflow evidence.
 
 ## Findings
@@ -1019,3 +1019,54 @@ provider/gateway/HTTPS/full public/browser/reproducibility/notices, explicit F4
 user disposition, publication clearance and eventual published-revision CI are
 still incomplete. No push/PR, readiness, Linux/Windows runtime, merge/tag/release
 or deployment claim. Source pauses after the clean committed handoff for High.
+
+## High N2/N3 residual corrections
+
+Input `5eac95a1cffe433d75639f1978c1f9ed076b9d5c`; independent High report
+`high-review-5eac95a1.md` accepted N1 and the primary N2/N3 fixes, with two P3
+`test_harness` residual paths. The coordinator granted only both narrow fixes,
+ordinary/race focused checks and one stabilized pre-commit check through a clean
+handoff. Full final acceptance and publication remain ungranted.
+
+The separate startup regression now uses the shared controlled fixture. Root
+ownership immediately registers nil-safe cleanup before log/forwarder setup;
+retained children are registered before startup. An outer subprocess forces the
+actual shared log `OpenFile` to fail on a proven test-owned directory before any
+log/forwarder allocation. It requires intentional inner failure, a cleanup receipt
+with both allocation fields false, joined/released resources and absent owned root.
+Existing startup/readiness, delayed join and Fatal recovery assertions remain.
+
+Provider handoff now checks availability before calling receipt completion, on
+both initial switch and already-upstream retry. New controlled HTTP503 and absent
+Unix-upstream cases require failure without creating verified metadata, retain the
+owned switched link and an unknown receipt obstruction with unchanged inode/mode,
+then restore the same upstream and require exact private receipt completion.
+These are native owned models, not Docker/provider or final release acceptance.
+
+Private evidence: `implementation-residuals-5eac95a` under the durable resume root;
+`stabilized-source` records parent, tracked patch, all194 source hashes and actual
+host/toolchain. Ordinary focused selection **PASS**, package2.960s; race focused
+selection **PASS**, package26.396s. Required `make-check`: **PASS**, wall267.55s;
+daemon race263.728s, acceptance race26.178s; schema/notices/format/vet/lint,
+complete default race suite, six ADRs and build.
+Implementation hashes matched after checking; only this ledger narration followed.
+No failing test run occurred in this dispatch; required inner setup/Fatal failures
+were asserted by passing outer tests. Prior failed/interrupted checks remain at
+their original source/provenance in the previous handoff.
+
+Cleanup guards and outer receipts verified controlled owner joins, dependency
+release, upstream closure and removal of the newly owned model roots. No external
+Docker/Caddy/browser/image action or unaffected public duplicate was performed;
+provider opt-ins were explicitly cleared for the default gate. No global `TMPDIR`
+override. Prior diagnostic/uncertain roots, browser profiles and shared bases/cache
+were untouched. No observed-PID signal or foreign cleanup occurred. Source-bound
+final fixture/browser images and all full final gates remain pending.
+
+Fourth High fix verification is complete with these two residuals; verification
+of this new combined correction is next in the retained High context. The two P3
+paths remain grouped under N2/N3; prior accounting and unknown usage/cost remain
+available in the preceding handoff. Final-validation attempts **0**. F4 original
+DB stop remains historical unknown/open with no waiver. No push/PR, readiness,
+Linux/Windows runtime, merge/tag/release/deploy claim. Exact committed candidate
+and concise handoff are external at `implementation-residuals-5eac95a/handoff.md`;
+source pauses for High after that clean commit.

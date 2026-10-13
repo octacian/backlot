@@ -37,9 +37,8 @@ type controlledFixture struct {
 	report    string
 }
 
-// Cleanup is registered as soon as the root is owned, including setup failures.
-// The second registration runs before environment restoration and is idempotent.
-func ownerFixture(t *testing.T, setup func(*controlledFixture) error) *controlledFixture {
+// fixtureRoot registers nil-safe cleanup before any dependent setup can fail.
+func fixtureRoot(t *testing.T) *controlledFixture {
 	t.Helper()
 	root, err := newAcceptanceRoot("bl-owner-")
 	if err != nil {
@@ -47,6 +46,22 @@ func ownerFixture(t *testing.T, setup func(*controlledFixture) error) *controlle
 	}
 	f := &controlledFixture{t: t, root: root, parent: &harness{t: t}, report: os.Getenv("BACKLOT_UNWIND_REPORT")}
 	t.Cleanup(f.cleanup)
+	return f
+}
+
+func ownerFixture(t *testing.T, setup func(*controlledFixture) error) *controlledFixture {
+	t.Helper()
+	f := fixtureRoot(t)
+	f.initializeOwner(setup)
+	return f
+}
+
+// initializeOwner allocates dependents only after fixtureRoot owns cleanup.
+func (f *controlledFixture) initializeOwner(setup func(*controlledFixture) error) {
+	t := f.t
+	t.Helper()
+	root := f.root
+	var err error
 	f.logFile, err = os.OpenFile(filepath.Join(root, "log"), os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +83,6 @@ func ownerFixture(t *testing.T, setup func(*controlledFixture) error) *controlle
 	if err := os.WriteFile(filepath.Join(root, "helper"), []byte("#!/bin/sh\nexec \"$BACKLOT_STARTUP_HELPER_BINARY\" -test.run=^TestOwnedDaemonStartupHelper$ -- \"$@\"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	return f
 }
 func (f *controlledFixture) retain(h *harness) {
 	for _, known := range f.retained {
@@ -244,7 +258,7 @@ func (f *controlledFixture) receipt(closed bool) {
 	for _, u := range f.upstreams {
 		upstreamJoined = upstreamJoined && u.joined
 	}
-	data, err := json.Marshal(map[string]any{"root": f.root, "closed": closed, "owners_joined": allJoined, "dependencies_released": released, "upstreams_joined": upstreamJoined})
+	data, err := json.Marshal(map[string]any{"root": f.root, "closed": closed, "owners_joined": allJoined, "dependencies_released": released, "upstreams_joined": upstreamJoined, "log_allocated": f.logFile != nil, "forwarder_allocated": f.forwarder != nil})
 	if err == nil {
 		err = os.WriteFile(f.report, data, 0600)
 	}

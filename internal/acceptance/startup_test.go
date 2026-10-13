@@ -5,10 +5,8 @@ package acceptance
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,46 +53,12 @@ func TestOwnedDaemonStartupHelper(t *testing.T) {
 }
 
 func TestOwnedDaemonStartupFailureCleanup(t *testing.T) {
-	root, err := newAcceptanceRoot("bl-startup-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var retained []*harness
-	logFile, err := os.OpenFile(filepath.Join(root, "daemon.log"), os.O_CREATE|os.O_WRONLY, 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	forwarder := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = fmt.Fprint(w, "forwarding-live") }))
-	// Dependents are closed only after all retained ownership has been joined.
-	defer func() {
-		for _, h := range retained {
-			if h.daemon != nil {
-				t.Error("startup regression residual; forwarding/log/root preserved", root)
-				return
-			}
-		}
-		forwarder.Close()
-		if err := logFile.Close(); err != nil {
-			t.Error(err)
-		}
-		if err := os.RemoveAll(root); err != nil {
-			t.Error(err)
-		}
-	}()
-	binary, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("BACKLOT_STARTUP_HELPER_ROOT", root)
-	t.Setenv("BACKLOT_STARTUP_HELPER_FORWARDER", forwarder.URL)
-	t.Setenv("BACKLOT_STARTUP_HELPER_BINARY", binary)
+	fixture := ownerFixture(t, nil)
+	root, logFile, forwarder := fixture.root, fixture.logFile, fixture.forwarder
 	wrapper := filepath.Join(root, "helper")
-	if err = os.WriteFile(wrapper, []byte("#!/bin/sh\nexec \"$BACKLOT_STARTUP_HELPER_BINARY\" -test.run=^TestOwnedDaemonStartupHelper$ -- \"$@\"\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
 	t.Run("Start-failure", func(t *testing.T) {
 		h := &harness{t: t, root: root, binary: filepath.Join(root, "absent"), state: filepath.Join(root, "absent-state"), daemonLog: logFile}
-		retained = append(retained, h)
+		fixture.retain(h)
 		defer h.stop()
 		err := h.startDaemon(250 * time.Millisecond)
 		if err == nil || !strings.Contains(err.Error(), "Start failed") || h.daemon != nil || h.daemonDone != nil || h.ownerUnresolved {
@@ -104,7 +68,7 @@ func TestOwnedDaemonStartupFailureCleanup(t *testing.T) {
 	})
 	t.Run("post-Start-readiness-failure", func(t *testing.T) {
 		h := &harness{t: t, root: root, binary: wrapper, state: filepath.Join(root, "state"), daemonLog: logFile}
-		retained = append(retained, h)
+		fixture.retain(h)
 		defer h.stop() // Registered before readiness; startup failure has already joined.
 		before := time.Now()
 		err := h.startDaemon(time.Second)

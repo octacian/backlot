@@ -80,22 +80,26 @@ func (p *providerPath) handoff() error {
 	if !os.SameFile(actual, p.linkProof) || target != p.target {
 		return errors.New("foreign provider endpoint preserved; recovery handoff blocked")
 	}
-	if p.target == p.upstream {
-		return errors.Join(p.verifyHandoff(), p.completeReceipt())
+	if p.target != p.upstream {
+		if err = removeProvenPath(p.endpoint, p.linkProof); err != nil {
+			return err
+		}
+		// Symlink creation is exclusive: a concurrent foreign path is never replaced.
+		if err = os.Symlink(p.upstream, p.endpoint); err != nil {
+			return err
+		}
+		p.linkProof, err = os.Lstat(p.endpoint)
+		if err != nil {
+			return err
+		}
+		p.target = p.upstream
 	}
-	if err = removeProvenPath(p.endpoint, p.linkProof); err != nil {
+	// A verified receipt must never be created or refreshed after a failed
+	// availability check, including retries of an already switched endpoint.
+	if err := p.verifyHandoff(); err != nil {
 		return err
 	}
-	// Symlink creation is exclusive: a concurrent foreign path is never replaced.
-	if err = os.Symlink(p.upstream, p.endpoint); err != nil {
-		return err
-	}
-	p.linkProof, err = os.Lstat(p.endpoint)
-	if err != nil {
-		return err
-	}
-	p.target = p.upstream
-	return errors.Join(p.verifyHandoff(), p.completeReceipt())
+	return p.completeReceipt()
 }
 func (p *providerPath) receiptPath() string { return p.endpoint + ".recovery.json" }
 

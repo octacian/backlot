@@ -54,8 +54,9 @@ Preserve and report uncertain residuals; never infer ownership from name/PID.
 
 Early real-flow and multiple public workflow checks passed (details below).
 No criterion has final frozen-candidate acceptance yet. The initial Low review, Low fix verification and initial High review have completed;
-two High fix verifications completed: H1–H4 accepted, with H5/H6 now requiring
-verification. Frozen final validation and CI remain pending. Record exact command/revision/result/artifact evidence here as gates run;
+three High fix verifications completed per the coordinator resume record: H1–H5
+and F24 accepted, with H6 improved and N1–N3 plus resume harness corrections
+requiring verification. Frozen final validation and CI remain pending. Record exact command/revision/result/artifact evidence here as gates run;
 unit/fault-injection tests supplement and never replace public workflow evidence.
 
 ## Findings
@@ -841,3 +842,180 @@ Linux/Windows runtime, branch/PR publication, merge/tag/deploy/release claim.
 Exact committed candidate and collapsed efficiency snapshot are external at
 `/tmp/bl-lifetime-flgiuvtz/lifetime-handoff.md`; source pauses for independent High
 verification after that committed handoff.
+
+## Resumed N1–N3 recovery, unwind and receipt corrections
+
+Input candidate `54395d54acc3d601ce1661d0d40477c5e4d31a3f`. The coordinator's
+2026-10-13 durable resume record confirms the latest High verification accepted
+H5/F24 and improved H6, then identified N1 (fresh-owner shutdown expectations),
+N2 (controlled-fixture setup/Fatal unwind ownership), and N3 (receipt retry), all
+`test_harness` findings. The original detailed `/tmp` handoffs/raw reports are now
+absent; their committed sanitized development narration remains historical, not
+recovered provenance. The four paused dirty files were preserved and completed.
+
+The renewed exclusive grant covers these corrections, focused checks and a
+pre-commit check through a clean handoff for High. It does **not** authorize the
+full final cycle or publication. Existing exact-child gateway and unique owned
+Docker/native/private-fixture boundaries remain; no gateway restart, whole config,
+DNS, certificate, trust, foreign cleanup or observed-PID signalling occurred.
+
+N1: only the original log-loss owner expects its injected collection failure.
+The shared dependency callback stops each fresh recovery owner normally; durable
+historical collection results do not predict a new owner's shutdown result.
+`TestFreshProviderOwnerShutdown` exercises that actual callback through an initial
+collection-failed owner, first public-destroy failure, clean fresh-owner shutdown,
+retry, verified destruction/join and dependency/log release. Its CLI-shaped native
+model retains a modeled collection gap and terminal exit137; real Docker exit137
+is separately witnessed in the public selection. No native model is Docker or
+full release acceptance.
+
+N2: controlled ownership is registered immediately after root allocation, before
+log/forwarder/wrapper setup can fail. Upstreams, proxies and retained direct owners
+share guarded parent cleanup; recovery precedes upstream/log/root release.
+Injected faults are disarmed for bounded cleanup; unresolved state is reported
+and preserved rather than erased. Outer subprocess regressions require the inner
+setup-after-allocation, Fatal-after-pending-destroy and startup-abort-after-listen
+cases to fail, then verify owner joins, dependency release, upstream join and
+owned-root removal. Readiness failure follows an explicit live-model response
+witness and is disarmed before registered recovery in both ordinary and race
+modes; race-exit delay is not the fault. The CLI model uses fresh kernel loopback control listeners,
+so an authoritatively killed/joined helper cannot leave a stale filesystem control
+socket that blocks the next recovery owner. Completed-subtest recovery contexts
+remain covered by the actual shared callback.
+
+N3: every successful handoff separately checks the exact owned link, endpoint
+availability and private receipt. Receipt creation is exclusive; retries only
+complete a retained same-inode regular file with mode0600 and sync its data.
+The regression switches the link while a test-owned directory blocks receipt
+creation, verifies failure/obstruction preservation, removes only proven test
+objects, then requires the already-upstream retry to create exact endpoint,
+upstream, link-inode/device and recovery metadata. Repeated retry retains the
+receipt inode; a foreign replacement is rejected and preserved.
+
+Two additional resume harness findings are recorded rather than hidden. The
+first temporary-root migration would have honored an overlong default macOS
+`TMPDIR`; self-review corrected it before final checking. A test-only
+`BACKLOT_ACCEPTANCE_TEMP_ROOT` now preserves `/tmp` as the short default, accepts
+an explicit short durable parent and rejects an overlong explicit request.
+Actual maximum nested Unix socket binding, long-system-temp/default behavior,
+explicit durable selection and rejection-before-allocation are covered.
+The permission-negative daemon fixture also assumed `Mkdir(0755)` established
+0755 despite a caller's umask. It now explicitly chmods/verifies0755 and bounds
+all expected-rejection `Serve` calls while retaining the exact permission error
+assertions. Focused runs pass under both inherited077 and022.
+
+### Resume evidence and actual outcomes
+
+New private evidence is durable under the coordinator's
+`issue8-resume-20261013/implementation-n1-n3` directory. Raw state/config/logs,
+source snapshots, build recipes and images' full inspection data stay private.
+The final code snapshot is `deterministic-source`; post-check implementation
+hash verification excludes only later ledger narration. The exact commit and
+sanitized case matrix/cleanup/accounting are recorded in the external handoff.
+
+- `controlled-1`: **FAIL**, race package29.107s, wall39.66s. Two new helpers used
+  a one-second readiness budget shorter than their race-instrumented successful
+  status subprocess; startup abort then left model control sockets and prevented
+  recovery. Later stable initial readiness was observed around1.12–1.18s.
+  Both failed native model roots remain diagnostics with durable file copies;
+  their upstreams are not claimed usable after the failed test process exited.
+- Intermediate focused runs passed at their own snapshots (`controlled-2`,
+  `controlled-3`, `controlled-final`, `controlled-durable`,
+  `controlled-stabilized`); these are development iterations, not final cycles.
+  Final affected acceptance/path selection `focused-temp-root`: **PASS**, race
+  package26.423s. `permission-fixed-077` **PASS**, package1.537s;
+  `permission-fixed-022` **PASS**, package1.303s; each explicitly witnessed0755.
+- `public-observation`: **PASS**, workflow38.13s/package39.457s. The filtered
+  job inspection and truncated-log cases each injected one fault and preserved
+  separate causes/collection results with independently observed post-stop
+  Docker exit137. Service inspection loss retained normal DB shutdown logs and
+  data across restart. Original provenance is `final-durable-source`; later
+  receipt assertions, effective-equivalent short-root constructor plumbing and
+  the independent daemon permission fixture are reconciled explicitly in
+  `focused-public-provenance-final.json`. This focused evidence is carried only
+  under coordinator direction; it is **not** an exact-final-revision full gate.
+  The queued duplicate `public-stabilized` never executed: coordinator scope
+  control cancelled it before launch, not a test failure or user intervention.
+- First `make-check`: **FAIL**, wall606.42s; daemon package timed out at600s in
+  `TestPermissionsAndDoctorProviderIndependence`. The private evidence runner
+  inherited umask077 into tests, masking intended0755 to actual0700; `Serve`
+  correctly ran instead of rejecting it. Timeout stack, actual mode0700,
+  zero-instance/zero-allocation state and refused listener are retained. The
+  conventional022 diagnostic passed before the source fixture correction;
+  final077/022 checks validate the corrected fixture itself. Private evidence
+  files retain077 creation while conventional test children use022.
+- Premature `make-check-renewed`: **INTERRUPTED**, retained session exit130.
+  An inbox-read/launch tool batch started it before the new required daemon-fixture
+  instruction could be processed. Narrow retained-session cancellation was
+  authorized; no observed PID or process group was signalled. Four supervised
+  native members remained, so exact private snapshots bound the interrupted test
+  executable to one fixture state. Its original CLI performed public daemon
+  recovery/list/destroy/stop; one instance was destroyed and the retained recovery
+  child was joined with exit0. Post-audit shows no active allocations/control
+  paths and no matching process rows. Before/after raw state is private; the
+  recovered root remains diagnostic. This interrupted run is not passing evidence.
+- `make-check-final`: **PASS**, wall271.78s, daemon race267.139s,
+  acceptance race26.506s on `permission-fixed-source`; schema/notices/format/vet/
+  lint, complete default race suite, six ADRs and build. Its source hashes matched
+  afterward. A later source review found the new abort test still relied on race
+  exit delay; `abort-nonrace-diagnosis` **FAIL**, package1.034s, confirmed ordinary
+  readiness succeeded before the expected abort. This pass is retained at its own
+  source, not relabelled as evidence for the subsequent correction.
+- Coordinator granted the narrow deterministic readiness fault, whole helper
+  assumption review, both-mode focused checks and one renewed pre-commit gate.
+  Final `controlled-normal` **PASS**, package2.978s; `controlled-race` **PASS**,
+  package26.495s on `deterministic-source`, covering the complete controlled
+  selection. The explicit status fault follows a live response/witness and is
+  disarmed before every registered cleanup/recovery, including Fatal unwind.
+- Renewed required `make-check-deterministic`: **PASS**, wall267.73s, daemon
+  race264.590s, acceptance race26.209s; schema/notices/format/vet/lint, complete
+  default race suite, six ADRs and build. All recorded source hashes matched
+  afterward; only ledger narration follows this implementation freeze.
+  Opt-in provider/public suites remain separate final gates; default skips are
+  not acceptance. No further broad repeat is needed for narration.
+- Two diagnostic audit mistakes also remain explicit: the first state audit
+  incorrectly treated ten historical native identities as active allocations;
+  corrected read-only interpretation verifies their control paths absent and
+  zero active resources. A timeout-audit invocation used an incomplete pathname
+  and failed before opening state; corrected exact-path audit passed. Neither
+  changed state or established a product defect.
+
+### Resume provenance, cleanup and handoff
+
+Read-only providers verified the exact local Docker endpoint, existing `backlot`
+subroute with zero children, normal host DNS and trusted HTTPS. An explicit
+Linux ARM64 app build and uniquely labeled image were recorded with binary hash,
+image ID, base images and unchanged fixture/module source. Browser image/host
+browser were not exercised. These development receipts do not replace required
+final source-bound fixture/browser rebuilds or macOS ARM64 release reproducibility.
+
+The real selection destroyed all **six** instances across parent/child states;
+read-only audit confirms zero active allocations, zero gateway intents and absent
+historical native control paths. Public cleanup joined the daemons and removed
+all owned proxy/provider sockets and fixture repo/worktrees. The exact image label
+and zero consumers were checked before `--no-prune` removal, and absence verified.
+Scoped route child count remained0. The interrupted native fixture added **one**
+publicly destroyed instance, with joined recovery owner and zero active allocations.
+Two failed model roots, the refused-listener timeout candidate and recovered
+interruption state are preserved diagnostics with durable copies; no unresolved
+usable-provider or live-owned-workload claim is inferred from process exit alone.
+Shared base/cache and both uncertain old browser directories remain untouched.
+
+Known counts after N1–N3 were product7/test_harness29/environment0/unknown1;
+the two additional resume harness findings (`resume-temp-root` and
+`resume-unsafe-umask`) above bring test_harness to31. The helper readiness-budget
+and abort-lifetime/normal-race assumption corrections are grouped under N2, with
+each failed run explicit.
+One corrective human unblock occurred: the user started the already-configured
+shared Caddy after an offline check. The optional manual Codex update is recorded
+separately, not as a required unblock; pause/resume and routine approvals are not
+corrective interventions. Human minutes remain unknown.
+Standard review initial1/fix1 and sensitive initial1/fix3 are complete per the
+coordinator resume record; independent High verification of this combined delta
+is next. Initial scope5/complexity4/size20 remains unchanged; usage/cost null.
+Full final-validation attempts remain **0**. F4 original DB stop remains **open
+historical unknown**, with no causal reconstruction or waiver. Required frozen
+provider/gateway/HTTPS/full public/browser/reproducibility/notices, explicit F4
+user disposition, publication clearance and eventual published-revision CI are
+still incomplete. No push/PR, readiness, Linux/Windows runtime, merge/tag/release
+or deployment claim. Source pauses after the clean committed handoff for High.

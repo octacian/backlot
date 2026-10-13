@@ -190,5 +190,9 @@ The machine file must select explicitly built fixture/browser image tags. This
 suite mutates only its owned instance routes/resources, never gateway bootstrap,
 DNS or trust. An unset variable skips; a skip is not acceptance. This supplements
 the complete Docker/gateway/HTTPS suites above, which remain separate required
-frozen-candidate gates. Record exact commit/dirty patch, image/config provenance,
+frozen-candidate gates. For durable raw fixture state, set the test-only
+`BACKLOT_ACCEPTANCE_TEMP_ROOT` to an existing short private absolute directory.
+The default remains `/tmp` to fit macOS Unix socket paths; an overlong explicit
+root fails instead of silently falling back. `TMPDIR` separately controls Go
+build/test scratch, not the acceptance fixture root. Record exact commit/dirty patch, image/config provenance,
 failed/skipped runs, timing and cleanup in the [ledger](release-acceptance/ledger.md).

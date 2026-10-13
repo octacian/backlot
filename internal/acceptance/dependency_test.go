@@ -3,14 +3,15 @@
 package acceptance
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -21,6 +22,7 @@ import (
 type providerPath struct {
 	endpoint, socket, upstream string
 	linkProof, socketProof     os.FileInfo
+	receiptProof               os.FileInfo
 	target                     string
 }
 
@@ -79,7 +81,7 @@ func (p *providerPath) handoff() error {
 		return errors.New("foreign provider endpoint preserved; recovery handoff blocked")
 	}
 	if p.target == p.upstream {
-		return p.verifyHandoff()
+		return errors.Join(p.verifyHandoff(), p.completeReceipt())
 	}
 	if err = removeProvenPath(p.endpoint, p.linkProof); err != nil {
 		return err
@@ -93,15 +95,64 @@ func (p *providerPath) handoff() error {
 		return err
 	}
 	p.target = p.upstream
+	return errors.Join(p.verifyHandoff(), p.completeReceipt())
+}
+func (p *providerPath) receiptPath() string { return p.endpoint + ".recovery.json" }
+
+// Receipt retries may complete only a file created and retained by this owner.
+// A pre-existing or replaced obstruction is reported, never overwritten.
+func (p *providerPath) completeReceipt() (result error) {
 	data, err := json.MarshalIndent(map[string]any{"endpoint": p.endpoint, "verified_upstream": p.upstream, "link_inode": p.linkProof.Sys().(*syscall.Stat_t).Ino, "link_device": p.linkProof.Sys().(*syscall.Stat_t).Dev, "recovery": "recorded endpoint now reaches original provider; use public daemon start/list/destroy/stop with retained private state; remove only owned link after destruction and owner join"}, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(filepath.Dir(p.endpoint), filepath.Base(p.endpoint)+".recovery.json"), data, 0600); err != nil {
+	name := p.receiptPath()
+	var file *os.File
+	if p.receiptProof == nil {
+		file, err = os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+		if err != nil {
+			return fmt.Errorf("recovery receipt incomplete; obstruction preserved: %w", err)
+		}
+		p.receiptProof, err = file.Stat()
+	} else {
+		actual, statErr := os.Lstat(name)
+		if statErr != nil {
+			return fmt.Errorf("owned recovery receipt unavailable: %w", statErr)
+		}
+		if !os.SameFile(actual, p.receiptProof) || !actual.Mode().IsRegular() || actual.Mode().Perm() != 0600 {
+			return errors.New("uncertain recovery receipt preserved")
+		}
+		file, err = os.OpenFile(name, os.O_RDWR, 0)
+	}
+	if file != nil {
+		defer func() { result = errors.Join(result, file.Close()) }()
+	}
+	if err != nil {
 		return err
 	}
-	return p.verifyHandoff()
+	actual, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(actual, p.receiptProof) || !actual.Mode().IsRegular() || actual.Mode().Perm() != 0600 {
+		return errors.New("recovery receipt identity/mode changed; preserved")
+	}
+	existing, err := io.ReadAll(file)
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(existing, data) {
+		return file.Sync()
+	}
+	if err = file.Truncate(0); err != nil {
+		return err
+	}
+	if _, err = file.WriteAt(data, 0); err != nil {
+		return err
+	}
+	return file.Sync()
 }
+
 func (p *providerPath) verifyHandoff() error {
 	status, err := unixCall(p.endpoint, http.MethodGet, "/_ping")
 	if err != nil {
@@ -130,7 +181,6 @@ type providerDependency struct {
 	path                *providerPath
 	closeProxy          func() error
 	recover             func() error
-	collectionFragment  string
 }
 
 func (h *harness) dependency(owner *harness, p *providerPath, server *http.Server, done <-chan error, transport *http.Transport) *providerDependency {
@@ -170,7 +220,9 @@ func (h *harness) dependency(owner *harness, p *providerPath, server *http.Serve
 				failures = errors.Join(failures, err)
 			}
 		}
-		owner.stopDaemonCollection(d.collectionFragment)
+		// A fresh owner has no live collector from the original daemon. Historical
+		// instance collection results remain in state and do not predict this exit.
+		owner.stop()
 		if owner.daemon != nil {
 			failures = errors.Join(failures, errors.New("recovery owner remains unjoined"))
 		}

@@ -55,7 +55,7 @@ func TestOwnedDaemonStartupHelper(t *testing.T) {
 }
 
 func TestOwnedDaemonStartupFailureCleanup(t *testing.T) {
-	root, err := os.MkdirTemp("/tmp", "bl-startup-")
+	root, err := newAcceptanceRoot("bl-startup-")
 	if err != nil {
 		t.Fatal(err)
 	}

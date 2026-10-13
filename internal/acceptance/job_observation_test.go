@@ -172,8 +172,7 @@ func (h *harness) jobObservationFailure(collection bool) {
 	collectionObserved := false
 	defer func() {
 		if collectionObserved {
-			dependency.collectionFragment = "container output collection failed"
-			child.stopDaemonCollection(dependency.collectionFragment)
+			child.stopDaemonCollection("container output collection failed")
 		} else {
 			child.stop()
 		}

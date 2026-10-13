@@ -469,7 +469,7 @@ func TestReleaseWorkflows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := os.MkdirTemp("/tmp", "bl-public-")
+	root, err := newAcceptanceRoot("bl-public-")
 	if err != nil {
 		t.Fatal(err)
 	}

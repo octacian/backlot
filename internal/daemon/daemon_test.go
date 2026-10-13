@@ -458,11 +458,27 @@ func TestSingleDaemonAndStaleSocketSafety(t *testing.T) {
 }
 
 func TestPermissionsAndDoctorProviderIndependence(t *testing.T) {
+	reject := func(directory string) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		code(t, Serve(ctx, Options{Directory: directory}), "permissions")
+	}
 	dir := filepath.Join(shortTemp(t), "unsafe")
 	if err := os.Mkdir(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	code(t, Serve(context.Background(), Options{Directory: dir}), "permissions")
+	// Mkdir's mode is filtered by the inherited umask. Establish the actual
+	// unsafe state explicitly so a secure caller cannot turn this into Serve.
+	if err := os.Chmod(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil || info.Mode().Perm() != 0755 {
+		t.Fatal("unsafe directory mode not established", err)
+	}
+	t.Log("intended unsafe directory mode0755 established independently of inherited umask")
+	reject(dir)
 	private := filepath.Join(shortTemp(t), "state")
 	cli, stop := startFixture(t, private, time.Second)
 	root := shortTemp(t)
@@ -485,7 +501,7 @@ func TestPermissionsAndDoctorProviderIndependence(t *testing.T) {
 	if err := os.Chmod(filepath.Join(private, "state.db"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	code(t, Serve(context.Background(), Options{Directory: private}), "permissions")
+	reject(private)
 	if err := os.Chmod(filepath.Join(private, "state.db"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +509,7 @@ func TestPermissionsAndDoctorProviderIndependence(t *testing.T) {
 	if err := os.WriteFile(SocketPath(private), []byte("preserve"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	code(t, Serve(context.Background(), Options{Directory: private}), "permissions")
+	reject(private)
 	data, err := os.ReadFile(SocketPath(private))
 	if err != nil || string(data) != "preserve" {
 		t.Fatal("foreign path removed")

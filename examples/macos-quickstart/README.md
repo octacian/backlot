@@ -10,7 +10,16 @@ remains Go-only. `ws` is pinned in the lockfile and is [MIT licensed](https://gi
 ## Prepare once
 
 Install stock Caddy and Node separately, for example `brew install caddy node`.
-Use Node 26 or newer for this example. From the Backlot repository:
+Use Node 26 or newer for this example. Go installation supplies only the Backlot
+command, so obtain the example source with Git (skip the clone if you already have
+a Backlot checkout):
+
+```sh
+git clone https://github.com/octacian/backlot.git
+cd backlot
+```
+
+From the Backlot checkout root:
 
 ```sh
 cd examples/macos-quickstart

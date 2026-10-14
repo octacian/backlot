@@ -6,24 +6,20 @@ routes. Each Git worktree gets its own instance, ports and canonical origin.
 
 ## Install Backlot
 
-The supported installation path is a local source build on **macOS ARM64**. Install
-Go 1.27.1, Git and Make first (`lsof` ships with macOS), then:
+Install with **Go 1.27.1 or newer**. Backlot's supported runtime is **macOS ARM64**:
 
 ```sh
-git clone https://github.com/octacian/backlot.git
-cd backlot
-go mod download
-make release-build
-mkdir -p "$HOME/.local/bin"
-install -m 0755 bin/backlot-darwin-arm64 "$HOME/.local/bin/backlot"
-export PATH="$HOME/.local/bin:$PATH"
+go install github.com/octacian/backlot/cmd/backlot@latest
 backlot version --json
 ```
 
-Add that PATH entry to your shell profile for future terminals. Keep
-[LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) with copied
-binaries. There is no published installer, signed/notarized bundle or prebuilt
-release promised here. [Build and operating details](docs/operations.md).
+If `backlot` is not found, add the directory reported by `go env GOBIN` to PATH
+when set; otherwise add `bin` under the first directory in `go env GOPATH`
+(default `$HOME/go/bin`).
+Save any PATH change in your shell profile. Git is needed for project worktrees;
+Make is needed only for the alternative source build.
+
+[Installation details and reproducible source builds](docs/operations.md).
 
 ## Run an existing configured project
 

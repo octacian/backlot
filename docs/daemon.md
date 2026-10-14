@@ -259,3 +259,14 @@ The CLI waits for persistent ready or disposable terminal status through inspect
 raw API callers must renew disposable capabilities while polling. Logs pages use
 an absolute unfiltered record offset, so component filtering preserves cursor
 progress. Inspect and cancel remain shared across metadata and runtime execution.
+
+## Managed gateway control
+
+`backlot gateway start|stop|restart|status --state-dir ... --json` uses named
+`GatewayRequest`/`GatewayResponse` contracts at `/v1/gateway/<action>` (POST).
+Start accepts an absolute machine `config_path`; first start requires explicit
+managed mode and an absolute native Caddy executable. Subsequent start/restart
+may reuse the retained configuration; stop/status reject configuration arguments.
+Responses omit guardian capabilities and CA private keys. Gateway process/listener
+readiness is independent of client trust. See [HTTPS operations](https.md) for
+separate stock trust installation, lifecycle fences and retained recovery state.

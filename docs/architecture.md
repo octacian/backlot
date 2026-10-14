@@ -3,7 +3,7 @@
 This is the implementation baseline for the [V1 PRD](prd.md). The executable
 implements version discovery, offline scene planning, and a local metadata daemon
 with transactional preparation/recovery, native and container execution, and retained
-private resource generations and configured HTTPS publication. See the [HTTPS guide](https.md), [manifest guide](manifest.md) and
+private resource generations and managed/external HTTPS publication. See the [HTTPS guide](https.md), [manifest guide](manifest.md) and
 [daemon guide](daemon.md).
 
 ## Boundaries
@@ -103,6 +103,19 @@ domain suffix, and the host address reachable by a containerized gateway. Do not
 assume loopback means the same thing inside Docker. Projects request origin/path
 routes and map resolved values into consumers' environments.
 
-Caddy's TLS and DNS setup is external. Validate the shared origin through HTTPS
+Caddy mode is explicit; omitted mode preserves legacy external ownership. In
+managed mode the daemon activates an explicitly configured stock native executable
+through the existing journaled authenticated guardian. It owns loopback listeners,
+private persistent CA/config state and `*.backlot.localhost:8443` origins; stock
+Caddy performs local issuance/renewal. Trust installation is disabled; a separate
+operator `caddy trust` targets the owned endpoint. Serialize gateway lifecycle with
+scene acceptance, refuse stop/restart with active published scenes and fail port
+conflicts without fallback. Recovery removes exact scene routes before authenticated
+gateway stop, preserves uncertain intents and CA/data, and requires explicit start.
+Only validated saved effective config can resume after first activation; missing
+saved state or changed/unusable CA cannot fall back to bootstrap. See the
+[gateway decision](adr/20261014T033700000Z-support-managed-local-ca-and-external-caddy-gateways.md).
+
+External Caddy retains operator TLS/DNS/lifecycle ownership. Validate the shared origin through HTTPS
 from every required consumer context. Keep listener readiness separate from final
 public-origin readiness to avoid proxy/SSR dependency cycles.

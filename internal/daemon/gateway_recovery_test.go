@@ -5,12 +5,56 @@ package daemon
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/gateway"
 	"github.com/octacian/backlot/internal/gateway/gatewaytest"
 )
+
+func TestShutdownRetainsUnavailableRecoveredRoute(t *testing.T) {
+	f := newControlledExpiry(t)
+	f.allowError = true // The fixture deliberately retains durable cleanup uncertainty.
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	prepared, err := f.s.prepare(context.Background(), request(f.root, f.config, "dev"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, err := gateway.NewIntent(v1.CaddyConfig{Endpoint: server.URL, Scope: "backlot", HostAddress: "127.0.0.1"}, "recovered.fixture.test", newID(),
+		v1.Publication{Routes: []v1.Route{{Path: "/", Service: "web", Port: "http", Prefix: "preserve"}}},
+		[]v1.PlannedComponent{{Name: "web", Ports: map[string]v1.ServicePort{"http": {Resource: "port"}}}}, map[string]int{"port": 1234})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := &v1.ExecutionResult{Attempt: newID(), CleanupFailure: "previous unavailable recovery"}
+	id := prepared.Instance.ID
+	if _, err := f.s.store.execution(id, v1.Interrupted, result); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.store.saveRuntime(id, runtimeRecord{Attempt: result.Attempt, Gateway: &intent}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.stop(); err == nil {
+		t.Fatal("unavailable exact-route cleanup reported success")
+	}
+	journal, err := f.s.store.runtime(id)
+	if err != nil || journal.Gateway == nil || journal.Gateway.ID != intent.ID || attempts.Load() == 0 {
+		t.Fatal("shutdown skipped durable route retry or discarded authority", err)
+	}
+	instance, err := f.s.store.inspect(id)
+	if err != nil || instance.Status != v1.Interrupted || instance.Execution.CleanupFailure == "" {
+		t.Fatal("failed cleanup uncertainty not preserved", err)
+	}
+}
 
 func TestGatewayJournalRecovery(t *testing.T) {
 	f := gatewaytest.Start(t, "fixture.test")

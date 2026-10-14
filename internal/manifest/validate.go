@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"net/url"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -612,6 +613,23 @@ func ValidateMachine(c v1.MachineConfig) error {
 		}
 	}
 	if c.Caddy != nil {
+		value := CaddyDefaults(*c.Caddy)
+		c.Caddy = &value
+		if value.Mode != "managed" && value.Mode != "external" {
+			return invalid("config.caddy.mode", "use managed or external")
+		}
+		if value.Mode == "managed" {
+			u, err := url.Parse(value.Endpoint)
+			if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.Port() == "" || u.Path != "" || !validURLPort(u) || value.Scope != "backlot-managed" || value.DomainSuffix != "backlot.localhost" || value.HostAddress != "127.0.0.1" || !filepath.IsAbs(value.Executable) || *value.HTTPSPort < 1024 {
+				return invalid("config.caddy", "managed mode requires an absolute native executable, loopback HTTP admin endpoint, unprivileged HTTPS port, and fixed managed scope/domain/upstream address")
+			}
+			port, _ := strconv.Atoi(u.Port())
+			if port < 1024 || port == *value.HTTPSPort {
+				return invalid("config.caddy.endpoint", "managed admin port must be unprivileged and distinct from HTTPS")
+			}
+		} else if value.Executable != "" {
+			return invalid("config.caddy.executable", "external mode never launches an executable")
+		}
 		if c.Caddy.HTTPSPort != nil && (*c.Caddy.HTTPSPort < 1 || *c.Caddy.HTTPSPort > 65535) {
 			return invalid("config.caddy.https_port", "use a port in 1..65535")
 		}

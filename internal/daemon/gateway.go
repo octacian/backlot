@@ -26,7 +26,15 @@ func (s *service) publish(ctx context.Context, id string, snapshot plan.Snapshot
 	if err != nil {
 		return err
 	}
-	intent, err := gateway.NewIntent(*snapshot.Caddy, origin.Hostname(), newID(), *snapshot.Plan.Publish, snapshot.Plan.Components, result.Ports)
+	config := *snapshot.Caddy
+	if config.Mode == "managed" {
+		record, err := s.store.managed()
+		if err != nil {
+			return err
+		}
+		config = managedCaddy(record)
+	}
+	intent, err := gateway.NewIntent(config, origin.Hostname(), newID(), *snapshot.Plan.Publish, snapshot.Plan.Components, result.Ports)
 	if err != nil {
 		return err
 	}

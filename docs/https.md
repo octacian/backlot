@@ -1,11 +1,103 @@
 # Published HTTPS and mixed execution
 
-Backlot uses an already-running Caddy JSON API. Only published scenes require
-Caddy; native/container scenes without `publish` do not contact it. Metadata
-`prepare` remains allocation-free. Backlot never provisions DNS, certificates,
-system trust, gateway listeners, Caddy modules or gateway processes.
+Backlot supports an explicit daemon-managed native local-CA gateway and an
+externally managed Caddy JSON API. Omitted `caddy.mode` retains external mode.
+Only published scenes require a gateway; other scenes and metadata-only `prepare`
+do not contact it. The [gateway decision](adr/20261014T033700000Z-support-managed-local-ca-and-external-caddy-gateways.md)
+records ownership and trust boundaries.
 
-## Operator setup
+## Managed local HTTPS on macOS ARM64
+
+Install stock native Caddy separately through your package manager; for Homebrew,
+`brew install caddy`. Configure its absolute executable path explicitly, such as
+`/opt/homebrew/bin/caddy`. Backlot does not install dependencies or custom modules.
+Use a private machine file outside the checkout:
+
+```yaml
+version: backlot/v1
+caddy:
+  mode: managed
+  executable: /opt/homebrew/bin/caddy
+  # Defaults shown; explicit ports must be distinct and unprivileged.
+  endpoint: http://127.0.0.1:2020
+  https_port: 8443
+```
+
+Managed mode fixes the configuration scope to `backlot-managed` and uses a private
+persisted random scope identity for actual effects. It fixes the suffix to `backlot.localhost`
+and upstream address to `127.0.0.1`. HTTPS listens on IPv4/IPv6 loopback only, on
+port 8443 by default. HTTP redirect and HTTP/3 listeners are disabled. Different
+ports can be configured explicitly; conflicts fail without fallback/takeover.
+Docker may supply dependencies or loopback-mapped HTTP upstreams; local HTTPS
+origins are for host/browser/native consumers, not container-origin consumers.
+
+Start the daemon and gateway explicitly, then install trust as a separate operator
+action using the configured stock executable and **owned managed admin endpoint**:
+
+```sh
+backlot daemon start --state-dir /absolute/private/daemon --json
+backlot gateway start --state-dir /absolute/private/daemon --config /absolute/private/machine.yaml --json
+/opt/homebrew/bin/caddy trust --address 127.0.0.1:2020 --ca local
+backlot gateway status --state-dir /absolute/private/daemon --json
+```
+
+[Caddy trust](https://caddyserver.com/docs/command-line#caddy-trust) fetches the CA
+from that running endpoint and may request administrator authorization. Approve
+this separate command according to your machine policy. Do not point it at an
+unrelated Caddy server. The daemon runs unprivileged and sets `install_trust:false`;
+it never changes system/browser trust. Standard trust setup is an explicit
+prerequisite for regular use. Browsers can use different trust stores: verify your
+browser accepts the origin without a warning; no universal browser guarantee is
+made. Missing/wrong trust fails normal TLS readiness, never invokes a bypass.
+
+Run a published scene using the existing scene contract below. Its canonical
+origin is `https://bl-<instance-label>.backlot.localhost:8443`; different worktrees
+receive different labels. Host/native clients and browsers must resolve the
+hostname normally to loopback. No resolver files, `--resolve`, custom dialers or
+proceed-anyway browser behavior satisfy adoption acceptance. Owned native fixtures
+verify normal host resolution with explicit private client roots; clean-machine
+macOS/browser trust and resolution remain a separate acceptance gate until a
+suitable disposable environment verifies them. Existing operator resolver setup
+can influence local observations.
+
+Gateway status reports owned process/listener readiness, independently from
+client trust or scene readiness. Startup errors distinguish configuration,
+listener conflict, unavailable gateway, unusable CA/saved state and uncertain
+ownership. Inspect the protected `gateway/gateway.log` within the daemon directory
+for stock Caddy startup errors. Caddy manages certificate issuance and renewal.
+
+```sh
+backlot stop --state-dir /absolute/private/daemon --json INSTANCE_ID
+backlot gateway stop --state-dir /absolute/private/daemon --json
+backlot gateway start --state-dir /absolute/private/daemon --json
+backlot gateway restart --state-dir /absolute/private/daemon --json
+```
+
+The first start requires `--config`; subsequent starts/restarts can reuse the
+retained configuration. A supplied configuration must match retained gateway
+settings. Stop/restart refuse while any published scene is active or kept. Stop
+those scenes by ID first. Scene stop/start preserves retained data and logical
+origins; gateway stop/start preserves CA identity and effective configuration.
+Stopping an individual scene never stops the gateway.
+
+All managed configuration, autosave, logs and CA state live under the private
+`gateway/` directory inside daemon state. Keep its CA keys private and retain the
+whole directory. Ordinary starts resume validated saved effective configuration,
+never replay bootstrap. Missing/corrupt saved state, missing/mismatched CA keys or
+a changed root fail explicitly rather than silently resetting trust. Restore the
+original private state under a maintenance window; deleting it while journaled
+process/route ownership remains is unsafe.
+
+Shutdown and crash recovery first attempt exact scene-route cleanup, then stop
+the managed gateway through authenticated guardian authority. Recovery preserves
+CA and retained data, marks interrupted and requires explicit gateway start and
+scene restart. If Caddy is unavailable, exact route intents and cleanup uncertainty
+remain; the daemon stays accessible. Explicit gateway start resumes saved state
+so scene stop/restart can retry exact cleanup. It never resumes application work.
+Unknown guardian ownership is preserved and blocks a new gateway start. Never
+signal by PID/name or overwrite saved state to hide uncertainty.
+
+## External gateway operator setup
 
 For concrete Certbot, file-certificate Caddy JSON, macOS DNS/VPN and host/container
 diagnostic steps, follow the [manual macOS setup walkthrough](https-setup.md).
@@ -49,6 +141,7 @@ docker:
   # Select a LAN address or 0.0.0.0 only when those consumers require it.
   publish_address: 127.0.0.1
 caddy:
+  mode: external
   endpoint: http://127.0.0.1:2019
   scope: backlot
   domain_suffix: dev.example.com
@@ -80,10 +173,10 @@ Fixture tests trust a private CA only in fixture clients; they do not install tr
 
 ### Gateway restarts and certificate renewal
 
-The bootstrap JSON is only an initial configuration. Reapplying an old bootstrap
+For an external gateway, the bootstrap JSON is only an initial configuration. Reapplying an old bootstrap
 while scenes are live can erase dynamically installed routes. Use Caddy's saved
 effective configuration (`caddy run --resume` with the same protected storage and
-environment) for ordinary operator gateway restarts. Backlot does not manage this
+environment) for ordinary operator gateway restarts. In external mode Backlot does not manage this
 process or silently recreate removed live routes.
 
 For file-loaded certificate renewal in this MVP, arrange a gateway maintenance
@@ -162,8 +255,7 @@ cleanup categories in `execution.cleanup_details`, alongside readable failure
 strings. Gateway diagnostics distinguish scope/configuration, hostname conflict,
 concurrency exhaustion, unavailable API and uncertain ownership/effect.
 
-State format is now 3. Formats 1/2 are rejected without migration or modification;
-use the matching older binary to stop/destroy old environments before selecting a
-fresh state directory. An older binary cannot safely interpret publication
-ownership. See [testing](testing.md) for isolated fixture commands and the separate
-required real-domain acceptance gate.
+State format is now 4. Older formats are rejected without modification; an older
+binary cannot safely interpret managed gateway ownership. See [testing](testing.md)
+for isolated fixture commands and separate managed macOS/browser and external
+real-domain acceptance gates.

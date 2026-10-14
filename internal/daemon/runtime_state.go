@@ -91,8 +91,23 @@ func (s *store) replaceSnapshot(id string, snap plan.Snapshot) error {
 	})
 }
 func (s *store) recoverRuntime() error {
+	ids, err := s.runtimeRecoveryIDs()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := s.recoverExecution(id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// runtimeRecoveryIDs selects durable cleanup obligations, including executions
+// recovered by a previous daemon which have no current in-memory owner.
+func (s *store) runtimeRecoveryIDs() ([]string, error) {
 	var ids []string
-	if err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.db.View(func(tx *bolt.Tx) error {
 		return tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
 			var r record
 			if err := decodeRecord(data, string(key), &r); err != nil {
@@ -103,16 +118,8 @@ func (s *store) recoverRuntime() error {
 			}
 			return nil
 		})
-	}); err != nil {
-		return err
-	}
-
-	for _, id := range ids {
-		if err := s.recoverExecution(id); err != nil {
-			return err
-		}
-	}
-	return nil
+	})
+	return ids, err
 }
 func (s *store) recoverExecution(id string) error {
 	r, err := s.runtime(id)

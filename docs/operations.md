@@ -3,9 +3,11 @@
 V1 runtime acceptance targets macOS ARM64. Install Go at the `go.mod` version
 (currently 1.27.1), Git, Make and `lsof`. Native commands must cooperate with
 Backlot's supervised process-group contract; do not detach or delegate to another
-supervisor. Install Docker only for container scenes, and configure existing
-Caddy/DNS/trusted TLS only for published scenes. Toolchain installation, system
-services, certificate issuance and DNS management are operator tasks.
+supervisor. Install Docker only for container scenes. For published scenes choose
+[managed local HTTPS or external Caddy](https.md). Managed mode needs a configured
+stock native Caddy executable and a separate explicit trust command; Backlot never
+installs system/browser trust. External DNS/public certificates, toolchain
+installation and system services remain operator tasks.
 
 ## Local binary and dependency notices
 
@@ -68,7 +70,8 @@ backlot daemon stop --state-dir /private/backlot --json
 `list` emits one bounded identity-ordered page, including historical/destroyed
 instances. Continue with `--after NEXT_AFTER_ID`; concurrent additions with earlier
 random IDs may require a fresh traversal. `status` aliases recorded-instance
-inspection; `daemon status` reports daemon connectivity. Neither ordinary command
+inspection; `daemon status` reports daemon connectivity and `gateway status`
+reports managed process/listener readiness independently of TLS trust. Neither ordinary command
 reveals private ownership authority or fixture secrets. `doctor` checks local
 access/compatibility; provider checks are explicitly deferred. Validate selected
 provider workflows separately. Raw API clients use the local permissioned Unix
@@ -91,12 +94,12 @@ A zero test exit cannot override failed collection/cleanup.
 | Database TCP ready but application unavailable | Use application preparation or a command probe that verifies credentials/schema; do not equate an open port with application readiness. |
 | Probe or preparation failed | Inspect component logs and failure detail; correct the application, then explicitly restart. Failed fresh-only initialization is not recorded as successful. |
 | Scene failed after readiness | Read the required-service exit/supervision diagnostic and historical logs. No automatic restart; fix the cause before explicit restart. |
-| Public origin unavailable | Verify operator DNS/TLS and exact owned scope first. Check host and container consumers separately. Keep unrelated routes intact; never reload a stale bootstrap. |
+| Public origin unavailable | Verify selected gateway status, normal DNS and TLS trust, and exact owned scope first. Check host and container consumers separately. Keep unrelated routes intact; never reload a stale bootstrap. |
 | Manifest drift | Repeated run reports preserved snapshot drift. Restart applies compatible changes; retained storage/initialization/sensitive contract changes require explicit reset/destroy. |
 | Kept disposable failure | Inspect status/logs/artifacts/fixtures, then explicitly destroy by ID. Successful runs still clean up. |
 | Cleanup uncertain or foreign consumer present | Preserve journal/resources; restore provider access or remove only your verified consumer, then retry stop/destroy. Never prune by name, PID or hostname. |
-| Daemon crash | Start the same binary/state directory; recovery stops verifiably owned survivors and marks interrupted, retains data and reports evidence gaps. Inspect, then explicitly restart. |
-| Unsupported state version | Preserve old state; use its matching binary to stop/destroy before choosing a fresh state directory. There is no automatic migration. |
+| Daemon crash | Start the same binary/state directory; recovery stops verifiably owned survivors and marks interrupted, retains data/managed CA and reports evidence gaps. Inspect, explicitly start the managed gateway, then restart scenes. Unavailable gateway retains exact route cleanup uncertainty for retry. |
+| Unsupported state version | Incompatible state is rejected without modification; use a matching state format. |
 | Evidence expired | Status retains `evidence_expired`; expired logs/artifacts cannot be recovered from deleted containers. Configure daemon age/size retention before runs. |
 
 Never remove retained data while a consumer may still run. A cleanup failure is a

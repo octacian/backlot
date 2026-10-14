@@ -1,11 +1,11 @@
 ---
 title: "Declare generic containers and inject configuration through environment"
 date: 2026-10-07
-status: accepted
+status: superseded
 summary: "Use generic native/container components and explicit environment mappings to avoid database-specific provisioning in V1."
 tags: [configuration, containers, networking]
 supersedes: []
-superseded_by: []
+superseded_by: [20261014T033700000Z-support-managed-local-ca-and-external-caddy-gateways.md]
 ---
 
 # Declare generic containers and inject configuration through environment

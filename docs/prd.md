@@ -24,10 +24,12 @@ Ship a Go daemon and CLI in one executable for macOS ARM64. A future UI must be
 able to use the same typed API. Keep OS-specific process and transport operations
 behind explicit boundaries so Linux and native Windows can follow later.
 
-Operate on one machine with a local Docker engine. Publishing uses an existing
-local Caddy server, running natively or in a local container, with an owned domain
-and trusted certificates configured by the operator. LAN access to applications
-is compatible with this model; daemon administration stays local to the user.
+Operate on one machine with a local Docker engine. Publishing supports an
+explicitly managed stock native Caddy local-CA gateway
+with loopback `.backlot.localhost:8443` origins, or an externally managed native/
+container Caddy gateway with operator DNS/certificates. Managed mode targets host/
+browser/native clients on macOS ARM64; external mode can support LAN applications.
+Trust setup is a separate explicit operator action; administration stays local.
 
 Required workflows:
 
@@ -158,7 +160,7 @@ only for selected container work. The daemon remains usable for diagnosis when
 providers are unavailable; affected scene starts fail with actionable messages.
 
 Allocate a distinct hostname per published instance under the configured suffix.
-Keep the instance label within the operator's wildcard certificate depth. A
+Keep the instance label within one wildcard certificate depth. A
 logical persistent instance keeps its hostname across stop/start and reset.
 
 Declare a bounded routing structure: hostname, path match, target service/port,
@@ -169,8 +171,23 @@ Raw Caddyfile import and arbitrary Caddy configuration are outside V1.
 
 Register routes only inside the configured Backlot-owned scope. Preserve unrelated
 gateway configuration and handle concurrent edits. Never stop or reload the whole
-gateway to stop a scene. Treat DNS, certificate issuance/renewal, and system trust
-as operator responsibilities. Validate published origin reachability from both
+gateway to stop a scene. In external mode DNS, certificate issuance/renewal and
+trust are operator
+responsibilities. Managed mode owns a dedicated native Caddy process and private
+persistent configuration/CA, uses stock local wildcard issuance/renewal, and disables
+automatic trust installation. Users run a separate stock `caddy trust` command
+against the owned endpoint; the daemon never modifies system/browser trust.
+Normal host/browser resolution and verified TLS are required, without resolver
+overrides or browser warning bypasses. See [HTTPS operations](https.md).
+
+Managed gateway start/stop/restart/status are explicit daemon operations; published
+scene launch requires a started gateway. Stop/restart refuse active published
+scenes. Conflicting loopback ports fail without fallback or takeover. Shutdown/
+crash recovery uses authenticated native guardian ownership after exact scene-route
+cleanup, preserves CA/data and requires explicit restart. Unavailable Caddy retains
+route intents/cleanup uncertainty while administration remains usable. Subsequent
+starts resume validated saved effective configuration, never stale bootstrap; lost/
+unusable CA or saved state fails explicitly instead of replacing identity. Validate published origin reachability from both
 host and container consumers when applicable, including TLS validation and SSR.
 
 ## Lifecycle and concurrency
@@ -255,7 +272,8 @@ must not serialize secret values; application stdout/stderr is captured as emitt
 Frontend UI; remote/multi-host orchestration; Linux/Windows release support;
 toolchain/version-manager installation; automatic watch/build/restart; arbitrary
 job retriggering; shared-database provisioning; Compose import/export; CI scene
-execution guarantees; DNS/router management; certificate provisioning/local trust;
+execution guarantees; DNS/router management; public certificate provisioning; automatic trust installation;
+container consumers of managed local HTTPS;
 raw Caddyfiles; generated application config; atomic multi-service rollouts;
 transparent continuation across daemon crashes.
 

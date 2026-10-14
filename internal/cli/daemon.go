@@ -50,6 +50,8 @@ func output(c *urfave.Command, value any, err error) error {
 		return json.NewEncoder(c.Writer).Encode(value)
 	}
 	switch result := value.(type) {
+	case v1.GatewayResponse:
+		_, err = fmt.Fprintf(c.Writer, "Gateway %s (%s, HTTPS port %d)\n%s\n", result.Status, result.Mode, result.HTTPSPort, result.Message)
 	case v1.DaemonStatusResponse:
 		_, err = fmt.Fprintf(c.Writer, "Daemon %s (API %s, state %d, PID %d)\n", result.Status, result.APIVersion, result.StateVersion, result.PID)
 	case v1.InstanceResponse:

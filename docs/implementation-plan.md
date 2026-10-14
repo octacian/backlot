@@ -122,8 +122,13 @@ no browser-warning bypass or persistent trust mutation can replace it.
 
 The managed origin also exposes `ca_cert_path` for explicit native environment
 assignments, with symbolic offline planning and validated existing public-root
-resolution. See [application trust](https.md#explicit-application-trust). Container
-local-HTTPS consumers and a runnable adoption quickstart remain separate slices.
+resolution. See [application trust](https.md#explicit-application-trust). The
+[runnable macOS quickstart](../examples/macos-quickstart/README.md) supplies
+frontend/API/native SSR and disposable tests, explicit project trust, two-worktree
+commands and scoped recovery/cleanup. Its owned complete suite is separate from
+real operator/browser adoption and published-HEAD CI evidence; see
+[testing](testing.md#runnable-macos-quickstart-integration). Container
+local-HTTPS consumers remain follow-up work.
 
 ## 6. Disposable results and evidence
 

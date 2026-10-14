@@ -1,7 +1,8 @@
 # Install and operate Backlot on macOS ARM64
 
-V1 runtime acceptance targets macOS ARM64. Install Go at the `go.mod` version
-(currently 1.27.1), Git, Make and `lsof`. Native commands must cooperate with
+V1 runtime acceptance targets macOS ARM64. Install Go 1.27.1 or newer, Git for project
+worktrees, and `lsof` (included with macOS). Make is needed only for the source-build
+alternative below. Native commands must cooperate with
 Backlot's supervised process-group contract; do not detach or delegate to another
 supervisor. Install Docker only for container scenes. For published scenes choose
 [managed local HTTPS or external Caddy](https.md). Managed mode needs a configured
@@ -9,13 +10,39 @@ stock native Caddy executable and a separate explicit trust command; Backlot nev
 installs system/browser trust. External DNS/public certificates, toolchain
 installation and system services remain operator tasks.
 
-## Local binary and dependency notices
+## Go installation
 
-From a reviewed checkout:
+```sh
+go install github.com/octacian/backlot/cmd/backlot@latest
+backlot version --json
+```
+
+The executable package is `cmd/backlot`; the module root is not an executable.
+Go installs into `GOBIN` when set, otherwise into `bin` under the first `GOPATH`
+directory (default `$HOME/go/bin`). Put that directory on PATH if it is not already
+there. This path downloads and builds the command without a repository checkout,
+Make or a separate `go mod download` step. It does not install the example files;
+the [macOS quickstart](../examples/macos-quickstart/README.md#prepare-once) explains
+how to obtain those.
+
+There are currently no release tags, so `@latest` resolves to a pseudo-version
+from `main`. Future release tags follow Go's normal version selection. The command
+currently reports `dev` version metadata; use `go version -m` on the installed
+binary to inspect its resolved module version and build settings.
+
+## Reproducible source build and dependency notices
+
+For a reviewed checkout and reproducible local build, install Make, then:
+
+```sh
+git clone https://github.com/octacian/backlot.git
+cd backlot
+```
+
+Review/select the source revision before building:
 
 ```sh
 go mod download
-make check
 make release-build
 bin/backlot-darwin-arm64 version --json
 shasum -a 256 bin/backlot-darwin-arm64
@@ -46,6 +73,11 @@ with `go mod download -json github.com/go-sql-driver/mysql@v1.9.3`. Its license
 notice identifies covered source obligations; the fixture driver is not linked
 into `backlot`. Docker/Chromium distributions carry their own license notices;
 their images are operator-built setup dependencies, not bundled binary contents.
+
+For the shortest existing-project path, start with the [README quickstart](../README.md#run-an-existing-configured-project).
+For included application code, a minimal manifest and explicit trust settings, use
+the [macOS HTTPS quickstart](../examples/macos-quickstart/README.md). Contributor
+validation (`make check`) is required when changing Backlot, not to run a project.
 
 ## Explicit setup and daily use
 

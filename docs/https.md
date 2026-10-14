@@ -49,7 +49,11 @@ it never changes system/browser trust. Configure trust explicitly for each consu
 [public CA reference](#explicit-application-trust), while standard system/browser
 trust setup is a separate operator action. Browsers can use different trust stores: verify your
 browser accepts the origin without a warning; no universal browser guarantee is
-made. Missing/wrong trust fails normal TLS readiness, never invokes a bypass.
+made. Missing/wrong trust fails normal TLS readiness, never invokes a bypass. The daemon
+aggregate probe also needs system trust independently of Node/browser settings. If
+it attempted HTTPS before trust installation, stop/start the daemon and explicitly
+start the gateway again to refresh cached certificate roots; retained CA identity
+is preserved.
 
 Run a published scene using the existing scene contract below. Its canonical
 origin is `https://bl-<instance-label>.backlot.localhost:8443`; different worktrees
@@ -163,8 +167,9 @@ Pass the agent through the application's supported HTTPS client API; other
 libraries can use different transport configuration. Backlot neither detects
 Node nor rewrites application code/configuration, replaces existing CA settings,
 or disables TLS verification. Node is an optional application dependency, not
-Backlot contributor tooling. Container trust and a runnable adoption walkthrough
-are separate follow-up work.
+Backlot contributor tooling. The [runnable macOS quickstart](../examples/macos-quickstart/README.md) supplies
+frontend/API/SSR and disposable tests using this mapping. Container trust remains
+follow-up work.
 
 ## External gateway operator setup
 

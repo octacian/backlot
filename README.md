@@ -1,46 +1,103 @@
 # Backlot
 
-Backlot is a local development and testing stack manager for humans and
-coding agents. A background daemon coordinates native processes, containers,
-isolated resources, and HTTPS routes from a project's declarative scenes.
+Backlot runs isolated development and test environments from a project's
+`backlot.yaml`: native processes, optional containers, private resources and HTTPS
+routes. Each Git worktree gets its own instance, ports and canonical origin.
 
-The intended interface is a single command from any checkout or Git worktree:
+## Install Backlot
+
+Install with **Go 1.27.1 or newer**. Backlot's supported runtime is **macOS ARM64**:
 
 ```sh
-backlot run dev
-backlot run preview
-backlot run db-integration -- <test arguments>
-backlot run ui-test -- <test arguments>
+go install github.com/octacian/backlot/cmd/backlot@latest
+backlot version --json
 ```
 
-Scene names are project-defined. Persistent environments return a usable URL;
-disposable runs return their outcome and retained evidence.
+If `backlot` is not found, add the directory reported by `go env GOBIN` to PATH
+when set; otherwise add `bin` under the first directory in `go env GOPATH`
+(default `$HOME/go/bin`).
+Save any PATH change in your shell profile. Git is needed for project worktrees;
+Make is needed only for the alternative source build.
 
-**Status:** native/container execution, private retained state, configured HTTPS
-publication and disposable results/evidence are implemented. Release readiness
-requires independent reviews, frozen-candidate verification and published-HEAD CI;
-this status is not a V1 release declaration. See the
-[release verification guide](docs/release-acceptance/README.md).
+[Installation details and reproducible source builds](docs/operations.md).
 
-Start with [installation and operations](docs/operations.md) and the
-[runnable four-workflow fixture](examples/release-acceptance/README.md). The
-[manifest guide](docs/manifest.md) defines strict offline planning/configuration;
-the [daemon guide](docs/daemon.md), [private-state guide](docs/containers.md),
-[HTTPS guide](docs/https.md) and [evidence guide](docs/evidence.md) describe runtime
-contracts. Use `list` to discover recorded IDs and `status`/`inspect` to inspect
-them; ordinary views redact secrets and ownership authority. Prepared metadata
-never claims execution/readiness.
+## Run an existing configured project
 
-Native commands and all descendants must stay in their supervised process group;
-detachment and external process delegation are unsupported. The release target is
-macOS ARM64; Linux and Windows compile checks are portability evidence only.
+Prepare this machine **once** for local HTTPS. Install stock Caddy separately
+(`brew install caddy` if you use Homebrew). Save this private configuration outside
+your project; replace the executable with the absolute `command -v caddy` path:
+
+```sh
+umask 077
+mkdir -p "$HOME/.config/backlot"
+cat > "$HOME/.config/backlot/machine.yaml" <<'YAML'
+version: backlot/v1
+caddy:
+  mode: managed
+  executable: /opt/homebrew/bin/caddy
+  endpoint: http://127.0.0.1:2020
+  https_port: 8443
+YAML
+backlot daemon start --state-dir "$HOME/.backlot" --json
+backlot gateway start --state-dir "$HOME/.backlot" --config "$HOME/.config/backlot/machine.yaml" --json
+/opt/homebrew/bin/caddy trust --address 127.0.0.1:2020 --ca local
+```
+
+Use free ports 2020/8443; if occupied, select other unprivileged ports in the file
+and trust command. Run the stock trust command yourself against **your owned
+gateway**; it may ask for administrator authorization. Backlot never changes
+system/browser trust. If your browser uses a separate store, import the public
+`$HOME/.backlot/gateway/data/pki/authorities/local/root.crt` as a trusted authority.
+If you tried HTTPS before installing trust, stop/start the daemon and start the
+gateway again to refresh cached roots. [Trust and recovery](examples/macos-quickstart/README.md#prepare-once).
+
+Install your project's declared application dependencies using its own setup
+instructions. From that project's checkout, daily use is:
+
+```sh
+backlot run dev --state-dir "$HOME/.backlot" --config "$HOME/.config/backlot/machine.yaml" --json
+```
+
+Open `instance.execution.origin` from the result:
+`https://bl-<instance-label>.backlot.localhost:8443`. Record `instance.id`.
+The command returns when ready; closing your terminal leaves the persistent scene
+running. Scene names are project-defined; use the project's development scene if
+it is not named `dev`. Application trust must already be configured in its manifest.
+No public domain, Certbot, router DNS or resolver file is needed.
+
+```sh
+backlot stop --state-dir "$HOME/.backlot" --json INSTANCE_ID
+```
+
+Repeat `run dev` to resume with the same logical origin. After a daemon stop or
+machine restart, repeat daemon start and gateway start before running scenes;
+retained state preserves the CA. Native-only unpublished scenes need no gateway;
+Docker is needed only for container scenes.
+
+## Set up a project
+
+Follow the [runnable macOS HTTPS quickstart](examples/macos-quickstart/README.md)
+for a minimal working manifest, included frontend/API/native SSR code, explicit
+Node CA settings and disposable tests with retained reports. It also walks through
+two concurrent Git worktrees, CA persistence and scoped cleanup. Node/npm are
+example application dependencies, not Backlot contributor requirements.
+
+For more: [manifest reference](docs/manifest.md), [HTTPS and application trust](docs/https.md),
+[logs and evidence](docs/evidence.md), [operations and diagnosis](docs/operations.md),
+and the advanced [four-workflow/container fixture](examples/release-acceptance/README.md).
+Use `backlot list --state-dir "$HOME/.backlot" --json` to discover recorded IDs,
+and `backlot status --state-dir "$HOME/.backlot" --json INSTANCE_ID` to inspect one.
+
+Native commands and descendants must stay in their supervised process group;
+detachment and delegation to another supervisor are unsupported. The support
+boundary is macOS ARM64 host/browser/native managed HTTPS. Linux/Windows compile
+checks are portability evidence. This is not a V1 release declaration; the
+[release verification guide](docs/release-acceptance/README.md) records broader gates.
 
 ## Development
 
-See [Developer documentation](docs/README.md) for setup, commands, and shared
-contributor expectations. Begin with the [V1 PRD](docs/prd.md) and
-[implementation plan](docs/implementation-plan.md) for product work.
+See [Developer documentation](docs/README.md) for contributor setup and checks.
 
 ## License
 
-Backlot is BSD 3-Clause licensed. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
+Backlot is [BSD 3-Clause licensed](LICENSE).

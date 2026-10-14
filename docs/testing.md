@@ -210,6 +210,39 @@ resolver override or browser proceed-anyway is never evidence. External mode's
 real-domain/container acceptance remains its own contract. Full release/epic
 walkthroughs remain outside this implementation slice.
 
+## Runnable macOS quickstart integration
+
+The shipped [macOS example](../examples/macos-quickstart/README.md) has a separate
+complete native suite. Install its explicit application dependencies (Node 26/npm)
+and run serially under an owned native/gateway fixture grant:
+
+```sh
+BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
+BACKLOT_NODE_TEST_BINARY=/absolute/path/to/node \
+BACKLOT_NPM_TEST_BINARY=/absolute/path/to/npm \
+  go test -race ./internal/acceptance -run '^TestMacOSQuickstart$' -count=1 -v
+```
+
+It copies the actual application/lockfile into an owned temporary Git repository,
+creates two real worktrees, and runs `npm ci --ignore-scripts` in each (registry
+access or a populated npm cache is needed). It verifies frontend/native SSR/API,
+variable text/binary WebSockets, canonical redirects/secure cookies, success and
+failure reports retained after teardown, distinct ports/origins, stop/start and
+CA persistence, missing Node trust, occupied ports, unavailable gateway recovery
+and preservation of peers/unrelated listeners. It retains private daemon evidence
+at its reported short root and removes owned worktrees only after verified cleanup.
+Only explicit private fixture clients/daemon trust the generated root; it never
+changes system/browser trust or DNS. Missing opt-in tools skip; skips are not
+acceptance. Node/npm remain optional application dependencies, outside `make check`.
+
+For the managed quickstart slice, run this complete suite, the complete managed
+HTTPS suite above (including the explicit Node setting), gateway fixture contracts,
+`make check`, and the separate real macOS/browser adoption walkthrough on the frozen
+candidate. These demonstrate the bounded host/browser/native path; full external
+container/release gates below remain required before a broader release declaration.
+Published-HEAD CI is still required. Record real browser/system trust actions and
+baseline DNS/trust configuration separately; private fixture roots cannot prove them.
+
 ## Public release workflows
 
 The macOS ARM64 opt-in public workflow suite uses the runnable generic fixture,

@@ -62,6 +62,8 @@ func TestEditorExamples(t *testing.T) {
 		target       any
 	}{
 		{"../../examples/adoption/backlot.yaml", "manifest-v1.schema.json", &v1.Manifest{}},
+		{"../../examples/macos-quickstart/backlot.yaml", "manifest-v1.schema.json", &v1.Manifest{}},
+		{"../../examples/macos-quickstart/machine.example.yaml", "machine-config-v1.schema.json", &v1.MachineConfig{}},
 		{"../../examples/fullstack/backlot.yaml", "manifest-v1.schema.json", &v1.Manifest{}},
 		{"../../examples/fullstack/machine.example.yaml", "machine-config-v1.schema.json", &v1.MachineConfig{}},
 	} {
@@ -110,7 +112,7 @@ func TestGeneratedArtifacts(t *testing.T) {
 }
 
 func TestExampleAssociations(t *testing.T) {
-	for _, file := range []string{"../../examples/adoption/backlot.yaml", "../../examples/fullstack/backlot.yaml", "../../examples/fullstack/machine.example.yaml"} {
+	for _, file := range []string{"../../examples/macos-quickstart/backlot.yaml", "../../examples/macos-quickstart/machine.example.yaml", "../../examples/adoption/backlot.yaml", "../../examples/fullstack/backlot.yaml", "../../examples/fullstack/machine.example.yaml"} {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)

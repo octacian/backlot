@@ -34,7 +34,9 @@ The [manifest and offline planning guide](manifest.md) documents milestone 1.
 The command reference lives in [Testing and tooling](testing.md). README and
 agent entry points link there rather than maintaining competing command lists.
 
-The [installation and operations guide](operations.md) is the user entry point.
+The [README quickstart](../README.md) is the shortest user entry point; the
+[runnable macOS HTTPS example](../examples/macos-quickstart/README.md) includes
+project setup. The [installation and operations guide](operations.md) deepens operations.
 The [runnable release fixture](../examples/release-acceptance/README.md) implements
 all four application workflows; the [release verification guide](release-acceptance/README.md)
 defines required gates, evidence expectations and external retention.

@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../schemas/machine-config-v1.schema.json
+version: backlot/v1
+# If node is not on PATH at daemon startup, explicitly add:
+# tools: {node: /absolute/path/to/node}
+caddy:
+  mode: managed
+  executable: /opt/homebrew/bin/caddy
+  endpoint: http://127.0.0.1:2020
+  https_port: 8443

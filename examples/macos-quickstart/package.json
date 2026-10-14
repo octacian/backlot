@@ -1,0 +1,7 @@
+{
+  "name": "backlot-macos-quickstart",
+  "private": true,
+  "type": "module",
+  "engines": {"node": ">=26"},
+  "dependencies": {"ws": "8.22.0"}
+}

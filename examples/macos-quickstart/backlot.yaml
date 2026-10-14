@@ -1,0 +1,77 @@
+# yaml-language-server: $schema=../../schemas/manifest-v1.schema.json
+version: backlot/v1
+project: macos-quickstart
+tools: {node: node}
+resources:
+  api_port: {kind: port}
+  web_port: {kind: port}
+  origin: {kind: origin}
+outputs:
+  reports: {path: reports, concurrency_group: reports}
+environments:
+  https:
+    assign:
+      APP_ORIGIN: {ref: {kind: resource, name: origin, field: url}}
+      NODE_EXTRA_CA_CERTS: {ref: {kind: resource, name: origin, field: ca_cert_path}}
+components:
+  api:
+    kind: service
+    runtime: native
+    command: {tool: node, args: [app.mjs, api]}
+    resources: [api_port, origin]
+    ports: {http: {resource: api_port}}
+    environment_sets: [https]
+    environment:
+      assign:
+        PORT: {ref: {kind: resource, name: api_port, field: port}}
+    readiness:
+      kind: tcp
+      target: {ref: {kind: service, name: api, field: port, port: http}}
+      timeout: 10s
+  web:
+    kind: service
+    runtime: native
+    command: {tool: node, args: [app.mjs, web]}
+    resources: [web_port, origin]
+    ports: {http: {resource: web_port}}
+    environment_sets: [https]
+    environment:
+      assign:
+        PORT: {ref: {kind: resource, name: web_port, field: port}}
+    readiness:
+      kind: tcp
+      target: {ref: {kind: service, name: web, field: port, port: http}}
+      timeout: 10s
+  test:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: node, args: [test.mjs]}
+    resources: [origin]
+    environment_sets: [https]
+    depends_on: [{component: api, condition: ready}, {component: web, condition: ready}]
+    outputs: [reports]
+    artifacts:
+      report: {path: reports/result.json}
+scenes:
+  dev:
+    lifetime: persistent
+    components: [api, web]
+    resources: [api_port, web_port, origin]
+    publish:
+      resource: origin
+      routes:
+        - {path: /api, service: api, port: http, prefix: strip}
+        - {path: /, service: web, port: http, prefix: preserve}
+      probe: {kind: http, target: {ref: {kind: resource, name: origin, field: url}}, timeout: 10s}
+  test:
+    lifetime: disposable
+    components: [api, web, test]
+    resources: [api_port, web_port, origin]
+    terminal_job: test
+    publish:
+      resource: origin
+      routes:
+        - {path: /api, service: api, port: http, prefix: strip}
+        - {path: /, service: web, port: http, prefix: preserve}
+      probe: {kind: http, target: {ref: {kind: resource, name: origin, field: url}}, timeout: 10s}

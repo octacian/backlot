@@ -15,7 +15,6 @@ From a reviewed checkout:
 
 ```sh
 go mod download
-make check
 make release-build
 bin/backlot-darwin-arm64 version --json
 shasum -a 256 bin/backlot-darwin-arm64
@@ -46,6 +45,11 @@ with `go mod download -json github.com/go-sql-driver/mysql@v1.9.3`. Its license
 notice identifies covered source obligations; the fixture driver is not linked
 into `backlot`. Docker/Chromium distributions carry their own license notices;
 their images are operator-built setup dependencies, not bundled binary contents.
+
+For the shortest existing-project path, start with the [README quickstart](../README.md#run-an-existing-configured-project).
+For included application code, a minimal manifest and explicit trust settings, use
+the [macOS HTTPS quickstart](../examples/macos-quickstart/README.md). Contributor
+validation (`make check`) is required when changing Backlot, not to run a project.
 
 ## Explicit setup and daily use
 

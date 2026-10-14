@@ -189,3 +189,50 @@ func TestConsumerCACertPath(t *testing.T) {
 		})
 	}
 }
+
+func TestContainerCACertPath(t *testing.T) {
+	for _, name := range []string{"valid", "redacted", "no environment", "missing mount", "writable", "external", "changed root"} {
+		t.Run(name, func(t *testing.T) {
+			state, snapshot, root := caReferenceState(t)
+			c := &snapshot.Plan.Components[0]
+			c.Runtime = v1.Container
+			c.Mounts = []v1.Mount{{OriginCACert: "origin", Target: "/app/trust/root.pem", ReadOnly: true}}
+			value := c.Environment["CA"]
+			switch name {
+			case "redacted":
+				snapshot.Secrets["client/environment/CA"] = value
+				c.Environment["CA"] = v1.PlannedValue{Redacted: true}
+			case "no environment":
+				c.Environment = nil
+			case "missing mount":
+				c.Mounts = nil
+			case "writable":
+				c.Mounts[0].ReadOnly = false
+			case "external":
+				snapshot.Caddy.Mode = "external"
+			case "changed root":
+				if err := os.WriteFile(root, []byte("changed"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			actual, err := state.consumerCACertPath(snapshot)
+			valid := name == "valid" || name == "redacted" || name == "no environment"
+			if (err == nil) != valid {
+				t.Fatal(actual, err)
+			}
+			if !valid {
+				return
+			}
+			if actual != root {
+				t.Fatal(actual)
+			}
+			got, err := resolvedValue(c.Environment["CA"], "client/environment/CA", "id", snapshot, &v1.ExecutionResult{}, &execution{caCertPath: actual}, v1.Container)
+			if name != "no environment" && (err != nil || got != "/app/trust/root.pem") {
+				t.Fatal(got, err)
+			}
+			if _, err := resolvedValue(value, "client/fixture/CA", "id", snapshot, &v1.ExecutionResult{}, &execution{caCertPath: actual}, v1.Container); err == nil {
+				t.Fatal("CA resolved outside environment")
+			}
+		})
+	}
+}

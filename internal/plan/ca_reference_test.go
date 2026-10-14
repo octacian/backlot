@@ -109,3 +109,57 @@ scenes:
 		t.Fatal(err)
 	}
 }
+
+func TestContainerCAOffline(t *testing.T) {
+	noDefaultConfig(t)
+	root := t.TempDir()
+	const project = `version: backlot/v1
+project: trust
+resources: {origin: {kind: origin}, port: {kind: port}}
+components:
+  web:
+    kind: service
+    runtime: container
+    image: {literal: alpine:3.21}
+    resources: [origin, port]
+    ports: {http: {resource: port, container_port: 8080}}
+    mounts: [{origin_ca_cert: origin, target: /app/root.pem, read_only: true}]
+    environment: {assign: {SSL_CERT_FILE: {ref: {kind: resource, name: origin, field: ca_cert_path}}}}
+    readiness: {kind: tcp, target: {ref: {kind: resource, name: port, field: port}}, timeout: 1s}
+scenes:
+  dev:
+    lifetime: persistent
+    components: [web]
+    resources: [origin, port]
+    publish:
+      resource: origin
+      routes: [{path: /, service: web, port: http, prefix: preserve}]
+      probe: {kind: http, target: {ref: {kind: resource, name: origin, field: url}}, timeout: 1s}
+`
+	write(t, filepath.Join(root, "backlot.yaml"), []byte(project))
+	config := filepath.Join(root, "machine.yaml")
+	request := v1.PlanRequest{ProjectPath: root, Scene: "dev", ConfigPath: config}
+	machine := "version: backlot/v1\ndocker: {endpoint: 'unix:///nonexistent/backlot21.sock'}\ncaddy: {mode: managed, executable: /nonexistent/caddy}\n"
+	write(t, config, []byte(machine))
+	p, err := Resolve(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := p.Components[0]
+	if c.Environment["SSL_CERT_FILE"].Symbolic == nil || c.Mounts[0].OriginCACert != "origin" || c.Mounts[0].Target != "/app/root.pem" {
+		t.Fatal(c)
+	}
+	source, err := Locate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Prepare(source, request); err != nil {
+		t.Fatal("offline prepare contacted providers", err)
+	}
+	// The typed mount still requires managed mode when there is no trust assignment.
+	write(t, filepath.Join(root, "backlot.yaml"), []byte(strings.Replace(project, "    environment: {assign: {SSL_CERT_FILE: {ref: {kind: resource, name: origin, field: ca_cert_path}}}}\n", "", 1)))
+	write(t, config, []byte("version: backlot/v1\ndocker: {endpoint: 'unix:///nonexistent/backlot21.sock'}\ncaddy: {endpoint: 'http://127.0.0.1:2019', scope: backlot, domain_suffix: example.test, host_address: localhost}\n"))
+	if _, err := Resolve(request); err == nil {
+		t.Fatal("external origin CA mount accepted")
+	}
+}

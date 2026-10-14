@@ -634,6 +634,13 @@
                   "const": ""
                 }
               }
+            },
+            {
+              "properties": {
+                "origin_ca_cert": {
+                  "const": ""
+                }
+              }
             }
           ]
         },
@@ -657,11 +664,56 @@
                   "const": ""
                 }
               }
+            },
+            {
+              "properties": {
+                "origin_ca_cert": {
+                  "const": ""
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "required": [
+                "origin_ca_cert",
+                "read_only"
+              ]
+            },
+            {
+              "properties": {
+                "origin_ca_cert": {
+                  "minLength": 1
+                },
+                "read_only": {
+                  "const": true
+                }
+              }
+            },
+            {
+              "properties": {
+                "resource": {
+                  "const": ""
+                }
+              }
+            },
+            {
+              "properties": {
+                "output": {
+                  "const": ""
+                }
+              }
             }
           ]
         }
       ],
       "properties": {
+        "origin_ca_cert": {
+          "type": "string",
+          "description": "Attached published managed origin whose public root is mounted as a read-only file; never a key or CA directory."
+        },
         "resource": {
           "type": "string",
           "description": "Declared resource name; selection and kind are checked by backlot plan."
@@ -686,7 +738,7 @@
       "required": [
         "target"
       ],
-      "description": "Mount connects declared storage or checkout output to a container path."
+      "description": "Mount connects declared storage, checkout output or a public origin CA to a container path."
     },
     "Output": {
       "properties": {

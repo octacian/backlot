@@ -124,7 +124,7 @@ environment:
 Select the same origin in the scene and publish it using the [scene contract](#scene-contract).
 The machine configuration must explicitly select `caddy.mode: managed`.
 Reusable environment sets can contain these assignments when explicitly included
-by native components. External gateways, container consumers, probe targets and
+by native or explicitly mounted container components. External gateways, probe targets and
 fixture values cannot use `ca_cert_path`. Planning rejects unsupported use before
 allocation; offline plans and metadata preparation retain a symbolic reference
 without reading or creating CA state. Runtime requires the started gateway and
@@ -168,8 +168,38 @@ libraries can use different transport configuration. Backlot neither detects
 Node nor rewrites application code/configuration, replaces existing CA settings,
 or disables TLS verification. Node is an optional application dependency, not
 Backlot contributor tooling. The [runnable macOS quickstart](../examples/macos-quickstart/README.md) supplies
-frontend/API/SSR and disposable tests using this mapping. Container trust remains
-follow-up work.
+frontend/API/SSR and disposable tests using this mapping.
+
+### Public-root file mounts for containers
+
+Container components explicitly declare a typed mount:
+
+```yaml
+resources: [origin]
+mounts:
+  - {origin_ca_cert: origin, target: /app/trust/backlot-root.pem, read_only: true}
+environment:
+  assign:
+    APP_ORIGIN: {ref: {kind: resource, name: origin, field: url}}
+    SSL_CERT_FILE: {ref: {kind: resource, name: origin, field: ca_cert_path}}
+```
+
+The origin must be attached, selected and published, with explicit managed Caddy
+configuration. `origin_ca_cert` is exclusive with `resource` and `output`; it
+mounts only the existing validated public root as a read-only file at the chosen
+absolute target. Duplicate origin mounts and overlapping mount targets are
+rejected. Keys and CA directories are never mount sources. The environment
+reference resolves to this container target, while native consumers retain the
+host public-root path. A mount can be used without an environment assignment when
+the application explicitly reads that file itself. No runtime settings are
+injected. Choose image users and filesystem permissions that can read the file;
+the daemon does not relax private host CA permissions.
+
+Go clients on Alpine can use `SSL_CERT_FILE` with their normal system-root loading.
+Node containers can map `NODE_EXTRA_CA_CERTS` to the same `ca_cert_path` instead;
+the startup and explicit `ca` override rules above still apply. Applications own
+all other runtime-specific trust settings. Container hostname reachability must
+also be configured explicitly; mounting a root does not provide DNS.
 
 ## External gateway operator setup
 

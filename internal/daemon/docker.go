@@ -422,7 +422,15 @@ func (s *service) launchContainer(ctx context.Context, id string, c v1.PlannedCo
 	}
 	for _, m := range c.Mounts {
 		x := mount.Mount{Target: m.Target, ReadOnly: m.ReadOnly, Type: mount.TypeBind}
-		if m.Resource != "" {
+		if m.OriginCACert != "" {
+			x.Source, err = s.store.consumerCACertPath(snap)
+			if err != nil {
+				return nil, err
+			}
+			if !m.ReadOnly || x.Source == "" || x.Source != entry.caCertPath {
+				return nil, problem("gateway_ca", "public root mount has no validated matching CA")
+			}
+		} else if m.Resource != "" {
 			allocation := entry.resources.Resources[m.Resource]
 			x.Source = allocation.Name
 			if allocation.Kind == "volume" {
@@ -587,8 +595,23 @@ func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, re
 	}
 	r := value.Symbolic
 	if r != nil && r.Kind == "resource" && r.Field == "ca_cert_path" {
-		if runtime != v1.Native || entry == nil || entry.caCertPath == "" || snap.Plan.Publish == nil || snap.Plan.Publish.Resource != r.Name || snap.Plan.Resources[r.Name].Kind != "origin" {
-			return "", problem("invalid_contract", "ca_cert_path requires a managed published origin and native environment assignment")
+		if entry == nil || entry.caCertPath == "" || snap.Plan.Publish == nil || snap.Plan.Publish.Resource != r.Name || snap.Plan.Resources[r.Name].Kind != "origin" {
+			return "", problem("invalid_contract", "ca_cert_path requires a managed published origin and explicit environment assignment")
+		}
+		if runtime == v1.Container {
+			name, suffix, ok := strings.Cut(key, "/environment/")
+			if ok && suffix != "" {
+				for _, component := range snap.Plan.Components {
+					if component.Name == name && component.Runtime == v1.Container {
+						for _, mount := range component.Mounts {
+							if mount.OriginCACert == r.Name && mount.ReadOnly {
+								return mount.Target, nil
+							}
+						}
+					}
+				}
+			}
+			return "", problem("invalid_contract", "container ca_cert_path requires its explicit read-only origin_ca_cert mount and environment assignment")
 		}
 		return entry.caCertPath, nil
 	}

@@ -157,8 +157,9 @@ func (Probe) JSONSchemaExtend(s *jsonschema.Schema) {
 // JSONSchemaExtend enforces exactly one mount source.
 func (Mount) JSONSchemaExtend(s *jsonschema.Schema) {
 	s.OneOf = []*jsonschema.Schema{
-		{AllOf: []*jsonschema.Schema{schemaRequire("resource"), schemaProperties(map[string]*jsonschema.Schema{"resource": {MinLength: schemaOne()}}), schemaEmpty("output")}},
-		{AllOf: []*jsonschema.Schema{schemaRequire("output"), schemaProperties(map[string]*jsonschema.Schema{"output": {MinLength: schemaOne()}}), schemaEmpty("resource")}},
+		{AllOf: []*jsonschema.Schema{schemaRequire("resource"), schemaProperties(map[string]*jsonschema.Schema{"resource": {MinLength: schemaOne()}}), schemaEmpty("output"), schemaEmpty("origin_ca_cert")}},
+		{AllOf: []*jsonschema.Schema{schemaRequire("output"), schemaProperties(map[string]*jsonschema.Schema{"output": {MinLength: schemaOne()}}), schemaEmpty("resource"), schemaEmpty("origin_ca_cert")}},
+		{AllOf: []*jsonschema.Schema{schemaRequire("origin_ca_cert", "read_only"), schemaProperties(map[string]*jsonschema.Schema{"origin_ca_cert": {MinLength: schemaOne()}, "read_only": {Const: true}}), schemaEmpty("resource"), schemaEmpty("output")}},
 	}
 	schemaProperty(s, "target").Pattern = "^/"
 }

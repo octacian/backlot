@@ -325,3 +325,22 @@ func TestContractVariants(t *testing.T) {
 		}
 	}
 }
+
+func TestOriginCAMountSchema(t *testing.T) {
+	s := compile(t, "manifest-v1.schema.json")
+	for _, tc := range []struct {
+		mount string
+		valid bool
+	}{
+		{"origin_ca_cert: origin, target: /root.pem, read_only: true", true},
+		{"origin_ca_cert: origin, target: /root.pem", false},
+		{"origin_ca_cert: origin, target: /root.pem, read_only: false", false},
+		{"origin_ca_cert: origin, output: out, target: /root.pem, read_only: true", false},
+		{"origin_ca_cert: origin, resource: data, target: /root.pem, read_only: true", false},
+	} {
+		doc := "version: backlot/v1\nproject: ca\ncomponents:\n  job: {kind: job, runtime: container, policy: each-start, image: {literal: alpine}, mounts: [{" + tc.mount + "}]}\nscenes:\n  test: {lifetime: disposable, components: [job], terminal_job: job}\n"
+		if err := s.Validate(yamlValue(t, []byte(doc))); (err == nil) != tc.valid {
+			t.Fatal(tc.mount, err)
+		}
+	}
+}

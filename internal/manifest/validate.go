@@ -105,7 +105,7 @@ func Validate(m v1.Manifest) error {
 		}
 		for key, fixture := range c.Fixtures {
 			if caCertPath(fixture.Value) {
-				return invalid("components."+name+".fixtures."+key, "ca_cert_path is only supported in native environment assignments")
+				return invalid("components."+name+".fixtures."+key, "ca_cert_path is only supported in explicit environment assignments")
 			}
 			if err := value(m, fixture.Value, "components."+name+".fixtures."+key); err != nil {
 				return err
@@ -372,10 +372,26 @@ func component(m v1.Manifest, name string, c v1.Component) error {
 	}
 	mounts := map[string]bool{}
 	for _, mount := range c.Mounts {
-		if (mount.Resource == "") == (mount.Output == "") || !strings.HasPrefix(mount.Target, "/") || path.Clean(mount.Target) != mount.Target || mounts[mount.Target] || strings.ContainsRune(mount.Target, 0) {
+		sources := 0
+		for _, source := range []string{mount.Resource, mount.Output, mount.OriginCACert} {
+			if source != "" {
+				sources++
+			}
+		}
+		if sources != 1 || !strings.HasPrefix(mount.Target, "/") || path.Clean(mount.Target) != mount.Target || mounts[mount.Target] || strings.ContainsRune(mount.Target, 0) {
 			return invalid(f+".mounts", "declare one storage source and unique absolute target")
 		}
 		mounts[mount.Target] = true
+		if mount.OriginCACert != "" {
+			if m.Resources[mount.OriginCACert].Kind != "origin" || !slices.Contains(c.Resources, mount.OriginCACert) || !mount.ReadOnly || mount.Target == "/" {
+				return invalid(f+".mounts", "origin_ca_cert requires an attached origin and read-only absolute file target")
+			}
+			for _, other := range c.Mounts {
+				if other.Target != mount.Target && (other.OriginCACert == mount.OriginCACert || strings.HasPrefix(other.Target+"/", mount.Target+"/") || strings.HasPrefix(mount.Target+"/", other.Target+"/")) {
+					return invalid(f+".mounts", "origin CA mounts must be unique and cannot overlap another mount")
+				}
+			}
+		}
 		if mount.Resource != "" {
 			kind := m.Resources[mount.Resource].Kind
 			if !slices.Contains(c.Resources, mount.Resource) || (kind != "volume" && kind != "directory") {
@@ -444,6 +460,11 @@ func scene(m v1.Manifest, name string, s v1.Scene) error {
 		for _, d := range c.DependsOn {
 			if !slices.Contains(s.Components, d.Component) {
 				return invalid(f, "dependency is not selected; explicitly include it")
+			}
+		}
+		for _, mount := range c.Mounts {
+			if mount.OriginCACert != "" && (s.Publish == nil || s.Publish.Resource != mount.OriginCACert) {
+				return invalid(f+".components."+name+".mounts", "origin_ca_cert requires scene publication of that origin")
 			}
 		}
 		values := componentValues(m, c)
@@ -530,8 +551,16 @@ func selectedReference(m v1.Manifest, s v1.Scene, c v1.Component, v v1.Value, fi
 		return nil
 	}
 	r := v.Ref
-	if caCertPath(v) && c.Runtime != v1.Native {
-		return invalid(field, "ca_cert_path is only supported in native environment assignments")
+	if caCertPath(v) && c.Runtime == v1.Container {
+		found := false
+		for _, mount := range c.Mounts {
+			if mount.OriginCACert == r.Name {
+				found = true
+			}
+		}
+		if !found {
+			return invalid(field, "container ca_cert_path requires an explicit origin_ca_cert mount")
+		}
 	}
 	switch r.Kind {
 	case "resource":

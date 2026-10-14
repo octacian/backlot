@@ -118,6 +118,11 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 		c := m.Components[name]
 		// Check declared assignments, including selected reusable sets, before
 		// layering can hide a reference behind a later explicit override.
+		for _, mount := range c.Mounts {
+			if mount.OriginCACert != "" && (config.Caddy == nil || config.Caddy.Mode != "managed") {
+				return v1.PlanResponse{}, problem("invalid_contract", "components."+name+".mounts", "origin_ca_cert requires explicit managed Caddy configuration")
+			}
+		}
 		environments := []v1.Environment{c.Environment}
 		for _, set := range c.EnvironmentSets {
 			environments = append(environments, m.Environments[set])

@@ -82,8 +82,8 @@ type Value struct {
 }
 
 // Reference identifies a value without expression evaluation or interpolation.
-// An origin supports url and ca_cert_path; ca_cert_path is the existing managed
-// public root certificate path, only for native environment assignments.
+// An origin supports url and ca_cert_path; ca_cert_path is the explicitly mapped managed
+// public root certificate path, only for explicit environment assignments.
 // Allocation-dependent values remain symbolic during offline planning.
 type Reference struct {
 	Kind  string `json:"kind" yaml:"kind" jsonschema_description:"Explicit discriminator; see the supported values and conditional fields."`
@@ -123,12 +123,13 @@ type Probe struct {
 	Timeout string   `json:"timeout" yaml:"timeout" jsonschema:"minLength=1" jsonschema_description:"Nonnegative Go duration, at most 24h; 0s is unlimited subject to other execution budgets."`
 }
 
-// Mount connects declared storage or checkout output to a container path.
+// Mount connects declared storage, checkout output or a public origin CA to a container path.
 type Mount struct {
-	Resource string `json:"resource,omitempty" yaml:"resource,omitempty" jsonschema_description:"Declared resource name; selection and kind are checked by backlot plan."`
-	Output   string `json:"output,omitempty" yaml:"output,omitempty" jsonschema_description:"Declared checkout output name attached to the component."`
-	Target   string `json:"target" yaml:"target" jsonschema:"minLength=1" jsonschema_description:"Probe destination or absolute mount target, according to this contract."`
-	ReadOnly bool   `json:"read_only,omitempty" yaml:"read_only,omitempty" jsonschema_description:"Mount the declared source read-only."`
+	OriginCACert string `json:"origin_ca_cert,omitempty" yaml:"origin_ca_cert,omitempty" jsonschema_description:"Attached published managed origin whose public root is mounted as a read-only file; never a key or CA directory."`
+	Resource     string `json:"resource,omitempty" yaml:"resource,omitempty" jsonschema_description:"Declared resource name; selection and kind are checked by backlot plan."`
+	Output       string `json:"output,omitempty" yaml:"output,omitempty" jsonschema_description:"Declared checkout output name attached to the component."`
+	Target       string `json:"target" yaml:"target" jsonschema:"minLength=1" jsonschema_description:"Probe destination or absolute mount target, according to this contract."`
+	ReadOnly     bool   `json:"read_only,omitempty" yaml:"read_only,omitempty" jsonschema_description:"Mount the declared source read-only."`
 }
 
 // ServicePort maps an allocated host port to an explicit container listener when needed.

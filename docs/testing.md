@@ -194,6 +194,14 @@ client root pools); production does not inject CA trust. Missing/wrong private
 trust must fail. Tests register authenticated cleanup before faults and preserve
 uncertain residuals. No existing gateway, trust store or resolver is changed.
 
+The suite also maps the managed origin's `ca_cert_path` through explicit native
+assignments and an included reusable environment set. Trusted clients succeed;
+missing/wrong explicit trust fails with a TLS authority diagnostic. To additionally
+execute the Node mapping and canonical custom bootstrap in [application trust](https.md#explicit-application-trust),
+set `BACKLOT_NODE_TEST_BINARY` to an explicit absolute Node executable (Node 26 was
+verified). This optional check also verifies that an explicit wrong `ca` overrides
+`NODE_EXTRA_CA_CERTS`; Node is not required by contributor gates.
+
 These tests do not prove standard macOS/browser adoption setup. That gate requires
 an isolated disposable macOS environment, stock separate `caddy trust`, normal
 hostname resolution and a browser that accepts the certificate without a warning.

@@ -45,8 +45,9 @@ backlot gateway status --state-dir /absolute/private/daemon --json
 from that running endpoint and may request administrator authorization. Approve
 this separate command according to your machine policy. Do not point it at an
 unrelated Caddy server. The daemon runs unprivileged and sets `install_trust:false`;
-it never changes system/browser trust. Standard trust setup is an explicit
-prerequisite for regular use. Browsers can use different trust stores: verify your
+it never changes system/browser trust. Configure trust explicitly for each consumer; native applications can use the
+[public CA reference](#explicit-application-trust), while standard system/browser
+trust setup is a separate operator action. Browsers can use different trust stores: verify your
 browser accepts the origin without a warning; no universal browser guarantee is
 made. Missing/wrong trust fails normal TLS readiness, never invokes a bypass.
 
@@ -96,6 +97,74 @@ remain; the daemon stays accessible. Explicit gateway start resumes saved state
 so scene stop/restart can retry exact cleanup. It never resumes application work.
 Unknown guardian ownership is preserved and blocks a new gateway start. Never
 signal by PID/name or overwrite saved state to hide uncertainty.
+
+## Explicit application trust
+
+A native component can map the published origin's `ca_cert_path` to its own
+runtime setting. It resolves to the managed gateway's existing public PEM
+`root.crt`, under private daemon state, and stays stable across scene/gateway
+restarts. No certificate export copy is created. Signing and private keys are
+never application inputs. Keep the daemon's entire CA state private and intact.
+
+For Node, add these assignments to an existing native component (the tool,
+command and publication are project-owned):
+
+```yaml
+resources: [origin]
+environment:
+  assign:
+    APP_ORIGIN: {ref: {kind: resource, name: origin, field: url}}
+    NODE_EXTRA_CA_CERTS: {ref: {kind: resource, name: origin, field: ca_cert_path}}
+```
+
+Select the same origin in the scene and publish it using the [scene contract](#scene-contract).
+The machine configuration must explicitly select `caddy.mode: managed`.
+Reusable environment sets can contain these assignments when explicitly included
+by native components. External gateways, container consumers, probe targets and
+fixture values cannot use `ca_cert_path`. Planning rejects unsupported use before
+allocation; offline plans and metadata preparation retain a symbolic reference
+without reading or creating CA state. Runtime requires the started gateway and
+validates private paths, usable CA state and its pinned root identity before
+allocating workload resources.
+
+Backlot applies the usual [environment precedence](manifest.md#values-and-environment).
+Component assignments win over included sets, seeds and pass-throughs. Nothing
+is injected implicitly: choose which processes receive trust, and how it combines
+with existing settings. This application setting does not configure the daemon's
+aggregate HTTPS readiness or install browser/system trust; those consumers need
+their own explicit trust setup.
+
+[Node reads `NODE_EXTRA_CA_CERTS` at process startup](https://nodejs.org/api/cli.html#node_extra_ca_certsfile).
+An explicit TLS `ca` option overrides the default roots, including extra roots;
+a library that supplies `ca` must combine trust deliberately. For example, on
+Node versions supporting [`tls.getCACertificates`](https://nodejs.org/api/tls.html#tlsgetcacertificatestype)
+(including Node 26), an application-owned bootstrap can create a client-specific
+agent:
+
+```js
+import { readFileSync } from 'node:fs';
+import { getCACertificates } from 'node:tls';
+import https from 'node:https';
+
+const localCA = readFileSync(process.env.NODE_EXTRA_CA_CERTS, 'utf8');
+// Choose the roots this client should trust. Include application-owned roots
+// here as needed; supplying only localCA intentionally replaces other roots.
+const ca = [...getCACertificates('default'), localCA];
+const agent = new https.Agent({ ca });
+https.get(new URL('/api/value', process.env.APP_ORIGIN), { agent }, response => {
+  response.pipe(process.stdout);
+}).on('error', error => {
+  console.error(error.message);
+  process.exitCode = 1;
+});
+```
+
+Pass the agent through the application's supported HTTPS client API; other
+libraries can use different transport configuration. Backlot neither detects
+Node nor rewrites application code/configuration, replaces existing CA settings,
+or disables TLS verification. Node is an optional application dependency, not
+Backlot contributor tooling. Container trust and a runnable adoption walkthrough
+are separate follow-up work.
 
 ## External gateway operator setup
 

@@ -586,6 +586,12 @@ func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, re
 		value = snap.Secrets[key]
 	}
 	r := value.Symbolic
+	if r != nil && r.Kind == "resource" && r.Field == "ca_cert_path" {
+		if runtime != v1.Native || entry == nil || entry.caCertPath == "" || snap.Plan.Publish == nil || snap.Plan.Publish.Resource != r.Name || snap.Plan.Resources[r.Name].Kind != "origin" {
+			return "", problem("invalid_contract", "ca_cert_path requires a managed published origin and native environment assignment")
+		}
+		return entry.caCertPath, nil
+	}
 	if r != nil && r.Kind == "resource" && r.Field == "url" {
 		if snap.Plan.Publish == nil || r.Name != snap.Plan.Publish.Resource || result.Origin == "" {
 			return "", problem("invalid_publication", "origin reference requires the scene publication")

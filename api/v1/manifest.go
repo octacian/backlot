@@ -82,6 +82,9 @@ type Value struct {
 }
 
 // Reference identifies a value without expression evaluation or interpolation.
+// An origin supports url and ca_cert_path; ca_cert_path is the existing managed
+// public root certificate path, only for native environment assignments.
+// Allocation-dependent values remain symbolic during offline planning.
 type Reference struct {
 	Kind  string `json:"kind" yaml:"kind" jsonschema_description:"Explicit discriminator; see the supported values and conditional fields."`
 	Name  string `json:"name,omitempty" yaml:"name,omitempty" jsonschema_description:"Declared identifier used by this reference; graph lookup happens in backlot plan."`

@@ -116,6 +116,19 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 	}
 	for _, name := range order {
 		c := m.Components[name]
+		// Check declared assignments, including selected reusable sets, before
+		// layering can hide a reference behind a later explicit override.
+		environments := []v1.Environment{c.Environment}
+		for _, set := range c.EnvironmentSets {
+			environments = append(environments, m.Environments[set])
+		}
+		for _, environment := range environments {
+			for _, value := range environment.Assign {
+				if value.Ref != nil && value.Ref.Kind == "resource" && value.Ref.Field == "ca_cert_path" && (config.Caddy == nil || config.Caddy.Mode != "managed") {
+					return v1.PlanResponse{}, problem("invalid_contract", "components."+name+".environment", "ca_cert_path requires explicit managed Caddy configuration")
+				}
+			}
+		}
 		if snapshot == nil && c.Runtime == v1.Container && config.Docker == nil {
 			return v1.PlanResponse{}, problem("missing_provider", "config.docker", "selected container work requires local Docker settings; supply --config PATH")
 		}

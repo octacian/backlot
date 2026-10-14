@@ -170,7 +170,10 @@ service port, `port`. Supported shapes are:
 | `output` | Attached output | `path` | Resolve project-relative output path |
 
 Resource fields are `port.port`, `directory.path`, `volume.name`, `network.name`,
-`secret.value`, and `origin.url`. Unused reference fields may be omitted or
+`secret.value`, and `origin.url` or `origin.ca_cert_path`. The latter is only for
+native component environment assignments (including explicitly selected reusable sets), requires
+a selected/attached/published origin and explicit managed Caddy configuration,
+and stays symbolic offline. See [explicit application trust](https.md#explicit-application-trust). Unused reference fields may be omitted or
 empty strings; nonempty extra values are rejected. Prefer omission when authoring
 manifests.
 There are no concatenation, expressions, variable substitutions or embedded

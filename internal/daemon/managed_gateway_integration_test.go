@@ -126,13 +126,33 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	portRef := func(name string) v1.Value { return fixtureRef("resource", name, "port") }
 	originRef := fixtureRef("resource", "origin", "url")
 	component := func(name string) v1.Component {
-		return v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "fixture"}, Resources: []string{name, "origin"}, Ports: map[string]v1.ServicePort{"http": {Resource: name}}, Environment: v1.Environment{Assign: map[string]v1.Value{"PORT": portRef(name), "BIND": fixtureLiteral("127.0.0.1"), "ROLE": fixtureLiteral(name), "CERT": fixtureLiteral(trust), "ORIGIN": originRef}}, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(portRef(name)), Timeout: "10s"}}
+		return v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "fixture"}, Resources: []string{name, "origin"}, Ports: map[string]v1.ServicePort{"http": {Resource: name}}, Environment: v1.Environment{Assign: map[string]v1.Value{"PORT": portRef(name), "BIND": fixtureLiteral("127.0.0.1"), "ROLE": fixtureLiteral(name), "CERT": fixtureRef("resource", "origin", "ca_cert_path"), "ORIGIN": originRef}}, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(portRef(name)), Timeout: "10s"}}
 	}
 	h.manifest = v1.Manifest{Version: v1.ManifestVersion, Project: "managed-fixture", Tools: map[string]string{"fixture": app}, Resources: map[string]v1.Resource{"api": {Kind: "port"}, "web": {Kind: "port"}, "origin": {Kind: "origin"}, "data": {Kind: "directory"}}, Components: map[string]v1.Component{"api": component("api"), "web": component("web")}, Scenes: map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"api", "web"}, Resources: []string{"api", "web", "origin", "data"}, Publish: &v1.Publication{Resource: "origin", Routes: []v1.Route{{Path: "/api", Service: "api", Port: "http", Prefix: "strip"}, {Path: "/", Service: "web", Port: "http", Prefix: "preserve"}}, Probe: v1.Probe{Kind: "http", Target: &originRef, Timeout: "10s"}}}}}
 	web := h.manifest.Components["web"]
 	web.Resources = append(web.Resources, "data")
 	web.Fixtures = map[string]v1.Fixture{"data": {Value: fixtureRef("resource", "data", "path")}}
 	h.manifest.Components["web"] = web
+	// Native clients receive trust only through explicit assignments. The shared
+	// set exercises the same reference path as application runtime settings.
+	h.manifest.Environments = map[string]v1.Environment{"trust": {Assign: map[string]v1.Value{"CERT": fixtureRef("resource", "origin", "ca_cert_path")}}}
+	for _, mode := range []string{"trusted", "missing", "wrong"} {
+		client := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "fixture", Args: []string{"client"}}, Resources: []string{"origin"}, EnvironmentSets: []string{"trust"}, DependsOn: []v1.Dependency{{Component: "api", Condition: v1.Ready}, {Component: "web", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"ORIGIN": originRef}}}
+		if mode == "missing" {
+			client.Environment.Assign["CERT"] = fixtureLiteral("")
+			client.Environment.Assign["SSL_CERT_FILE"] = fixtureLiteral(filepath.Join(buildDir, "empty.pem"))
+			client.Environment.Assign["SSL_CERT_DIR"] = fixtureLiteral(filepath.Join(buildDir, "empty-roots"))
+		}
+		if mode == "wrong" {
+			client.Environment.Assign["CERT"] = fixtureLiteral(filepath.Join(buildDir, "wrong.pem"))
+		}
+		h.manifest.Components[mode] = client
+		scene := h.manifest.Scenes["dev"]
+		scene.Components = []string{"api", "web", mode}
+		scene.Lifetime, scene.TerminalJob = v1.Disposable, mode
+		h.manifest.Scenes[mode] = scene
+	}
+	nodeModes := addManagedNodeClients(t, &h.manifest, buildDir)
 	h.write()
 	git := func(args ...string) {
 		t.Helper()
@@ -203,6 +223,60 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	wrongRoots.AddCert(cert)
+	if err := os.WriteFile(filepath.Join(buildDir, "wrong.pem"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "empty.pem"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(buildDir, "empty-roots"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"trusted", "missing", "wrong"} {
+		output := command(mode == "trusted", "run", mode, "--project", h.project, "--config", configPath)
+		var tested v1.InstanceResponse
+		if err := json.Unmarshal(output, &tested); err != nil {
+			t.Fatal(err, string(output))
+		}
+		result := tested.Instance.Execution
+		if result == nil || result.TerminalExitCode == nil || (*result.TerminalExitCode == 0) != (mode == "trusted") || result.CleanupFailure != "" || result.Failure != "" {
+			t.Fatal("native explicit trust result", mode, string(output))
+		}
+		logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: tested.Instance.ID, Component: mode})
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(logs)
+		if mode != "trusted" && !strings.Contains(string(encoded), "certificate signed by unknown authority") {
+			t.Fatal("missing/wrong trust did not report a TLS trust failure", mode, string(encoded))
+		}
+		command(true, "destroy", tested.Instance.ID)
+	}
+	for _, mode := range nodeModes {
+		wantSuccess := mode == "node-default" || mode == "node-bootstrap"
+		output := command(wantSuccess, "run", mode, "--project", h.project, "--config", configPath)
+		var tested v1.InstanceResponse
+		if err := json.Unmarshal(output, &tested); err != nil {
+			t.Fatal(err, string(output))
+		}
+		result := tested.Instance.Execution
+		if result == nil || result.TerminalExitCode == nil || (*result.TerminalExitCode == 0) != wantSuccess || result.CleanupFailure != "" || result.Failure != "" {
+			t.Fatal("Node explicit trust result", mode, string(output))
+		}
+		logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: tested.Instance.ID, Component: mode})
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(logs)
+		if wantSuccess && !strings.Contains(string(encoded), "api:/value") || !wantSuccess && !strings.Contains(string(encoded), "certificate") {
+			t.Fatal("Node expected verified response or trust diagnostic", mode, string(encoded))
+		}
+		command(true, "destroy", tested.Instance.ID)
+	}
+	if len(nodeModes) != 0 {
+		t.Log("optional Node: default extra roots and canonical custom bootstrap succeed; missing/wrong roots and explicit wrong ca override fail with certificate diagnostics")
+	}
+	t.Log("CA reference early flow: real CLI/daemon/native client with selected reusable trust set succeeds; explicit missing/wrong trust fails with unknown authority; normal DNS/TLS and owned cleanup verified")
 	for _, roots := range []*x509.CertPool{x509.NewCertPool(), wrongRoots} {
 		tr := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
 		response, err := (&http.Client{Transport: tr}).Get(origin)
@@ -386,4 +460,64 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	command(true, "gateway", "start")
 	command(true, "gateway", "stop")
 	t.Log("real managed CLI/native HTTPS, normal host DNS, private trust, API/SSR/WebSocket/redirect/cookie, conflict/busy/unavailable gates, stop/start, daemon crash, CA/saved-state persistence verified; browser trust remains a separate gate", root)
+}
+
+// addManagedNodeClients is optional documentation verification, never a Node
+// dependency of the contributor gates. It executes the canonical bootstrap
+// verbatim through real native component reference/environment resolution.
+func addManagedNodeClients(t *testing.T, m *v1.Manifest, buildDir string) []string {
+	t.Helper()
+	node := os.Getenv("BACKLOT_NODE_TEST_BINARY")
+	if node == "" {
+		return nil
+	}
+	if !filepath.IsAbs(node) {
+		t.Fatal("BACKLOT_NODE_TEST_BINARY must be an explicit absolute executable")
+	}
+	guide, err := os.ReadFile("../../docs/https.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, code, ok := strings.Cut(string(guide), "```js\n")
+	if !ok {
+		t.Fatal("missing canonical Node bootstrap")
+	}
+	bootstrap, _, ok := strings.Cut(code, "\n```")
+	if !ok {
+		t.Fatal("unterminated canonical Node bootstrap")
+	}
+	standard := `import https from 'node:https';
+https.get(new URL('/api/value', process.env.APP_ORIGIN), response => {
+  response.pipe(process.stdout);
+}).on('error', error => { console.error(error.message); process.exitCode = 1; });`
+	override := `import https from 'node:https';
+import { readFileSync } from 'node:fs';
+https.get(new URL('/api/value', process.env.APP_ORIGIN), { ca: readFileSync(process.env.WRONG_CA) }, response => {
+  response.pipe(process.stdout);
+}).on('error', error => { console.error(error.message); process.exitCode = 1; });`
+	m.Tools["node"] = node
+	m.Environments["node-trust"] = v1.Environment{Assign: map[string]v1.Value{"NODE_EXTRA_CA_CERTS": fixtureRef("resource", "origin", "ca_cert_path")}}
+	modes := []string{"node-default", "node-bootstrap", "node-override", "node-missing", "node-wrong"}
+	for _, mode := range modes {
+		script := standard
+		if mode == "node-bootstrap" {
+			script = bootstrap
+		}
+		if mode == "node-override" {
+			script = override
+		}
+		component := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "node", Args: []string{"--input-type=module", "-e", script}}, Resources: []string{"origin"}, EnvironmentSets: []string{"node-trust"}, DependsOn: []v1.Dependency{{Component: "api", Condition: v1.Ready}, {Component: "web", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"APP_ORIGIN": fixtureRef("resource", "origin", "url"), "WRONG_CA": fixtureLiteral(filepath.Join(buildDir, "wrong.pem"))}}}
+		if mode == "node-missing" {
+			component.EnvironmentSets = nil
+		}
+		if mode == "node-wrong" {
+			component.Environment.Assign["NODE_EXTRA_CA_CERTS"] = fixtureLiteral(filepath.Join(buildDir, "wrong.pem"))
+		}
+		m.Components[mode] = component
+		scene := m.Scenes["dev"]
+		scene.Components = []string{"api", "web", mode}
+		scene.Lifetime, scene.TerminalJob = v1.Disposable, mode
+		m.Scenes[mode] = scene
+	}
+	return modes
 }

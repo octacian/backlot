@@ -4,6 +4,59 @@
   "$ref": "#/$defs/MachineConfig",
   "$defs": {
     "CaddyConfig": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "managed"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "required": [
+                  "executable"
+                ]
+              },
+              {
+                "properties": {
+                  "executable": {
+                    "minLength": 1,
+                    "pattern": "^/"
+                  },
+                  "https_port": {
+                    "minimum": 1024
+                  }
+                }
+              }
+            ]
+          },
+          "else": {
+            "allOf": [
+              {
+                "required": [
+                  "endpoint",
+                  "scope",
+                  "domain_suffix",
+                  "host_address"
+                ]
+              },
+              {
+                "properties": {
+                  "executable": {
+                    "const": ""
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
       "properties": {
         "mode": {
           "type": "string",

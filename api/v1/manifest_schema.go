@@ -266,4 +266,18 @@ func (CaddyConfig) JSONSchemaExtend(s *jsonschema.Schema) {
 	schemaProperty(s, "scope").Pattern = schemaIdentifier
 	schemaProperty(s, "domain_suffix").Pattern = `^[a-z0-9-]+(\.[a-z0-9-]+)+$`
 	schemaProperty(s, "host_address").Pattern = "^[^/\x00 \n\r]+$"
+	// Omitted mode retains external requirements; only managed mode supplies
+	// defaults for the endpoint, scope, suffix and upstream address.
+	managed := schemaWhen("mode", "managed", &jsonschema.Schema{AllOf: []*jsonschema.Schema{
+		schemaRequire("executable"),
+		schemaProperties(map[string]*jsonschema.Schema{
+			"executable": {MinLength: schemaOne(), Pattern: "^/"},
+			"https_port": {Minimum: "1024"},
+		}),
+	}})
+	managed.Else = &jsonschema.Schema{AllOf: []*jsonschema.Schema{
+		schemaRequire("endpoint", "scope", "domain_suffix", "host_address"),
+		schemaEmpty("executable"),
+	}}
+	s.AllOf = []*jsonschema.Schema{managed}
 }

@@ -215,6 +215,60 @@ scenes:
 	}
 }
 
+func TestCaddyModeValidationParity(t *testing.T) {
+	s := compile(t, "machine-config-v1.schema.json")
+	external := "endpoint: 'http://127.0.0.1:2019', scope: backlot, domain_suffix: example.test, host_address: 127.0.0.1"
+	type testCase struct {
+		name, fields string
+		valid        bool
+	}
+	tests := []testCase{
+		{"omitted mode", external, true},
+		{"explicit external", "mode: external, " + external, true},
+		{"empty external executable", external + ", executable: ''", true},
+		{"empty omitted mode config", "", false},
+		{"empty external config", "mode: external", false},
+		{"omitted mode executable", external + ", executable: /usr/bin/caddy", false},
+		{"external executable", "mode: external, " + external + ", executable: /usr/bin/caddy", false},
+		{"managed defaults", "mode: managed, executable: /usr/bin/caddy", true},
+		{"missing managed executable", "mode: managed", false},
+		{"empty managed executable", "mode: managed, executable: ''", false},
+		{"relative managed executable", "mode: managed, executable: caddy", false},
+		{"privileged managed port", "mode: managed, executable: /usr/bin/caddy, https_port: 443", false},
+		{"managed port below minimum", "mode: managed, executable: /usr/bin/caddy, https_port: 1023", false},
+		{"managed minimum port", "mode: managed, executable: /usr/bin/caddy, https_port: 1024", true},
+		{"managed maximum port", "mode: managed, executable: /usr/bin/caddy, https_port: 65535", true},
+		{"managed excessive port", "mode: managed, executable: /usr/bin/caddy, https_port: 65536", false},
+	}
+	// Check each legacy requirement independently in both external spellings,
+	// so a single remaining required field cannot hide a missing constraint.
+	for _, field := range strings.Split(external, ", ") {
+		name, _, _ := strings.Cut(field, ":")
+		remaining := strings.Trim(strings.Replace(external, field, "", 1), ", ")
+		remaining = strings.ReplaceAll(remaining, ", , ", ", ")
+		tests = append(tests,
+			testCase{"omitted mode missing " + name, remaining, false},
+			testCase{"external missing " + name, "mode: external, " + remaining, false},
+		)
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			data := []byte("version: backlot/v1\ncaddy: {" + tc.fields + "}\n")
+			schemaErr := s.Validate(yamlValue(t, data))
+			var config v1.MachineConfig
+			if err := manifest.Decode(data, ".yaml", &config); err != nil {
+				t.Fatal(err)
+			}
+			// Use runtime validation without executable/provider health checks.
+			// The absolute fixture path need not exist for this local contract.
+			runtimeErr := manifest.ValidateMachine(config)
+			if (schemaErr == nil) != tc.valid || (runtimeErr == nil) != tc.valid {
+				t.Fatalf("want valid=%v; schema: %v; runtime: %v", tc.valid, schemaErr, runtimeErr)
+			}
+		})
+	}
+}
+
 func TestContractVariants(t *testing.T) {
 	// Validate individual $defs within the actual generated artifact. This covers
 	// independent valid branches without inventing graph/executable fixtures.

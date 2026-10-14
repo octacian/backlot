@@ -125,8 +125,8 @@ the bytes supplied by the engine. Container stdout/stderr is collected outside D
 joined before deletion. Historical `logs` remains available after destroy.
 Application output is captured as emitted and can contain application-printed
 credentials; ordinary Backlot plans/status never expose private secret values.
-Broader artifacts, keep-on-failure, secret-access endpoints and age/size retention
-remain milestone 6 work.
+See [disposable evidence](evidence.md) for artifacts, keep-on-failure, explicit
+secret-access endpoints and age/size retention.
 
 ## Shared API
 

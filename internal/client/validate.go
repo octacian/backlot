@@ -38,7 +38,7 @@ func validateInstance(response v1.InstanceResponse) error {
 		return responseError()
 	}
 	allocation := instance.Operation.Allocations[0]
-	if !validID(allocation.ID) || !validID(allocation.OwnershipToken) || allocation.Kind != "private_snapshot" || (allocation.Phase != "intent" && allocation.Phase != "effect") {
+	if !validID(allocation.ID) || allocation.OwnershipToken != "" || allocation.Kind != "private_snapshot" || (allocation.Phase != "intent" && allocation.Phase != "effect") {
 		return responseError()
 	}
 	if instance.Status == v1.Prepared && allocation.Phase != "effect" {
@@ -91,17 +91,8 @@ func validateExecution(instance v1.Instance) error {
 	if !validID(result.Attempt) {
 		return responseError()
 	}
-	if result.Origin != "" {
-		origin, err := url.Parse(result.Origin)
-		if err != nil || origin.Scheme != "https" || origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" || !strings.HasPrefix(origin.Hostname(), "bl-"+instance.ID[:40]+".") || origin.Port() == "" && strings.Contains(origin.Host, ":") {
-			return responseError()
-		}
-		if origin.Port() != "" {
-			port, err := strconv.Atoi(origin.Port())
-			if err != nil || port < 1 || port > 65535 {
-				return responseError()
-			}
-		}
+	if err := validateOrigin(instance.ID, result.Origin); err != nil {
+		return err
 	}
 	if instance.Status == v1.RuntimeReady && instance.Plan.Publish != nil && result.Origin == "" {
 		return responseError()
@@ -136,6 +127,22 @@ func validateExecution(instance v1.Instance) error {
 	}
 	if instance.Status == v1.Succeeded && (result.Cancelled || result.Failure != "" || result.CleanupFailure != "" || result.CollectionFailure != "") {
 		return responseError()
+	}
+	return nil
+}
+
+func validateOrigin(id, originText string) error {
+	if originText != "" {
+		origin, err := url.Parse(originText)
+		if err != nil || origin.Scheme != "https" || origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" || !strings.HasPrefix(origin.Hostname(), "bl-"+id[:40]+".") || origin.Port() == "" && strings.Contains(origin.Host, ":") {
+			return responseError()
+		}
+		if origin.Port() != "" {
+			port, err := strconv.Atoi(origin.Port())
+			if err != nil || port < 1 || port > 65535 {
+				return responseError()
+			}
+		}
 	}
 	return nil
 }

@@ -60,13 +60,36 @@ func TestCrashRecoveryWithOwnedDaemonChild(t *testing.T) {
 	if _, err := os.Lstat(SocketPath(dir)); err != nil {
 		t.Fatal("expected stale socket after SIGKILL")
 	}
-	recovered, _ := startFixture(t, dir, time.Second)
+	// Recovery authority is private now. Read it only while the retained child
+	// is reaped and no daemon owns the database, preserving the original token
+	// stability assertion without re-exposing that token through the public API.
+	state, err := openStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, readErr := state.inspect(disposable.Instance.ID)
+	closeErr := state.db.Close()
+	if readErr != nil || closeErr != nil {
+		t.Fatal("cannot read private authority before recovery")
+	}
+	token := before.Operation.Allocations[0].OwnershipToken
+	recovered, stopRecovered := startFixture(t, dir, time.Second)
 	interrupted, err := recovered.Inspect(context.Background(), disposable.Instance.ID)
-	if err != nil || interrupted.Instance.Status != v1.Interrupted || interrupted.Instance.Operation.ID != disposable.Instance.Operation.ID || interrupted.Instance.Operation.Allocations[0].OwnershipToken != disposable.Instance.Operation.Allocations[0].OwnershipToken {
+	if err != nil || interrupted.Instance.Status != v1.Interrupted || interrupted.Instance.Operation.ID != disposable.Instance.Operation.ID || interrupted.Instance.Operation.Allocations[0].ID != disposable.Instance.Operation.Allocations[0].ID {
 		t.Fatalf("crash recovery lost durable ownership: %+v %v", interrupted, err)
 	}
 	stable, err := recovered.Inspect(context.Background(), persistent.Instance.ID)
 	if err != nil || stable.Instance.Status != v1.Prepared {
 		t.Fatal("completed persistent metadata lost after crash")
+	}
+	stopRecovered()
+	state, err = openStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, readErr := state.inspect(disposable.Instance.ID)
+	closeErr = state.db.Close()
+	if readErr != nil || closeErr != nil || !validID(token) || after.Operation.Allocations[0].OwnershipToken != token {
+		t.Fatal("crash recovery changed private snapshot authority")
 	}
 }

@@ -210,6 +210,17 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/instances":
+			var request v1.ListRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.store.list(request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
 		case "/v1/run", "/v1/restart", "/v1/reset":
 			var request v1.RunRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
@@ -365,7 +376,12 @@ func decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	return true
 }
 func writeJSON(w http.ResponseWriter, value any) {
-	// Encoding named contracts cannot expose private persistence/snapshot models.
+	// Instances are also used by persistence. Remove snapshot capabilities at
+	// this single response boundary, including prepare/run/cancel/recovery views.
+	if response, ok := value.(v1.InstanceResponse); ok {
+		response.Instance = publicInstance(response.Instance)
+		value = response
+	}
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		return
 	}

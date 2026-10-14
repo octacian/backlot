@@ -1,0 +1,14 @@
+# Copy outside the checkout; use your approved existing DNS/TLS/gateway setup.
+version: backlot/v1
+inputs:
+  image: backlot-release-fixture:local
+  browser-image: backlot-release-browser:local
+docker:
+  endpoint: unix:///absolute/path/to/docker.sock
+  host_address: host.docker.internal
+  publish_address: 127.0.0.1
+caddy:
+  endpoint: http://127.0.0.1:2019
+  scope: backlot
+  domain_suffix: dev.example.com
+  host_address: 127.0.0.1

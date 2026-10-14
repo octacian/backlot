@@ -696,7 +696,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 					status = v1.Failed
 					if !exit.Known || component.Name != snapshot.Plan.TerminalJob || exit.Code < 0 || exit.Error != "" && exit.Code == 0 {
 						if !exit.Known {
-							failure = fmt.Errorf("job %s exit status unavailable", component.Name)
+							failure = errors.Join(failure, fmt.Errorf("job %s supervision failed: %s", component.Name, exit.Error))
 						} else {
 							failure = fmt.Errorf("job %s failed (exit %d)", component.Name, exit.Code)
 						}
@@ -754,8 +754,20 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 }
 func serviceFailure(services map[string]workload) error {
 	for name, g := range services {
-		if g.Result() != nil || !g.Alive() {
-			return fmt.Errorf("required service %s exited unexpectedly; explicit restart required", name)
+		if result := g.Result(); result != nil {
+			if !result.Known {
+				return fmt.Errorf("required service %s supervision failed: %s; explicit restart required", name, result.Error)
+			}
+			return fmt.Errorf("required service %s exited unexpectedly (exit %d); explicit restart required", name, result.Code)
+		}
+		// Docker Result already performs a fresh running-state inspection. A second
+		// inspection through Alive could fail independently and discard its cause.
+		// Native work additionally verifies its guardian/group identity via Alive.
+		if _, container := g.(*dockerWork); container {
+			continue
+		}
+		if !g.Alive() {
+			return fmt.Errorf("required service %s is unavailable without a verified exit; explicit restart required", name)
 		}
 	}
 	return nil
@@ -770,7 +782,9 @@ func waitJob(ctx context.Context, g workload, services map[string]workload) (*na
 		if exit := g.Result(); exit != nil {
 			return exit, nil
 		}
-		if !g.Alive() {
+		// Docker Result already verifies running state once per polling cycle.
+		// Native work separately verifies its guardian/group identity.
+		if _, container := g.(*dockerWork); !container && !g.Alive() {
 			if exit := g.Result(); exit != nil {
 				return exit, nil
 			}
@@ -778,7 +792,7 @@ func waitJob(ctx context.Context, g workload, services map[string]workload) (*na
 		}
 		select {
 		case <-ctx.Done():
-			return g.Result(), ctx.Err()
+			return nil, ctx.Err()
 		case <-ticker.C:
 		}
 	}

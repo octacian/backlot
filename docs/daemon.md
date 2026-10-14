@@ -4,8 +4,8 @@ Milestone 2 adds explicit local daemon control and durable metadata preparation.
 `prepared` means a validated snapshot was recorded. It never means an application
 was executed, a resource was reserved, or readiness was observed. Native execution
 and retained logs are documented below. See [containers/private state](containers.md)
-for Docker execution and retained resource lifecycle; Caddy and broader evidence
-retention remain later milestones.
+for Docker execution and retained resource lifecycle; Publication and retained evidence are documented in the
+[HTTPS](https.md) and [evidence](evidence.md) guides.
 
 ## Commands
 
@@ -116,6 +116,7 @@ migration. See the [private-state guide](containers.md) for compatibility.
 | Endpoint | Named request | Named response |
 | --- | --- | --- |
 | `GET /v1/status` | None | `DaemonStatusResponse` |
+| `POST /v1/instances` | `ListRequest` | `ListResponse` (at most 100 summaries) |
 | `POST /v1/stop` | `ControlRequest` | `DaemonStatusResponse` (`stopping`) |
 | `POST /v1/prepare` | `PrepareRequest` | `InstanceResponse` |
 | `POST /v1/inspect` | `InstanceRequest` | `InstanceResponse` |
@@ -124,6 +125,15 @@ migration. See the [private-state guide](containers.md) for compatibility.
 | `POST /v1/run`, `/v1/restart`, `/v1/reset` | `RunRequest` | `InstanceResponse` |
 | `POST /v1/runtime/stop`, `/v1/destroy` | `InstanceRequest` | `InstanceResponse` |
 | `POST /v1/logs` | `LogsRequest` | `LogsResponse` |
+
+`list` uses `ListRequest` (`after_id`, `limit`; zero means default 100, maximum
+100) and returns identity-ordered summaries with a `next_after_id` continuation.
+Empty lists contain an empty array. Historical/destroyed targets remain discoverable.
+`status` is a CLI alias for `inspect`. Every instance response removes snapshot
+ownership tokens while preserving the private durable recovery authority. Stop
+an old daemon before upgrading the binary; use a matching CLI/daemon contract.
+Fixture discovery and explicit sensitive access use `FixturesRequest` through
+`POST /v1/fixtures` and `/v1/fixtures/secret`; see [evidence](evidence.md).
 
 Failures use `ErrorResponse` with safe code/field/message values and an HTTP error
 status. Request/response documents are bounded to 1 MiB, with strict types, exact
@@ -167,8 +177,8 @@ collection or cleanup failure returns nonzero. Following logs emits one typed
 stream and execution attempt. Non-UTF8 chunks use the optional base64 `data`
 field instead of text `message`, preserving raw bytes. Application stdout/stderr is captured as emitted;
 do not write secrets to those streams. Logs persist outside runtime across stop
-and restart. There is no configurable retention policy, artifact collection or
-keep-on-failure in this milestone.
+and restart. Artifact collection, keep-on-failure and configurable evidence retention are
+documented in the [evidence guide](evidence.md).
 
 Generic containers, private volumes/directories/secrets/networks and fresh-only
 jobs follow the [private-state lifecycle](containers.md). Publication follows the

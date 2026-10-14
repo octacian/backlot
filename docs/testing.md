@@ -109,7 +109,8 @@ for diagnosis. Docker tests skip only when the explicit endpoint variable is abs
 a configured but unavailable provider is a failure. The complete suite must pass on
 the frozen feature candidate after independent reviews; `make check` alone does not
 prove Docker integration. Logs and exact source/image/config provenance belong in
-the feature evidence ledger.
+the revision-bound external evidence described in the
+[release verification guide](release-acceptance/README.md).
 
 Focused milestone 6 provider coverage (run serially with the same resource grant):
 
@@ -170,7 +171,9 @@ setup. Frozen-candidate acceptance also requires the complete Docker suite and
 real owned-domain trusted HTTPS from macOS ARM64 host, browser and containers,
 including SSR/API/WebSockets and relevant redirects/cookies. Record commands,
 candidate revision, fixtures/config/image provenance, logs, skips/failures and
-cleanup in the delivery ledger; never substitute mock success for missing evidence.
+cleanup in revision-bound external evidence; follow the
+[release verification guide](release-acceptance/README.md) and never substitute
+mock success for missing evidence.
 
 ## Public release workflows
 
@@ -195,4 +198,5 @@ frozen-candidate gates. For durable raw fixture state, set the test-only
 The default remains `/tmp` to fit macOS Unix socket paths; an overlong explicit
 root fails instead of silently falling back. `TMPDIR` separately controls Go
 build/test scratch, not the acceptance fixture root. Record exact commit/dirty patch, image/config provenance,
-failed/skipped runs, timing and cleanup in the [ledger](release-acceptance/ledger.md).
+failed/skipped runs, timing and cleanup outside the source tree as described in
+the [release verification guide](release-acceptance/README.md).

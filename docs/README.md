@@ -36,5 +36,5 @@ agent entry points link there rather than maintaining competing command lists.
 
 The [installation and operations guide](operations.md) is the user entry point.
 The [runnable release fixture](../examples/release-acceptance/README.md) implements
-all four application workflows; [release acceptance evidence](release-acceptance/ledger.md)
-records actual results and outstanding gates.
+all four application workflows; the [release verification guide](release-acceptance/README.md)
+defines required gates, evidence expectations and external retention.

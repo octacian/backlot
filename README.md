@@ -17,10 +17,10 @@ Scene names are project-defined. Persistent environments return a usable URL;
 disposable runs return their outcome and retained evidence.
 
 **Status:** native/container execution, private retained state, configured HTTPS
-publication and disposable results/evidence are implemented. Release acceptance
-is in progress; independent reviews, frozen-candidate checks and CI remain gates,
-so this is not a V1 release declaration. See the
-[release acceptance ledger](docs/release-acceptance/ledger.md).
+publication and disposable results/evidence are implemented. Release readiness
+requires independent reviews, frozen-candidate verification and published-HEAD CI;
+this status is not a V1 release declaration. See the
+[release verification guide](docs/release-acceptance/README.md).
 
 Start with [installation and operations](docs/operations.md) and the
 [runnable four-workflow fixture](examples/release-acceptance/README.md). The

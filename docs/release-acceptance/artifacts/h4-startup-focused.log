@@ -1,9 +1,0 @@
-=== RUN   TestOwnedDaemonStartupFailureCleanup
-=== RUN   TestOwnedDaemonStartupFailureCleanup/Start-failure
-=== RUN   TestOwnedDaemonStartupFailureCleanup/post-Start-readiness-failure
-    startup_test.go:139: live owned serve/status witnesses; readiness deadline failed; retained child killed and joined once before forwarding/log close; guarded repeated stop is a no-op
---- PASS: TestOwnedDaemonStartupFailureCleanup (1.01s)
-    --- PASS: TestOwnedDaemonStartupFailureCleanup/Start-failure (0.00s)
-    --- PASS: TestOwnedDaemonStartupFailureCleanup/post-Start-readiness-failure (1.01s)
-PASS
-ok  	github.com/octacian/backlot/internal/acceptance	2.361s

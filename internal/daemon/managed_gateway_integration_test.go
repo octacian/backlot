@@ -297,6 +297,36 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 		t.Fatal("unavailable gateway cleanup uncertainty discarded")
 	}
 	command(true, "gateway", "start")
+	// No scene stop/restart intervenes: shutdown must discover the recovered
+	// durable route even though this daemon has no in-memory execution owner.
+	_, resumed, _ := managedPaths(h.dir)
+	host := strings.TrimSuffix(strings.TrimPrefix(origin, "https://"), ":"+strconv.Itoa(port))
+	savedConfig, err := os.ReadFile(resumed)
+	if err != nil || !strings.Contains(string(savedConfig), host) {
+		t.Fatal("explicit gateway start did not resume retained scene route", err)
+	}
+	h.close()
+	state, err = openStore(h.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal, journalErr := state.runtime(id)
+	recovered, inspectErr := state.inspect(id)
+	managed, managedErr := state.managed()
+	cleanupErr := state.cleanupFailures()
+	closeErr := state.db.Close()
+	if err := errors.Join(journalErr, inspectErr, managedErr, cleanupErr, closeErr); err != nil {
+		t.Fatal("shutdown after gateway resume did not reconcile durable cleanup", err)
+	}
+	if journal.Gateway != nil || recovered.Execution.CleanupFailure != "" || managed.Identity != nil || managed.Pending {
+		t.Fatal("shutdown retained recovered scene/gateway effects")
+	}
+	savedConfig, err = os.ReadFile(resumed)
+	if err != nil || strings.Contains(string(savedConfig), host) {
+		t.Fatal("saved effective configuration retained scene route after shutdown", err)
+	}
+	h.start()
+	command(true, "gateway", "start")
 	command(true, "restart", "--project", h.project, "--config", configPath, id)
 	repaired, err := h.cli.Inspect(context.Background(), id)
 	if err != nil || repaired.Instance.Execution.CleanupFailure != "" || repaired.Instance.Execution.Origin != origin {

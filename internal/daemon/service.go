@@ -119,6 +119,9 @@ func (s *service) stop() error {
 	// Shutdown fences acceptance before joining. Expiry coordinators retain their
 	// own channels so storage cannot close while they finish durable results.
 	result = errors.Join(result, s.joinExpiryWorkers())
+	// Recovered executions have no entry in executions. Retry their durable
+	// exact effects before stopping a gateway explicitly resumed for cleanup.
+	result = errors.Join(result, s.recoverUnownedExecutions())
 	s.mu.Lock()
 	expiryErr := s.expiryErr
 	s.mu.Unlock()
@@ -129,6 +132,31 @@ func (s *service) stop() error {
 	}
 	s.mu.Unlock()
 	return errors.Join(result, expiryErr, gatewayErr, s.store.reconcile("daemon shutdown interrupted preparation", false), s.store.cleanupFailures())
+}
+
+func (s *service) recoverUnownedExecutions() error {
+	ids, err := s.store.runtimeRecoveryIDs()
+	if err != nil {
+		return err
+	}
+	var result error
+	for _, id := range ids {
+		s.mu.Lock()
+		entry := s.executions[id]
+		s.mu.Unlock()
+		// Current owners already went through cancellation/join above. In
+		// particular, a failed join never authorizes concurrent recovery or
+		// waiting on a mutation lock still held by its cancellation coordinator.
+		if entry != nil {
+			continue
+		}
+		// Closing fences new owners; serialize with any explicit cleanup request
+		// already acting on this recovered instance.
+		unlock := s.lockMutation(id)
+		result = errors.Join(result, s.store.recoverExecution(id))
+		unlock()
+	}
+	return result
 }
 
 // expire dispatches each eligible owner independently. It never joins native

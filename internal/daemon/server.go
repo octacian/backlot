@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -100,6 +101,9 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 		return problem("permissions", "cannot inspect daemon socket")
 	}
 	if err := state.recoverRuntime(); err != nil {
+		return err
+	}
+	if err := state.recoverManaged(); err != nil {
 		return err
 	}
 	if err := state.reconcile("daemon recovery interrupted preparation", false); err != nil {
@@ -210,6 +214,22 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/gateway/start", "/v1/gateway/stop", "/v1/gateway/restart", "/v1/gateway/status":
+			var request v1.GatewayRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			action := strings.TrimPrefix(r.URL.Path, "/v1/gateway/")
+			if (action == "stop" || action == "status") && request.ConfigPath != "" {
+				writeError(w, problem("invalid_request", "stop/status do not accept configuration"))
+				return
+			}
+			response, err := s.gatewayControl(r.Context(), action, request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
 		case "/v1/instances":
 			var request v1.ListRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {

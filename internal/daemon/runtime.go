@@ -189,6 +189,11 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 	if s.closing {
 		return empty, problem("shutting_down", "daemon is shutting down")
 	}
+	if snapshot.Plan.Publish != nil && snapshot.Caddy != nil {
+		if err := s.requireManaged(ctx, *snapshot.Caddy); err != nil {
+			return empty, err
+		}
+	}
 	if s.executions == nil {
 		s.executions = map[string]*execution{}
 	}

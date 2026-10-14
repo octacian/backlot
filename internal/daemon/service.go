@@ -13,10 +13,12 @@ import (
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/manifest"
+	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 )
 
 type service struct {
+	gatewayGroup  *native.Group
 	evidence      evidencePolicy
 	store         *store
 	lease         time.Duration
@@ -120,7 +122,13 @@ func (s *service) stop() error {
 	s.mu.Lock()
 	expiryErr := s.expiryErr
 	s.mu.Unlock()
-	return errors.Join(result, expiryErr, s.store.reconcile("daemon shutdown interrupted preparation", false), s.store.cleanupFailures())
+	s.mu.Lock()
+	gatewayRecord, gatewayErr := s.store.managed()
+	if gatewayErr == nil {
+		gatewayErr = s.store.stopManaged(&gatewayRecord, s.gatewayGroup)
+	}
+	s.mu.Unlock()
+	return errors.Join(result, expiryErr, gatewayErr, s.store.reconcile("daemon shutdown interrupted preparation", false), s.store.cleanupFailures())
 }
 
 // expire dispatches each eligible owner independently. It never joins native

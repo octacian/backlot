@@ -15,6 +15,7 @@ import (
 	"github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/localipc"
+	"github.com/octacian/backlot/internal/manifest"
 	"github.com/octacian/backlot/internal/plan"
 	bolt "go.etcd.io/bbolt"
 )
@@ -109,6 +110,14 @@ func safeRestart(old, next plan.Snapshot) error {
 	}
 	if !reflect.DeepEqual(old.Plan.Resources, next.Plan.Resources) {
 		return unsafe()
+	}
+	if old.Caddy != nil {
+		value := manifest.CaddyDefaults(*old.Caddy)
+		old.Caddy = &value
+	}
+	if next.Caddy != nil {
+		value := manifest.CaddyDefaults(*next.Caddy)
+		next.Caddy = &value
 	}
 	if (old.Plan.Publish != nil || next.Plan.Publish != nil) && !reflect.DeepEqual(old.Caddy, next.Caddy) {
 		return unsafe()

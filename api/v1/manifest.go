@@ -189,7 +189,7 @@ type MachineConfig struct {
 	Tools   map[string]string `json:"tools,omitempty" yaml:"tools,omitempty" jsonschema_description:"Named executables; planning checks availability without running them."`
 	Inputs  map[string]string `json:"inputs,omitempty" yaml:"inputs,omitempty" jsonschema_description:"Explicit external inputs; keep machine credentials out of projects."`
 	Docker  *DockerConfig     `json:"docker,omitempty" yaml:"docker,omitempty" jsonschema_description:"Local engine configuration; planning does not contact Docker."`
-	Caddy   *CaddyConfig      `json:"caddy,omitempty" yaml:"caddy,omitempty" jsonschema_description:"Operator-owned gateway scope and reachability; no health check during planning."`
+	Caddy   *CaddyConfig      `json:"caddy,omitempty" yaml:"caddy,omitempty" jsonschema_description:"Explicit managed or external gateway settings; no health check during planning."`
 	Storage *StorageConfig    `json:"storage,omitempty" yaml:"storage,omitempty" jsonschema_description:"Future daemon storage and evidence retention settings."`
 }
 
@@ -200,13 +200,15 @@ type DockerConfig struct {
 	PublishAddress string `json:"publish_address,omitempty" yaml:"publish_address,omitempty" jsonschema_description:"Numeric host address for mapped container ports; defaults to 127.0.0.1. Exposure is explicitly operator-selected."`
 }
 
-// CaddyConfig identifies the operator-owned gateway scope and reachability.
+// CaddyConfig selects explicit managed or external gateway ownership.
 type CaddyConfig struct {
-	HTTPSPort    *int   `json:"https_port,omitempty" yaml:"https_port,omitempty" jsonschema:"minimum=1,maximum=65535" jsonschema_description:"Explicit HTTPS listener port; defaults to 443. Nondefault ports appear in the canonical origin."`
-	Endpoint     string `json:"endpoint" yaml:"endpoint" jsonschema:"minLength=1" jsonschema_description:"Local Docker unix socket URL or Caddy HTTP(S) admin URL."`
-	Scope        string `json:"scope" yaml:"scope" jsonschema:"minLength=1" jsonschema_description:"Identifier of the Backlot-owned gateway scope."`
-	DomainSuffix string `json:"domain_suffix" yaml:"domain_suffix" jsonschema:"minLength=1" jsonschema_description:"Operator-managed lowercase domain suffix, including at least one dot."`
-	HostAddress  string `json:"host_address" yaml:"host_address" jsonschema:"minLength=1" jsonschema_description:"Gateway-reachable host address for native upstreams."`
+	Mode         string `json:"mode,omitempty" yaml:"mode,omitempty" jsonschema:"enum=managed,enum=external" jsonschema_description:"Gateway ownership; omitted retains legacy external mode."`
+	Executable   string `json:"executable,omitempty" yaml:"executable,omitempty" jsonschema_description:"Absolute stock native Caddy executable; required only in managed mode."`
+	HTTPSPort    *int   `json:"https_port,omitempty" yaml:"https_port,omitempty" jsonschema:"minimum=1,maximum=65535" jsonschema_description:"Explicit HTTPS listener port; defaults to 8443 managed or 443 external. Nondefault ports appear in the canonical origin."`
+	Endpoint     string `json:"endpoint,omitempty" yaml:"endpoint,omitempty" jsonschema:"minLength=1" jsonschema_description:"Admin HTTP(S) URL; managed defaults to http://127.0.0.1:2020."`
+	Scope        string `json:"scope,omitempty" yaml:"scope,omitempty" jsonschema:"minLength=1" jsonschema_description:"Owned external subroute ID; managed defaults to backlot-managed."`
+	DomainSuffix string `json:"domain_suffix,omitempty" yaml:"domain_suffix,omitempty" jsonschema:"minLength=1" jsonschema_description:"External lowercase domain suffix; managed defaults to backlot.localhost."`
+	HostAddress  string `json:"host_address,omitempty" yaml:"host_address,omitempty" jsonschema:"minLength=1" jsonschema_description:"Gateway-reachable upstream address; managed fixes 127.0.0.1."`
 }
 
 // StorageConfig describes future daemon storage and evidence retention bounds.

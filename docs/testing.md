@@ -175,6 +175,33 @@ cleanup in revision-bound external evidence; follow the
 [release verification guide](release-acceptance/README.md) and never substitute
 mock success for missing evidence.
 
+## Managed local-CA gateway integration
+
+Run the native managed suite with the same exclusive owned fixture grant:
+
+```sh
+BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
+  go test -race ./internal/daemon -run '^TestManagedHTTPSRuntime$' -count=1 -v
+```
+
+This is required on the frozen candidate alongside the complete gateway,
+HTTPS runtime, Docker runtime and disposable evidence suites above. It builds
+race-enabled CLI/native fixtures, uses dynamic IPv4/IPv6 loopback ports and a
+unique private daemon/CA state, and runs real CLI lifecycle and path traffic with
+normal host DNS. Private trust is explicit only in fixture clients/daemon process
+(`SSL_CERT_FILE` with Go 1.27.1 and an empty private `SSL_CERT_DIR`, plus fixture
+client root pools); production does not inject CA trust. Missing/wrong private
+trust must fail. Tests register authenticated cleanup before faults and preserve
+uncertain residuals. No existing gateway, trust store or resolver is changed.
+
+These tests do not prove standard macOS/browser adoption setup. That gate requires
+an isolated disposable macOS environment, stock separate `caddy trust`, normal
+hostname resolution and a browser that accepts the certificate without a warning.
+Record it as blocked when isolated trust cannot be demonstrated; a TLS bypass,
+resolver override or browser proceed-anyway is never evidence. External mode's
+real-domain/container acceptance remains its own contract. Full release/epic
+walkthroughs remain outside this implementation slice.
+
 ## Public release workflows
 
 The macOS ARM64 opt-in public workflow suite uses the runnable generic fixture,

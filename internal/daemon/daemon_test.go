@@ -387,35 +387,39 @@ func TestMovedAndReplacedCheckoutNeverAdopted(t *testing.T) {
 }
 
 func TestStateVersionRejectedWithoutMutation(t *testing.T) {
-	dir := shortTemp(t)
-	state, err := openStore(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := state.db.Update(func(tx *bolt.Tx) error { return tx.Bucket([]byte("meta")).Put([]byte("version"), []byte("999")) }); err != nil {
-		t.Fatal(err)
-	}
-	if err := state.db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	_, err = openStore(dir)
-	code(t, err, "state_version")
-	db, err := bolt.Open(filepath.Join(dir, "state.db"), 0600, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	if err := db.View(func(tx *bolt.Tx) error {
-		if string(tx.Bucket([]byte("meta")).Get([]byte("version"))) != "999" {
-			t.Fatal("unsupported version mutated")
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
+	for _, version := range []string{"1", "2", "3", "999"} {
+		t.Run(version, func(t *testing.T) {
+			dir := shortTemp(t)
+			state, err := openStore(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := state.db.Update(func(tx *bolt.Tx) error { return tx.Bucket([]byte("meta")).Put([]byte("version"), []byte(version)) }); err != nil {
+				t.Fatal(err)
+			}
+			if err := state.db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			_, err = openStore(dir)
+			code(t, err, "state_version")
+			db, err := bolt.Open(filepath.Join(dir, "state.db"), 0600, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := db.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			if err := db.View(func(tx *bolt.Tx) error {
+				if string(tx.Bucket([]byte("meta")).Get([]byte("version"))) != version {
+					t.Fatal("unsupported version mutated")
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

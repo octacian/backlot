@@ -78,6 +78,10 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 		if err := manifest.ValidateMachine(config); err != nil {
 			return result, err
 		}
+		if config.Caddy != nil {
+			value := manifest.CaddyDefaults(*config.Caddy)
+			config.Caddy = &value
+		}
 		configDigest = digest(data)
 	}
 	for name := range config.Tools {

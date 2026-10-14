@@ -5,46 +5,52 @@
   "$defs": {
     "CaddyConfig": {
       "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "managed",
+            "external"
+          ],
+          "description": "Gateway ownership; omitted retains legacy external mode."
+        },
+        "executable": {
+          "type": "string",
+          "description": "Absolute stock native Caddy executable; required only in managed mode."
+        },
         "https_port": {
           "type": "integer",
           "maximum": 65535,
           "minimum": 1,
-          "description": "Explicit HTTPS listener port; defaults to 443. Nondefault ports appear in the canonical origin."
+          "description": "Explicit HTTPS listener port; defaults to 8443 managed or 443 external. Nondefault ports appear in the canonical origin."
         },
         "endpoint": {
           "type": "string",
           "minLength": 1,
           "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^/?#@]+(/[^?#]*)?\\??#?$",
-          "description": "Local Docker unix socket URL or Caddy HTTP(S) admin URL."
+          "description": "Admin HTTP(S) URL; managed defaults to http://127.0.0.1:2020."
         },
         "scope": {
           "type": "string",
           "minLength": 1,
           "pattern": "^[a-z][a-z0-9_-]{0,62}$",
-          "description": "Identifier of the Backlot-owned gateway scope."
+          "description": "Owned external subroute ID; managed defaults to backlot-managed."
         },
         "domain_suffix": {
           "type": "string",
           "minLength": 1,
           "pattern": "^[a-z0-9-]+(\\.[a-z0-9-]+)+$",
-          "description": "Operator-managed lowercase domain suffix, including at least one dot."
+          "description": "External lowercase domain suffix; managed defaults to backlot.localhost."
         },
         "host_address": {
           "type": "string",
           "minLength": 1,
           "pattern": "^[^/\u0000 \n\r]+$",
-          "description": "Gateway-reachable host address for native upstreams."
+          "description": "Gateway-reachable upstream address; managed fixes 127.0.0.1."
         }
       },
       "additionalProperties": false,
       "type": "object",
-      "required": [
-        "endpoint",
-        "scope",
-        "domain_suffix",
-        "host_address"
-      ],
-      "description": "CaddyConfig identifies the operator-owned gateway scope and reachability."
+      "description": "CaddyConfig selects explicit managed or external gateway ownership."
     },
     "DockerConfig": {
       "properties": {
@@ -104,7 +110,7 @@
         },
         "caddy": {
           "$ref": "#/$defs/CaddyConfig",
-          "description": "Operator-owned gateway scope and reachability; no health check during planning."
+          "description": "Explicit managed or external gateway settings; no health check during planning."
         },
         "storage": {
           "$ref": "#/$defs/StorageConfig",

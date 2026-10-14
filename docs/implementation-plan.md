@@ -91,7 +91,7 @@ publication with optimistic concurrency, private intent/effect recovery, stable
 hostnames and mixed upstream/client contexts. See the [HTTPS guide](https.md).
 Owned real-gateway fixture evidence and real-domain trusted-certificate acceptance
 are separate gates; independent reviews and final frozen-candidate checks remain
-required before readiness. DNS/certificates/trust remain operator-owned.
+required before readiness. External DNS/certificates/trust remain operator-owned.
 
 Add the Caddy adapter for a bounded, owned route scope, unique stable hostnames,
 path routing, and concurrent configuration edits. Missing Caddy blocks only scenes
@@ -101,6 +101,26 @@ same trusted origin, including SSR and WebSockets.
 Keep automated tests on owned fixture gateways. Separately validate the real
 owned-domain/trusted-certificate workflow on macOS ARM64. Record any manual DNS/TLS
 setup and evidence honestly; mocked HTTP tests do not satisfy this gate.
+
+### Managed native local HTTPS
+
+Implemented for independent review: explicit managed/external configuration and
+legacy external defaults, daemon gateway start/stop/restart/status, private CA and
+saved configuration, loopback `.backlot.localhost:8443` origins, authenticated
+native guardian lifecycle and exact-route crash recovery. Stock Caddy handles
+local wildcard issuance/renewal with automatic trust installation disabled.
+The [superseding gateway ADR](adr/20261014T033700000Z-support-managed-local-ca-and-external-caddy-gateways.md)
+reconciles the former external-only decision. See [HTTPS operation](https.md).
+
+Owned native fixtures cover CLI-to-daemon-to-Caddy, normal host DNS with private
+client trust, paths/SSR/WebSockets/redirects/cookies, lifecycle conflicts, retained
+origins/data, actual worktree isolation and surviving/unavailable gateway recovery.
+These are fixture evidence, not system/browser trust acceptance. Independent
+reviews, complete frozen regression suites and exact-HEAD CI remain gates. Trusted
+browser/clean-machine macOS evidence is blocked pending a disposable environment;
+no browser-warning bypass or persistent trust mutation can replace it. Container
+local-HTTPS consumers, CA application references and a runnable adoption quickstart
+are outside this implementation slice.
 
 ## 6. Disposable results and evidence
 

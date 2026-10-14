@@ -44,12 +44,8 @@ logic. Applications own those operations and any application-level readiness
 probe. A TCP probe observes connectivity, which may precede application setup;
 use a declared native command probe when connectivity is insufficient.
 
-The durable state format is version 3. Version 1/2 state is rejected without
-modification; preserve it and use the matching older binary for its cleanup.
-There is no automatic migration in this development milestone. An older binary
-must not interpret mixed native/container ownership as native-only cleanup.
-Stop old environments with their matching binary before selecting a fresh
-`--state-dir`; keep the old journal until cleanup is verified.
+The durable state format is version 4. Older formats are rejected without
+modification because older binaries cannot interpret managed gateway ownership.
 
 ## Generations, jobs and drift
 

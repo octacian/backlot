@@ -21,6 +21,7 @@ import (
 )
 
 type execution struct {
+	caCertPath    string
 	kept          bool
 	cancel        context.CancelFunc
 	done          chan struct{}
@@ -194,6 +195,10 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 			return empty, err
 		}
 	}
+	caCertPath, err := s.store.consumerCACertPath(snapshot)
+	if err != nil {
+		return empty, err
+	}
 	if s.executions == nil {
 		s.executions = map[string]*execution{}
 	}
@@ -232,7 +237,7 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 		return empty, err
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
-	entry := &execution{cancel: cancel, done: make(chan struct{}), jobs: map[string]workload{}, services: map[string]workload{}, components: map[string]workload{}, source: identity, grace: mustGrace(request.Options)}
+	entry := &execution{caCertPath: caCertPath, cancel: cancel, done: make(chan struct{}), jobs: map[string]workload{}, services: map[string]workload{}, components: map[string]workload{}, source: identity, grace: mustGrace(request.Options)}
 	s.executions[id] = entry
 	response.Instance, err = s.store.inspect(id)
 	if err != nil {

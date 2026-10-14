@@ -1,12 +1,14 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"net"
 	"net/http"
@@ -23,6 +25,7 @@ import (
 	"github.com/octacian/backlot/internal/localipc"
 	"github.com/octacian/backlot/internal/manifest"
 	"github.com/octacian/backlot/internal/native"
+	"github.com/octacian/backlot/internal/plan"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -457,4 +460,51 @@ func (s *service) requireManaged(ctx context.Context, c v1.CaddyConfig) error {
 		return problem("gateway_unavailable", "start the managed gateway explicitly before running published scenes")
 	}
 	return nil
+}
+
+// consumerCACertPath resolves only explicitly mapped trust, before workload
+// allocation. It returns Caddy's existing public certificate, never an export
+// copy or key path. The private state and pinned CA must still be usable.
+func (s *store) consumerCACertPath(snapshot plan.Snapshot) (string, error) {
+	needed := false
+	for _, component := range snapshot.Plan.Components {
+		for key, value := range component.Environment {
+			if value.Redacted {
+				value = snapshot.Secrets[component.Name+"/environment/"+key]
+			}
+			if r := value.Symbolic; r != nil && r.Kind == "resource" && r.Field == "ca_cert_path" {
+				if component.Runtime != v1.Native || snapshot.Plan.Publish == nil || snapshot.Plan.Publish.Resource != r.Name || snapshot.Plan.Resources[r.Name].Kind != "origin" {
+					return "", problem("invalid_contract", "ca_cert_path requires a selected native consumer and published origin")
+				}
+				needed = true
+			}
+		}
+	}
+	if !needed {
+		return "", nil
+	}
+	if snapshot.Caddy == nil || snapshot.Caddy.Mode != "managed" {
+		return "", problem("invalid_contract", "ca_cert_path requires explicit managed Caddy configuration")
+	}
+	r, err := s.managed()
+	if err != nil {
+		return "", err
+	}
+	if !r.Initialized || r.RootHash == "" || !reflect.DeepEqual(*snapshot.Caddy, r.Config) {
+		return "", problem("gateway_ca", "managed CA has no matching pinned identity; start the configured gateway explicitly")
+	}
+	if err := validateManagedFiles(s.directory, r); err != nil {
+		return "", err
+	}
+	_, _, storage := managedPaths(s.directory)
+	path := filepath.Join(storage, "pki", "authorities", "local", "root.crt")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", problem("gateway_ca", "managed public root certificate is unavailable")
+	}
+	block, rest := pem.Decode(data)
+	if block == nil || block.Type != "CERTIFICATE" || len(block.Headers) != 0 || len(bytes.TrimSpace(rest)) != 0 || !bytes.Equal(bytes.TrimSpace(data), bytes.TrimSpace(pem.EncodeToMemory(block))) {
+		return "", problem("gateway_ca", "managed public root must contain only its PEM certificate; preserve original state")
+	}
+	return path, nil
 }

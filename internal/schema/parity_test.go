@@ -57,6 +57,7 @@ scenes:
 		{"resource network", "kind: resource, name: network, field: name", "port: ''"},
 		{"resource secret", "kind: resource, name: secret, field: value", "port: ''"},
 		{"resource origin", "kind: resource, name: origin, field: url", "port: ''"},
+		{"resource origin CA", "kind: resource, name: origin, field: ca_cert_path", "port: ''"},
 		{"output", "kind: output, name: build, field: path", "port: ''"},
 		{"service host", "kind: service, name: web, field: host", "port: ''"},
 		{"service port", "kind: service, name: web, field: port, port: http", ""},

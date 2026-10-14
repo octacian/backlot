@@ -118,9 +118,12 @@ origins/data, actual worktree isolation and surviving/unavailable gateway recove
 These are fixture evidence, not system/browser trust acceptance. Independent
 reviews, complete frozen regression suites and exact-HEAD CI remain gates. Trusted
 browser/clean-machine macOS evidence is blocked pending a disposable environment;
-no browser-warning bypass or persistent trust mutation can replace it. Container
-local-HTTPS consumers, CA application references and a runnable adoption quickstart
-are outside this implementation slice.
+no browser-warning bypass or persistent trust mutation can replace it.
+
+The managed origin also exposes `ca_cert_path` for explicit native environment
+assignments, with symbolic offline planning and validated existing public-root
+resolution. See [application trust](https.md#explicit-application-trust). Container
+local-HTTPS consumers and a runnable adoption quickstart remain separate slices.
 
 ## 6. Disposable results and evidence
 

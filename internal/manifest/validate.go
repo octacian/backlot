@@ -104,6 +104,9 @@ func Validate(m v1.Manifest) error {
 			}
 		}
 		for key, fixture := range c.Fixtures {
+			if caCertPath(fixture.Value) {
+				return invalid("components."+name+".fixtures."+key, "ca_cert_path is only supported in native environment assignments")
+			}
 			if err := value(m, fixture.Value, "components."+name+".fixtures."+key); err != nil {
 				return err
 			}
@@ -197,7 +200,8 @@ func value(m v1.Manifest, v v1.Value, field string) error {
 	case "resource":
 		resource, ok := m.Resources[r.Name]
 		fields := map[string]string{"port": "port", "directory": "path", "volume": "name", "network": "name", "secret": "value", "origin": "url"}
-		if !ok || r.Field != fields[resource.Kind] || r.Port != "" {
+		validField := r.Field == fields[resource.Kind] || (resource.Kind == "origin" && r.Field == "ca_cert_path")
+		if !ok || !validField || r.Port != "" {
 			return invalid(field, "reference must use the declared resource kind's field")
 		}
 	case "output":
@@ -526,6 +530,9 @@ func selectedReference(m v1.Manifest, s v1.Scene, c v1.Component, v v1.Value, fi
 		return nil
 	}
 	r := v.Ref
+	if caCertPath(v) && c.Runtime != v1.Native {
+		return invalid(field, "ca_cert_path is only supported in native environment assignments")
+	}
 	switch r.Kind {
 	case "resource":
 		if !slices.Contains(s.Resources, r.Name) || !slices.Contains(c.Resources, r.Name) {
@@ -701,4 +708,8 @@ func validURLPort(u *url.URL) bool {
 		return !strings.HasSuffix(u.Host, ":")
 	}
 	return validNetworkPort(u.Port())
+}
+
+func caCertPath(v v1.Value) bool {
+	return v.Ref != nil && v.Ref.Kind == "resource" && v.Ref.Field == "ca_cert_path"
 }

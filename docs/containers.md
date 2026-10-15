@@ -116,6 +116,20 @@ including unrelated consumers; no broad prune or forced volume/network deletion
 is used. Image-declared anonymous volumes belong to the owned container and are
 removed with it.
 
+Bind-consumer inspection must establish a host filesystem identity before
+declaring a source unrelated to retained directories. Docker Desktop can report
+a VM-prefixed source such as `/host_mnt/private/...` which the host cannot resolve.
+On native macOS, the adapter verifies the configured local Engine's Info reports
+Docker Desktop and Linux before reconciling this exact clean prefix to a fully
+existing canonical host counterpart. It compares every viable raw and translated
+identity, so a real host `/host_mnt` path cannot hide a consumed directory. A valid
+unrelated peer can continue running while another instance resets or destroys.
+This applies only to inspected Engine metadata, never ordinary project mount
+inputs or their private-state fences. Unknown providers/namespaces, unresolved
+counterparts, unclean paths and uncertain identities preserve storage with an
+actionable diagnostic. Remove the consumer or make its source verifiable before
+retrying reset/destroy; the consumer is never stopped or removed implicitly.
+
 After a daemon crash, verifiably owned surviving containers are stopped, available
 logs are retained, and containers are removed. Data/credentials remain retained;
 instances become interrupted and require explicit restart. Unknown ownership stays

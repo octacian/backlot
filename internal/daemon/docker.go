@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -147,6 +148,7 @@ func (d *dockerEngine) noConsumers(ctx context.Context, g resourceGeneration) er
 	if err != nil {
 		return err
 	}
+	desktop, checkedDesktop := false, false
 	for _, item := range list.Items {
 		inspect, err := d.ContainerInspect(ctx, item.ID, client.ContainerInspectOptions{})
 		if errdefs.IsNotFound(err) {
@@ -165,7 +167,17 @@ func (d *dockerEngine) noConsumers(ctx context.Context, g resourceGeneration) er
 					return problem("cleanup_failed", "storage still has a Docker consumer; preserved")
 				}
 				if r.Kind == "directory" && m.Type == mount.TypeBind {
-					overlap, err := bindSourcesOverlap(r.Name, m.Source)
+					if desktopBindSource(m.Source) && !checkedDesktop {
+						checkedDesktop = true
+						if runtime.GOOS == "darwin" {
+							info, err := d.Info(ctx, client.InfoOptions{})
+							if err != nil {
+								return problem("cleanup_failed", "cannot verify Docker bind-source namespace; storage preserved")
+							}
+							desktop = info.Info.OperatingSystem == "Docker Desktop" && info.Info.OSType == "linux"
+						}
+					}
+					overlap, err := engineBindSourceOverlap(r.Name, m.Source, desktop, filepath.EvalSymlinks)
 					if err != nil {
 						return err
 					}
@@ -185,6 +197,56 @@ func (d *dockerEngine) noConsumers(ctx context.Context, g resourceGeneration) er
 		}
 	}
 	return nil
+}
+
+func desktopBindSource(source string) bool {
+	return source == "/host_mnt" || strings.HasPrefix(source, "/host_mnt/")
+}
+
+// engineBindSourceOverlap interprets inspected provider metadata only. Generic
+// user/private bind inputs must keep their ordinary host filesystem semantics.
+// Desktop provenance is verified once per inspection on native macOS. Both
+// viable identities are compared so a real host /host_mnt tree cannot hide a
+// translated consumer; unknown/partially resolved namespaces preserve storage.
+// resolve is a narrow filesystem seam for the dual-identity regression, which
+// cannot create a global /host_mnt tree in an owned fixture.
+func engineBindSourceOverlap(directory, source string, desktop bool, resolve func(string) (string, error)) (bool, error) {
+	uncertain := func() error {
+		return problem("cleanup_failed", "Docker bind source has no verifiable host filesystem identity; storage preserved until the consumer is removed or its source is verifiable")
+	}
+	if !filepath.IsAbs(source) || filepath.Clean(source) != source {
+		return false, uncertain()
+	}
+	candidates := []string{source}
+	vmSource := desktopBindSource(source)
+	if vmSource {
+		if !desktop {
+			return false, uncertain()
+		}
+		counterpart := strings.TrimPrefix(source, "/host_mnt")
+		if counterpart == "" {
+			counterpart = "/"
+		}
+		candidates = append(candidates, counterpart)
+	}
+	var identities []string
+	for i, candidate := range candidates {
+		identity, err := resolve(candidate)
+		if err != nil {
+			if vmSource && i == 0 && os.IsNotExist(err) {
+				continue
+			}
+			return false, uncertain()
+		}
+		identities = append(identities, identity)
+	}
+	for _, identity := range identities {
+		overlap, err := bindSourcesOverlap(directory, identity)
+		if err != nil || overlap {
+			return overlap, err
+		}
+	}
+	return false, nil
 }
 
 // bindSourcesOverlap resolves aliases before comparing path components in both

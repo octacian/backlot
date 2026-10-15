@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -390,6 +391,152 @@ func TestDockerRuntime(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, out)
 	}
+	t.Run("native-directory-desktop-bind-preservation", func(t *testing.T) {
+		if runtime.GOOS != "darwin" {
+			t.Skip("requires the explicitly supported macOS Docker Desktop topology")
+		}
+		for _, relationship := range []string{"same", "parent", "child", "peer"} {
+			t.Run(relationship, func(t *testing.T) {
+				h := newDockerHarness(t, binary, endpoint)
+				tool, err := exec.LookPath("true")
+				if err != nil {
+					t.Fatal(err)
+				}
+				h.manifest.Tools = map[string]string{"true": tool}
+				h.manifest.Components = map[string]v1.Component{"job": {Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "true"}, Resources: []string{"directory"}}}
+				h.manifest.Scenes = map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"job"}, Resources: []string{"directory"}}}
+				h.write()
+				id := h.state(h.run("dev").Instance.ID, v1.RuntimeReady).Instance.ID
+				paths, err := filepath.Glob(filepath.Join(h.dir, "data", "*"))
+				if err != nil || len(paths) != 1 {
+					t.Fatal("private directory allocation missing", err)
+				}
+				directory, err := filepath.EvalSymlinks(paths[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				sub := filepath.Join(directory, "sub")
+				if err := os.Mkdir(sub, 0700); err != nil {
+					t.Fatal(err)
+				}
+				for _, location := range []string{directory, sub} {
+					if err := os.WriteFile(filepath.Join(location, "witness"), []byte("keep-directory-data"), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				source, witness := directory, "/used/witness"
+				var peerHarness *dockerHarness
+				var peerID string
+				switch relationship {
+				case "parent":
+					source = filepath.Dir(directory)
+					witness = "/used/" + filepath.Base(directory) + "/witness"
+				case "child":
+					source = sub
+				case "peer":
+					peerHarness = newDockerHarness(t, binary, endpoint)
+					peerHarness.manifest = h.manifest
+					peerHarness.write()
+					peerID = peerHarness.state(peerHarness.run("dev").Instance.ID, v1.RuntimeReady).Instance.ID
+					peerPaths, err := filepath.Glob(filepath.Join(peerHarness.dir, "data", "*"))
+					if err != nil || len(peerPaths) != 1 {
+						t.Fatal("peer directory missing", err)
+					}
+					source, err = filepath.EvalSymlinks(peerPaths[0])
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(source, "witness"), []byte("keep-directory-data"), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				// Explicitly choose the observed Desktop VM representation for this
+				// owned fixture; production never guesses or strips this prefix.
+				vmSource := "/host_mnt" + source
+				foreign := ownedResource{Kind: "container", Token: newID()}
+				foreign.Name = "backlot-fixture-" + foreign.Token
+				t.Cleanup(func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancel()
+					if err := removeContainer(ctx, h.engine, foreign); err != nil {
+						h.cleanupUnverified = true
+						t.Error("owned foreign-consumer cleanup uncertain", err)
+					}
+				})
+				created, err := h.engine.ContainerCreate(context.Background(), client.ContainerCreateOptions{Name: foreign.Name, Config: &container.Config{Image: "alpine:3.21", Cmd: []string{"sleep", "300"}, Labels: resourceLabels(foreign)}, HostConfig: &container.HostConfig{Mounts: []mount.Mount{{Type: mount.TypeBind, Source: vmSource, Target: "/used"}}}})
+				if err != nil {
+					t.Fatal("create owned Desktop bind consumer", err)
+				}
+				foreign.ID = created.ID
+				if _, err := h.engine.ContainerStart(context.Background(), foreign.ID, client.ContainerStartOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				inspect, err := h.engine.ContainerInspect(context.Background(), foreign.ID, client.ContainerInspectOptions{})
+				if err != nil || len(inspect.Container.Mounts) != 1 || inspect.Container.Mounts[0].Source != vmSource {
+					t.Fatal("fixture did not produce the exact VM-prefixed directory metadata", err)
+				}
+				t.Log("D21-P1-001 observed directory bind metadata:", relationship, inspect.Container.Mounts[0].Source)
+				if output, code := h.exec(foreign, []string{"cat", witness}); code != 0 || output != "keep-directory-data" {
+					t.Fatal("VM-prefixed bind did not consume the owned host directory")
+				}
+				request := h.request("dev")
+				request.InstanceID = id
+				if relationship == "peer" {
+					reset, err := h.cli.Reset(context.Background(), request)
+					if err != nil {
+						t.Fatal("unrelated VM-prefixed peer bind blocked reset", err)
+					}
+					h.state(reset.Instance.ID, v1.RuntimeReady)
+					if _, err := h.cli.Destroy(context.Background(), id); err != nil {
+						t.Fatal("unrelated VM-prefixed peer bind blocked destroy", err)
+					}
+					peerHarness.state(peerID, v1.RuntimeReady)
+					data, readErr := os.ReadFile(filepath.Join(source, "witness"))
+					if readErr != nil || string(data) != "keep-directory-data" || !h.engineAlive(foreign) {
+						t.Fatal("unrelated peer data/consumer changed", readErr)
+					}
+					if output, code := h.exec(foreign, []string{"cat", witness}); code != 0 || output != "keep-directory-data" {
+						t.Fatal("unrelated live peer mount lost its contents")
+					}
+					if err := removeContainer(context.Background(), h.engine, foreign); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := peerHarness.cli.Destroy(context.Background(), peerID); err != nil {
+						t.Fatal(err)
+					}
+					return
+				}
+				for _, action := range []string{"reset", "destroy"} {
+					if action == "reset" {
+						_, err = h.cli.Reset(context.Background(), request)
+					} else {
+						_, err = h.cli.Destroy(context.Background(), id)
+					}
+					var detail *v1.PlanError
+					if !errors.As(err, &detail) || detail.Code != "cleanup_failed" {
+						t.Fatal(action, "did not preserve uncertain directory consumer", err)
+					}
+					data, readErr := os.ReadFile(filepath.Join(directory, "witness"))
+					if readErr != nil || string(data) != "keep-directory-data" || !h.engineAlive(foreign) {
+						t.Fatal(action, "changed owned data or foreign consumer", readErr)
+					}
+					if output, code := h.exec(foreign, []string{"cat", witness}); code != 0 || output != "keep-directory-data" {
+						t.Fatal(action, "lost live foreign directory contents")
+					}
+				}
+				if err := removeContainer(context.Background(), h.engine, foreign); err != nil {
+					t.Fatal(err)
+				}
+				h.state(h.restart(id, true).Instance.ID, v1.RuntimeReady)
+				if _, err := os.Stat(directory); !os.IsNotExist(err) {
+					t.Fatal("explicit reset retry did not remove the old generation", err)
+				}
+				if _, err := h.cli.Destroy(context.Background(), id); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	})
 	t.Run("native-directory-configured-consumer-cleanup", func(t *testing.T) {
 		h := newDockerHarness(t, binary, endpoint)
 		tool, err := exec.LookPath("true")

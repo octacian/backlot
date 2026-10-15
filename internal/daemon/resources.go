@@ -134,13 +134,14 @@ func safeRestart(old, next plan.Snapshot) error {
 		Image          *v1.PlannedValue
 		Args           []string
 		Resources      []string
+		HostMappings   []v1.HostMapping
 		Mounts         []v1.Mount
 		Initialization *v1.PlannedComponent
 	}
 	contracts := func(snap plan.Snapshot) []contract {
 		var result []contract
 		for _, c := range snap.Plan.Components {
-			x := contract{Name: c.Name, Resources: c.Resources, Mounts: c.Mounts, Runtime: c.Runtime}
+			x := contract{Name: c.Name, Resources: c.Resources, Mounts: c.Mounts, HostMappings: c.HostMappings, Runtime: c.Runtime}
 			if c.Runtime == v1.Container && len(c.Mounts) > 0 {
 				x.Image = c.Image
 				x.Args = c.Args

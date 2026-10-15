@@ -124,6 +124,7 @@ components:
     resources: [origin, port]
     ports: {http: {resource: port, container_port: 8080}}
     mounts: [{origin_ca_cert: origin, target: /app/root.pem, read_only: true}]
+    host_mappings: [{origin: origin, host: host-gateway}]
     environment: {assign: {SSL_CERT_FILE: {ref: {kind: resource, name: origin, field: ca_cert_path}}}}
     readiness: {kind: tcp, target: {ref: {kind: resource, name: port, field: port}}, timeout: 1s}
 scenes:
@@ -146,7 +147,7 @@ scenes:
 		t.Fatal(err)
 	}
 	c := p.Components[0]
-	if c.Environment["SSL_CERT_FILE"].Symbolic == nil || c.Mounts[0].OriginCACert != "origin" || c.Mounts[0].Target != "/app/root.pem" {
+	if c.Environment["SSL_CERT_FILE"].Symbolic == nil || c.Mounts[0].OriginCACert != "origin" || c.Mounts[0].Target != "/app/root.pem" || len(c.HostMappings) != 1 || c.HostMappings[0].Host != "host-gateway" {
 		t.Fatal(c)
 	}
 	source, err := Locate(root)
@@ -161,5 +162,41 @@ scenes:
 	write(t, config, []byte("version: backlot/v1\ndocker: {endpoint: 'unix:///nonexistent/backlot21.sock'}\ncaddy: {endpoint: 'http://127.0.0.1:2019', scope: backlot, domain_suffix: example.test, host_address: localhost}\n"))
 	if _, err := Resolve(request); err == nil {
 		t.Fatal("external origin CA mount accepted")
+	}
+	mappingOnly := strings.Replace(project, "    environment: {assign: {SSL_CERT_FILE: {ref: {kind: resource, name: origin, field: ca_cert_path}}}}\n", "", 1)
+	mappingOnly = strings.Replace(mappingOnly, "    mounts: [{origin_ca_cert: origin, target: /app/root.pem, read_only: true}]\n", "", 1)
+	write(t, filepath.Join(root, "backlot.yaml"), []byte(mappingOnly))
+	if _, err := Resolve(request); err == nil {
+		t.Fatal("external mode accepted new managed origin mapping")
+	}
+}
+
+func TestContainerHTTPSExampleOffline(t *testing.T) {
+	noDefaultConfig(t)
+	root := t.TempDir()
+	// Metadata preparation validates explicit native executables without running
+	// them. Stand in for the application's separately documented build step.
+	if err := os.WriteFile(filepath.Join(root, "app"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"backlot.yaml", "machine.example.yaml"} {
+		data, err := os.ReadFile(filepath.Join("../../examples/container-https", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(root, name), data)
+	}
+	for _, scene := range []string{"dev", "test"} {
+		request := v1.PlanRequest{ProjectPath: root, Scene: scene, ConfigPath: filepath.Join(root, "machine.example.yaml")}
+		if _, err := Resolve(request); err != nil {
+			t.Fatal(scene, err)
+		}
+		source, err := Locate(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Prepare(source, request); err != nil {
+			t.Fatal("example metadata preparation contacted providers", scene, err)
+		}
 	}
 }

@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../schemas/machine-config-v1.schema.json
+version: backlot/v1
+docker:
+  # Replace YOUR_USER with the local Docker Desktop user's home path.
+  endpoint: unix:///Users/YOUR_USER/.docker/run/docker.sock
+caddy:
+  mode: managed
+  executable: /opt/homebrew/bin/caddy
+  endpoint: http://127.0.0.1:2020
+  https_port: 8443

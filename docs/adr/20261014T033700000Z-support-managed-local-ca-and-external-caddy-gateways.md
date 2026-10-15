@@ -1,11 +1,11 @@
 ---
 title: 'Support managed local CA and external Caddy gateways'
 date: '2026-10-14'
-status: accepted
+status: superseded
 summary: 'Add a dedicated native local-CA gateway while preserving external Caddy and explicit application configuration to make host HTTPS practical without public DNS.'
 tags: [gateway, https, trust, lifecycle, configuration, containers]
 supersedes: [20261007T052013841Z-declare-generic-containers-and-inject-configuration-through-environment.md]
-superseded_by: []
+superseded_by: [20261014T215536946Z-extend-managed-https-to-explicit-container-consumers.md]
 ---
 
 # Support managed local CA and external Caddy gateways

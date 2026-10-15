@@ -210,6 +210,40 @@ resolver override or browser proceed-anyway is never evidence. External mode's
 real-domain/container acceptance remains its own contract. Full release/epic
 walkthroughs remain outside this implementation slice.
 
+## Managed container trust integration
+
+Use the same exclusive serial fixture grant, pre-pulled `alpine:3.21`, native
+Caddy and explicit local Docker socket. This suite targets macOS ARM64 Docker
+Desktop Linux bridge consumers:
+
+```sh
+BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^TestContainerManagedHTTPSRuntime$' -count=1 -v
+```
+
+The real daemon suite builds the [shipped Go application](../examples/container-https/README.md)
+and a unique image from the pre-pulled Alpine base. It verifies explicit Engine
+`host-gateway` canonical mappings and readonly public-root file mounts, correct/
+missing/wrong trust with ordinary Go root loading and DNS, native frontend/API
+with container SSR/test, variable WebSockets, redirects and secure cookies. A
+private rejecting socket verifies zero Docker contacts for the native-only peer
+despite an unselected container declaration. Actual mount/mapping inspection,
+unsafe drift fencing, peer isolation, fresh creates across stop/start/restart/
+reset, volume retention/reset, destroy replacement and container/route journal
+intent-effect crash recovery preserve the existing ownership contracts.
+
+Docker Desktop may report the public bind source using its exact `/host_mnt`
+VM prefix and may retain `host-gateway` in inspected ExtraHosts. The fixture
+checks the exact canonical public-file source in either observed fixture
+representation, bind type, configured/effective readonly flags, actual file bytes
+and actual container resolution; it never accepts parent mounts or infers trust
+from a successful TCP connection. Cleanup is registered before faults and
+reconciles only owned resources, preserving uncertainty. Skips for absent opt-in
+settings are incomplete provider evidence. The complete new suite joins the
+existing frozen provider gates after independent reviews; it does not establish
+browser/system trust adoption or exact published-HEAD CI.
+
 ## Runnable macOS quickstart integration
 
 The shipped [macOS example](../examples/macos-quickstart/README.md) has a separate

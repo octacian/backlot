@@ -27,8 +27,9 @@ behind explicit boundaries so Linux and native Windows can follow later.
 Operate on one machine with a local Docker engine. Publishing supports an
 explicitly managed stock native Caddy local-CA gateway
 with loopback `.backlot.localhost:8443` origins, or an externally managed native/
-container Caddy gateway with operator DNS/certificates. Managed mode targets host/
-browser/native clients on macOS ARM64; external mode can support LAN applications.
+container Caddy gateway with operator DNS/certificates. Managed mode targets
+host/browser/native clients and explicitly configured Docker Desktop Linux bridge
+consumers on macOS ARM64; external mode can support LAN applications.
 Trust setup is a separate explicit operator action; administration stays local.
 
 Required workflows:
@@ -273,7 +274,6 @@ Frontend UI; remote/multi-host orchestration; Linux/Windows release support;
 toolchain/version-manager installation; automatic watch/build/restart; arbitrary
 job retriggering; shared-database provisioning; Compose import/export; CI scene
 execution guarantees; DNS/router management; public certificate provisioning; automatic trust installation;
-container consumers of managed local HTTPS;
 raw Caddyfiles; generated application config; atomic multi-service rollouts;
 transparent continuation across daemon crashes.
 

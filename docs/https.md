@@ -3,7 +3,7 @@
 Backlot supports an explicit daemon-managed native local-CA gateway and an
 externally managed Caddy JSON API. Omitted `caddy.mode` retains external mode.
 Only published scenes require a gateway; other scenes and metadata-only `prepare`
-do not contact it. The [gateway decision](adr/20261014T033700000Z-support-managed-local-ca-and-external-caddy-gateways.md)
+do not contact it. The [gateway decision](adr/20261014T215536946Z-extend-managed-https-to-explicit-container-consumers.md)
 records ownership and trust boundaries.
 
 ## Managed local HTTPS on macOS ARM64
@@ -28,8 +28,9 @@ persisted random scope identity for actual effects. It fixes the suffix to `back
 and upstream address to `127.0.0.1`. HTTPS listens on IPv4/IPv6 loopback only, on
 port 8443 by default. HTTP redirect and HTTP/3 listeners are disabled. Different
 ports can be configured explicitly; conflicts fail without fallback/takeover.
-Docker may supply dependencies or loopback-mapped HTTP upstreams; local HTTPS
-origins are for host/browser/native consumers, not container-origin consumers.
+Docker may supply dependencies or loopback-mapped HTTP upstreams. Explicitly
+configured Docker Desktop bridge consumers can use the same canonical HTTPS
+hostname; see [container trust and mapping](#public-root-file-mounts-for-containers).
 
 Start the daemon and gateway explicitly, then install trust as a separate operator
 action using the configured stock executable and **owned managed admin endpoint**:
@@ -172,10 +173,12 @@ frontend/API/SSR and disposable tests using this mapping.
 
 ### Public-root file mounts for containers
 
-Container components explicitly declare a typed mount:
+Container components explicitly declare an origin host mapping and typed mount:
 
 ```yaml
 resources: [origin]
+host_mappings:
+  - {origin: origin, host: host-gateway}
 mounts:
   - {origin_ca_cert: origin, target: /app/trust/backlot-root.pem, read_only: true}
 environment:
@@ -188,7 +191,11 @@ The origin must be attached, selected and published, with explicit managed Caddy
 configuration. `origin_ca_cert` is exclusive with `resource` and `output`; it
 mounts only the existing validated public root as a read-only file at the chosen
 absolute target. Duplicate origin mounts and overlapping mount targets are
-rejected. Keys and CA directories are never mount sources. The environment
+rejected. Generic storage/output bind sources cannot include private gateway
+state or its parent directories, including through filesystem aliases. Checkout
+output mounts also cannot expose private daemon state, even before CA initialization;
+owned retained data uses declared resource mounts. Keys and CA
+directories are never mount sources. The environment
 reference resolves to this container target, while native consumers retain the
 host public-root path. A mount can be used without an environment assignment when
 the application explicitly reads that file itself. No runtime settings are
@@ -200,6 +207,29 @@ Node containers can map `NODE_EXTRA_CA_CERTS` to the same `ca_cert_path` instead
 the startup and explicit `ca` override rules above still apply. Applications own
 all other runtime-specific trust settings. Container hostname reachability must
 also be configured explicitly; mounting a root does not provide DNS.
+
+The bounded topology is macOS ARM64 with Docker Desktop Linux engine bridge
+containers and stock native managed Caddy. Configure `host: host-gateway`
+explicitly. Backlot passes only the owned canonical hostname and this special
+[Engine token](https://docs.docker.com/reference/cli/docker/container/run/#add-entries-to-container-hosts-file---add-host)
+to Docker ExtraHosts; Engine chooses the current host address at each container
+create. Restart creates a fresh container and refreshes the mapping. Already
+running containers need recreation after Engine networking changes. No resolver
+image/container, DNS-name substitution, numeric copying, host DNS or fallback is
+involved. DNS names such as `host.docker.internal` are not accepted in this field.
+An Engine without the required token support fails container creation with a
+provider diagnostic. HTTPS and admin listeners stay on host loopback. Other
+engines, Linux-host, Windows/WSL, remote Docker and general LAN access are outside
+this support claim. Engine `host-gateway` and Docker Desktop's
+`host.docker.internal` matched in owned fixtures; Docker's VM gateway name is a
+different address, and equality across other topologies is not assumed.
+
+The [runnable Go/Alpine example](../examples/container-https/README.md) combines a
+native frontend/API with container SSR and a disposable HTTPS client. The same
+manifest declarations work for Node containers by explicitly assigning
+`NODE_EXTRA_CA_CERTS` instead of `SSL_CERT_FILE`; application code that specifies
+its own `ca` must explicitly include the mounted root. No additional Node runtime
+matrix is implied by this example.
 
 ## External gateway operator setup
 

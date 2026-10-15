@@ -41,6 +41,9 @@ func TestRetainedDriftContracts(t *testing.T) {
 		func(s *plan.Snapshot) { s.Plan.Resources = map[string]v1.Resource{"data": {Kind: "directory"}} },
 		func(s *plan.Snapshot) { s.Plan.Components[0].Image = ptrPlanned(literal("db:2")) },
 		func(s *plan.Snapshot) { s.Plan.Components[0].Mounts = []v1.Mount{{Resource: "data", Target: "/other"}} },
+		func(s *plan.Snapshot) {
+			s.Plan.Components[0].HostMappings = []v1.HostMapping{{Origin: "origin", Host: "host-gateway"}}
+		},
 		func(s *plan.Snapshot) { s.Secrets["db/environment/PASSWORD"] = literal("changed") },
 		func(s *plan.Snapshot) {
 			s.Plan.Components[0].Policy = v1.FreshOnly

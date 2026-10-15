@@ -35,24 +35,25 @@ type PlannedValue struct {
 
 // PlannedComponent contains selected work in dependency order.
 type PlannedComponent struct {
-	Artifacts   map[string]ArtifactSource `json:"artifacts,omitempty"`
-	Fixtures    map[string]PlannedFixture `json:"fixtures,omitempty"`
-	Name        string                    `json:"name"`
-	Kind        ComponentKind             `json:"kind"`
-	Runtime     Runtime                   `json:"runtime"`
-	Command     *Command                  `json:"command,omitempty"`
-	Args        []string                  `json:"args,omitempty"`
-	Policy      JobPolicy                 `json:"policy,omitempty"`
-	Initializes []string                  `json:"initializes,omitempty"`
-	DependsOn   []Dependency              `json:"depends_on,omitempty"`
-	Resources   []string                  `json:"resources,omitempty"`
-	Outputs     []string                  `json:"outputs,omitempty"`
-	Ports       map[string]ServicePort    `json:"ports,omitempty"`
-	Mounts      []Mount                   `json:"mounts,omitempty"`
-	Readiness   *PlannedProbe             `json:"readiness,omitempty"`
-	Executable  string                    `json:"executable,omitempty"`
-	Environment map[string]PlannedValue   `json:"environment"`
-	Image       *PlannedValue             `json:"image,omitempty"`
+	Artifacts    map[string]ArtifactSource `json:"artifacts,omitempty"`
+	Fixtures     map[string]PlannedFixture `json:"fixtures,omitempty"`
+	Name         string                    `json:"name"`
+	Kind         ComponentKind             `json:"kind"`
+	Runtime      Runtime                   `json:"runtime"`
+	Command      *Command                  `json:"command,omitempty"`
+	Args         []string                  `json:"args,omitempty"`
+	Policy       JobPolicy                 `json:"policy,omitempty"`
+	Initializes  []string                  `json:"initializes,omitempty"`
+	DependsOn    []Dependency              `json:"depends_on,omitempty"`
+	Resources    []string                  `json:"resources,omitempty"`
+	Outputs      []string                  `json:"outputs,omitempty"`
+	Ports        map[string]ServicePort    `json:"ports,omitempty"`
+	HostMappings []HostMapping             `json:"host_mappings,omitempty"`
+	Mounts       []Mount                   `json:"mounts,omitempty"`
+	Readiness    *PlannedProbe             `json:"readiness,omitempty"`
+	Executable   string                    `json:"executable,omitempty"`
+	Environment  map[string]PlannedValue   `json:"environment"`
+	Image        *PlannedValue             `json:"image,omitempty"`
 }
 
 // ErrorResponse is the shared actionable error envelope for finite operations.

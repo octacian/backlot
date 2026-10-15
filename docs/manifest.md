@@ -112,6 +112,17 @@ does not overlap any other mount. The unused source may be omitted or an empty s
 exactly one source must have a nonempty value. No external volume/container
 adoption is implied.
 
+Container `host_mappings` explicitly list `{origin: origin, host: host-gateway}`.
+The managed origin must be attached, selected and published. Only its canonical
+hostname is mapped for that consumer. The sole supported `host` is the explicit
+Engine `host-gateway` token; DNS names, numeric addresses, arbitrary aliases,
+duplicates and native declarations are rejected. Docker expands the token when
+creating each container, including fresh containers on restart. No helper image,
+host-DNS lookup, copied IP or global resolver change is involved. Planning
+preserves this intent without contacting Docker. Unsupported Engine mappings
+fail container creation; there is no implicit fallback.
+See [container HTTPS](https.md#public-root-file-mounts-for-containers).
+
 Services declare named `ports`, each with an attached port `resource`, and an
 explicit `readiness` probe. Container ports additionally require `container_port`
 in 1..65535 for the image's listener; native ports omit it. Jobs cannot declare readiness or ports. A port

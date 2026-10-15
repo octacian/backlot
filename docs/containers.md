@@ -58,7 +58,15 @@ are scoped to an attempt and bound on loopback by default; explicit machine
 `docker.publish_address` selects another numeric interface. Containers use service
 references for private DNS names and internal ports. Container-to-native references
 require explicit `docker.host_address` and reachable native listener interfaces;
-see the [HTTPS/mixed guide](https.md).
+see the [HTTPS/mixed guide](https.md). Managed HTTPS consumers on
+macOS ARM64 Docker Desktop explicitly declare origin `host_mappings` and read-only
+`origin_ca_cert` mounts. The explicit `host: host-gateway` Engine token expands
+at each container create, without helper images or copied IP addresses.
+`ca_cert_path` resolves to the chosen container file target in explicit
+application environment assignments; it never exposes the host path or signing
+keys. These declarations participate in conservative retained-contract drift
+checks. See [container application trust](https.md#public-root-file-mounts-for-containers).
+
 
 A fresh-only job is skipped only after its successful exit and completion record.
 A failed initialization leaves its generation incomplete. Explicit restart can

@@ -344,3 +344,25 @@ func TestOriginCAMountSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestOriginHostMappingSchema(t *testing.T) {
+	s := compile(t, "manifest-v1.schema.json")
+	for _, tc := range []struct {
+		mapping string
+		valid   bool
+	}{
+		{"origin: origin, host: host-gateway", true},
+		{"origin: origin, host: host.docker.internal", false},
+		{"origin: origin, host: 192.168.65.254", false},
+		{"origin: origin, host: localhost", false},
+		{"origin: origin, host: peer.localhost", false},
+		{"origin: origin, host: 'host.docker.internal:8443'", false},
+		{"origin: origin", false},
+		{"host: host.docker.internal", false},
+	} {
+		doc := "version: backlot/v1\nproject: ca\ncomponents:\n  job: {kind: job, runtime: container, policy: each-start, image: {literal: alpine}, host_mappings: [{" + tc.mapping + "}]}\nscenes:\n  test: {lifetime: disposable, components: [job], terminal_job: job}\n"
+		if err := s.Validate(yamlValue(t, []byte(doc))); (err == nil) != tc.valid {
+			t.Fatal(tc.mapping, err)
+		}
+	}
+}

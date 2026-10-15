@@ -1,0 +1,103 @@
+# yaml-language-server: $schema=../../schemas/manifest-v1.schema.json
+version: backlot/v1
+project: container-https
+tools: {app: ./app}
+resources:
+  api: {kind: port}
+  front: {kind: port}
+  ssr: {kind: port}
+  origin: {kind: origin}
+environments:
+  origin:
+    assign:
+      ORIGIN: {ref: {kind: resource, name: origin, field: url}}
+  container_trust:
+    assign:
+      SSL_CERT_FILE: {ref: {kind: resource, name: origin, field: ca_cert_path}}
+      SSL_CERT_DIR: {literal: /empty-roots}
+components:
+  api:
+    kind: service
+    runtime: native
+    command: {tool: app}
+    resources: [api]
+    ports: {http: {resource: api}}
+    environment:
+      assign:
+        ROLE: {literal: api}
+        BIND: {literal: 127.0.0.1}
+        PORT: {ref: {kind: resource, name: api, field: port}}
+    readiness:
+      kind: tcp
+      target: {ref: {kind: resource, name: api, field: port}}
+      timeout: 10s
+  front:
+    kind: service
+    runtime: native
+    command: {tool: app}
+    resources: [front, origin]
+    ports: {http: {resource: front}}
+    environment_sets: [origin]
+    environment:
+      assign:
+        ROLE: {literal: front}
+        BIND: {literal: 127.0.0.1}
+        PORT: {ref: {kind: resource, name: front, field: port}}
+        APP_CA_CERT: {ref: {kind: resource, name: origin, field: ca_cert_path}}
+    readiness:
+      kind: tcp
+      target: {ref: {kind: resource, name: front, field: port}}
+      timeout: 10s
+  ssr:
+    kind: service
+    runtime: container
+    image: {literal: backlot-container-https:local}
+    resources: [ssr, origin]
+    ports: {http: {resource: ssr, container_port: 8080}}
+    host_mappings: [{origin: origin, host: host-gateway}]
+    mounts: [{origin_ca_cert: origin, target: /app-trust/root.pem, read_only: true}]
+    environment_sets: [origin, container_trust]
+    environment:
+      assign:
+        BIND: {literal: 0.0.0.0}
+        PORT: {literal: '8080'}
+    depends_on: [{component: api, condition: ready}]
+    readiness:
+      kind: tcp
+      target: {ref: {kind: resource, name: ssr, field: port}}
+      timeout: 10s
+  client:
+    kind: job
+    runtime: container
+    policy: each-start
+    image: {literal: backlot-container-https:local}
+    args: [client]
+    resources: [origin]
+    host_mappings: [{origin: origin, host: host-gateway}]
+    mounts: [{origin_ca_cert: origin, target: /app-trust/root.pem, read_only: true}]
+    environment_sets: [origin, container_trust]
+    depends_on: [{component: front, condition: ready}, {component: ssr, condition: ready}]
+scenes:
+  dev:
+    lifetime: persistent
+    components: [api, front, ssr]
+    resources: [api, front, ssr, origin]
+    publish:
+      resource: origin
+      routes:
+        - {path: /api, service: api, port: http, prefix: strip}
+        - {path: /ssr, service: ssr, port: http, prefix: preserve}
+        - {path: /, service: front, port: http, prefix: preserve}
+      probe: {kind: http, target: {ref: {kind: resource, name: origin, field: url}}, timeout: 10s}
+  test:
+    lifetime: disposable
+    components: [api, front, ssr, client]
+    resources: [api, front, ssr, origin]
+    terminal_job: client
+    publish:
+      resource: origin
+      routes:
+        - {path: /api, service: api, port: http, prefix: strip}
+        - {path: /ssr, service: ssr, port: http, prefix: preserve}
+        - {path: /, service: front, port: http, prefix: preserve}
+      probe: {kind: http, target: {ref: {kind: resource, name: origin, field: url}}, timeout: 10s}

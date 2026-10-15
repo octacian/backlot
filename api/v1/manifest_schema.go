@@ -164,6 +164,11 @@ func (Mount) JSONSchemaExtend(s *jsonschema.Schema) {
 	schemaProperty(s, "target").Pattern = "^/"
 }
 
+// JSONSchemaExtend bounds explicit origin identifiers.
+func (HostMapping) JSONSchemaExtend(s *jsonschema.Schema) {
+	schemaProperty(s, "origin").Pattern = schemaIdentifier
+}
+
 // JSONSchemaExtend adds native/container and service/job conditional constraints.
 func (Component) JSONSchemaExtend(s *jsonschema.Schema) {
 	schemaProperty(s, "kind").Enum = schemaEnum(string(Service), string(Job)).Enum
@@ -173,9 +178,10 @@ func (Component) JSONSchemaExtend(s *jsonschema.Schema) {
 	native := &jsonschema.Schema{AllOf: []*jsonschema.Schema{
 		schemaRequire("command"), schemaForbid("image"),
 		schemaProperties(map[string]*jsonschema.Schema{
-			"args":   {MaxItems: schemaZero()},
-			"mounts": {MaxItems: schemaZero()},
-			"ports":  {AdditionalProperties: schemaProperties(map[string]*jsonschema.Schema{"container_port": {Const: 0}})},
+			"args":          {MaxItems: schemaZero()},
+			"mounts":        {MaxItems: schemaZero()},
+			"host_mappings": {MaxItems: schemaZero()},
+			"ports":         {AdditionalProperties: schemaProperties(map[string]*jsonschema.Schema{"container_port": {Const: 0}})},
 		}),
 	}}
 	container := &jsonschema.Schema{AllOf: []*jsonschema.Schema{

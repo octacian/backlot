@@ -108,7 +108,9 @@ func safeRestart(old, next plan.Snapshot) error {
 	unsafe := func() error {
 		return problem("unsafe_drift", "retained resource, initialization or sensitive configuration changed; use explicit reset/destroy; runtime preserved")
 	}
-	if !reflect.DeepEqual(old.Plan.Resources, next.Plan.Resources) {
+	// JSON omits empty resource maps; nil and allocated-empty mean the same
+	// resource-free contract. Nonempty declarations still require exact equality.
+	if (len(old.Plan.Resources) != 0 || len(next.Plan.Resources) != 0) && !reflect.DeepEqual(old.Plan.Resources, next.Plan.Resources) {
 		return unsafe()
 	}
 	if old.Caddy != nil {

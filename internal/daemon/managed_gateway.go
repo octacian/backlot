@@ -287,6 +287,12 @@ func (s *service) managedListeners(ctx context.Context, c v1.CaddyConfig) error 
 			return problem("gateway_unavailable", "managed listener ownership/readiness unavailable; no takeover performed")
 		}
 	}
+	for _, address := range append([]string{u.Host}, gateway.ManagedHTTPSListeners(c)...) {
+		owned, conflict, err := native.ListenerEndpoint(ctx, s.gatewayGroup.PGID(), address)
+		if err != nil || !owned || conflict {
+			return problem("gateway_unavailable", "configured managed listener endpoint is unavailable; no fallback performed")
+		}
+	}
 	return nil
 }
 
@@ -298,7 +304,7 @@ func (s *service) startManaged(ctx context.Context, r *managedRecord) (result er
 	u, _ := url.Parse(r.Config.Endpoint)
 	// Bind checks are observations, never reservations. Subsequent guardian
 	// listener proof rejects races; no retry, fallback, or unrelated actuation.
-	for _, address := range []string{u.Host, net.JoinHostPort("127.0.0.1", strconv.Itoa(*r.Config.HTTPSPort)), net.JoinHostPort("::1", strconv.Itoa(*r.Config.HTTPSPort))} {
+	for _, address := range append([]string{u.Host}, gateway.ManagedHTTPSListeners(r.Config)...) {
 		listener, err := net.Listen("tcp", address)
 		if err != nil {
 			return problem("gateway_port_conflict", "configured managed listener is unavailable; no fallback or takeover")

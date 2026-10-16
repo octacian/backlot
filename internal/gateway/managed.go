@@ -9,7 +9,7 @@ import (
 	v1 "github.com/octacian/backlot/api/v1"
 )
 
-// ManagedConfig builds the dedicated loopback gateway bootstrap. Caddy owns
+// ManagedConfig builds the dedicated gateway bootstrap with explicit HTTPS exposure. Caddy owns
 // renewal and autosaving subsequent scoped mutations; trust installation is off.
 func ManagedConfig(c v1.CaddyConfig, storage string) ([]byte, error) {
 	u, err := url.Parse(c.Endpoint)
@@ -23,7 +23,7 @@ func ManagedConfig(c v1.CaddyConfig, storage string) ([]byte, error) {
 			"pki": map[string]any{"certificate_authorities": map[string]any{"local": map[string]any{"install_trust": false}}},
 			"tls": map[string]any{"automation": map[string]any{"policies": []any{map[string]any{"issuers": []any{map[string]any{"module": "internal"}}}}}},
 			"http": map[string]any{"https_port": *c.HTTPSPort, "servers": map[string]any{"backlot": map[string]any{
-				"listen":                  []string{net.JoinHostPort("127.0.0.1", strconv.Itoa(*c.HTTPSPort)), net.JoinHostPort("::1", strconv.Itoa(*c.HTTPSPort))},
+				"listen":                  ManagedHTTPSListeners(c),
 				"protocols":               []string{"h1", "h2"},
 				"automatic_https":         map[string]any{"disable_redirects": true},
 				"tls_connection_policies": []any{map[string]any{}},
@@ -60,4 +60,24 @@ func ValidateManagedConfig(data []byte, c v1.CaddyConfig, storage string) error 
 		return diagnostic("gateway_state", "managed saved configuration changed outside owned routes; preserved")
 	}
 	return nil
+}
+
+// ManagedHTTPSListeners returns the validated managed HTTPS bind endpoints.
+// Loopback stays available for host consumers; an explicit IPv4 wildcard replaces
+// the IPv4 loopback socket because binding both would conflict. No OS detection
+// or Docker observation changes exposure.
+func ManagedHTTPSListeners(c v1.CaddyConfig) []string {
+	hosts := []string{"127.0.0.1", "::1"}
+	switch c.HTTPSBindAddress {
+	case "", "127.0.0.1":
+	case "0.0.0.0":
+		hosts[0] = c.HTTPSBindAddress
+	default:
+		hosts = append(hosts, c.HTTPSBindAddress)
+	}
+	addresses := make([]string, len(hosts))
+	for i, host := range hosts {
+		addresses[i] = net.JoinHostPort(host, strconv.Itoa(*c.HTTPSPort))
+	}
+	return addresses
 }

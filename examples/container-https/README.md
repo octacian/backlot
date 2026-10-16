@@ -1,8 +1,8 @@
 # Native and container HTTPS example
 
 Run a native Go frontend/API, Linux Go/Alpine SSR service and disposable test
-through one canonical managed HTTPS origin. Target: macOS ARM64, Docker Desktop
-Linux engine and stock native Caddy 2.11.6. Container clients use ordinary DNS and
+through one canonical managed HTTPS origin. Targets: macOS ARM64 Docker Desktop bridges and the
+[Linux amd64 rootful bridge topology](../../docs/platforms.md), with stock native Caddy 2.11.6. Container clients use ordinary DNS and
 Go root loading; no custom dialer or TLS verification bypass exists.
 
 ## Prepare
@@ -33,6 +33,19 @@ owned daemon/gateway and separately establish host/daemon trust following the
 machine file. Browser trust is separate; importing a container root does not
 establish host/browser trust. No global trust or DNS changes are made by Backlot.
 
+### Linux setup differences
+
+On Ubuntu 24.04/Debian 13.4 amd64, build `app-linux` with `GOARCH=amd64` and use
+`docker --context default` instead of `desktop-linux` for a local rootful Engine.
+Configure `docker.endpoint: unix:///var/run/docker.sock`, the absolute installed
+Caddy executable, and a verified Docker-reachable `caddy.https_bind_address` in the
+private machine file. A specific bridge-facing IPv4 address preserves loopback;
+explicit `0.0.0.0` exposes HTTPS on all IPv4 interfaces. Admin stays loopback.
+Confirm ordinary native `*.backlot.localhost` resolution and separate
+host/daemon/browser trust using the [Linux guide](../../docs/platforms.md).
+The project mapping/mount/application declarations remain the same. WSL has
+configuration guidance only, with no WSL QA or guarantee.
+
 ## Run
 
 From this example directory, using your private machine file:
@@ -56,8 +69,8 @@ scene's origin or resources.
 canonical hostname. Engine chooses the address on each new container create;
 restart creates fresh containers, so no numeric IP or resolver helper is maintained.
 Existing containers need recreation after Engine networking changes. Only this
-bounded Docker Desktop topology is supported; no listener widening or fallback
-occurs. `host.docker.internal` is not accepted as a substitute in this field.
+bounded topology is covered. Linux requires an explicit Docker-reachable
+`caddy.https_bind_address`; no automatic listener widening or fallback occurs. `host.docker.internal` is not accepted as a substitute in this field.
 
 Each consumer explicitly mounts `origin_ca_cert` read-only at `/app-trust/root.pem`.
 The explicit `SSL_CERT_FILE` reference resolves to that path, while native

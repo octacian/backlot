@@ -17,7 +17,7 @@ Run these from the repository root:
 | Command | Purpose |
 | --- | --- |
 | `make build` | Build `bin/backlot` |
-| `make release-build` | Reproducible local macOS ARM64 binary |
+| `make release-build` | Reproducible binary (defaults macOS ARM64; explicit RELEASE_GOOS/RELEASE_GOARCH for Linux) |
 | `make notices`, `make notices-check` | Generate/verify linked dependency license notices |
 | `bin/backlot daemon start --state-dir /absolute/private/path --json` | Start an explicit local metadata daemon after building |
 | `bin/backlot doctor --state-dir /absolute/private/path --json` | Check local daemon access; provider checks deferred |
@@ -45,9 +45,11 @@ duplicate implementation details.
 
 ## CI and platform evidence
 
-GitHub Actions runs the shared checks on macOS ARM64. Linux checks provide early
-portability evidence, not a Linux runtime support claim. A Windows cross-build
-checks compilation only, not process lifecycle, networking, or installation.
+GitHub Actions runs shared checks on macOS ARM64 and Ubuntu 24.04 amd64. A separate
+Ubuntu runtime job installs a reproducible Linux binary and runs real native,
+Docker, Caddy and disposable-browser gates. Windows cross-build CI is removed;
+native Windows execution is out of scope. Debian 13.4 amd64 requires actual-host
+runtime evidence; WSL is configuration guidance only. See [platform policy](platforms.md).
 The workflow runs on every PR and push to `main`, without path filters that
 could leave required checks missing.
 
@@ -214,7 +216,8 @@ walkthroughs remain outside this implementation slice.
 
 Use the same exclusive serial fixture grant, pre-pulled `alpine:3.21`, native
 Caddy and explicit local Docker socket. This suite targets macOS ARM64 Docker
-Desktop Linux bridge consumers:
+Desktop bridges and rootful Linux IPv4 bridges. The Linux fixture explicitly sets
+`https_bind_address: 0.0.0.0` on dynamic HTTPS ports; admin stays loopback:
 
 ```sh
 BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
@@ -302,3 +305,44 @@ root fails instead of silently falling back. `TMPDIR` separately controls Go
 build/test scratch, not the acceptance fixture root. Record exact commit/dirty patch, image/config provenance,
 failed/skipped runs, timing and cleanup outside the source tree as described in
 the [release verification guide](release-acceptance/README.md).
+
+## Linux runtime and disposable browser gate
+
+First build/install the static release binary and run its IPC/native lifecycle gate:
+
+```sh
+make release-build RELEASE_GOOS=linux RELEASE_GOARCH=amd64
+install -m 0755 bin/backlot-linux-amd64 /your/user/bin/backlot
+BACKLOT_INSTALLED_TEST_BINARY=/your/user/bin/backlot \
+  go test -race ./internal/daemon -run '^TestLinuxInstallation$' -count=1 -v
+```
+
+This verifies the installed executable's private IPC/state permissions, resource-free
+persistent restart and cooperative descendant cleanup. Then run the early HTTPS
+vertical slice before lengthy provider regression suites:
+
+```sh
+BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///var/run/docker.sock \
+BACKLOT_BROWSER_TEST_BINARY=/absolute/path/to/chromium \
+BACKLOT_CERTUTIL_TEST_BINARY=/usr/bin/certutil \
+  go test -race ./internal/daemon -run '^TestLinuxHTTPS$' -count=1 -v -timeout=15m
+```
+
+This builds the real CLI/native Go application, verifies canonical host-only and
+bridge HTTPS with explicit read-only public-root inputs, correct/missing/wrong
+trust, SSR/API/WebSockets/redirects/cookies and lifecycle cleanup. Optional browser
+settings enable an additional bounded Linux browser gate: a fresh private HOME,
+profile and NSS database reject missing trust, then accept only the public root
+with normal canonical DNS. Both browser variables are required together; CI sets
+both. No TLS ignore flags, resolver overrides or system/user trust mutation are
+used. A run without browser settings is incomplete browser evidence.
+
+The short gate does not replace `make check` or the complete gateway, Docker,
+HTTPS, managed HTTPS, container-managed HTTPS and disposable evidence suites.
+Run those serially on the frozen candidate and preserve exact revision/tool/image
+provenance, failures/skips, timings and authenticated cleanup. macOS regression
+requirements remain unchanged. An unavailable configured prerequisite fails;
+absent opt-in settings skip and are never passes. Exact published-HEAD CI remains
+required for readiness. Debian actual-host and Ubuntu fresh-runner results are
+separate evidence, and neither establishes WSL UX.

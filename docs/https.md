@@ -3,11 +3,13 @@
 Backlot supports an explicit daemon-managed native local-CA gateway and an
 externally managed Caddy JSON API. Omitted `caddy.mode` retains external mode.
 Only published scenes require a gateway; other scenes and metadata-only `prepare`
-do not contact it. The [gateway decision](adr/20261014T215536946Z-extend-managed-https-to-explicit-container-consumers.md)
+do not contact it. The [gateway decision](adr/20261016T201500000Z-support-explicit-linux-managed-https-reachability.md)
 records ownership and trust boundaries.
 
-## Managed local HTTPS on macOS ARM64
+## Managed local HTTPS
 
+For Linux prerequisites, resolver setup and explicit bridge reachability, follow
+[platform operations](platforms.md). The following executable path is for macOS.
 Install stock native Caddy separately through your package manager; for Homebrew,
 `brew install caddy`. Configure its absolute executable path explicitly, such as
 `/opt/homebrew/bin/caddy`. Backlot does not install dependencies or custom modules.
@@ -25,8 +27,9 @@ caddy:
 
 Managed mode fixes the configuration scope to `backlot-managed` and uses a private
 persisted random scope identity for actual effects. It fixes the suffix to `backlot.localhost`
-and upstream address to `127.0.0.1`. HTTPS listens on IPv4/IPv6 loopback only, on
-port 8443 by default. HTTP redirect and HTTP/3 listeners are disabled. Different
+and upstream address to `127.0.0.1`. HTTPS defaults to IPv4/IPv6 loopback, on
+port 8443. Only explicit `caddy.https_bind_address` adds numeric IPv4 reachability
+(or selects all IPv4 interfaces with `0.0.0.0`); administration remains loopback. HTTP redirect and HTTP/3 listeners are disabled. Different
 ports can be configured explicitly; conflicts fail without fallback/takeover.
 Docker may supply dependencies or loopback-mapped HTTP upstreams. Explicitly
 configured Docker Desktop bridge consumers can use the same canonical HTTPS
@@ -208,8 +211,10 @@ the startup and explicit `ca` override rules above still apply. Applications own
 all other runtime-specific trust settings. Container hostname reachability must
 also be configured explicitly; mounting a root does not provide DNS.
 
-The bounded topology is macOS ARM64 with Docker Desktop Linux engine bridge
-containers and stock native managed Caddy. Configure `host: host-gateway`
+The bounded topologies are macOS ARM64 Docker Desktop Linux bridges and the
+[Linux targets](platforms.md) with a local rootful Engine/IPv4 bridge and stock
+native managed Caddy. Linux requires explicitly configured Docker-reachable HTTPS
+listeners; the loopback default is unchanged. Configure `host: host-gateway`
 explicitly. Backlot passes only the owned canonical hostname and this special
 [Engine token](https://docs.docker.com/reference/cli/docker/container/run/#add-entries-to-container-hosts-file---add-host)
 to Docker ExtraHosts; Engine chooses the current host address at each container
@@ -218,9 +223,9 @@ running containers need recreation after Engine networking changes. No resolver
 image/container, DNS-name substitution, numeric copying, host DNS or fallback is
 involved. DNS names such as `host.docker.internal` are not accepted in this field.
 An Engine without the required token support fails container creation with a
-provider diagnostic. HTTPS and admin listeners stay on host loopback. Other
-engines, Linux-host, Windows/WSL, remote Docker and general LAN access are outside
-this support claim. Engine `host-gateway` and Docker Desktop's
+provider diagnostic. Admin stays on host loopback. HTTPS stays loopback unless the operator explicitly
+selects wider IPv4 exposure. Rootless/remote engines, Windows/WSL QA and general
+LAN compatibility are outside this support claim. Engine `host-gateway` and Docker Desktop's
 `host.docker.internal` matched in owned fixtures; Docker's VM gateway name is a
 different address, and equality across other topologies is not assumed.
 

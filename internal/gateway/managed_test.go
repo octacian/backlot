@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -36,5 +37,43 @@ func TestManagedSavedBoundary(t *testing.T) {
 	}
 	if ValidateManagedConfig(data, c, "/different/storage") == nil {
 		t.Fatal("changed CA storage accepted")
+	}
+}
+
+func TestManagedExposureBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		address   string
+		listeners []string
+	}{
+		{"", []string{"127.0.0.1:8443", "[::1]:8443"}},
+		{"0.0.0.0", []string{"0.0.0.0:8443", "[::1]:8443"}},
+		{"172.17.0.1", []string{"127.0.0.1:8443", "[::1]:8443", "172.17.0.1:8443"}},
+	} {
+		t.Run(tc.address, func(t *testing.T) {
+			c := manifest.CaddyDefaults(v1.CaddyConfig{Mode: "managed", Executable: "/explicit/caddy", HTTPSBindAddress: tc.address})
+			data, err := ManagedConfig(c, "/private/owned/data")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var root map[string]any
+			if err := json.Unmarshal(data, &root); err != nil {
+				t.Fatal(err)
+			}
+			if root["admin"].(map[string]any)["listen"] != "127.0.0.1:2020" {
+				t.Fatal("admin exposure widened")
+			}
+			if !reflect.DeepEqual(ManagedHTTPSListeners(c), tc.listeners) {
+				t.Fatal("HTTPS exposure mismatch")
+			}
+			if err := ValidateManagedConfig(data, c, "/private/owned/data"); err != nil {
+				t.Fatal(err)
+			}
+			if tc.address != "" {
+				c.HTTPSBindAddress = ""
+				if ValidateManagedConfig(data, c, "/private/owned/data") == nil {
+					t.Fatal("changed exposure accepted on resume")
+				}
+			}
+		})
 	}
 }

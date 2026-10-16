@@ -107,7 +107,7 @@ func ListenerConflict(ctx context.Context, pgid, port int) (bool, error) {
 	return conflict, err
 }
 
-// ListenerEndpoint checks ownership at a resolved numeric loopback destination.
+// ListenerEndpoint checks ownership at a resolved numeric destination.
 func ListenerEndpoint(ctx context.Context, pgid int, address string) (bool, bool, error) {
 	host, portText, err := net.SplitHostPort(address)
 	if err != nil {

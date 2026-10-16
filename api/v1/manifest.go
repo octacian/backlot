@@ -214,13 +214,14 @@ type DockerConfig struct {
 
 // CaddyConfig selects explicit managed or external gateway ownership.
 type CaddyConfig struct {
-	Mode         string `json:"mode,omitempty" yaml:"mode,omitempty" jsonschema:"enum=managed,enum=external" jsonschema_description:"Gateway ownership; omitted retains legacy external mode."`
-	Executable   string `json:"executable,omitempty" yaml:"executable,omitempty" jsonschema_description:"Absolute stock native Caddy executable; required only in managed mode."`
-	HTTPSPort    *int   `json:"https_port,omitempty" yaml:"https_port,omitempty" jsonschema:"minimum=1,maximum=65535" jsonschema_description:"Explicit HTTPS listener port; defaults to 8443 managed or 443 external. Nondefault ports appear in the canonical origin."`
-	Endpoint     string `json:"endpoint,omitempty" yaml:"endpoint,omitempty" jsonschema:"minLength=1" jsonschema_description:"Admin HTTP(S) URL; managed defaults to http://127.0.0.1:2020."`
-	Scope        string `json:"scope,omitempty" yaml:"scope,omitempty" jsonschema:"minLength=1" jsonschema_description:"Owned external subroute ID; managed defaults to backlot-managed."`
-	DomainSuffix string `json:"domain_suffix,omitempty" yaml:"domain_suffix,omitempty" jsonschema:"minLength=1" jsonschema_description:"External lowercase domain suffix; managed defaults to backlot.localhost."`
-	HostAddress  string `json:"host_address,omitempty" yaml:"host_address,omitempty" jsonschema:"minLength=1" jsonschema_description:"Gateway-reachable upstream address; managed fixes 127.0.0.1."`
+	Mode             string `json:"mode,omitempty" yaml:"mode,omitempty" jsonschema:"enum=managed,enum=external" jsonschema_description:"Gateway ownership; omitted retains legacy external mode."`
+	Executable       string `json:"executable,omitempty" yaml:"executable,omitempty" jsonschema_description:"Absolute stock native Caddy executable; required only in managed mode."`
+	HTTPSBindAddress string `json:"https_bind_address,omitempty" yaml:"https_bind_address,omitempty" jsonschema_description:"Explicit additional IPv4 managed HTTPS reachability; omitted keeps IPv4/IPv6 loopback. 0.0.0.0 binds all IPv4 interfaces. Administration stays loopback."`
+	HTTPSPort        *int   `json:"https_port,omitempty" yaml:"https_port,omitempty" jsonschema:"minimum=1,maximum=65535" jsonschema_description:"Explicit HTTPS listener port; defaults to 8443 managed or 443 external. Nondefault ports appear in the canonical origin."`
+	Endpoint         string `json:"endpoint,omitempty" yaml:"endpoint,omitempty" jsonschema:"minLength=1" jsonschema_description:"Admin HTTP(S) URL; managed defaults to http://127.0.0.1:2020."`
+	Scope            string `json:"scope,omitempty" yaml:"scope,omitempty" jsonschema:"minLength=1" jsonschema_description:"Owned external subroute ID; managed defaults to backlot-managed."`
+	DomainSuffix     string `json:"domain_suffix,omitempty" yaml:"domain_suffix,omitempty" jsonschema:"minLength=1" jsonschema_description:"External lowercase domain suffix; managed defaults to backlot.localhost."`
+	HostAddress      string `json:"host_address,omitempty" yaml:"host_address,omitempty" jsonschema:"minLength=1" jsonschema_description:"Gateway-reachable upstream address; managed fixes 127.0.0.1."`
 }
 
 // StorageConfig describes future daemon storage and evidence retention bounds.

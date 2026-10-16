@@ -678,6 +678,14 @@ func ValidateMachine(c v1.MachineConfig) error {
 			if port < 1024 || port == *value.HTTPSPort {
 				return invalid("config.caddy.endpoint", "managed admin port must be unprivileged and distinct from HTTPS")
 			}
+			if value.HTTPSBindAddress != "" {
+				address, err := netip.ParseAddr(value.HTTPSBindAddress)
+				if err != nil || !address.Is4() || address.IsMulticast() || address.String() != value.HTTPSBindAddress {
+					return invalid("config.caddy.https_bind_address", "use a canonical numeric IPv4 bind address; administration remains loopback")
+				}
+			}
+		} else if value.HTTPSBindAddress != "" {
+			return invalid("config.caddy.https_bind_address", "external mode leaves listener configuration to the operator")
 		} else if value.Executable != "" {
 			return invalid("config.caddy.executable", "external mode never launches an executable")
 		}

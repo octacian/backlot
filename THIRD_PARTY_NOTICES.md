@@ -106,7 +106,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## github.com/bahlo/generic-list-go v0.2.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -142,7 +142,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## github.com/buger/jsonparser v1.1.2
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -284,7 +284,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ## github.com/containerd/errdefs v1.0.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -483,7 +483,7 @@ Apache License
 
 ## github.com/containerd/errdefs/pkg v0.3.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -682,7 +682,7 @@ Apache License
 
 ## github.com/distribution/reference v0.6.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -892,7 +892,7 @@ Apache License
 
 ## github.com/docker/go-connections v0.8.1
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -1091,7 +1091,7 @@ Apache License
 
 ## github.com/docker/go-units v0.5.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -1290,7 +1290,7 @@ Apache License
 
 ## github.com/felixge/httpsnoop v1.0.4
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE.txt
 
@@ -1354,7 +1354,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## github.com/go-logr/logr v1.4.2
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -1564,7 +1564,7 @@ Apache License
 
 ## github.com/go-logr/stdr v1.2.2
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -2270,7 +2270,7 @@ IN THE SOFTWARE.
 
 ## github.com/gofrs/flock v0.13.1
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -2307,7 +2307,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## github.com/invopop/jsonschema v0.14.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### COPYING
 
@@ -2335,7 +2335,7 @@ SOFTWARE.
 
 ## github.com/moby/docker-image-spec v1.3.1
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -2545,7 +2545,7 @@ Apache License
 
 ## github.com/moby/moby/api v1.56.1
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -2755,7 +2755,7 @@ Apache License
 
 ## github.com/moby/moby/client v0.6.1
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -2965,7 +2965,7 @@ Apache License
 
 ## github.com/opencontainers/go-digest v1.0.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -3595,7 +3595,7 @@ Creative Commons may be contacted at creativecommons.org.
 
 ## github.com/opencontainers/image-spec v1.1.1
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -3794,7 +3794,7 @@ Apache License
 
 ## github.com/pb33f/ordered-map/v2 v2.3.1
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -4004,7 +4004,7 @@ Apache License
 
 ## github.com/urfave/cli/v3 v3.14.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -4034,7 +4034,7 @@ SOFTWARE.
 
 ## go.etcd.io/bbolt v1.5.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -4063,7 +4063,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ## go.opentelemetry.io/auto/sdk v1.1.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -4273,7 +4273,7 @@ Apache License
 
 ## go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.60.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -4483,7 +4483,7 @@ Apache License
 
 ## go.opentelemetry.io/otel v1.35.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -4693,7 +4693,7 @@ Apache License
 
 ## go.opentelemetry.io/otel/metric v1.35.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -4903,7 +4903,7 @@ Apache License
 
 ## go.opentelemetry.io/otel/trace v1.35.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -5113,7 +5113,7 @@ Apache License
 
 ## go.yaml.in/yaml/v3 v3.0.5
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -5214,7 +5214,7 @@ SOFTWARE.
 
 ## go.yaml.in/yaml/v4 v4.0.0-rc.2
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 
@@ -5315,7 +5315,7 @@ SOFTWARE.
 
 ## golang.org/x/sys v0.47.0
 
-Linked into: Backlot CLI (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 

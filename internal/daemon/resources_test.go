@@ -445,3 +445,31 @@ func TestPlannerRestartBaselineProvenance(t *testing.T) {
 		})
 	}
 }
+
+// TestResourceFreeRestartSnapshot checks the actual durable JSON round trip,
+// which omits an allocated-empty map. Real resource additions/removals remain drift.
+func TestResourceFreeRestartSnapshot(t *testing.T) {
+	next := plan.Snapshot{Plan: v1.PlanResponse{Resources: map[string]v1.Resource{}}}
+	data, err := json.Marshal(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved plan.Snapshot
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.Plan.Resources != nil {
+		t.Fatal("fixture did not exercise omitted empty resources")
+	}
+	if err := safeRestart(saved, next); err != nil {
+		t.Fatal("resource-free restart rejected", err)
+	}
+	withResource := next
+	withResource.Plan.Resources = map[string]v1.Resource{"port": {Kind: "port"}}
+	for _, pair := range [][2]plan.Snapshot{{saved, withResource}, {withResource, next}} {
+		var diagnostic *v1.PlanError
+		if err := safeRestart(pair[0], pair[1]); !errors.As(err, &diagnostic) || diagnostic.Code != "unsafe_drift" {
+			t.Fatal("actual resource drift accepted", err)
+		}
+	}
+}

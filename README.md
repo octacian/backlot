@@ -6,7 +6,7 @@ routes. Each Git worktree gets its own instance, ports and canonical origin.
 
 ## Install Backlot
 
-Install with **Go 1.27.1 or newer**. Backlot's supported runtime is **macOS ARM64**:
+Install with **Go 1.27.1 or newer**. Backlot targets **macOS ARM64**, **Ubuntu 24.04 amd64** and **Debian 13.4 amd64**; see the [platform policy](docs/platforms.md) for runtime gates and Linux prerequisites:
 
 ```sh
 go install github.com/octacian/backlot/cmd/backlot@latest
@@ -90,8 +90,9 @@ and `backlot status --state-dir "$HOME/.backlot" --json INSTANCE_ID` to inspect 
 
 Native commands and descendants must stay in their supervised process group;
 detachment and delegation to another supervisor are unsupported. The support
-boundary is macOS ARM64 host/browser/native managed HTTPS. Linux/Windows compile
-checks are portability evidence. This is not a V1 release declaration; the
+boundary includes the bounded Linux rootful bridge topology in the
+[platform guide](docs/platforms.md). WSL has configuration guidance only, without
+WSL QA or a guarantee; native Windows execution is out of scope. This is not a V1 release declaration; the
 [release verification guide](docs/release-acceptance/README.md) records broader gates.
 
 ## Development

@@ -1,11 +1,11 @@
 ---
 title: 'Extend managed HTTPS to explicit container consumers'
 date: '2026-10-14'
-status: accepted
+status: superseded
 summary: 'Extend canonical managed origins to Docker Desktop bridge consumers using explicit Engine host-gateway mappings and read-only public-root mounts without widening gateway listeners.'
 tags: [gateway, https, trust, containers, networking, lifecycle]
 supersedes: [20261014T033700000Z-support-managed-local-ca-and-external-caddy-gateways.md]
-superseded_by: []
+superseded_by: [20261016T201500000Z-support-explicit-linux-managed-https-reachability.md]
 ---
 
 # Extend managed HTTPS to explicit container consumers

@@ -16,7 +16,7 @@ clean up Docker state.
 Use a per-user permissioned Unix socket for local HTTP/JSON. Socket placement,
 single-daemon locking, and stale-socket recovery belong in the platform/runtime
 adapter. Do not expose administrative HTTP on the LAN. Keep transport selection
-separate from API types for eventual native Windows support.
+separate from API types. Native Windows execution is outside the platform scope.
 
 The lifecycle coordinator consumes a validated, resolved plan and runs its graph.
 It owns idempotency, instance mutation locking, dependency gates, initialization
@@ -88,8 +88,10 @@ reuses v3; see the
 Do not add unused runtime dependencies to the scaffold.
 
 Keep platform-specific supervision and socket operations separate from domain
-code. macOS ARM64 is the V1 runtime acceptance platform. Linux CI and Windows
-cross-builds catch portability issues without promising runtime support there.
+code. The [platform policy](platforms.md) targets macOS ARM64, Ubuntu 24.04 amd64
+and Debian 13.4 amd64. Linux runtime support requires actual lifecycle, IPC,
+permissions, trust and cleanup evidence plus Ubuntu runtime CI; compilation is
+insufficient. WSL receives configuration guidance only; native Windows is out of scope.
 
 ## Configuration and routing design work
 
@@ -105,7 +107,7 @@ routes and map resolved values into consumers' environments.
 
 Caddy mode is explicit; omitted mode preserves legacy external ownership. In
 managed mode the daemon activates an explicitly configured stock native executable
-through the existing journaled authenticated guardian. It owns loopback listeners,
+through the existing journaled authenticated guardian. It owns explicitly configured HTTPS listeners,
 private persistent CA/config state and `*.backlot.localhost:8443` origins; stock
 Caddy performs local issuance/renewal. Trust installation is disabled; a separate
 operator `caddy trust` targets the owned endpoint. Serialize gateway lifecycle with
@@ -125,8 +127,12 @@ a read-only file at the project's chosen absolute container target; explicit
 container `ca_cert_path` environment references resolve there. Native references
 retain the private host public-root path. Keys/CA directories are never consumer
 mount inputs, trust is never injected implicitly, and runtime detection/TLS
-bypasses are excluded. Keep both managed listeners and admin on loopback for the
-bounded macOS ARM64 Docker Desktop Linux bridge topology. Host-only selected work
+bypasses are excluded. Managed HTTPS defaults to IPv4/IPv6 loopback for the macOS ARM64 Docker Desktop
+topology. Rootful Linux bridges require an explicit numeric IPv4
+`caddy.https_bind_address`; a specific address adds a listener, while `0.0.0.0`
+replaces the IPv4 loopback socket. Administration always stays loopback; no
+automatic widening or Docker address inference occurs. See the
+[Linux gateway decision](adr/20261016T201500000Z-support-explicit-linux-managed-https-reachability.md). Host-only selected work
 does not access Docker; snapshots and journaled recovery retain their existing
 ownership boundaries.
 

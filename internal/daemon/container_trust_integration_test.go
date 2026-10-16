@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -33,6 +34,18 @@ import (
 // TestContainerManagedHTTPSRuntime exercises explicit public-root inputs and
 // Engine host-gateway mappings through the real CLI/daemon/Docker path.
 func TestContainerManagedHTTPSRuntime(t *testing.T) {
+	testContainerManagedHTTPSRuntime(t, false)
+}
+
+// TestLinuxHTTPS is the early real CLI/native/Caddy/bridge trust and cleanup gate.
+func TestLinuxHTTPS(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux runtime acceptance")
+	}
+	testContainerManagedHTTPSRuntime(t, true)
+}
+
+func testContainerManagedHTTPSRuntime(t *testing.T, smoke bool) {
 	caddy, endpoint := os.Getenv("BACKLOT_CADDY_TEST_BINARY"), os.Getenv("BACKLOT_DOCKER_TEST_ENDPOINT")
 	if caddy == "" || endpoint == "" {
 		t.Skip("set BACKLOT_CADDY_TEST_BINARY and BACKLOT_DOCKER_TEST_ENDPOINT")
@@ -116,6 +129,11 @@ func TestContainerManagedHTTPSRuntime(t *testing.T) {
 		admin = managedFixturePort(t)
 	}
 	config := v1.MachineConfig{Version: v1.ManifestVersion, Docker: &v1.DockerConfig{Endpoint: "unix://" + trapPath}, Caddy: &v1.CaddyConfig{Mode: "managed", Executable: caddy, Endpoint: "http://127.0.0.1:" + strconv.Itoa(admin), HTTPSPort: &port}}
+	// This fixture explicitly selects wider HTTPS reachability on rootful Linux.
+	// Production never detects Docker or changes the loopback default.
+	if runtime.GOOS == "linux" {
+		config.Caddy.HTTPSBindAddress = "0.0.0.0"
+	}
 	data, err := json.Marshal(config)
 	if err != nil {
 		t.Fatal(err)
@@ -266,6 +284,17 @@ printf '%s\n' 'public root input and readonly file mount verified'`}}
 			t.Fatal(err)
 		}
 		t.Log("daemon-integrated canonical container TLS", trustCase, "verified with native frontend/API, variable WebSocket payloads and redirect/cookie checks in success case")
+	}
+	if smoke {
+		if os.Getenv("BACKLOT_BROWSER_TEST_BINARY") != "" {
+			testManagedBrowser(t, peerOrigin, rootPath)
+		}
+		if _, err := h.cli.Destroy(context.Background(), peer); err != nil {
+			t.Fatal(err)
+		}
+		command("gateway", "stop")
+		t.Log("early real Linux CLI/native/Caddy/bridge trust and lifecycle cleanup verified")
+		return
 	}
 	consumer.Environment.Assign = map[string]v1.Value{"SSL_CERT_FILE": cert, "SSL_CERT_DIR": fixtureLiteral("/empty-roots"), "ORIGIN": origin}
 	delete(h.manifest.Scenes, "trust")

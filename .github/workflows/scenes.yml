@@ -23,14 +23,16 @@ jobs:
         shard: [1, 2]
     env:
       BACKLOT_BINARY: ${{ github.workspace }}/bin/backlot-linux-amd64
-      BACKLOT_CADDY_BINARY: ${{ runner.temp }}/scene-tools/caddy
-      BACKLOT_CI_POINTER: ${{ runner.temp }}/scene-root
-      BACKLOT_CI_EXPORT: ${{ runner.temp }}/scene-evidence
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
     defaults:
       run:
         shell: bash
     steps:
+      - name: Configure job-owned paths
+        run: |
+          echo "BACKLOT_CADDY_BINARY=$RUNNER_TEMP/scene-tools/caddy" >> "$GITHUB_ENV"
+          echo "BACKLOT_CI_POINTER=$RUNNER_TEMP/scene-root" >> "$GITHUB_ENV"
+          echo "BACKLOT_CI_EXPORT=$RUNNER_TEMP/scene-evidence" >> "$GITHUB_ENV"
+          echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/playwright-browsers" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:

@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,4 +62,32 @@ func testManagedBrowser(t *testing.T, origin, root string) {
 		t.Fatalf("trusted normal-DNS browser HTTPS/SSR: body=%q err=%v", body, err)
 	}
 	t.Log("disposable Linux browser rejected missing trust then accepted explicit public-root trust, canonical hostname and SSR")
+}
+
+// managedBrowserOptIn validates the pair before fixture allocation. Absence is
+// optional coverage, never evidence that browser trust passed.
+func managedBrowserOptIn(browser, certutil string) (bool, error) {
+	if (browser == "") != (certutil == "") {
+		return false, errors.New("browser acceptance requires both BACKLOT_BROWSER_TEST_BINARY and BACKLOT_CERTUTIL_TEST_BINARY")
+	}
+	return browser != "", nil
+}
+
+func TestManagedBrowserOptIn(t *testing.T) {
+	for _, tc := range []struct {
+		name, browser, certutil string
+		enabled, invalid        bool
+	}{
+		{name: "absent"},
+		{name: "browser only", browser: "/invalid/browser", invalid: true},
+		{name: "certutil only", certutil: "/invalid/certutil", invalid: true},
+		{name: "both", browser: "/explicit/browser", certutil: "/explicit/certutil", enabled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enabled, err := managedBrowserOptIn(tc.browser, tc.certutil)
+			if enabled != tc.enabled || (err != nil) != tc.invalid {
+				t.Fatalf("enabled=%v err=%v", enabled, err)
+			}
+		})
+	}
 }

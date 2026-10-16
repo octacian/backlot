@@ -324,12 +324,15 @@ vertical slice before lengthy provider regression suites:
 ```sh
 BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
 BACKLOT_DOCKER_TEST_ENDPOINT=unix:///var/run/docker.sock \
+BACKLOT_INSTALLED_TEST_BINARY=/your/user/bin/backlot \
 BACKLOT_BROWSER_TEST_BINARY=/absolute/path/to/chromium \
 BACKLOT_CERTUTIL_TEST_BINARY=/usr/bin/certutil \
   go test -race ./internal/daemon -run '^TestLinuxHTTPS$' -count=1 -v -timeout=15m
 ```
 
-This builds the real CLI/native Go application, verifies canonical host-only and
+With `BACKLOT_INSTALLED_TEST_BINARY`, this uses the installed static CLI/daemon
+(and builds the native Go application); otherwise it builds a race CLI fixture,
+which does not establish installed CGO=0 networking evidence. It verifies canonical host-only and
 bridge HTTPS with explicit read-only public-root inputs, correct/missing/wrong
 trust, SSR/API/WebSockets/redirects/cookies and lifecycle cleanup. Optional browser
 settings enable an additional bounded Linux browser gate: a fresh private HOME,

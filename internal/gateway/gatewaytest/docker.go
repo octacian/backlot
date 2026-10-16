@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -117,4 +118,36 @@ func CleanupContainer(t *testing.T, endpoint, name, owner string) bool {
 		return false
 	}
 	return true
+}
+
+// HostGatewayAddress observes Engine's host-gateway expansion in an owned fixture.
+// External daemon fixtures have no managed-origin mapping contract, so their
+// existing explicit test-only dial address uses this observation. Production
+// managed consumers still pass the token directly at each actual container create.
+func HostGatewayAddress(t *testing.T, endpoint string) string {
+	t.Helper()
+	name := fixtureName(t)
+	cleaned := false
+	t.Cleanup(func() {
+		if !cleaned {
+			CleanupContainer(t, endpoint, name, name)
+		}
+	})
+	alias := "backlot-host.fixture"
+	DockerCommand(t, endpoint, "create", "--name", name, "--label", "backlot.fixture="+name, "--add-host", alias+":host-gateway", "alpine:3.21", "getent", "hosts", alias)
+	output := DockerCommand(t, endpoint, "start", "-a", name)
+	fields := strings.Fields(output)
+	code := DockerCommand(t, endpoint, "inspect", "--format", "{{.State.ExitCode}}", name)
+	if len(fields) < 2 || fields[1] != alias || code != "0" {
+		t.Fatal("owned Engine host-gateway fixture lookup failed", "exit", code, "output", output)
+	}
+	address, err := netip.ParseAddr(fields[0])
+	if err != nil || !address.Is4() || address.IsLoopback() || address.IsUnspecified() || address.IsMulticast() {
+		t.Fatal("owned Engine host-gateway fixture did not return a reachable IPv4 address")
+	}
+	cleaned = CleanupContainer(t, endpoint, name, name)
+	if !cleaned {
+		t.Fatal("owned host-gateway probe cleanup unverified")
+	}
+	return address.String()
 }

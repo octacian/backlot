@@ -46,6 +46,17 @@ func TestLinuxHTTPS(t *testing.T) {
 }
 
 func testContainerManagedHTTPSRuntime(t *testing.T, smoke bool) {
+	runBrowser := false
+	if smoke {
+		var err error
+		runBrowser, err = managedBrowserOptIn(os.Getenv("BACKLOT_BROWSER_TEST_BINARY"), os.Getenv("BACKLOT_CERTUTIL_TEST_BINARY"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !runBrowser {
+			t.Log("browser opt-ins absent; browser trust evidence is incomplete")
+		}
+	}
 	caddy, endpoint := os.Getenv("BACKLOT_CADDY_TEST_BINARY"), os.Getenv("BACKLOT_DOCKER_TEST_ENDPOINT")
 	if caddy == "" || endpoint == "" {
 		t.Skip("set BACKLOT_CADDY_TEST_BINARY and BACKLOT_DOCKER_TEST_ENDPOINT")
@@ -90,7 +101,17 @@ func testContainerManagedHTTPSRuntime(t *testing.T, smoke bool) {
 	})
 	buildDir := t.TempDir()
 	binary, app := filepath.Join(buildDir, "backlot"), filepath.Join(buildDir, "fixture")
-	for _, build := range []struct{ path, source string }{{binary, "../../cmd/backlot"}, {app, "../../examples/container-https"}} {
+	builds := []struct{ path, source string }{{app, "../../examples/container-https"}}
+	if installed := os.Getenv("BACKLOT_INSTALLED_TEST_BINARY"); smoke && installed != "" {
+		if !filepath.IsAbs(installed) {
+			t.Fatal("installed Linux executable must be absolute")
+		}
+		binary = installed
+		t.Log("canonical HTTPS gate uses explicitly installed CLI/daemon", binary)
+	} else {
+		builds = append(builds, struct{ path, source string }{binary, "../../cmd/backlot"})
+	}
+	for _, build := range builds {
 		if output, err := exec.Command("go", "build", "-race", "-o", build.path, build.source).CombinedOutput(); err != nil {
 			t.Fatal(err, string(output))
 		}
@@ -286,7 +307,7 @@ printf '%s\n' 'public root input and readonly file mount verified'`}}
 		t.Log("daemon-integrated canonical container TLS", trustCase, "verified with native frontend/API, variable WebSocket payloads and redirect/cookie checks in success case")
 	}
 	if smoke {
-		if os.Getenv("BACKLOT_BROWSER_TEST_BINARY") != "" {
+		if runBrowser {
 			testManagedBrowser(t, peerOrigin, rootPath)
 		}
 		if _, err := h.cli.Destroy(context.Background(), peer); err != nil {

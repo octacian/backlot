@@ -138,7 +138,7 @@ func start(t *testing.T, domain string, inContainer bool) Fixture {
 		t.Cleanup(func() {
 			preserve = !CleanupContainer(t, endpoint, name, name)
 		})
-		DockerCommand(t, endpoint, "create", "--name", name, "--label", "backlot.fixture="+name, "-p", "127.0.0.1:"+strconv.Itoa(admin)+":"+strconv.Itoa(admin), "-p", strconv.Itoa(port)+":"+strconv.Itoa(port), "-v", directory+":"+directory+":ro", image, "caddy", "run", "--config", configPath)
+		DockerCommand(t, endpoint, "create", "--name", name, "--label", "backlot.fixture="+name, "--add-host", "host.docker.internal:host-gateway", "-p", "127.0.0.1:"+strconv.Itoa(admin)+":"+strconv.Itoa(admin), "-p", strconv.Itoa(port)+":"+strconv.Itoa(port), "-v", directory+":"+directory+":ro", image, "caddy", "run", "--config", configPath)
 		DockerCommand(t, endpoint, "start", name)
 	} else {
 		var logs bytes.Buffer

@@ -67,6 +67,7 @@ jobs:
           BACKLOT_CERTUTIL_TEST_BINARY: /usr/bin/certutil
         run: |
           export BACKLOT_CADDY_TEST_BINARY="$RUNNER_TEMP/backlot-tools/caddy"
+          export BACKLOT_INSTALLED_TEST_BINARY="$RUNNER_TEMP/backlot-install/backlot"
           go test -race ./internal/daemon -run '^TestLinuxHTTPS$' -count=1 -v -timeout=15m
       - name: Complete provider and HTTPS runtime gates
         env:

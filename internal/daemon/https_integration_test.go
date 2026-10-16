@@ -19,7 +19,7 @@ import (
 	"github.com/octacian/backlot/internal/gateway/gatewaytest"
 )
 
-func httpsHarness(t *testing.T, binary, app, image, endpoint string, f gatewaytest.Fixture, containerGateway bool) *dockerHarness {
+func httpsHarness(t *testing.T, binary, app, image, endpoint, containerHost string, f gatewaytest.Fixture, containerGateway bool) *dockerHarness {
 	t.Helper()
 	// Root trust is scoped to this new fixture daemon process, never installed.
 	t.Setenv("SSL_CERT_FILE", f.Cert)
@@ -39,7 +39,7 @@ func httpsHarness(t *testing.T, binary, app, image, endpoint string, f gatewayte
 	if containerGateway {
 		upstream = "host.docker.internal"
 	}
-	config := v1.MachineConfig{Version: v1.ManifestVersion, Docker: &v1.DockerConfig{Endpoint: endpoint, HostAddress: "host.docker.internal", PublishAddress: "0.0.0.0"}, Caddy: &v1.CaddyConfig{Endpoint: f.Endpoint, Scope: "backlot", DomainSuffix: "fixture.localhost", HostAddress: upstream, HTTPSPort: &f.Port}}
+	config := v1.MachineConfig{Version: v1.ManifestVersion, Docker: &v1.DockerConfig{Endpoint: endpoint, HostAddress: containerHost, PublishAddress: "0.0.0.0"}, Caddy: &v1.CaddyConfig{Endpoint: f.Endpoint, Scope: "backlot", DomainSuffix: "fixture.localhost", HostAddress: upstream, HTTPSPort: &f.Port}}
 	data, _ := json.Marshal(config)
 	if err := os.WriteFile(h.config, data, 0600); err != nil {
 		t.Fatal(err)
@@ -47,8 +47,8 @@ func httpsHarness(t *testing.T, binary, app, image, endpoint string, f gatewayte
 	port := func(name string) v1.Value { return fixtureRef("resource", name, "port") }
 	origin := fixtureRef("resource", "origin", "url")
 	api := v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "fixture"}, Resources: []string{"api"}, Ports: map[string]v1.ServicePort{"http": {Resource: "api"}}, Environment: v1.Environment{Assign: map[string]v1.Value{"PORT": port("api"), "BIND": fixtureLiteral("0.0.0.0"), "ROLE": fixtureLiteral("api")}}, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(port("api")), Timeout: "10s"}}
-	web := v1.Component{Kind: v1.Service, Runtime: v1.Container, Image: ptrValue(fixtureLiteral(image)), Resources: []string{"web", "origin"}, Outputs: []string{"trust"}, Mounts: []v1.Mount{{Output: "trust", Target: "/trust", ReadOnly: true}}, Ports: map[string]v1.ServicePort{"http": {Resource: "web", ContainerPort: 8080}}, DependsOn: []v1.Dependency{{Component: "api", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"PORT": fixtureLiteral("8080"), "ROLE": fixtureLiteral("web"), "CERT": fixtureLiteral("/trust/cert.pem"), "ORIGIN": origin, "GATEWAY_ADDRESS": fixtureLiteral("host.docker.internal:" + strconv.Itoa(f.Port))}}, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(port("web")), Timeout: "10s"}}
-	client := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: web.Image, Resources: []string{"origin", "api"}, Outputs: web.Outputs, Mounts: web.Mounts, DependsOn: []v1.Dependency{{Component: "web", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"CLIENT": fixtureLiteral("1"), "CERT": fixtureLiteral("/trust/cert.pem"), "ORIGIN": origin, "GATEWAY_ADDRESS": fixtureLiteral("host.docker.internal:" + strconv.Itoa(f.Port)), "BACKEND_HOST": {Ref: &v1.Reference{Kind: "service", Name: "api", Field: "host"}}, "BACKEND_PORT": {Ref: &v1.Reference{Kind: "service", Name: "api", Field: "port", Port: "http"}}}}}
+	web := v1.Component{Kind: v1.Service, Runtime: v1.Container, Image: ptrValue(fixtureLiteral(image)), Resources: []string{"web", "origin"}, Outputs: []string{"trust"}, Mounts: []v1.Mount{{Output: "trust", Target: "/trust", ReadOnly: true}}, Ports: map[string]v1.ServicePort{"http": {Resource: "web", ContainerPort: 8080}}, DependsOn: []v1.Dependency{{Component: "api", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"PORT": fixtureLiteral("8080"), "ROLE": fixtureLiteral("web"), "CERT": fixtureLiteral("/trust/cert.pem"), "ORIGIN": origin, "GATEWAY_ADDRESS": fixtureLiteral(containerHost + ":" + strconv.Itoa(f.Port))}}, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(port("web")), Timeout: "10s"}}
+	client := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: web.Image, Resources: []string{"origin", "api"}, Outputs: web.Outputs, Mounts: web.Mounts, DependsOn: []v1.Dependency{{Component: "web", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"CLIENT": fixtureLiteral("1"), "CERT": fixtureLiteral("/trust/cert.pem"), "ORIGIN": origin, "GATEWAY_ADDRESS": fixtureLiteral(containerHost + ":" + strconv.Itoa(f.Port)), "BACKEND_HOST": {Ref: &v1.Reference{Kind: "service", Name: "api", Field: "host"}}, "BACKEND_PORT": {Ref: &v1.Reference{Kind: "service", Name: "api", Field: "port", Port: "http"}}}}}
 	publication := &v1.Publication{Resource: "origin", Routes: []v1.Route{{Path: "/", Service: "web", Port: "http", Prefix: "preserve"}, {Path: "/api", Service: "api", Port: "http", Prefix: "strip"}}, Probe: v1.Probe{Kind: "http", Target: &origin, Timeout: "10s"}}
 	resources := []string{"api", "web", "origin"}
 	h.manifest = v1.Manifest{Version: v1.ManifestVersion, Project: "https-fixture", Tools: map[string]string{"fixture": app}, Resources: map[string]v1.Resource{"api": {Kind: "port"}, "web": {Kind: "port"}, "origin": {Kind: "origin"}}, Outputs: map[string]v1.Output{"trust": {Path: "trust", ConcurrencyGroup: "fixture-trust"}}, Components: map[string]v1.Component{"api": api, "web": web, "client": client}, Scenes: map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"api", "web"}, Resources: resources, Publish: publication}, "test": {Lifetime: v1.Disposable, Components: []string{"api", "web", "client"}, Resources: resources, TerminalJob: "client", Publish: publication}}}
@@ -89,6 +89,9 @@ func TestHTTPSRuntime(t *testing.T) {
 		}
 	}
 	image := gatewaytest.FixtureImage(t, endpoint, "../gateway/testdata/fixture")
+	// This external fixture uses explicit dialing with URL-host TLS verification.
+	// Observe Engine expansion instead of relying on Desktop-only DNS aliases.
+	containerHost := gatewaytest.HostGatewayAddress(t, endpoint)
 	for _, topology := range []string{"native-gateway", "container-gateway"} {
 		t.Run(topology, func(t *testing.T) {
 			var f gatewaytest.Fixture
@@ -97,7 +100,7 @@ func TestHTTPSRuntime(t *testing.T) {
 			} else {
 				f = gatewaytest.Start(t, "fixture.localhost")
 			}
-			h := httpsHarness(t, binary, app, image, endpoint, f, topology == "container-gateway")
+			h := httpsHarness(t, binary, app, image, endpoint, containerHost, f, topology == "container-gateway")
 			ready := h.state(h.run("dev").Instance.ID, v1.RuntimeReady)
 			id, origin := ready.Instance.ID, ready.Instance.Execution.Origin
 			if !strings.HasPrefix(origin, "https://bl-") || httpsBody(t, f, origin, "/ssr") != "ssr:api:/value" {

@@ -21,3 +21,8 @@ func ListenerConflict(_ context.Context, _, _ int) (bool, error) {
 func ListenerEndpoint(_ context.Context, _ int, _ string) (bool, bool, error) {
 	return false, false, errors.New("native listener ownership unsupported")
 }
+
+// OwnsListenerAddresses is unavailable on unsupported execution platforms.
+func OwnsListenerAddresses(_ context.Context, _, _ int, _ []string) (bool, error) {
+	return false, errors.New("native listener ownership unsupported")
+}

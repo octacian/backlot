@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -33,6 +34,29 @@ import (
 // TestContainerManagedHTTPSRuntime exercises explicit public-root inputs and
 // Engine host-gateway mappings through the real CLI/daemon/Docker path.
 func TestContainerManagedHTTPSRuntime(t *testing.T) {
+	testContainerManagedHTTPSRuntime(t, false)
+}
+
+// TestLinuxHTTPS is the early real CLI/native/Caddy/bridge trust and cleanup gate.
+func TestLinuxHTTPS(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux runtime acceptance")
+	}
+	testContainerManagedHTTPSRuntime(t, true)
+}
+
+func testContainerManagedHTTPSRuntime(t *testing.T, smoke bool) {
+	runBrowser := false
+	if smoke {
+		var err error
+		runBrowser, err = managedBrowserOptIn(os.Getenv("BACKLOT_BROWSER_TEST_BINARY"), os.Getenv("BACKLOT_CERTUTIL_TEST_BINARY"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !runBrowser {
+			t.Log("browser opt-ins absent; browser trust evidence is incomplete")
+		}
+	}
 	caddy, endpoint := os.Getenv("BACKLOT_CADDY_TEST_BINARY"), os.Getenv("BACKLOT_DOCKER_TEST_ENDPOINT")
 	if caddy == "" || endpoint == "" {
 		t.Skip("set BACKLOT_CADDY_TEST_BINARY and BACKLOT_DOCKER_TEST_ENDPOINT")
@@ -77,7 +101,17 @@ func TestContainerManagedHTTPSRuntime(t *testing.T) {
 	})
 	buildDir := t.TempDir()
 	binary, app := filepath.Join(buildDir, "backlot"), filepath.Join(buildDir, "fixture")
-	for _, build := range []struct{ path, source string }{{binary, "../../cmd/backlot"}, {app, "../../examples/container-https"}} {
+	builds := []struct{ path, source string }{{app, "../../examples/container-https"}}
+	if installed := os.Getenv("BACKLOT_INSTALLED_TEST_BINARY"); smoke && installed != "" {
+		if !filepath.IsAbs(installed) {
+			t.Fatal("installed Linux executable must be absolute")
+		}
+		binary = installed
+		t.Log("canonical HTTPS gate uses explicitly installed CLI/daemon", binary)
+	} else {
+		builds = append(builds, struct{ path, source string }{binary, "../../cmd/backlot"})
+	}
+	for _, build := range builds {
 		if output, err := exec.Command("go", "build", "-race", "-o", build.path, build.source).CombinedOutput(); err != nil {
 			t.Fatal(err, string(output))
 		}
@@ -116,6 +150,11 @@ func TestContainerManagedHTTPSRuntime(t *testing.T) {
 		admin = managedFixturePort(t)
 	}
 	config := v1.MachineConfig{Version: v1.ManifestVersion, Docker: &v1.DockerConfig{Endpoint: "unix://" + trapPath}, Caddy: &v1.CaddyConfig{Mode: "managed", Executable: caddy, Endpoint: "http://127.0.0.1:" + strconv.Itoa(admin), HTTPSPort: &port}}
+	// This fixture explicitly selects wider HTTPS reachability on rootful Linux.
+	// Production never detects Docker or changes the loopback default.
+	if runtime.GOOS == "linux" {
+		config.Caddy.HTTPSBindAddress = "0.0.0.0"
+	}
 	data, err := json.Marshal(config)
 	if err != nil {
 		t.Fatal(err)
@@ -266,6 +305,25 @@ printf '%s\n' 'public root input and readonly file mount verified'`}}
 			t.Fatal(err)
 		}
 		t.Log("daemon-integrated canonical container TLS", trustCase, "verified with native frontend/API, variable WebSocket payloads and redirect/cookie checks in success case")
+	}
+	if smoke {
+		if runBrowser {
+			testManagedBrowser(t, peerOrigin, rootPath)
+		}
+		if _, err := h.cli.Destroy(context.Background(), peer); err != nil {
+			t.Fatal(err)
+		}
+		command("gateway", "stop")
+		// Resume the validated saved wildcard configuration through the real
+		// installed daemon; no bootstrap replay or CA replacement is allowed.
+		command("gateway", "start")
+		resumedCA, err := os.ReadFile(rootPath)
+		if err != nil || !bytes.Equal(ca, resumedCA) {
+			t.Fatal("saved listener resume changed CA identity", err)
+		}
+		command("gateway", "stop")
+		t.Log("early real Linux CLI/native/Caddy/bridge trust, saved gateway resume and lifecycle cleanup verified")
+		return
 	}
 	consumer.Environment.Assign = map[string]v1.Value{"SSL_CERT_FILE": cert, "SSL_CERT_DIR": fixtureLiteral("/empty-roots"), "ORIGIN": origin}
 	delete(h.manifest.Scenes, "trust")

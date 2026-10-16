@@ -37,10 +37,18 @@ func TestConcurrentPublicationAndOwnership(t *testing.T) {
 			w.Header().Set("Etag", etag)
 			_ = json.NewEncoder(w).Encode(root)
 		case r.Method == "PATCH" && r.URL.Path == "/config/routes/0/handle/0/routes":
-			if r.Header.Get("If-Match") != etag || retries == 0 {
+			// Inject one real concurrent edit. A rejected stale precondition is
+			// otherwise read-only, as in Caddy: making every 412 another edit
+			// can force two writers to invalidate each other indefinitely.
+			if retries == 0 {
 				retries++
 				version++
 				root["unrelated"] = "concurrent edit"
+				w.WriteHeader(412)
+				return
+			}
+			if r.Header.Get("If-Match") != etag {
+				retries++
 				w.WriteHeader(412)
 				return
 			}

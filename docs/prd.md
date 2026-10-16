@@ -20,16 +20,20 @@ gate. Acceptance uses self-contained, generic fixtures maintained here.
 
 ## V1 boundary
 
-Ship a Go daemon and CLI in one executable for macOS ARM64. A future UI must be
-able to use the same typed API. Keep OS-specific process and transport operations
-behind explicit boundaries so Linux and native Windows can follow later.
+Ship a Go daemon and CLI in one executable for macOS ARM64 and the bounded Linux
+amd64 targets in the [platform policy](platforms.md). A future UI must use the same
+typed API. Keep OS-specific process and transport operations behind explicit
+boundaries. WSL runs the Linux runtime with configuration guidance only; no WSL QA
+or support guarantee is claimed. Native Windows execution is not a target.
 
 Operate on one machine with a local Docker engine. Publishing supports an
 explicitly managed stock native Caddy local-CA gateway
 with loopback `.backlot.localhost:8443` origins, or an externally managed native/
 container Caddy gateway with operator DNS/certificates. Managed mode targets
 host/browser/native clients and explicitly configured Docker Desktop Linux bridge
-consumers on macOS ARM64; external mode can support LAN applications.
+consumers on macOS ARM64 and explicitly reachable rootful Linux bridge consumers;
+external mode can support LAN applications. Managed HTTPS stays loopback unless
+the operator explicitly configures `https_bind_address`; admin always stays loopback.
 Trust setup is a separate explicit operator action; administration stays local.
 
 Required workflows:
@@ -270,7 +274,7 @@ must not serialize secret values; application stdout/stderr is captured as emitt
 
 ## Out of scope
 
-Frontend UI; remote/multi-host orchestration; Linux/Windows release support;
+Frontend UI; remote/multi-host orchestration; native Windows execution; WSL QA/support guarantees;
 toolchain/version-manager installation; automatic watch/build/restart; arbitrary
 job retriggering; shared-database provisioning; Compose import/export; CI scene
 execution guarantees; DNS/router management; public certificate provisioning; automatic trust installation;

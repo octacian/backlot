@@ -59,7 +59,8 @@ are scoped to an attempt and bound on loopback by default; explicit machine
 references for private DNS names and internal ports. Container-to-native references
 require explicit `docker.host_address` and reachable native listener interfaces;
 see the [HTTPS/mixed guide](https.md). Managed HTTPS consumers on
-macOS ARM64 Docker Desktop explicitly declare origin `host_mappings` and read-only
+macOS ARM64 Docker Desktop and the [bounded rootful Linux topology](platforms.md)
+explicitly declare origin `host_mappings` and read-only
 `origin_ca_cert` mounts. The explicit `host: host-gateway` Engine token expands
 at each container create, without helper images or copied IP addresses.
 `ca_cert_path` resolves to the chosen container file target in explicit

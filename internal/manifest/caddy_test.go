@@ -25,6 +25,11 @@ func TestManagedCaddyContract(t *testing.T) {
 		func(c *v1.CaddyConfig) { c.HostAddress = "host.docker.internal" },
 		func(c *v1.CaddyConfig) { p := 443; c.HTTPSPort = &p },
 		func(c *v1.CaddyConfig) { c.Mode = "external" },
+		func(c *v1.CaddyConfig) { c.HTTPSBindAddress = "host.docker.internal" },
+		func(c *v1.CaddyConfig) { c.HTTPSBindAddress = "::" },
+		func(c *v1.CaddyConfig) { c.HTTPSBindAddress = "224.0.0.1" },
+		func(c *v1.CaddyConfig) { c.HTTPSBindAddress = "127.0.0.1:8443" },
+		func(c *v1.CaddyConfig) { c.HTTPSBindAddress = "0172.17.0.1" },
 	} {
 		c := base
 		change(&c)
@@ -35,5 +40,18 @@ func TestManagedCaddyContract(t *testing.T) {
 	legacy := v1.CaddyConfig{Endpoint: "http://127.0.0.1:2019", Scope: "backlot", DomainSuffix: "example.test", HostAddress: "localhost"}
 	if CaddyDefaults(legacy).Mode != "external" || ValidateMachine(v1.MachineConfig{Version: v1.ManifestVersion, Caddy: &legacy}) != nil {
 		t.Fatal("legacy external config changed")
+	}
+}
+
+func TestExplicitManagedHTTPSBind(t *testing.T) {
+	for _, address := range []string{"0.0.0.0", "172.17.0.1", "127.0.0.1"} {
+		c := v1.CaddyConfig{Mode: "managed", Executable: "/explicit/caddy", HTTPSBindAddress: address}
+		if err := ValidateMachine(v1.MachineConfig{Version: v1.ManifestVersion, Caddy: &c}); err != nil {
+			t.Fatal(address, err)
+		}
+	}
+	c := v1.CaddyConfig{Mode: "external", HTTPSBindAddress: "0.0.0.0", Endpoint: "http://127.0.0.1:2019", Scope: "backlot", DomainSuffix: "example.test", HostAddress: "localhost"}
+	if ValidateMachine(v1.MachineConfig{Version: v1.ManifestVersion, Caddy: &c}) == nil {
+		t.Fatal("external exposure accepted")
 	}
 }

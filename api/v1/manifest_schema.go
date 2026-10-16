@@ -270,6 +270,9 @@ func (DockerConfig) JSONSchemaExtend(s *jsonschema.Schema) {
 func (CaddyConfig) JSONSchemaExtend(s *jsonschema.Schema) {
 	// Match Go's case-insensitive schemes and zero-valued query/fragment delimiters.
 	schemaProperty(s, "endpoint").Pattern = `^[Hh][Tt][Tt][Pp][Ss]?://[^/?#@]+(/[^?#]*)?\??#?$`
+	octet := `(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])`
+	schemaProperty(s, "https_bind_address").Pattern = `^$|^(` + octet + `\.){3}` + octet + `$`
+	schemaProperty(s, "https_bind_address").Not = &jsonschema.Schema{Pattern: `^(22[4-9]|23[0-9])\.`}
 	schemaProperty(s, "scope").Pattern = schemaIdentifier
 	schemaProperty(s, "domain_suffix").Pattern = `^[a-z0-9-]+(\.[a-z0-9-]+)+$`
 	schemaProperty(s, "host_address").Pattern = "^[^/\x00 \n\r]+$"
@@ -285,6 +288,7 @@ func (CaddyConfig) JSONSchemaExtend(s *jsonschema.Schema) {
 	managed.Else = &jsonschema.Schema{AllOf: []*jsonschema.Schema{
 		schemaRequire("endpoint", "scope", "domain_suffix", "host_address"),
 		schemaEmpty("executable"),
+		schemaEmpty("https_bind_address"),
 	}}
 	s.AllOf = []*jsonschema.Schema{managed}
 }

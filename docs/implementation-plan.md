@@ -191,3 +191,15 @@ cleanup/results. Prefer maintained libraries for solved infrastructure concerns
 and write the smallest Backlot-specific lifecycle code that preserves the PRD.
 Keep the implementation plan current as milestones land. Any material scope
 change needs an explicit decision rather than silently weakening acceptance.
+
+## Linux platform expansion (issue 23)
+
+Implementation adds explicit managed IPv4 HTTPS reachability, Linux amd64
+reproducible builds/notices, Ubuntu 24.04 runtime/provider/browser CI and
+[Linux/WSL operations](platforms.md). The
+[Linux gateway decision](adr/20261016T201500000Z-support-explicit-linux-managed-https-reachability.md)
+retains private administration and explicit host-gateway/public-root trust.
+Debian 13.4 amd64 actual-host evidence, complete frozen provider/native/macOS
+regressions, independent reviews and exact published-HEAD CI remain required
+before readiness. WSL is configuration guidance only, without WSL QA or guarantees;
+native Windows execution and compile-only CI are outside the platform roadmap.

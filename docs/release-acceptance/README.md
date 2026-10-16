@@ -50,10 +50,14 @@ exclude secrets, raw private configuration/state and ownership capabilities.
 
 ## Supported platform boundary
 
-The release runtime target is macOS ARM64. Linux checks are portability evidence;
-Windows cross-builds establish compilation only. Neither proves runtime lifecycle,
-networking, installation or supported release behavior on those platforms.
-Mocked checks and fixture-only DNS/TLS do not establish real operator acceptance.
+The original V1 four-workflow release acceptance remains macOS ARM64. The
+[platform policy](../platforms.md) additionally targets Ubuntu 24.04 amd64 and
+Debian 13.4 amd64 through their separate installation/lifecycle/networking/trust
+runtime gates. Ubuntu CI and Debian actual-host evidence are both required;
+cross-compilation proves neither. WSL has configuration guidance only, without
+WSL QA or guarantees. Native Windows execution and its compile-only CI are out
+of scope. Mocked checks and fixture-only DNS/TLS do not establish real operator
+acceptance; bounded disposable Linux browser trust is reported separately.
 
 ## External retention
 

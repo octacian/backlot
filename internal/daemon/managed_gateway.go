@@ -281,10 +281,18 @@ func (s *service) managedListeners(ctx context.Context, c v1.CaddyConfig) error 
 	}
 	u, _ := url.Parse(c.Endpoint)
 	admin, _ := strconv.Atoi(u.Port())
-	for _, port := range []int{admin, *c.HTTPSPort} {
-		owned, err := native.OwnsListener(ctx, s.gatewayGroup.PGID(), port)
+	https := gateway.ManagedHTTPSBindings(c)
+	addresses := make([]string, len(https))
+	for i, binding := range https {
+		addresses[i] = binding.Address
+	}
+	for _, listener := range []struct {
+		port      int
+		addresses []string
+	}{{admin, []string{u.Host}}, {*c.HTTPSPort, addresses}} {
+		owned, err := native.OwnsListenerAddresses(ctx, s.gatewayGroup.PGID(), listener.port, listener.addresses)
 		if err != nil || !owned {
-			return problem("gateway_unavailable", "managed listener ownership/readiness unavailable; no takeover performed")
+			return problem("gateway_unavailable", "configured managed listener ownership/family/exposure is unavailable; no fallback performed")
 		}
 	}
 	return nil
@@ -298,8 +306,8 @@ func (s *service) startManaged(ctx context.Context, r *managedRecord) (result er
 	u, _ := url.Parse(r.Config.Endpoint)
 	// Bind checks are observations, never reservations. Subsequent guardian
 	// listener proof rejects races; no retry, fallback, or unrelated actuation.
-	for _, address := range []string{u.Host, net.JoinHostPort("127.0.0.1", strconv.Itoa(*r.Config.HTTPSPort)), net.JoinHostPort("::1", strconv.Itoa(*r.Config.HTTPSPort))} {
-		listener, err := net.Listen("tcp", address)
+	for _, binding := range append([]gateway.ManagedListener{{Network: "tcp", Address: u.Host}}, gateway.ManagedHTTPSBindings(r.Config)...) {
+		listener, err := net.Listen(binding.Network, binding.Address)
 		if err != nil {
 			return problem("gateway_port_conflict", "configured managed listener is unavailable; no fallback or takeover")
 		}

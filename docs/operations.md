@@ -1,7 +1,8 @@
-# Install and operate Backlot on macOS ARM64
+# Install and operate Backlot
 
-V1 runtime acceptance targets macOS ARM64. Install Go 1.27.1 or newer, Git for project
-worktrees, and `lsof` (included with macOS). Make is needed only for the source-build
+Runtime targets are macOS ARM64, Ubuntu 24.04 amd64 and Debian 13.4 amd64; see
+[platform prerequisites and WSL guidance](platforms.md). Install Go 1.27.1 or a
+compatible newer patch, Git for project worktrees, and `lsof` (included with macOS). Make is needed only for the source-build
 alternative below. Native commands must cooperate with
 Backlot's supervised process-group contract; do not detach or delegate to another
 supervisor. Install Docker only for container scenes. For published scenes choose
@@ -49,7 +50,11 @@ shasum -a 256 bin/backlot-darwin-arm64
 install -m 0755 bin/backlot-darwin-arm64 /your/user/bin/backlot
 ```
 
-`release-build` fixes `GOOS=darwin`, `GOARCH=arm64`, `CGO_ENABLED=0`, trims build
+For Linux amd64, use `make release-build RELEASE_GOOS=linux RELEASE_GOARCH=amd64`
+and install `bin/backlot-linux-amd64` instead. Run `sha256sum` on Linux.
+
+`release-build` defaults to `GOOS=darwin`, `GOARCH=arm64`, supports explicit
+`RELEASE_GOOS`/`RELEASE_GOARCH`, fixes `CGO_ENABLED=0`, trims build
 paths and excludes VCS dirtiness, timestamps and Go build IDs. It deliberately
 uses stable `dev` version metadata until release versioning is separately
 specified. Rebuild twice with the same Go toolchain/modules/flags, compare with
@@ -60,8 +65,8 @@ by this local build command.
 Ship [LICENSE](../LICENSE) and [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)
 with any copied binary. Notices include linked CLI/optional acceptance application
 modules and the Go standard library. `make notices` regenerates from downloaded
-pinned source; `make notices-check` rejects drift. Inventories label the macOS
-ARM64 CLI separately from the optional macOS/container application. Reviewed
+pinned source; `make notices-check` rejects drift. Inventories label macOS ARM64
+and Linux amd64 CLI dependencies separately from the optional macOS/container application. Reviewed
 source-embedded notices live in `cmd/notices/supplements.json`, bound to exact
 module versions and source SHA-256; dependency/source changes require attribution
 review before regeneration. The current linked-source audit includes the wsutil

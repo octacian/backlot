@@ -32,10 +32,47 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code -- go.mod go.sum
-      - name: Cross-build Windows (compilation only)
-        if: runner.os == 'Linux'
+
+  linux-runtime:
+    name: Linux runtime (Ubuntu 24.04 amd64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install disposable runner prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lsof libnss3-tools
+          mkdir -p "$RUNNER_TEMP/backlot-tools"
+          GOBIN="$RUNNER_TEMP/backlot-tools" go install github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.6
+          docker pull alpine:3.21
+          docker pull mariadb:11.4
+          docker pull caddy:2.11.6
+      - name: Verify Linux installation
+        run: |
+          make release-build RELEASE_GOOS=linux RELEASE_GOARCH=amd64
+          mkdir -p "$RUNNER_TEMP/backlot-install"
+          install -m 0755 bin/backlot-linux-amd64 "$RUNNER_TEMP/backlot-install/backlot"
+          "$RUNNER_TEMP/backlot-install/backlot" version --json
+          BACKLOT_INSTALLED_TEST_BINARY="$RUNNER_TEMP/backlot-install/backlot" \
+            go test -race ./internal/daemon -run '^TestLinuxInstallation$' -count=1 -v
+      - name: Early native and bridge HTTPS trust and cleanup
         env:
-          GOOS: windows
-          GOARCH: amd64
-          CGO_ENABLED: '0'
-        run: go build ./...
+          BACKLOT_DOCKER_TEST_ENDPOINT: unix:///var/run/docker.sock
+          BACKLOT_BROWSER_TEST_BINARY: /usr/bin/google-chrome
+          BACKLOT_CERTUTIL_TEST_BINARY: /usr/bin/certutil
+        run: |
+          export BACKLOT_CADDY_TEST_BINARY="$RUNNER_TEMP/backlot-tools/caddy"
+          export BACKLOT_INSTALLED_TEST_BINARY="$RUNNER_TEMP/backlot-install/backlot"
+          go test -race ./internal/daemon -run '^TestLinuxHTTPS$' -count=1 -v -timeout=15m
+      - name: Complete provider and HTTPS runtime gates
+        env:
+          BACKLOT_DOCKER_TEST_ENDPOINT: unix:///var/run/docker.sock
+        run: |
+          export BACKLOT_CADDY_TEST_BINARY="$RUNNER_TEMP/backlot-tools/caddy"
+          go test -race ./internal/gateway -count=1 -v -timeout=15m
+          go test -race ./internal/daemon -run '^(TestDockerRuntime|TestDisposableEvidenceDocker|TestHTTPSRuntime|TestManagedHTTPSRuntime|TestContainerManagedHTTPSRuntime)$' -count=1 -v -timeout=40m

@@ -68,13 +68,14 @@ func embeddedNotice(m module, s supplement) (string, error) {
 func generate() ([]byte, error) {
 	modules := map[string]module{}
 	scopes := map[string][]string{}
-	for _, target := range []struct{ name, pkg, os string }{
-		{"Backlot CLI (darwin/arm64)", "./cmd/backlot", "darwin"},
-		{"optional acceptance application (darwin/arm64)", "./examples/release-acceptance", "darwin"},
-		{"optional acceptance application (linux/arm64 container)", "./examples/release-acceptance", "linux"},
+	for _, target := range []struct{ name, pkg, os, arch string }{
+		{"Backlot CLI (darwin/arm64)", "./cmd/backlot", "darwin", "arm64"},
+		{"Backlot CLI (linux/amd64)", "./cmd/backlot", "linux", "amd64"},
+		{"optional acceptance application (darwin/arm64)", "./examples/release-acceptance", "darwin", "arm64"},
+		{"optional acceptance application (linux/arm64 container)", "./examples/release-acceptance", "linux", "arm64"},
 	} {
 		command := exec.Command("go", "list", "-deps", "-json", target.pkg)
-		command.Env = append(os.Environ(), "GOOS="+target.os, "GOARCH=arm64", "CGO_ENABLED=0")
+		command.Env = append(os.Environ(), "GOOS="+target.os, "GOARCH="+target.arch, "CGO_ENABLED=0")
 		data, err := command.Output()
 		if err != nil {
 			return nil, fmt.Errorf("list %s dependencies: %w", target.name, err)

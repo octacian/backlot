@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -147,6 +148,7 @@ func (d *dockerEngine) noConsumers(ctx context.Context, g resourceGeneration) er
 	if err != nil {
 		return err
 	}
+	desktop, checkedDesktop := false, false
 	for _, item := range list.Items {
 		inspect, err := d.ContainerInspect(ctx, item.ID, client.ContainerInspectOptions{})
 		if errdefs.IsNotFound(err) {
@@ -165,7 +167,17 @@ func (d *dockerEngine) noConsumers(ctx context.Context, g resourceGeneration) er
 					return problem("cleanup_failed", "storage still has a Docker consumer; preserved")
 				}
 				if r.Kind == "directory" && m.Type == mount.TypeBind {
-					overlap, err := bindSourcesOverlap(r.Name, m.Source)
+					if desktopBindSource(m.Source) && !checkedDesktop {
+						checkedDesktop = true
+						if runtime.GOOS == "darwin" {
+							info, err := d.Info(ctx, client.InfoOptions{})
+							if err != nil {
+								return problem("cleanup_failed", "cannot verify Docker bind-source namespace; storage preserved")
+							}
+							desktop = info.Info.OperatingSystem == "Docker Desktop" && info.Info.OSType == "linux"
+						}
+					}
+					overlap, err := engineBindSourceOverlap(r.Name, m.Source, desktop, filepath.EvalSymlinks)
 					if err != nil {
 						return err
 					}
@@ -187,8 +199,58 @@ func (d *dockerEngine) noConsumers(ctx context.Context, g resourceGeneration) er
 	return nil
 }
 
+func desktopBindSource(source string) bool {
+	return source == "/host_mnt" || strings.HasPrefix(source, "/host_mnt/")
+}
+
+// engineBindSourceOverlap interprets inspected provider metadata only. Generic
+// user/private bind inputs must keep their ordinary host filesystem semantics.
+// Desktop provenance is verified once per inspection on native macOS. Both
+// viable identities are compared so a real host /host_mnt tree cannot hide a
+// translated consumer; unknown/partially resolved namespaces preserve storage.
+// resolve is a narrow filesystem seam for the dual-identity regression, which
+// cannot create a global /host_mnt tree in an owned fixture.
+func engineBindSourceOverlap(directory, source string, desktop bool, resolve func(string) (string, error)) (bool, error) {
+	uncertain := func() error {
+		return problem("cleanup_failed", "Docker bind source has no verifiable host filesystem identity; storage preserved until the consumer is removed or its source is verifiable")
+	}
+	if !filepath.IsAbs(source) || filepath.Clean(source) != source {
+		return false, uncertain()
+	}
+	candidates := []string{source}
+	vmSource := desktopBindSource(source)
+	if vmSource {
+		if !desktop {
+			return false, uncertain()
+		}
+		counterpart := strings.TrimPrefix(source, "/host_mnt")
+		if counterpart == "" {
+			counterpart = "/"
+		}
+		candidates = append(candidates, counterpart)
+	}
+	var identities []string
+	for i, candidate := range candidates {
+		identity, err := resolve(candidate)
+		if err != nil {
+			if vmSource && i == 0 && os.IsNotExist(err) {
+				continue
+			}
+			return false, uncertain()
+		}
+		identities = append(identities, identity)
+	}
+	for _, identity := range identities {
+		overlap, err := bindSourcesOverlap(directory, identity)
+		if err != nil || overlap {
+			return overlap, err
+		}
+	}
+	return false, nil
+}
+
 // bindSourcesOverlap resolves aliases before comparing path components in both
-// directions. An unresolvable source cannot prove that deletion is safe.
+// directions. An unresolvable source cannot prove that a mount or deletion is safe.
 func bindSourcesOverlap(a, b string) (bool, error) {
 	a, err := canonicalBindSource(a)
 	if err != nil {
@@ -202,7 +264,33 @@ func bindSourcesOverlap(a, b string) (bool, error) {
 		rel, err := filepath.Rel(parent, child)
 		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	}
-	return within(a, b) || within(b, a), nil
+	if within(a, b) || within(b, a) {
+		return true, nil
+	}
+	// EvalSymlinks preserves spelling on case-insensitive filesystems. Compare
+	// actual ancestor identities so a case alias cannot hide the same directory.
+	for _, pair := range [][2]string{{a, b}, {b, a}} {
+		parent, err := os.Stat(pair[0])
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return false, fmt.Errorf("inspect bind boundary: %w", err)
+		}
+		for candidate := pair[1]; ; candidate = filepath.Dir(candidate) {
+			child, err := os.Stat(candidate)
+			if err == nil && os.SameFile(parent, child) {
+				return true, nil
+			}
+			if err != nil && !os.IsNotExist(err) {
+				return false, fmt.Errorf("inspect bind ancestor: %w", err)
+			}
+			if filepath.Dir(candidate) == candidate {
+				break
+			}
+		}
+	}
+	return false, nil
 }
 
 // canonicalBindSource resolves existing ancestors, retaining a missing suffix.
@@ -412,6 +500,10 @@ func (s *service) launchContainer(ctx context.Context, id string, c v1.PlannedCo
 	r.Name = "backlot-" + r.Token
 	config := &container.Config{Image: image, Cmd: c.Args, Env: env, Labels: resourceLabels(r), ExposedPorts: network.PortSet{}}
 	host := &container.HostConfig{RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled}, PortBindings: network.PortMap{}}
+	host.ExtraHosts, err = containerOriginHosts(c, snap, result.Origin)
+	if err != nil {
+		return nil, err
+	}
 	for _, port := range c.Ports {
 		p, err := network.ParsePort(strconv.Itoa(port.ContainerPort) + "/tcp")
 		if err != nil {
@@ -422,7 +514,15 @@ func (s *service) launchContainer(ctx context.Context, id string, c v1.PlannedCo
 	}
 	for _, m := range c.Mounts {
 		x := mount.Mount{Target: m.Target, ReadOnly: m.ReadOnly, Type: mount.TypeBind}
-		if m.Resource != "" {
+		if m.OriginCACert != "" {
+			x.Source, err = s.store.consumerCACertPath(snap)
+			if err != nil {
+				return nil, err
+			}
+			if !m.ReadOnly || x.Source == "" || x.Source != entry.caCertPath {
+				return nil, problem("gateway_ca", "public root mount has no validated matching CA")
+			}
+		} else if m.Resource != "" {
 			allocation := entry.resources.Resources[m.Resource]
 			x.Source = allocation.Name
 			if allocation.Kind == "volume" {
@@ -433,6 +533,9 @@ func (s *service) launchContainer(ctx context.Context, id string, c v1.PlannedCo
 			output := snap.Plan.Outputs[m.Output]
 			x.Source, err = plan.OutputPath(project, output.Path)
 			if err != nil {
+				return nil, err
+			}
+			if err = s.store.validateOutputBindSource(x.Source); err != nil {
 				return nil, err
 			}
 			root, openErr := os.OpenRoot(project)
@@ -453,6 +556,16 @@ func (s *service) launchContainer(ctx context.Context, id string, c v1.PlannedCo
 			}
 
 		}
+		if m.OriginCACert == "" && x.Type == mount.TypeBind {
+			if m.Output != "" {
+				err = s.store.validateOutputBindSource(x.Source)
+			} else {
+				err = s.store.validateGatewayBindSource(x.Source)
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
 		host.Mounts = append(host.Mounts, x)
 	}
 	networking := &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{}}
@@ -468,7 +581,11 @@ func (s *service) launchContainer(ctx context.Context, id string, c v1.PlannedCo
 	}
 	out, err := entry.docker.ContainerCreate(ctx, client.ContainerCreateOptions{Name: r.Name, Config: config, HostConfig: host, NetworkingConfig: networking})
 	if err != nil {
-		return nil, providerFailure("create container (use external Docker tooling to pull/build the declared image)", err)
+		action := "create container (use external Docker tooling to pull/build the declared image)"
+		if len(host.ExtraHosts) > 0 {
+			action = "create container (pre-pull/build the declared image; explicit origin mappings require Engine host-gateway support)"
+		}
+		return nil, providerFailure(action, err)
 	}
 	r.ID = out.ID
 	entry.resources.Containers[index] = r
@@ -587,8 +704,23 @@ func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, re
 	}
 	r := value.Symbolic
 	if r != nil && r.Kind == "resource" && r.Field == "ca_cert_path" {
-		if runtime != v1.Native || entry == nil || entry.caCertPath == "" || snap.Plan.Publish == nil || snap.Plan.Publish.Resource != r.Name || snap.Plan.Resources[r.Name].Kind != "origin" {
-			return "", problem("invalid_contract", "ca_cert_path requires a managed published origin and native environment assignment")
+		if entry == nil || entry.caCertPath == "" || snap.Plan.Publish == nil || snap.Plan.Publish.Resource != r.Name || snap.Plan.Resources[r.Name].Kind != "origin" {
+			return "", problem("invalid_contract", "ca_cert_path requires a managed published origin and explicit environment assignment")
+		}
+		if runtime == v1.Container {
+			name, suffix, ok := strings.Cut(key, "/environment/")
+			if ok && suffix != "" {
+				for _, component := range snap.Plan.Components {
+					if component.Name == name && component.Runtime == v1.Container {
+						for _, mount := range component.Mounts {
+							if mount.OriginCACert == r.Name && mount.ReadOnly {
+								return mount.Target, nil
+							}
+						}
+					}
+				}
+			}
+			return "", problem("invalid_contract", "container ca_cert_path requires its explicit read-only origin_ca_cert mount and environment assignment")
 		}
 		return entry.caCertPath, nil
 	}

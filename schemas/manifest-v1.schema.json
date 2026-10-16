@@ -75,6 +75,9 @@
                   "args": {
                     "maxItems": 0
                   },
+                  "host_mappings": {
+                    "maxItems": 0
+                  },
                   "mounts": {
                     "maxItems": 0
                   },
@@ -399,6 +402,13 @@
           "type": "object",
           "description": "Named allocated host ports with explicit container listeners when needed."
         },
+        "host_mappings": {
+          "items": {
+            "$ref": "#/$defs/HostMapping"
+          },
+          "type": "array",
+          "description": "Explicit managed origin hostname mappings to the Engine host gateway at each container create."
+        },
         "mounts": {
           "items": {
             "$ref": "#/$defs/Mount"
@@ -504,6 +514,30 @@
         "value"
       ],
       "description": "Fixture declares a discoverable identity or credential for a component."
+    },
+    "HostMapping": {
+      "properties": {
+        "origin": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "description": "Attached and published origin whose canonical hostname is mapped."
+        },
+        "host": {
+          "type": "string",
+          "enum": [
+            "host-gateway"
+          ],
+          "description": "Explicit Engine host-gateway token, expanded by Docker at each container create; no copied IP or resolver helper."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "origin",
+        "host"
+      ],
+      "description": "HostMapping explicitly maps a published origin hostname to Docker's host gateway."
     },
     "Input": {
       "properties": {
@@ -634,6 +668,13 @@
                   "const": ""
                 }
               }
+            },
+            {
+              "properties": {
+                "origin_ca_cert": {
+                  "const": ""
+                }
+              }
             }
           ]
         },
@@ -657,11 +698,56 @@
                   "const": ""
                 }
               }
+            },
+            {
+              "properties": {
+                "origin_ca_cert": {
+                  "const": ""
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "required": [
+                "origin_ca_cert",
+                "read_only"
+              ]
+            },
+            {
+              "properties": {
+                "origin_ca_cert": {
+                  "minLength": 1
+                },
+                "read_only": {
+                  "const": true
+                }
+              }
+            },
+            {
+              "properties": {
+                "resource": {
+                  "const": ""
+                }
+              }
+            },
+            {
+              "properties": {
+                "output": {
+                  "const": ""
+                }
+              }
             }
           ]
         }
       ],
       "properties": {
+        "origin_ca_cert": {
+          "type": "string",
+          "description": "Attached published managed origin whose public root is mounted as a read-only file; never a key or CA directory."
+        },
         "resource": {
           "type": "string",
           "description": "Declared resource name; selection and kind are checked by backlot plan."
@@ -686,7 +772,7 @@
       "required": [
         "target"
       ],
-      "description": "Mount connects declared storage or checkout output to a container path."
+      "description": "Mount connects declared storage, checkout output or a public origin CA to a container path."
     },
     "Output": {
       "properties": {

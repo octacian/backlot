@@ -418,8 +418,9 @@ func newNativeHarnessConfigured(t *testing.T, binary, budget string, faults bool
 	h.manifest = v1.Manifest{Version: v1.ManifestVersion, Project: "native-fixture", Tools: map[string]string{"fixture": self}, Resources: map[string]v1.Resource{"port": {Kind: "port"}}, Components: map[string]v1.Component{"server": server, "job": job}, Scenes: map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"server"}, Resources: []string{"port"}}, "test": {Lifetime: v1.Disposable, Components: []string{"server", "job"}, Resources: []string{"port"}, TerminalJob: "job"}}}
 	h.write()
 	h.cli = client.New(SocketPath(h.dir))
-	h.start()
+	// Retain cleanup before startup can fail after creating the daemon child.
 	t.Cleanup(h.close)
+	h.start()
 	return h
 }
 

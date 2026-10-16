@@ -114,7 +114,21 @@ conflicts without fallback. Recovery removes exact scene routes before authentic
 gateway stop, preserves uncertain intents and CA/data, and requires explicit start.
 Only validated saved effective config can resume after first activation; missing
 saved state or changed/unusable CA cannot fall back to bootstrap. See the
-[gateway decision](adr/20261014T033700000Z-support-managed-local-ca-and-external-caddy-gateways.md).
+[gateway decision](adr/20261014T215536946Z-extend-managed-https-to-explicit-container-consumers.md).
+
+Container consumers explicitly map their attached published origin's canonical
+hostname to the explicit Engine `host-gateway` token. Pass that token directly to
+Docker ExtraHosts at each container create, including fresh creates on restart;
+Engine owns address expansion. Do not infer a DNS name, look up host DNS, copy an
+IP or allocate a resolver helper. The public-root `origin_ca_cert` mount is
+a read-only file at the project's chosen absolute container target; explicit
+container `ca_cert_path` environment references resolve there. Native references
+retain the private host public-root path. Keys/CA directories are never consumer
+mount inputs, trust is never injected implicitly, and runtime detection/TLS
+bypasses are excluded. Keep both managed listeners and admin on loopback for the
+bounded macOS ARM64 Docker Desktop Linux bridge topology. Host-only selected work
+does not access Docker; snapshots and journaled recovery retain their existing
+ownership boundaries.
 
 External Caddy retains operator TLS/DNS/lifecycle ownership. Validate the shared origin through HTTPS
 from every required consumer context. Keep listener readiness separate from final

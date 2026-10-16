@@ -5,16 +5,20 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/plan"
 )
@@ -41,6 +45,9 @@ func TestRetainedDriftContracts(t *testing.T) {
 		func(s *plan.Snapshot) { s.Plan.Resources = map[string]v1.Resource{"data": {Kind: "directory"}} },
 		func(s *plan.Snapshot) { s.Plan.Components[0].Image = ptrPlanned(literal("db:2")) },
 		func(s *plan.Snapshot) { s.Plan.Components[0].Mounts = []v1.Mount{{Resource: "data", Target: "/other"}} },
+		func(s *plan.Snapshot) {
+			s.Plan.Components[0].HostMappings = []v1.HostMapping{{Origin: "origin", Host: "host-gateway"}}
+		},
 		func(s *plan.Snapshot) { s.Secrets["db/environment/PASSWORD"] = literal("changed") },
 		func(s *plan.Snapshot) {
 			s.Plan.Components[0].Policy = v1.FreshOnly
@@ -128,6 +135,137 @@ func TestBindSourcesOverlap(t *testing.T) {
 	}
 	if _, err := bindSourcesOverlap(owned, dangling); err == nil {
 		t.Fatal("uncertain source accepted")
+	}
+}
+
+// D21-P1-001: Docker metadata can name a different filesystem namespace.
+// A missing VM path cannot establish that a live bind consumer is unrelated.
+func TestDockerBindConsumerIdentity(t *testing.T) {
+	root := t.TempDir()
+	owned, sibling := filepath.Join(root, "data"), filepath.Join(root, "data-other")
+	child := filepath.Join(owned, "sub")
+	for _, path := range []string{child, sibling} {
+		if err := os.MkdirAll(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(child, alias); err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := filepath.EvalSymlinks(owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, source string
+		blocked      bool
+	}{
+		{"same", owned, true}, {"parent", root, true}, {"child", child, true},
+		{"alias", alias, true}, {"sibling", sibling, false},
+		{"desktop-same", "/host_mnt" + canonical, true},
+		{"desktop-parent", "/host_mnt" + filepath.Dir(canonical), true},
+		{"desktop-child", "/host_mnt" + filepath.Join(canonical, "sub"), true},
+		{"desktop-sibling", "/host_mnt" + filepath.Join(filepath.Dir(canonical), "data-other"), runtime.GOOS != "darwin"},
+		{"desktop-sibling-unknown-provider", "/host_mnt" + filepath.Join(filepath.Dir(canonical), "data-other"), true},
+		{"desktop-sibling-nonlinux-provider", "/host_mnt" + filepath.Join(filepath.Dir(canonical), "data-other"), true},
+		{"desktop-sibling-info-unavailable", "/host_mnt" + filepath.Join(filepath.Dir(canonical), "data-other"), true},
+		{"unresolved-sibling", filepath.Join(root, "missing"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/containers/json"):
+					_ = json.NewEncoder(w).Encode([]map[string]any{{"Id": "foreign"}})
+				case strings.HasSuffix(r.URL.Path, "/containers/foreign/json"):
+					_ = json.NewEncoder(w).Encode(map[string]any{"Id": "foreign", "Mounts": []map[string]any{{"Type": "bind", "Source": tc.source, "Destination": "/used", "RW": true}}})
+				case strings.HasSuffix(r.URL.Path, "/info"):
+					operatingSystem, osType := "Docker Desktop", "linux"
+					switch tc.name {
+					case "desktop-sibling-unknown-provider":
+						operatingSystem = "Other Engine"
+					case "desktop-sibling-nonlinux-provider":
+						osType = "windows"
+					case "desktop-sibling-info-unavailable":
+						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"OperatingSystem": operatingSystem, "OSType": osType})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			engine, err := client.New(client.WithHost(server.URL), client.WithAPIVersion("1.53"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = engine.Close() })
+			err = (&dockerEngine{engine}).noConsumers(context.Background(), resourceGeneration{Resources: map[string]ownedResource{"data": {Kind: "directory", Name: owned}}})
+			if (err != nil) != tc.blocked {
+				t.Fatalf("blocked=%v want=%v error=%v", err != nil, tc.blocked, err)
+			}
+			var detail *v1.PlanError
+			if err != nil && (!errors.As(err, &detail) || detail.Code != "cleanup_failed") {
+				t.Fatal("expected explicit preservation diagnostic", err)
+			}
+		})
+	}
+}
+
+func TestEngineBindSourceAmbiguity(t *testing.T) {
+	root := t.TempDir()
+	owned, sibling := filepath.Join(root, "data"), filepath.Join(root, "other")
+	for _, path := range []string{owned, sibling} {
+		if err := os.Mkdir(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// All resolver results remain real owned paths. No global /host_mnt directory
+	// is created, and both raw/translated spellings exercise the production check.
+	source := "/host_mnt" + owned
+	for _, tc := range []struct {
+		name, raw, translated string
+		want                  bool
+	}{
+		{"raw-sibling-translated-owned", sibling, owned, true},
+		{"raw-owned-translated-sibling", owned, sibling, true},
+		{"both-sibling", sibling, sibling, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolve := func(path string) (string, error) {
+				if path == source {
+					return tc.raw, nil
+				}
+				if path == owned {
+					return tc.translated, nil
+				}
+				t.Fatal("unexpected namespace candidate", path)
+				return "", os.ErrNotExist
+			}
+			overlap, err := engineBindSourceOverlap(owned, source, true, resolve)
+			if err != nil || overlap != tc.want {
+				t.Fatal("dual identity comparison", overlap, tc.want, err)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name, source string
+		desktop      bool
+	}{
+		{"unverified-provider", source, false},
+		{"unresolved-counterpart", "/host_mnt" + filepath.Join(root, "missing"), true},
+		{"unclean-metadata", "/host_mnt/../tmp", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := engineBindSourceOverlap(owned, tc.source, tc.desktop, filepath.EvalSymlinks); err == nil {
+				t.Fatal("uncertain engine metadata declared unrelated")
+			}
+		})
+	}
+	if _, err := engineBindSourceOverlap(owned, source, false, func(string) (string, error) { return sibling, nil }); err == nil {
+		t.Fatal("resolvable raw host path bypassed unverified Desktop provenance")
 	}
 }
 

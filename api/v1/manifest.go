@@ -82,8 +82,8 @@ type Value struct {
 }
 
 // Reference identifies a value without expression evaluation or interpolation.
-// An origin supports url and ca_cert_path; ca_cert_path is the existing managed
-// public root certificate path, only for native environment assignments.
+// An origin supports url and ca_cert_path; ca_cert_path is the explicitly mapped managed
+// public root certificate path, only for explicit environment assignments.
 // Allocation-dependent values remain symbolic during offline planning.
 type Reference struct {
 	Kind  string `json:"kind" yaml:"kind" jsonschema_description:"Explicit discriminator; see the supported values and conditional fields."`
@@ -123,12 +123,20 @@ type Probe struct {
 	Timeout string   `json:"timeout" yaml:"timeout" jsonschema:"minLength=1" jsonschema_description:"Nonnegative Go duration, at most 24h; 0s is unlimited subject to other execution budgets."`
 }
 
-// Mount connects declared storage or checkout output to a container path.
+// Mount connects declared storage, checkout output or a public origin CA to a container path.
 type Mount struct {
-	Resource string `json:"resource,omitempty" yaml:"resource,omitempty" jsonschema_description:"Declared resource name; selection and kind are checked by backlot plan."`
-	Output   string `json:"output,omitempty" yaml:"output,omitempty" jsonschema_description:"Declared checkout output name attached to the component."`
-	Target   string `json:"target" yaml:"target" jsonschema:"minLength=1" jsonschema_description:"Probe destination or absolute mount target, according to this contract."`
-	ReadOnly bool   `json:"read_only,omitempty" yaml:"read_only,omitempty" jsonschema_description:"Mount the declared source read-only."`
+	OriginCACert string `json:"origin_ca_cert,omitempty" yaml:"origin_ca_cert,omitempty" jsonschema_description:"Attached published managed origin whose public root is mounted as a read-only file; never a key or CA directory."`
+	Resource     string `json:"resource,omitempty" yaml:"resource,omitempty" jsonschema_description:"Declared resource name; selection and kind are checked by backlot plan."`
+	Output       string `json:"output,omitempty" yaml:"output,omitempty" jsonschema_description:"Declared checkout output name attached to the component."`
+	Target       string `json:"target" yaml:"target" jsonschema:"minLength=1" jsonschema_description:"Probe destination or absolute mount target, according to this contract."`
+	ReadOnly     bool   `json:"read_only,omitempty" yaml:"read_only,omitempty" jsonschema_description:"Mount the declared source read-only."`
+}
+
+// HostMapping explicitly maps a published origin hostname to Docker's host gateway.
+// The Engine expands the special token at each container create.
+type HostMapping struct {
+	Origin string `json:"origin" yaml:"origin" jsonschema:"minLength=1" jsonschema_description:"Attached and published origin whose canonical hostname is mapped."`
+	Host   string `json:"host" yaml:"host" jsonschema:"enum=host-gateway" jsonschema_description:"Explicit Engine host-gateway token, expanded by Docker at each container create; no copied IP or resolver helper."`
 }
 
 // ServicePort maps an allocated host port to an explicit container listener when needed.
@@ -154,6 +162,7 @@ type Component struct {
 	Resources       []string                  `json:"resources,omitempty" yaml:"resources,omitempty" jsonschema_description:"Instance-owned allocations selected explicitly; planning does not provision them."`
 	Outputs         []string                  `json:"outputs,omitempty" yaml:"outputs,omitempty" jsonschema_description:"Checkout output paths and serialization groups."`
 	Ports           map[string]ServicePort    `json:"ports,omitempty" yaml:"ports,omitempty" jsonschema_description:"Named allocated host ports with explicit container listeners when needed."`
+	HostMappings    []HostMapping             `json:"host_mappings,omitempty" yaml:"host_mappings,omitempty" jsonschema_description:"Explicit managed origin hostname mappings to the Engine host gateway at each container create."`
 	Mounts          []Mount                   `json:"mounts,omitempty" yaml:"mounts,omitempty" jsonschema_description:"Container storage/output mounts with exactly one source each."`
 	Readiness       *Probe                    `json:"readiness,omitempty" yaml:"readiness,omitempty" jsonschema_description:"Required service probe; process liveness alone is insufficient."`
 }

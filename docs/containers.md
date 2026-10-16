@@ -58,7 +58,15 @@ are scoped to an attempt and bound on loopback by default; explicit machine
 `docker.publish_address` selects another numeric interface. Containers use service
 references for private DNS names and internal ports. Container-to-native references
 require explicit `docker.host_address` and reachable native listener interfaces;
-see the [HTTPS/mixed guide](https.md).
+see the [HTTPS/mixed guide](https.md). Managed HTTPS consumers on
+macOS ARM64 Docker Desktop explicitly declare origin `host_mappings` and read-only
+`origin_ca_cert` mounts. The explicit `host: host-gateway` Engine token expands
+at each container create, without helper images or copied IP addresses.
+`ca_cert_path` resolves to the chosen container file target in explicit
+application environment assignments; it never exposes the host path or signing
+keys. These declarations participate in conservative retained-contract drift
+checks. See [container application trust](https.md#public-root-file-mounts-for-containers).
+
 
 A fresh-only job is skipped only after its successful exit and completion record.
 A failed initialization leaves its generation incomplete. Explicit restart can
@@ -107,6 +115,20 @@ Docker consumers of volumes/directories/networks also block resource deletion,
 including unrelated consumers; no broad prune or forced volume/network deletion
 is used. Image-declared anonymous volumes belong to the owned container and are
 removed with it.
+
+Bind-consumer inspection must establish a host filesystem identity before
+declaring a source unrelated to retained directories. Docker Desktop can report
+a VM-prefixed source such as `/host_mnt/private/...` which the host cannot resolve.
+On native macOS, the adapter verifies the configured local Engine's Info reports
+Docker Desktop and Linux before reconciling this exact clean prefix to a fully
+existing canonical host counterpart. It compares every viable raw and translated
+identity, so a real host `/host_mnt` path cannot hide a consumed directory. A valid
+unrelated peer can continue running while another instance resets or destroys.
+This applies only to inspected Engine metadata, never ordinary project mount
+inputs or their private-state fences. Unknown providers/namespaces, unresolved
+counterparts, unclean paths and uncertain identities preserve storage with an
+actionable diagnostic. Remove the consumer or make its source verifiable before
+retrying reset/destroy; the consumer is never stopped or removed implicitly.
 
 After a daemon crash, verifiably owned surviving containers are stopped, available
 logs are retained, and containers are removed. Data/credentials remain retained;

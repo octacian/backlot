@@ -116,8 +116,16 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 	}
 	for _, name := range order {
 		c := m.Components[name]
+		if len(c.HostMappings) > 0 && (config.Caddy == nil || config.Caddy.Mode != "managed") {
+			return v1.PlanResponse{}, problem("invalid_contract", "components."+name+".host_mappings", "origin host mappings require explicit managed Caddy configuration")
+		}
 		// Check declared assignments, including selected reusable sets, before
 		// layering can hide a reference behind a later explicit override.
+		for _, mount := range c.Mounts {
+			if mount.OriginCACert != "" && (config.Caddy == nil || config.Caddy.Mode != "managed") {
+				return v1.PlanResponse{}, problem("invalid_contract", "components."+name+".mounts", "origin_ca_cert requires explicit managed Caddy configuration")
+			}
+		}
 		environments := []v1.Environment{c.Environment}
 		for _, set := range c.EnvironmentSets {
 			environments = append(environments, m.Environments[set])
@@ -132,7 +140,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 		if snapshot == nil && c.Runtime == v1.Container && config.Docker == nil {
 			return v1.PlanResponse{}, problem("missing_provider", "config.docker", "selected container work requires local Docker settings; supply --config PATH")
 		}
-		planned := v1.PlannedComponent{Artifacts: c.Artifacts, Name: name, Kind: c.Kind, Runtime: c.Runtime, Command: c.Command, Args: slices.Clone(c.Args), Policy: c.Policy, Initializes: c.Initializes, DependsOn: c.DependsOn, Resources: c.Resources, Outputs: c.Outputs, Ports: c.Ports, Mounts: c.Mounts}
+		planned := v1.PlannedComponent{Artifacts: c.Artifacts, Name: name, Kind: c.Kind, Runtime: c.Runtime, Command: c.Command, Args: slices.Clone(c.Args), Policy: c.Policy, Initializes: c.Initializes, DependsOn: c.DependsOn, Resources: c.Resources, Outputs: c.Outputs, Ports: c.Ports, Mounts: c.Mounts, HostMappings: c.HostMappings}
 		if c.Command != nil {
 			executable, err := tool(m, config, c.Command.Tool, project)
 			if err != nil {

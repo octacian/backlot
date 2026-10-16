@@ -105,10 +105,23 @@ Components declare `kind: service|job` and `runtime: native|container`. Native
 work requires `command`; container work requires `image` and optionally direct
 `args`. Native work cannot declare container `image`, `args` or `mounts`.
 Containers use declared `resources` and `mounts`: each mount names exactly one
-attached `resource` (volume/directory) or `output`, an absolute unique `target`,
-and optional `read_only`. The unused source may be omitted or an empty string;
+attached `resource` (volume/directory), `output`, or `origin_ca_cert` (the
+published managed origin public root), an absolute unique `target`, and optional
+`read_only`. Origin CA mounts require `read_only: true` and a file target that
+does not overlap any other mount. The unused source may be omitted or an empty string;
 exactly one source must have a nonempty value. No external volume/container
 adoption is implied.
+
+Container `host_mappings` explicitly list `{origin: origin, host: host-gateway}`.
+The managed origin must be attached, selected and published. Only its canonical
+hostname is mapped for that consumer. The sole supported `host` is the explicit
+Engine `host-gateway` token; DNS names, numeric addresses, arbitrary aliases,
+duplicates and native declarations are rejected. Docker expands the token when
+creating each container, including fresh containers on restart. No helper image,
+host-DNS lookup, copied IP or global resolver change is involved. Planning
+preserves this intent without contacting Docker. Unsupported Engine mappings
+fail container creation; there is no implicit fallback.
+See [container HTTPS](https.md#public-root-file-mounts-for-containers).
 
 Services declare named `ports`, each with an attached port `resource`, and an
 explicit `readiness` probe. Container ports additionally require `container_port`
@@ -171,9 +184,10 @@ service port, `port`. Supported shapes are:
 
 Resource fields are `port.port`, `directory.path`, `volume.name`, `network.name`,
 `secret.value`, and `origin.url` or `origin.ca_cert_path`. The latter is only for
-native component environment assignments (including explicitly selected reusable sets), requires
+explicit component environment assignments (including explicitly selected reusable sets), requires
 a selected/attached/published origin and explicit managed Caddy configuration,
-and stays symbolic offline. See [explicit application trust](https.md#explicit-application-trust). Unused reference fields may be omitted or
+and stays symbolic offline. Container assignments also require an explicit
+`origin_ca_cert` mount and resolve to its target. See [explicit application trust](https.md#explicit-application-trust). Unused reference fields may be omitted or
 empty strings; nonempty extra values are rejected. Prefer omission when authoring
 manifests.
 There are no concatenation, expressions, variable substitutions or embedded

@@ -468,13 +468,32 @@ func (s *service) requireManaged(ctx context.Context, c v1.CaddyConfig) error {
 func (s *store) consumerCACertPath(snapshot plan.Snapshot) (string, error) {
 	needed := false
 	for _, component := range snapshot.Plan.Components {
+		for _, mount := range component.Mounts {
+			if mount.OriginCACert != "" {
+				if component.Runtime != v1.Container || !mount.ReadOnly || snapshot.Plan.Publish == nil || snapshot.Plan.Publish.Resource != mount.OriginCACert || snapshot.Plan.Resources[mount.OriginCACert].Kind != "origin" {
+					return "", problem("invalid_contract", "origin_ca_cert requires a read-only container mount of the published origin")
+				}
+				needed = true
+			}
+		}
 		for key, value := range component.Environment {
 			if value.Redacted {
 				value = snapshot.Secrets[component.Name+"/environment/"+key]
 			}
 			if r := value.Symbolic; r != nil && r.Kind == "resource" && r.Field == "ca_cert_path" {
-				if component.Runtime != v1.Native || snapshot.Plan.Publish == nil || snapshot.Plan.Publish.Resource != r.Name || snapshot.Plan.Resources[r.Name].Kind != "origin" {
-					return "", problem("invalid_contract", "ca_cert_path requires a selected native consumer and published origin")
+				if snapshot.Plan.Publish == nil || snapshot.Plan.Publish.Resource != r.Name || snapshot.Plan.Resources[r.Name].Kind != "origin" {
+					return "", problem("invalid_contract", "ca_cert_path requires a selected consumer and published origin")
+				}
+				if component.Runtime == v1.Container {
+					found := false
+					for _, mount := range component.Mounts {
+						if mount.OriginCACert == r.Name && mount.ReadOnly {
+							found = true
+						}
+					}
+					if !found {
+						return "", problem("invalid_contract", "container ca_cert_path requires an explicit read-only origin_ca_cert mount")
+					}
 				}
 				needed = true
 			}

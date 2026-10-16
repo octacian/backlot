@@ -127,8 +127,24 @@ resolution. See [application trust](https.md#explicit-application-trust). The
 frontend/API/native SSR and disposable tests, explicit project trust, two-worktree
 commands and scoped recovery/cleanup. Its owned complete suite is separate from
 real operator/browser adoption and published-HEAD CI evidence; see
-[testing](testing.md#runnable-macos-quickstart-integration). Container
-local-HTTPS consumers remain follow-up work.
+[testing](testing.md#runnable-macos-quickstart-integration).
+
+### Managed container HTTPS consumers
+
+Implemented for independent review in issue 21: explicit per-component
+`host: host-gateway` mappings and read-only `origin_ca_cert` file mounts on macOS
+ARM64 Docker Desktop Linux bridges, with `ca_cert_path` resolving to the chosen
+container path only in explicit assignments. Engine expands the token at each
+container create; no resolver helper or listener widening is needed. See the
+[container extension decision](adr/20261014T215536946Z-extend-managed-https-to-explicit-container-consumers.md)
+and [runnable Go/Alpine example](../examples/container-https/README.md).
+
+Owned fixture coverage verifies correct/missing/wrong trust, native frontend/API
+and container SSR/test, variable WebSockets, redirects/cookies, peer isolation,
+no Docker access for unselected host-only work, mapping/mount drift, retained
+state, fresh creates across lifecycle and journaled crash recovery. This is
+provider fixture evidence; independent low and fresh high reviews, complete
+frozen regression suites and exact published-HEAD CI remain outstanding gates.
 
 ## 6. Disposable results and evidence
 

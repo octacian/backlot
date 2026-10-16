@@ -1,0 +1,7 @@
+# yaml-language-server: $schema=../../schemas/machine-v1.schema.json
+version: backlot/v1
+caddy:
+  mode: managed
+  executable: /usr/local/bin/caddy
+  endpoint: http://127.0.0.1:2020
+  https_port: 8443

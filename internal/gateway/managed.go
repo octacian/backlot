@@ -62,11 +62,17 @@ func ValidateManagedConfig(data []byte, c v1.CaddyConfig, storage string) error 
 	return nil
 }
 
-// ManagedHTTPSListeners returns the validated managed HTTPS bind endpoints.
-// Loopback stays available for host consumers; an explicit IPv4 wildcard replaces
-// the IPv4 loopback socket because binding both would conflict. No OS detection
-// or Docker observation changes exposure.
-func ManagedHTTPSListeners(c v1.CaddyConfig) []string {
+// ManagedListener keeps the network selector separate from the numeric address.
+// Generic TCP wildcards can open both address families, so IPv4-only exposure
+// requires tcp4 in Caddy and in the daemon's bind preflight.
+type ManagedListener struct {
+	Network string
+	Address string
+}
+
+// ManagedHTTPSBindings returns the authoritative managed HTTPS bind policy.
+// Omitted settings retain legacy loopback addresses and their saved config.
+func ManagedHTTPSBindings(c v1.CaddyConfig) []ManagedListener {
 	hosts := []string{"127.0.0.1", "::1"}
 	switch c.HTTPSBindAddress {
 	case "", "127.0.0.1":
@@ -75,9 +81,27 @@ func ManagedHTTPSListeners(c v1.CaddyConfig) []string {
 	default:
 		hosts = append(hosts, c.HTTPSBindAddress)
 	}
-	addresses := make([]string, len(hosts))
+	listeners := make([]ManagedListener, len(hosts))
 	for i, host := range hosts {
-		addresses[i] = net.JoinHostPort(host, strconv.Itoa(*c.HTTPSPort))
+		network := "tcp"
+		if host == "0.0.0.0" {
+			network = "tcp4"
+		}
+		listeners[i] = ManagedListener{Network: network, Address: net.JoinHostPort(host, strconv.Itoa(*c.HTTPSPort))}
+	}
+	return listeners
+}
+
+// ManagedHTTPSListeners encodes the managed bindings in Caddy network syntax.
+// Legacy loopback strings are unchanged; explicit IPv4 wildcard pins TCP4.
+func ManagedHTTPSListeners(c v1.CaddyConfig) []string {
+	bindings := ManagedHTTPSBindings(c)
+	addresses := make([]string, len(bindings))
+	for i, binding := range bindings {
+		addresses[i] = binding.Address
+		if binding.Network != "tcp" {
+			addresses[i] = binding.Network + "/" + binding.Address
+		}
 	}
 	return addresses
 }

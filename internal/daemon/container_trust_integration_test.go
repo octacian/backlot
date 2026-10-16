@@ -314,7 +314,15 @@ printf '%s\n' 'public root input and readonly file mount verified'`}}
 			t.Fatal(err)
 		}
 		command("gateway", "stop")
-		t.Log("early real Linux CLI/native/Caddy/bridge trust and lifecycle cleanup verified")
+		// Resume the validated saved wildcard configuration through the real
+		// installed daemon; no bootstrap replay or CA replacement is allowed.
+		command("gateway", "start")
+		resumedCA, err := os.ReadFile(rootPath)
+		if err != nil || !bytes.Equal(ca, resumedCA) {
+			t.Fatal("saved listener resume changed CA identity", err)
+		}
+		command("gateway", "stop")
+		t.Log("early real Linux CLI/native/Caddy/bridge trust, saved gateway resume and lifecycle cleanup verified")
 		return
 	}
 	consumer.Environment.Assign = map[string]v1.Value{"SSL_CERT_FILE": cert, "SSL_CERT_DIR": fixtureLiteral("/empty-roots"), "ORIGIN": origin}

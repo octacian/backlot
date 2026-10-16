@@ -162,6 +162,12 @@ buffered upgrades. Contract tests reject fixed/corrupted echoes, require actual
 variable-payload echoes and reject malformed frames; they also run through the
 gateway package during `make check`.
 
+The gateway suite also inspects actual managed Caddy socket families: an explicit
+IPv4 wildcard must be TCP4, IPv6 must remain loopback, and admin must remain
+IPv4 loopback. Generated address strings alone cannot prove exposure. Saved
+omitted-bind loopback configuration remains compatible; unsafe generic-wildcard
+saved configuration is rejected without repair.
+
 The gateway suite covers real native/container Caddy, TLS-verified host/container
 consumers, native API/container SSR, literal routing, WebSockets, redirects/cookies,
 ambiguous mutation response recovery and preservation. The daemon suite adds real

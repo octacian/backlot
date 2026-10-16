@@ -40,7 +40,9 @@ trust, custom production dialing, DNS mutation or TLS verification bypass is add
 Managed mode accepts an optional canonical numeric IPv4 HTTPS bind address.
 A specific address adds HTTPS reachability while preserving IPv4/IPv6 loopback;
 `0.0.0.0` explicitly replaces the IPv4 loopback listener with all IPv4 interfaces.
-IPv6 remains loopback. Hostnames, zones, multicast addresses and external-mode
+IPv6 remains loopback. Pin the actual wildcard listener to Caddy TCP4 rather
+than generic TCP, which can create a dual-stack IPv6 wildcard. Preflight uses the
+same network selector and readiness checks exact owned address families/exposure. Hostnames, zones, multicast addresses and external-mode
 bind settings are rejected. There is no default widening or automatic Docker
 address selection. The operator selects the actual reachable interface and
 firewall exposure. Admin remains `http://127.0.0.1` on a distinct unprivileged port.

@@ -22,7 +22,7 @@ def check(name, data, depth=0):
                     raise ValueError("unsafe archive entry")
                 if not item.is_dir():
                     check(item.filename, archive.read(item), depth + 1)
-    if name.endswith((".trace", ".network")):
+    if name.endswith((".trace", ".network", ".ndjson")):
         for line in data.splitlines():
             json.loads(line)
     if name.endswith("playwright.json"):

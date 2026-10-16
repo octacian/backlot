@@ -49,6 +49,7 @@ export function flow(viewport) {
     await expect(page.getByRole('status')).toHaveText('Saved: hello-' + worker);
     expect(await (await request.get('/api/notes/' + worker)).text()).toBe('hello-' + worker);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-    await info.attach('stack', { body: JSON.stringify({ stack, origin: process.env.APP_ORIGIN, worker }), contentType: 'application/json' });
+    await info.attach('stack', { body: JSON.stringify({ stack, origin: process.env.APP_ORIGIN, worker,
+      browser: page.context().browser().version(), viewport }), contentType: 'application/json' });
   });
 }

@@ -210,5 +210,6 @@ The [Ubuntu example](../examples/ci-scenes/README.md) adds a native directory-ba
 application and disposable Playwright Chromium scenes, with explicit job-local
 Caddy trust and an automatic two-shard matrix. The application owns test-worker
 data isolation; Backlot retains lifecycle, checkout output locking and evidence
-ownership. Initial Ubuntu browser evidence, lifecycle/isolation acceptance,
-independent reviews and frozen published-HEAD gates remain required before readiness.
+ownership. The initial Ubuntu Chromium checkpoint passed at `1fef82b`; see the
+example's revision-bound evidence link. Lifecycle/isolation acceptance, independent
+reviews and frozen published-HEAD gates remain required before readiness.

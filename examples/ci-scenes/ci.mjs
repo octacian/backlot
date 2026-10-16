@@ -19,6 +19,7 @@ for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
 }
 async function command(args, options = {}) {
   const child = spawn(binary, args, { cwd: options.cwd ?? project, env: options.env ?? process.env });
+  options.onSpawn?.(child);
   active = child;
   let stdout = '', stderr = '';
   child.stdout.on('data', chunk => { stdout += chunk; });
@@ -45,8 +46,8 @@ async function port() {
   await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   return value; // Bind conflicts fail without touching the winner; no claim of reservation.
 }
-async function run(args, cwd = project) {
-  return command(['run', 'browser', '--project', cwd, '--config', config(), '--state-dir', state(), '--json', '--', ...args], { ok: false, cwd });
+async function run(args, cwd = project, options = {}) {
+  return command(['run', 'browser', '--project', cwd, '--config', config(), '--state-dir', state(), '--json', '--', ...args], { ...options, ok: false, cwd });
 }
 function clean(instance) {
   assert.equal(instance.execution?.cleanup_failure ?? '', '');
@@ -115,6 +116,9 @@ try {
       assert.notEqual(first.id, recovered.id);
       assert.notEqual(first.execution.origin, recovered.execution.origin);
       process.exitCode = interrupted;
+    } else if (mode === 'acceptance') {
+      const { acceptance } = await import('./acceptance.mjs');
+      await acceptance({ root, project, state: state(), cli, inspect, instances, run });
     } else if (mode === 'collect') {
       const staging = join(root, 'export-staging');
       await mkdir(staging);
@@ -129,7 +133,7 @@ try {
           cancelled: e?.cancelled ?? false, failure: e?.failure, collection_failure: e?.collection_failure,
           cleanup_failure: e?.cleanup_failure }, null, 2));
         const logs = await cli('logs', instance.id);
-        await writeFile(join(destination, 'logs.json'), logs.stdout);
+        await writeFile(join(destination, 'logs.ndjson'), logs.stdout);
         for (const artifact of e?.artifacts ?? []) {
           assert.equal(artifact.name, 'reports');
           const rel = relative(join(state(), 'artifacts'), artifact.path);
@@ -137,6 +141,8 @@ try {
           await safeCopy(artifact.path, join(destination, 'artifacts'));
         }
       }
+      try { await safeCopy(join(root, 'acceptance.json'), join(staging, 'acceptance.json')); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
       // Check exported text/logs too. Never copy daemon/gateway state or logs wholesale.
       await safeCopy(staging, join(root, 'export-audit'));
       execFileSync('python3', [join(project, 'audit.py'), join(root, 'export-audit')], { stdio: 'inherit' });
@@ -155,10 +161,16 @@ try {
         assert.ok(attempt < 100, 'daemon shutdown not confirmed; preserve state');
         await new Promise(resolve => setTimeout(resolve, 100));
       }
+      // Only this runner-created, recorded worktree may be removed.
+      try {
+        const peer = await readFile(join(root, 'peer-worktree'), 'utf8');
+        assert.equal(peer, join(root, 'peer'));
+        execFileSync('git', ['worktree', 'remove', '--force', peer], { cwd: project });
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
       await rm(root, { recursive: true });
       await rm(pointer);
       console.log('Verified scoped destruction and stopped job-local gateway/daemon');
-    } else throw new Error('usage: ci.mjs bootstrap|run [Playwright arguments]|collect|cleanup');
+    } else throw new Error('usage: ci.mjs bootstrap|run [Playwright arguments]|acceptance|collect|cleanup');
   }
 } catch (error) {
   console.error(error.stack);

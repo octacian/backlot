@@ -9,8 +9,10 @@ and does not repeat the existing Linux installation/Docker/provider suites.
 The bounded combination is Ubuntu 24.04 **amd64**, Go 1.27.1, Node 26.8.1,
 Caddy 2.11.6, and `@playwright/test` 1.64.1's Chromium headless shell
 156.0.8078.4 (revision 1248). The lockfile pins the browser driver/download
-revision. This initial implementation still needs actual published Ubuntu CI
-evidence; macOS checks are not browser support evidence. Other engines,
+revision. Both shards passed the initial real Ubuntu checkpoint at `1fef82b`
+([run 38982798894](https://github.com/octacian/backlot/actions/runs/38982798894));
+this is development evidence, with independent reviews and frozen final gates
+still outstanding. Other engines,
 distributions, and containerized browsers are not claimed.
 
 ## Bootstrap and run
@@ -37,6 +39,7 @@ export BACKLOT_CI_EXPORT="$RUNNER_TEMP/scene-evidence"
 export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/playwright-browsers"
 node examples/ci-scenes/ci.mjs bootstrap
 node examples/ci-scenes/ci.mjs run --shard=1/2
+node examples/ci-scenes/ci.mjs acceptance
 node examples/ci-scenes/ci.mjs collect
 # Upload only BACKLOT_CI_EXPORT here, before runner teardown.
 node examples/ci-scenes/ci.mjs cleanup
@@ -50,6 +53,17 @@ Playwright; the retained `invocation.json` proves the exact vector, including
 `--shard=x/y`. For a single scene without these checkpoint assertions, use the
 normal `backlot run browser --project examples/ci-scenes --config <private
 machine.json> --state-dir <private state> --json -- --shard=1/2` command.
+
+`acceptance` runs once in shard 1. It holds a real browser while a second run
+queues on the same checkout, verifies no build/report overwrite, cancels the
+first CLI with SIGINT (exit 130), and lets the second run execute both specs
+with two workers. It then creates a real independent Git worktree with its own
+dependency install, runs two browser stacks simultaneously, and checks distinct
+origins, ports, directory paths and stored stack identities. A note written in
+one remains absent in the peer. Killing only one retained CLI handle proves
+daemon lease cancellation, collected evidence, removed data and route, while
+the peer stack/data and an unrelated listener remain intact. The final peer
+is cancelled and the worktree is removed during authenticated runner cleanup.
 
 ## Trust and isolation
 
@@ -83,7 +97,7 @@ retry recovery, and a 360px viewport.
 ## Evidence and teardown
 
 Backlot copies `reports/` before disposing of the scene. The runner exports
-allowlisted result fields, retained application logs, `invocation.json`,
+allowlisted result fields, retained application NDJSON logs, `invocation.json`,
 Playwright JSON/HTML, screenshots and ZIP traces. Raw daemon state, snapshots,
 gateway configuration, NSS databases, and CA directories/keys are never upload
 sources. The exporter rejects links, special files, key filenames and PEM private

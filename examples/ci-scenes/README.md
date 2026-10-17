@@ -39,6 +39,7 @@ export BACKLOT_CI_EXPORT="$RUNNER_TEMP/scene-evidence"
 export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/playwright-browsers"
 node examples/ci-scenes/ci.mjs bootstrap
 node examples/ci-scenes/ci.mjs run --shard=1/2
+node examples/ci-scenes/signal-check.mjs
 node examples/ci-scenes/ci.mjs acceptance
 node examples/ci-scenes/ci.mjs collect
 # Upload only BACKLOT_CI_EXPORT here, before runner teardown.
@@ -64,6 +65,15 @@ one remains absent in the peer. Killing only one retained CLI handle proves
 daemon lease cancellation, collected evidence, removed data and route, while
 the peer stack/data and an unrelated listener remain intact. The final peer
 is cancelled and the worktree is removed during authenticated runner cleanup.
+
+`signal-check.mjs` signals the real outer `ci.mjs acceptance` process with
+SIGINT and SIGTERM during its no-command wait with a held browser and a queued
+client. It requires outer exits 130/143, both clients joined with their own
+signal results, no subsequent scene or worktree allocation, available held
+browser evidence, removed data/routes and an unrelated listener surviving.
+The runner tracks all live CLI clients, rejects new commands after cancellation,
+interrupts acceptance waits and joins clients before exiting in every mode.
+Native terminal results remain separate from the outer and CLI signal exits.
 
 ## Trust and isolation
 

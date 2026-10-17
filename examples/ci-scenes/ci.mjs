@@ -12,27 +12,49 @@ const pointer = resolve(process.env.BACKLOT_CI_POINTER);
 const output = resolve(process.env.BACKLOT_CI_EXPORT);
 const mode = process.argv[2];
 let root;
-let active;
+const children = new Set();
+const pending = new Set();
+const cancellation = new AbortController();
+function checkpoint() { cancellation.signal.throwIfAborted(); }
 let interrupted = 0;
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
-  process.on(signal, () => { interrupted = code; active?.kill(signal); });
+  process.on(signal, () => {
+    if (interrupted) return; // Preserve the first requested signal result.
+    interrupted = code;
+    cancellation.abort(new Error(`runner interrupted by ${signal}`));
+    for (const child of children) child.kill(signal);
+  });
 }
-async function command(args, options = {}) {
+function command(args, options = {}) {
+  checkpoint();
   const child = spawn(binary, args, { cwd: options.cwd ?? project, env: options.env ?? process.env });
-  options.onSpawn?.(child);
-  active = child;
+  children.add(child);
   let stdout = '', stderr = '';
   child.stdout.on('data', chunk => { stdout += chunk; });
   child.stderr.on('data', chunk => { stderr += chunk; });
   const timer = setTimeout(() => child.kill('SIGTERM'), options.timeout ?? 180_000);
-  try {
-    const result = await new Promise((resolve, reject) => {
-      child.on('error', reject);
-      child.on('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
-    });
-    if (options.ok !== false && result.code !== 0) throw new Error(`backlot ${args[0]} failed (${result.code}): ${stderr || stdout}`);
-    return result;
-  } finally { clearTimeout(timer); if (active === child) active = undefined; }
+  const done = (async () => {
+    try {
+      const result = await new Promise((resolve, reject) => {
+        child.on('error', reject);
+        child.on('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
+      });
+      if (interrupted && args[0] === 'run') {
+        // Keep the client result distinct from the native terminal job result.
+        let instance;
+        try { instance = JSON.parse(stdout).instance; } catch { /* No final JSON if the CLI itself was killed. */ }
+        console.log(JSON.stringify({ checkpoint: 'interrupted run client', id: instance?.id,
+          cli_exit: result.code, client_signal: result.signal,
+          terminal_exit: instance?.execution?.terminal_exit_code }));
+      }
+      if (options.ok !== false && result.code !== 0) throw new Error(`backlot ${args[0]} failed (${result.code}): ${stderr || stdout}`);
+      return result;
+    } finally { clearTimeout(timer); children.delete(child); }
+  })();
+  pending.add(done);
+  done.then(() => pending.delete(done), () => pending.delete(done));
+  options.onSpawn?.(child);
+  return done;
 }
 const state = () => join(root, 'd');
 const config = () => join(root, 'machine.json');
@@ -40,6 +62,7 @@ async function cli(...args) { return command([...args, '--state-dir', state(), '
 async function instances() { return JSON.parse((await cli('list')).stdout).instances; }
 async function inspect(id) { return JSON.parse((await cli('inspect', id)).stdout).instance; }
 async function port() {
+  checkpoint();
   const server = createServer();
   await new Promise((resolve, reject) => { server.on('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const value = server.address().port;
@@ -56,6 +79,7 @@ function clean(instance) {
 }
 async function requireRun(args, expected) {
   const result = await run(args);
+  checkpoint();
   const instance = JSON.parse(result.stdout).instance;
   assert.ok(instance, result.stdout);
   clean(instance);
@@ -70,6 +94,7 @@ async function requireRun(args, expected) {
 }
 // Copy only regular evidence files, never links, keys, private state or CA storage.
 async function safeCopy(source, destination) {
+  checkpoint();
   const stat = await lstat(source);
   assert.ok(!stat.isSymbolicLink(), 'evidence link rejected');
   if (stat.isDirectory()) {
@@ -90,6 +115,7 @@ try {
     assert.equal(process.platform, 'linux', 'this bootstrap is bounded to Ubuntu Linux');
     assert.equal(process.arch, 'x64');
     assert.match(await readFile('/etc/os-release', 'utf8'), /VERSION_ID="24.04"/);
+    checkpoint();
     root = await mkdtemp('/tmp/bl-ci-');
     await writeFile(pointer, root, { flag: 'wx', mode: 0o600 });
     await mkdir(join(root, 'empty-roots'), { mode: 0o700 });
@@ -115,10 +141,9 @@ try {
       const recovered = await requireRun(args, 0);
       assert.notEqual(first.id, recovered.id);
       assert.notEqual(first.execution.origin, recovered.execution.origin);
-      process.exitCode = interrupted;
     } else if (mode === 'acceptance') {
       const { acceptance } = await import('./acceptance.mjs');
-      await acceptance({ root, project, state: state(), cli, inspect, instances, run });
+      await acceptance({ root, project, state: state(), cli, inspect, instances, run, signal: cancellation.signal });
     } else if (mode === 'collect') {
       const staging = join(root, 'export-staging');
       await mkdir(staging);
@@ -143,8 +168,11 @@ try {
       }
       try { await safeCopy(join(root, 'acceptance.json'), join(staging, 'acceptance.json')); }
       catch (error) { if (error.code !== 'ENOENT') throw error; }
+      try { await safeCopy(join(root, 'outer-cancellation.json'), join(staging, 'outer-cancellation.json')); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
       // Check exported text/logs too. Never copy daemon/gateway state or logs wholesale.
       await safeCopy(staging, join(root, 'export-audit'));
+      checkpoint();
       execFileSync('python3', [join(project, 'audit.py'), join(root, 'export-audit')], { stdio: 'inherit' });
       await rename(join(root, 'export-audit'), output);
       await rm(staging, { recursive: true });
@@ -176,4 +204,10 @@ try {
   console.error(error.stack);
   console.error('Owned private state preserved for authenticated cleanup: ' + (root ?? pointer));
   process.exitCode = interrupted || 1;
+} finally {
+  // Registered before bootstrap/acceptance work: every retained CLI is cancelled
+  // and joined before this runner exits, including clients hidden by polling.
+  for (const child of children) child.kill(interrupted === 143 ? 'SIGTERM' : 'SIGINT');
+  await Promise.allSettled([...pending]);
+  if (interrupted) process.exitCode = interrupted;
 }

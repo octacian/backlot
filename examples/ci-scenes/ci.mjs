@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir, lstat, rm, rename } from 
 import { createServer } from 'node:net';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { verifyReports } from './reports.mjs';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
 const binary = resolve(process.env.BACKLOT_BINARY);
@@ -86,7 +87,7 @@ async function requireRun(args, expected) {
   assert.equal(result.code, expected);
   assert.equal(instance.execution.terminal_exit_code, expected);
   const artifact = instance.execution.artifacts.find(a => a.name === 'reports');
-  const invocation = JSON.parse(await readFile(join(artifact.path, 'reports/invocation.json')));
+  const invocation = await verifyReports(instance, artifact);
   assert.deepEqual(invocation.args, args);
   console.log(JSON.stringify({ checkpoint: expected ? 'expected test failure' : 'trusted browser success',
     id: instance.id, origin: instance.execution.origin, terminal_exit_code: instance.execution.terminal_exit_code }));
@@ -163,6 +164,7 @@ try {
           assert.equal(artifact.name, 'reports');
           const rel = relative(join(state(), 'artifacts'), artifact.path);
           assert.ok(rel && !rel.startsWith('..') && !isAbsolute(rel));
+          await verifyReports(instance, artifact);
           await safeCopy(artifact.path, join(destination, 'artifacts'));
         }
       }

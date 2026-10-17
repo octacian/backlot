@@ -31,6 +31,11 @@ type evidencePolicy struct {
 func (s *service) collectArtifacts(id string, snapshot plan.Snapshot, entry *execution, result *v1.ExecutionResult) error {
 	var failures error
 	for _, component := range snapshot.Plan.Components {
+		// Only a launched workload owns artifacts for this attempt. In particular,
+		// a cancelled output-lock waiter must not read its active peer's checkout.
+		if entry.components[component.Name] == nil {
+			continue
+		}
 		for name, source := range component.Artifacts {
 			destination := filepath.Join(s.directory, "artifacts", id, result.Attempt, component.Name, name)
 			err := localipc.Directory(destination, true)

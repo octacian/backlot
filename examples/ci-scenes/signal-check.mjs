@@ -7,6 +7,7 @@ import { createServer, connect } from 'node:net';
 import https from 'node:https';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { verifyReports } from './reports.mjs';
 
 const exec = promisify(execFile);
 const project = fileURLToPath(new URL('.', import.meta.url));
@@ -41,8 +42,8 @@ try {
     });
     pending.add(done);
     done.then(() => { clients.delete(child); pending.delete(done); }, () => { clients.delete(child); pending.delete(done); });
-    // A hung regression fails; exact retained child handle only. Lease expiry
-    // still bounds its CLI descendants, and workflow authenticated cleanup runs.
+    // A hung regression fails; signal only the retained outer handle. Workflow
+    // authenticated cleanup then destroys every job-owned scene by recorded ID.
     const timer = setTimeout(() => child.kill('SIGKILL'), 60_000);
     child.stderr.on('data', data => { stderr += data; });
     child.stdout.on('data', data => {
@@ -83,6 +84,12 @@ try {
       assert.equal(instance.status, 'cancelled');
       assert.equal(instance.execution.cancelled, true);
       for (const key of ['failure', 'collection_failure', 'cleanup_failure']) assert.equal(instance.execution[key] ?? '', '');
+      if (item.id === checkpoint.ids[1]) {
+        assert.equal(instance.execution.terminal_exit_code, undefined, 'queued terminal never launched');
+        assert.deepEqual(instance.execution.components, [], 'queued components never launched');
+        assert.deepEqual(instance.execution.artifacts ?? [], [], 'queued run claimed peer reports');
+        assert.ok(await absent(join(state, 'artifacts', item.id)), 'queued run created foreign invocation storage');
+      }
       for (const fixture of instance.execution.fixtures ?? []) {
         if (fixture.name === 'data') assert.ok(await absent(fixture.value), 'cancelled data retained');
       }
@@ -108,7 +115,7 @@ try {
     const first = (await cli('inspect', checkpoint.ids[0])).instance;
     const reports = first.execution.artifacts.find(a => a.name === 'reports');
     assert.ok(reports, 'held browser evidence missing');
-    const invocation = JSON.parse(await readFile(join(reports.path, 'reports/invocation.json')));
+    const invocation = await verifyReports(first, reports);
     assert.deepEqual(invocation.args, ['--config=failure.config.mjs', 'hold.spec.mjs']);
     assert.equal(JSON.parse(await readFile(join(reports.path, 'reports/holding.json'))).origin, first.execution.origin);
     await new Promise((resolve, reject) => {

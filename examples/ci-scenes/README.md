@@ -74,6 +74,9 @@ browser evidence, removed data/routes and an unrelated listener surviving.
 The runner tracks all live CLI clients, rejects new commands after cancellation,
 interrupts acceptance waits and joins clients before exiting in every mode.
 Native terminal results remain separate from the outer and CLI signal exits.
+Queued clients that never launch must have no terminal result or collected
+reports. Before export, each launched report's invocation origin and exact
+argument vector must match that run's retained execution and plan.
 
 ## Trust and isolation
 

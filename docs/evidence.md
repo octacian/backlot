@@ -48,11 +48,14 @@ components:
 Native artifact paths are safe paths relative to the manifest directory inside
 the checkout. They may identify declared output locations. Container artifact
 paths are absolute paths inside that component's container, such as `/tmp/report`.
-Files and directories are copied into private daemon storage before containers
+Artifacts are collected only for components launched in the execution attempt;
+unlaunched or skipped components do not claim existing checkout reports. Files
+and directories are copied into private daemon storage before containers
 or data are removed. Links and special files are rejected; paths cannot traverse
-outside the checkout or extraction directory. A declared missing source or failed
-copy sets collection failure and prevents successful overall execution. Successful
-copies appear in `execution.artifacts` with component, name, attempt and local path.
+outside the checkout or extraction directory. A launched component's declared
+missing source or failed copy sets collection failure and prevents successful
+overall execution. Successful copies appear in `execution.artifacts` with
+component, name, attempt and local path.
 Partial copies are subject to the same evidence retention policy.
 
 Fixture values use the existing literal/reference contract and component attachment

@@ -6,6 +6,7 @@ import { createServer, connect } from 'node:net';
 import https from 'node:https';
 import { join } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
+import { verifyReports } from './reports.mjs';
 
 const exec = promisify(execFile);
 async function absent(path) {
@@ -78,7 +79,7 @@ export async function acceptance({ root, project, state, cli, inspect, instances
   async function invocation(instance, args) {
     const artifact = instance.execution.artifacts.find(a => a.name === 'reports');
     assert.ok(artifact, 'reports not collected');
-    assert.deepEqual(JSON.parse(await readFile(join(artifact.path, 'reports/invocation.json'))).args, args);
+    assert.deepEqual((await verifyReports(instance, artifact)).args, args);
   }
   async function routeGone(origin) {
     // Stock Caddy's empty scope can return an empty HTTP 200. Verify the

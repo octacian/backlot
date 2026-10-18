@@ -62,10 +62,6 @@ export async function setup() {
   assert.match(identity, /\tpath\tgithub\.com\/caddyserver\/caddy\/v2\/cmd\/caddy\n/);
   assert.match(identity, /\tmod\tgithub\.com\/caddyserver\/caddy\/v2\tv2\.11\.6\th1:/);
   assert.ok(!identity.includes('\t=>'), 'replaced Caddy modules are not supported');
-  // Compile the auditor from ACTION source, never the independently selected runtime.
-  const audit = join(tools, 'audit');
-  await command('go', ['build', '-trimpath', '-buildvcs=false', '-ldflags=-buildid=', '-o', audit, fileURLToPath(new URL('audit/main.go', import.meta.url))],
-    { env: { ...env, CGO_ENABLED: '0' }, timeout: 180_000 });
   if (!cacheHit) {
     try { await saveCache(paths, cacheKey); } catch (error) { console.warn(`Go cache save unavailable: ${error.message}`); }
   }
@@ -74,7 +70,7 @@ export async function setup() {
   const { state, config } = await prepare({ root: owner.root, binary, caddy: join(tools, 'caddy'), node });
   const helper = fileURLToPath(new URL('job.mjs', import.meta.url));
   const values = { BACKLOT_BINARY: binary, BACKLOT_STATE_DIR: state, BACKLOT_CONFIG: config,
-    BACKLOT_SETUP_OWNER: JSON.stringify(owner), BACKLOT_SETUP_HELPER: helper, BACKLOT_AUDIT_BINARY: audit };
+    BACKLOT_SETUP_OWNER: JSON.stringify(owner), BACKLOT_SETUP_HELPER: helper };
   for (const [name, value] of Object.entries(values)) {
     process.env[name] = value;
     await appendFile(process.env.GITHUB_ENV, `${name}=${value}\n`);

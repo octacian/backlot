@@ -124,3 +124,70 @@ age at the upgraded daemon's first observation. That inferred timestamp
 is persisted as `execution.evidence_observed_at` once; daemon restarts do not reset
 it, and old file mtimes do not cause immediate age expiration. The size cap still
 applies. Active, kept and cleanup-uncertain runtime remains protected.
+
+## Portable per-instance export
+
+`backlot export INSTANCE_ID --output NEW_DIRECTORY [--allow-partial]
+[--wait[=SECONDS_OR_DURATION]] [--json] [--state-dir DIRECTORY]` copies the latest
+settled execution attempt into a new caller-owned directory. For example:
+
+```sh
+backlot export INSTANCE_ID --output ./saved-run --wait=45s --json
+# The entire directory can now be moved or uploaded.
+open ./saved-run/index.html
+```
+
+The daemon owns selection, settlement, copying, audit and atomic publication.
+The CLI sends an absolute destination; it never opens private state or artifact
+paths. The parent directory must exist, belong to the caller, and be unwritable
+by other users. Output must be outside private daemon state. Existing files,
+directories and links are always rejected, including an empty directory. A sibling
+private staging directory is renamed with the platform's atomic no-replacement
+operation only after the report and all evidence pass audit. Failed/interrupted
+exports remove their staging directory and never replace the destination.
+
+Without `--wait`, active execution is rejected. Bare `--wait` observes indefinitely;
+`--wait=45`, `--wait=45s` and `--wait=2m` set positive bounds. Interrupting export
+does not cancel the run. All evidence producers must settle, including services
+kept for investigation; explicitly stop/destroy them before exporting. Unknown IDs
+and instances with no execution are errors. Export selects one latest attempt,
+identified in both outputs; it never merges evidence from earlier restarts.
+
+Strict default rejects known collection gaps, expired evidence and unavailable
+retained artifacts. `--allow-partial` publishes an explicitly incomplete bundle
+with omissions; it cannot recover pruned bytes or bypass path/link/key/archive
+safety. A failed or cancelled application can have a complete, successful export.
+The original exit (or absence), cancellation and execution/collection/cleanup
+failures remain separate. A settled publication failure may return the observed
+result in the typed export response alongside `error`, with `published: false`;
+its CLI exit is nonzero and it supplies no usable output path. Actions accept
+only complete published evidence.
+
+`report.json` is the independent `backlot.export/v1` agent contract, defined by
+`api/v1.ExportReport`. It contains bounded run/attempt identity, status, original
+results, creation/completion/export timestamps, project/scene/lifetime, checkout
+identity, available launch Git revision and manifest/config digests. Historical
+facts that were not captured remain absent/unknown. It excludes plans, environment,
+fixture secrets, ownership capabilities, machine configuration and snapshots.
+`complete` and `omissions` describe evidence availability. `evidence` inventories
+copied files with relative `path`, kind, component/name, byte size and SHA-256.
+Consumers must reject unsupported schema versions and resolve paths relative to
+the report's directory. `ExportResponse` is the bounded CLI/API publication result,
+not the full file inventory.
+
+`index.html` is a script-free local-file summary of the same report, with escaped
+untrusted text and relative evidence links. Application artifacts retain their
+original bytes/assets and are explicitly labelled application-provided content;
+those HTML reports may execute their own scripts and some need a local static
+server. Use the producing application's viewer; Playwright traces can be opened
+with a compatible installed `npx playwright show-trace PATH.zip`. Logs use typed
+NDJSON with base64 for binary chunks. Keep the whole bundle together. It survives
+destroy, daemon shutdown, private-state removal and relocation. The caller owns
+export retention and upload, independent of daemon pruning.
+
+The reusable generic audit rejects filesystem/archive links, special files,
+private-key filenames and PEM private keys, unsafe ZIP paths, malformed ZIPs and
+over-deep nested ZIPs (case-insensitive). Application format assertions belong in
+application tests; Backlot does not parse framework reports or invent missing ones.
+Applications remain responsible for credentials printed into logs or artifacts.
+The same-user administrative socket remains the authorization boundary.

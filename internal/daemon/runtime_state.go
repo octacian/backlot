@@ -16,6 +16,8 @@ import (
 )
 
 type runtimeRecord struct {
+	ExportSource  *v1.ExportSource    `json:"export_source,omitempty"`
+	StartedAt     string              `json:"started_at,omitempty"`
 	Gateway       *gateway.Intent     `json:"gateway,omitempty"`
 	LaunchPending bool                `json:"launch_pending,omitempty"`
 	ConfigPath    string              `json:"config_path,omitempty"`
@@ -61,6 +63,9 @@ func (s *store) execution(id string, status v1.InstanceStatus, result *v1.Execut
 		r, err := load(tx, id)
 		if err != nil {
 			return err
+		}
+		if result != nil && status != v1.Starting && status != v1.RuntimeReady && status != v1.Stopping && status != v1.Destroyed && result.Outcome == "" {
+			result.Outcome = status
 		}
 		r.Instance.Status = status
 		r.Instance.Operation.Status = status

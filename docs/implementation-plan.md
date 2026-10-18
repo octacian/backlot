@@ -259,3 +259,18 @@ without modification so incompatible binaries cannot ignore probe ownership.
 See the [state compatibility guidance](containers.md). Independent
 reviews, frozen provider/browser/macOS suites and published-HEAD CI remain required
 before delivery readiness; no browser/application trust adoption is claimed.
+
+## Portable run export (#41)
+
+Initial implementation for review adds typed daemon-owned export, a versioned
+intentional agent report, script-free local HTML, strict/explicit partial evidence,
+optional indefinite/bounded observation and atomic no-replacement publication.
+Actions run/quickrun and the existing scenes collector consume the public export
+contract. Generic evidence safety is product logic; application format validation
+remains in the application fixture. See [export semantics](evidence.md#portable-per-instance-export).
+
+The early real Ubuntu ci-scenes success/failure/recovery, teardown/relocation and
+browser preview precede broader feature regression development. Independent Low
+and fresh High reviews, final frozen complete provider/browser/action gates and
+published-revision CI remain required; this paragraph does not claim readiness.
+Binary distribution/version tags remain #25, with no legacy storage migration.

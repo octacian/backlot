@@ -92,3 +92,16 @@ func validateFixtures(response v1.FixturesResponse, request v1.FixturesRequest, 
 	}
 	return nil
 }
+
+// Export publishes a daemon-owned portable snapshot without cancelling the run.
+func (c *Client) Export(ctx context.Context, request v1.ExportRequest) (v1.ExportResponse, error) {
+	var response v1.ExportResponse
+	err := c.call(ctx, http.MethodPost, "/v1/export", request, &response)
+	if err == nil && (response.APIVersion != v1.Version || response.Published && (response.Output == "" || response.Report != "report.json" || response.HTML != "index.html") || response.Result.InstanceID != request.InstanceID) {
+		err = responseError()
+	}
+	if err == nil && response.Error != nil {
+		err = response.Error
+	}
+	return response, err
+}

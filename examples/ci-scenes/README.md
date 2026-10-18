@@ -103,13 +103,12 @@ retry recovery, and a 360px viewport.
 
 ## Evidence and teardown
 
-Backlot copies `reports/` before disposing of the scene. The runner exports
-allowlisted result fields, retained application NDJSON logs, `invocation.json`,
+Backlot copies `reports/` before disposing of the scene. The runner calls public `backlot export` for a versioned agent report, local HTML
+summary, retained application NDJSON logs, `invocation.json`,
 Playwright JSON/HTML, screenshots and ZIP traces. Raw daemon state, snapshots,
 gateway configuration, NSS databases, and CA directories/keys are never upload
 sources. The exporter rejects links, special files, key filenames and PEM private
-keys (including ZIP entries), validates JSON trace records and PNG headers, and
-publishes only audited staging. Application logs/artifacts still require
+keys (including ZIP entries), publishes only audited staging. Application tests validate their own formats. Application logs/artifacts still require
 application-level secret discipline. CI collection, upload, and authenticated
 cleanup are `always()` steps, so an expected or unexpected test failure does not
 skip evidence or teardown. Actions cancellation allows these bounded steps;

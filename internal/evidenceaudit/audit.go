@@ -1,24 +1,50 @@
-// Command audit validates action evidence independently of the selected Backlot runtime.
-package main
+// Package evidenceaudit rejects unsafe portable evidence, including nested archives.
+package evidenceaudit
 
 import (
 	"archive/zip"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path"
-	"path/filepath"
 	"regexp"
 	"strings"
 )
 
+const maxFileBytes = 128 << 20
+const maxAuditBytes = 512 << 20
+const maxEntries = 10000
+
+type budget struct {
+	bytes   int64
+	entries int
+}
+
 var privateKey = regexp.MustCompile(`-----BEGIN (?:[A-Z0-9 ]* )?PRIVATE KEY-----`)
 
 func check(name string, data []byte, depth int) error {
+	return checkBudget(name, data, depth, &budget{})
+}
+
+func checkBudget(name string, data []byte, depth int, limit *budget) error {
+	limit.bytes += int64(len(data))
+	limit.entries++
+	if len(data) > maxFileBytes || limit.bytes > maxAuditBytes || limit.entries > maxEntries {
+		return fmt.Errorf("evidence audit size or entry bound exceeded")
+	}
 	lower := strings.ToLower(name)
+	for _, part := range strings.Split(lower, "/") {
+		if part == ".." || strings.ContainsAny(part, `\:`) || part == ".git" || part == ".pki" || part == "state.db" || part == "key4.db" || part == "cert9.db" || part == "pkcs11.txt" || part == "owner" {
+			return fmt.Errorf("private or unsafe evidence path rejected: %s", name)
+		}
+	}
+	for _, suffix := range []string{".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar", ".zst"} {
+		if strings.HasSuffix(lower, suffix) {
+			return fmt.Errorf("unsupported evidence archive: %s", name)
+		}
+	}
 	if privateKey.Match(data) || strings.HasSuffix(lower, ".key") || strings.HasSuffix(lower, ".p12") || strings.HasSuffix(lower, ".pfx") {
 		return fmt.Errorf("private key rejected: %s", name)
 	}
@@ -51,7 +77,7 @@ func check(name string, data []byte, depth int) error {
 			if err != nil {
 				return err
 			}
-			contents, readErr := io.ReadAll(reader)
+			contents, readErr := io.ReadAll(io.LimitReader(reader, maxFileBytes+1))
 			closeErr := reader.Close()
 			if readErr != nil {
 				return fmt.Errorf("read ZIP entry: %w", readErr)
@@ -59,42 +85,23 @@ func check(name string, data []byte, depth int) error {
 			if closeErr != nil {
 				return closeErr
 			}
-			if err := check(item.Name, contents, depth+1); err != nil {
+			if err := checkBudget(item.Name, contents, depth+1, limit); err != nil {
 				return err
 			}
 		}
 	}
-	if strings.HasSuffix(name, ".trace") || strings.HasSuffix(name, ".network") || strings.HasSuffix(name, ".ndjson") {
-		lines := bytes.Split(data, []byte("\n"))
-		if len(lines[len(lines)-1]) == 0 {
-			lines = lines[:len(lines)-1]
-		}
-		for _, line := range lines {
-			if !json.Valid(line) {
-				return fmt.Errorf("invalid JSON line: %s", name)
-			}
-		}
-	}
-	if strings.HasSuffix(name, "playwright.json") {
-		var report struct {
-			Suites []json.RawMessage          `json:"suites"`
-			Stats  map[string]json.RawMessage `json:"stats"`
-		}
-		if err := json.Unmarshal(data, &report); err != nil {
-			return err
-		}
-		if report.Suites == nil || report.Stats == nil {
-			return fmt.Errorf("invalid Playwright report: %s", name)
-		}
-	}
-	if strings.HasSuffix(name, ".png") && !bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
-		return fmt.Errorf("invalid PNG: %s", name)
-	}
 	return nil
 }
 
-func audit(root string) error {
-	return filepath.WalkDir(root, func(name string, entry fs.DirEntry, err error) error {
+// Audit rejects links, special files, private keys and unsafe ZIP entries.
+func Audit(root string) error {
+	return AuditFS(os.DirFS(root))
+}
+
+// AuditFS audits a rooted evidence filesystem.
+func AuditFS(root fs.FS) error {
+	limit := &budget{}
+	return fs.WalkDir(root, ".", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -108,22 +115,13 @@ func audit(root string) error {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("evidence link or special file rejected: %s", name)
 		}
-		data, err := os.ReadFile(name)
+		if info.Size() > maxFileBytes {
+			return fmt.Errorf("evidence file exceeds audit bound: %s", name)
+		}
+		data, err := fs.ReadFile(root, name)
 		if err != nil {
 			return err
 		}
-		return check(name, data, 0)
+		return checkBudget(name, data, 0, limit)
 	})
-}
-
-func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: audit EVIDENCE_DIRECTORY")
-		os.Exit(1)
-	}
-	if err := audit(os.Args[1]); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	fmt.Println("Evidence audit passed: formats and no private keys (including ZIP entries)")
 }

@@ -5,7 +5,7 @@ import { mkdir, writeFile, lstat, symlink, readFile, readdir, rm } from 'node:fs
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { command, createOwner, verifyOwner, prepare, cleanup, listInstances } from './runtime.mjs';
-import { safeCopy, settleForExport } from './evidence.mjs';
+
 
 const script = name => fileURLToPath(new URL(name, import.meta.url));
 test('ownership fencing and pre-daemon post cleanup are idempotent', async () => {
@@ -16,19 +16,6 @@ test('ownership fencing and pre-daemon post cleanup are idempotent', async () =>
     await command(process.execPath, [script('post.mjs')], { env: { ...process.env, STATE_owner: JSON.stringify(owner) } });
     await assert.rejects(lstat(owner.root), { code: 'ENOENT' });
     await cleanup(owner);
-  } finally { await cleanup(owner); }
-});
-test('shared exporter rejects links and plaintext keys; archive contracts are Go tests', async () => {
-  const owner = await createOwner();
-  try {
-    const source = join(owner.root, 'input');
-    await mkdir(source);
-    await writeFile(join(source, 'root.key'), 'private');
-    await assert.rejects(safeCopy(source, join(owner.root, 'export')), /private key filename/);
-    await symlink('/etc/passwd', join(owner.root, 'link'));
-    await assert.rejects(safeCopy(join(owner.root, 'link'), join(owner.root, 'out')), /evidence link/);
-    await writeFile(join(owner.root, 'private.txt'), '-----BEGIN PRIVATE KEY-----');
-    await assert.rejects(safeCopy(join(owner.root, 'private.txt'), join(owner.root, 'out')), /private key in evidence/);
   } finally { await cleanup(owner); }
 });
 test('real setup failure after daemon start is cleaned by native post hook', {
@@ -56,12 +43,11 @@ test('real setup failure after daemon start is cleaned by native post hook', {
     assert.deepEqual(await readdir(emptyOutput), []);
     // Reuse the existing persistent metadata scene: no application is launched.
     const { instance } = JSON.parse(await cli('prepare', 'dev', '--project', script('../../examples/adoption')));
-    await collect(preparedOutput);
-    assert.equal(JSON.parse(await readFile(join(preparedOutput, instance.id, 'result.json'))).status, 'prepared');
+    await assert.rejects(collect(preparedOutput), /no recorded execution|no_execution/);
     await command(process.execPath, [script('post.mjs')], { env: { ...process.env, STATE_owner: JSON.stringify(owner) }, timeout: 100_000 });
     await assert.rejects(lstat(owner.root), { code: 'ENOENT' });
     assert.deepEqual(await readdir(emptyOutput), []);
-    assert.equal((await readdir(preparedOutput)).length, 1);
+    assert.deepEqual(await readdir(preparedOutput), []);
   } finally {
     await cleanup(owner);
     await rm(emptyOutput, { recursive: true, force: true });
@@ -69,18 +55,6 @@ test('real setup failure after daemon start is cleaned by native post hook', {
     await assert.rejects(lstat(emptyOutput), { code: 'ENOENT' });
     await assert.rejects(lstat(preparedOutput), { code: 'ENOENT' });
   }
-});
-
-test('export waits for disposable final evidence, bounds timeout and leaves persistent services live', async () => {
-  const active = { id: 'run', status: 'starting', plan: { lifetime: 'disposable' }, execution: {} };
-  let calls = 0;
-  const final = { ...active, status: 'failed', execution: { completed_at: 'done', cancelled: true, terminal_exit_code: -1, artifacts: ['reports'] } };
-  const result = await settleForExport(active, async () => ++calls === 1 ? active : final, Date.now() + 1000);
-  assert.deepEqual(result, final);
-  assert.equal(calls, 2);
-  await assert.rejects(settleForExport(active, async () => active, Date.now()), /did not settle/);
-  const persistent = { ...active, plan: { lifetime: 'persistent' } };
-  assert.equal(await settleForExport(persistent, () => { throw Error('must not poll persistent service'); }, Date.now()), persistent);
 });
 
 // Protocol-only fixture: actual collect/cleanup helpers, no daemon or gateway.
@@ -106,10 +80,14 @@ if (args[0] === 'list') {
   console.log(JSON.stringify({instance: {id: args[1], status: args[1] === ids.at(-1) ? 'ready' : 'destroyed',
     plan: {lifetime: args[1] === ids.at(-1) ? 'persistent' : 'disposable'},
     execution: args[1] === ids.at(-1) ? {} : {completed_at: 'done', terminal_exit_code: 0}}}));
-} else if (args[0] === 'logs') {
-  console.log(JSON.stringify({instance_id: args[1], output: 'retained evidence'}));
+} else if (args[0] === 'export') {
+  const target=args[args.indexOf('--output')+1];
+  const fs=await import('node:fs/promises');await fs.mkdir(target);
+  await fs.writeFile(target+'/report.json',JSON.stringify({schema_version:'backlot.export/v1',result:{instance_id:args[1],status:'succeeded',terminal_exit_code:0}}));
+  await fs.writeFile(target+'/logs.ndjson','retained evidence');
+  console.log(JSON.stringify({api_version:'v1',complete:true,result:{instance_id:args[1],status:'succeeded',terminal_exit_code:0}}));
 } else if (args[0] === 'destroy') {
-  assert.ok(existsSync(output + '/' + args[1] + '/result.json'), 'collection must precede destruction');
+  assert.ok(existsSync(output + '/' + args[1] + '/report.json'), 'collection must precede destruction');
   appendFileSync(root + '/destroyed', args[1] + '\\n');
 } else if (args[0] === 'gateway') {
   assert.deepEqual(readFileSync(root + '/destroyed', 'utf8').trim().split('\\n'), ids);
@@ -130,9 +108,9 @@ if (args[0] === 'list') {
     });
     assert.equal((await readdir(output)).length, 101);
     const last = '65'.padStart(64, '0');
-    assert.equal(JSON.parse(await readFile(join(output, last, 'result.json'))).status, 'ready');
+    assert.equal(JSON.parse(await readFile(join(output, last, 'report.json'))).result.status, 'succeeded');
     const first = '1'.padStart(64, '0');
-    assert.equal(JSON.parse(await readFile(join(output, first, 'result.json'))).terminal_exit_code, 0);
+    assert.equal(JSON.parse(await readFile(join(output, first, 'report.json'))).result.terminal_exit_code, 0);
     assert.match(await readFile(join(output, last, 'logs.ndjson'), 'utf8'), /retained evidence/);
     await cleanup(owner);
     await assert.rejects(lstat(owner.root), { code: 'ENOENT' });
@@ -236,10 +214,14 @@ else if (args[0] === 'run') {
   setInterval(() => {}, 1000);
   setTimeout(() => process.exit(9), 10000); // Bound a broken signal relay without orphaning a fixture.
 } else if (args[0] === 'inspect') console.log(JSON.stringify({api_version:'v1',instance}));
-else if (args[0] === 'logs') {
-  console.log(${Boolean(auditFails)} ? 'invalid NDJSON' : JSON.stringify({instance_id:id, component:'tests',
-    time:'2026-10-18T00:00:00Z', stream:'stdout', attempt:'1', message:'retained output'}));
-  if (${Boolean(logGap)}) console.error(${JSON.stringify(logGap)});
+else if (args[0] === 'export') {
+  const result={instance_id:id,status:instance.status,...instance.execution};
+  if (${Boolean(auditFails || collectionFailure || logGap || expired)}) {
+    console.log(JSON.stringify({api_version:'v1',result,error:{code:'export_incomplete',message:'known incomplete evidence'}}));
+    console.error(${JSON.stringify(auditFails ? 'evidence safety audit failed' : collectionFailure ? 'runtime evidence collection failed: '+collectionFailure : expired ? 'evidence expired' : 'known log gap')});process.exit(1);
+  }
+  const fs=await import('node:fs/promises');await fs.mkdir(args[args.indexOf('--output')+1]);
+  console.log(JSON.stringify({api_version:'v1',complete:true,result}));
 }
 else if (args[0] === 'destroy') {
   if (args[1] !== id) throw Error('foreign record');
@@ -278,7 +260,7 @@ else if (args[0] === 'destroy') {
       assert.doesNotMatch(values, /(?:upload-error|artifact-id)<</);
       const parents = await readdir(owner.root + '-exports');
       for (const parent of parents) await assert.rejects(lstat(join(owner.root + '-exports', parent, 'evidence')), { code: 'ENOENT' });
-      assert.match(logs, auditFails ? /NDJSON|JSON/ : collectionFailure ? /runtime evidence collection failed/ : expired ? /expired/ : /reported incomplete evidence/);
+      assert.match(logs, auditFails ? /safety audit/ : collectionFailure ? /runtime evidence collection failed/ : expired ? /expired/ : /known log gap/);
     } else assert.match(values, /evidence-available<<[^\n]+\ntrue\n/);
     if (signal) assert.match(values, new RegExp(`wrapper-signal<<[^\\n]+\\n${signal}\\n`));
     await verifyOwner(owner); // Shared setup state remains available.

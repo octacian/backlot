@@ -19,5 +19,7 @@ export async function verifyReports(instance, artifact) {
     const holding = JSON.parse(await readFile(join(artifact.path, 'reports/holding.json')));
     assert.equal(holding.origin, instance.execution.origin, 'holding report belongs to a different run');
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const report = JSON.parse(await readFile(join(artifact.path, 'reports/playwright.json')));
+  assert.ok(Array.isArray(report.suites) && report.stats && !Array.isArray(report.stats));
   return invocation;
 }

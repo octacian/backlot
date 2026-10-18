@@ -29,16 +29,6 @@ when versions change. The root `THIRD_PARTY_NOTICES.md` remains the independent 
 inventory. No npm step is added to contributor checks or the consumer path.
 No custom cache/artifact service protocol is maintained here.
 
-The archive auditor is independent Go source in `../setup/audit`; setup compiles
-`audit/main.go` from the selected ACTION tree with its required Go 1.27.1, even
-when `backlot-ref` selects a different runtime tree. To validate it directly:
-
-```sh
-go test -race ./actions/setup/audit # from repository root
-# Optional: go build -o /private/owned/audit ./actions/setup/audit
-# /private/owned/audit /private/owned/retained-evidence
-```
-
-Future release-based installation (#25) must account for packaging this helper
-before removing the consumer Go prerequisite. Python is not used by these actions
-or the action-check fixture generation.
+Portable evidence is created by the selected export-capable Backlot runtime through
+its typed public CLI. Generic audit lives in `internal/evidenceaudit`; application
+report validation lives in `examples/ci-scenes`. No action-side auditor is built.

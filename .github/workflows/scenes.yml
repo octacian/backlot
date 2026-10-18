@@ -86,12 +86,23 @@ jobs:
         run: |
           test "$FIRST" != "$SECOND"
           test "$FIRST_EVIDENCE" != "$SECOND_EVIDENCE"
-          test -f "$FIRST_EVIDENCE/$FIRST/result.json"
-          test -f "$SECOND_EVIDENCE/$SECOND/result.json"
+          test -f "$FIRST_EVIDENCE/report.json"
+          test -f "$SECOND_EVIDENCE/report.json"
           backlot gateway status --state-dir "$BACKLOT_STATE_DIR" --json
           backlot inspect "$FIRST" --state-dir "$BACKLOT_STATE_DIR" --json
       - name: Early real HTTPS, missing trust, interaction, failure and recovery
         run: node examples/ci-scenes/ci.mjs run --shard=${{ matrix.shard }}/2
+      - name: Export early success, failure and recovery preview
+        env:
+          BACKLOT_CI_EXPORT: ${{ runner.temp }}/early-preview
+        run: node examples/ci-scenes/ci.mjs collect
+      - name: Preserve early HTML bundle for independent browser feedback
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: early-export-preview-${{ matrix.shard }}
+          path: ${{ runner.temp }}/early-preview
+          if-no-files-found: error
+          retention-days: 7
       - name: Outer runner cancellation during overlapping clients
         if: matrix.shard == 1
         run: node examples/ci-scenes/signal-check.mjs

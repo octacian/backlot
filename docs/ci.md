@@ -84,7 +84,7 @@ that private cleanup immediately before returning, with a native post fallback.
 Do not use independent daemons against the same writable checkout.
 
 Setup exports `BACKLOT_BINARY`, `BACKLOT_CONFIG`, `BACKLOT_STATE_DIR`,
-`BACKLOT_SETUP_HELPER`, `BACKLOT_AUDIT_BINARY` and a private ownership capability
+`BACKLOT_SETUP_HELPER` and a private ownership capability
 `BACKLOT_SETUP_OWNER`. Never print/upload that capability or private state.
 Its mode-0700 `/tmp/bl-ci-*` root contains downloads, authenticated sockets and CA
 keys. Ownership is registered for post cleanup before downloads or daemon startup;
@@ -121,12 +121,17 @@ root are removed. For your own uploader later in the **same job**:
 Known runtime collection failures, expired evidence and native log-gap diagnostics
 prevent publication and upload, while successfully collected evidence remains
 available after an assertion failure or clean cancellation.
-It allowlists result fields, application logs and declared retained artifacts.
-The Go audit rejects filesystem/archive links, special files, private-key names
-and PEM keys, traversal, malformed/over-deep ZIPs (including uppercase/nested ZIPs),
-invalid trace/NDJSON/Playwright JSON and PNG headers. Daemon snapshots, internal
-capabilities, gateway state and browser NSS databases are excluded. Applications
-still own secret discipline in their logs/reports.
+Run calls `backlot export INSTANCE --output NEW_DIRECTORY --wait=45s --json`.
+The daemon owns report construction, completeness, safety audit and publication;
+the action handles upload, outputs, signals and authenticated cleanup. The bundle
+contains `report.json` (`backlot.export/v1`), `index.html`, logs and copied retained
+artifacts; see [the portable contract](evidence.md#portable-per-instance-export).
+Application-format assertions live in the scenes fixture.
+
+Pin `backlot-ref` to a full reviewed revision containing issue #41 public export,
+and select an action revision using that contract. An older runtime fails with
+an actionable unsupported-export error; there is no fallback to private storage.
+Release binaries/version tags remain tracked separately in #25.
 
 Outputs keep the original `cli-exit-code`, `cli-signal`, `wrapper-signal`,
 `terminal-exit-code`, `status`, `cancelled` and `instance-id` separate from

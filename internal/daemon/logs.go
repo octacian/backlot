@@ -13,6 +13,11 @@ import (
 func (s *service) logs(request v1.LogsRequest) (v1.LogsResponse, error) {
 	s.evidence.mu.Lock()
 	defer s.evidence.mu.Unlock()
+	return s.logsLocked(request)
+}
+
+// logsLocked requires evidence.mu, also held by portable snapshot collection.
+func (s *service) logsLocked(request v1.LogsRequest) (v1.LogsResponse, error) {
 	response := v1.LogsResponse{APIVersion: v1.Version, Records: []v1.LogRecord{}, NextOffset: request.Offset}
 	if !validID(request.InstanceID) || request.Offset < 0 {
 		return response, problem("invalid_request", "recorded instance_id and nonnegative log offset required")

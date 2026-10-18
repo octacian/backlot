@@ -20,6 +20,11 @@ export async function command(binary, args, options = {}) {
       child.on('error', reject);
       child.on('close', (code, signal) => resolve(code ?? signal));
     });
+    if (code !== 0) {
+      const error = Error(`${binary} ${args[0]} failed (${code}): ${stderr || stdout}`);
+      error.stdout = stdout;
+      throw error;
+    }
     assert.equal(code, 0, `${binary} ${args[0]} failed (${code}): ${stderr || stdout}`);
     assert.ok(!rejectStderr || !stderr.trim(), `${binary} ${args[0]} reported incomplete evidence: ${stderr}`);
     return stdout;

@@ -1,4 +1,4 @@
-package main
+package evidenceaudit
 
 import (
 	"archive/zip"
@@ -39,8 +39,8 @@ func TestAudit(t *testing.T) {
 		"absolute.zip": archive(t, "/root", []byte("x"), 0o600),
 		"windows.zip":  archive(t, `C:\root`, []byte("x"), 0o600),
 		"deep.zip":     archive(t, "inner.zip", archive(t, "inner.zip", archive(t, "file", []byte("x"), 0o600), 0o600), 0o600),
-		"blank.ndjson": []byte("{}\n\n"),
-		"root.KEY":     []byte("x"), "bad.trace": []byte("not JSON"), "playwright.json": []byte(`{"suites":[],"stats":[]}`), "screen.png": []byte("bad"),
+
+		"root.KEY": []byte("x"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := check(name, data, 0); err == nil {
@@ -60,7 +60,7 @@ func TestAudit(t *testing.T) {
 	if err := os.Symlink("/etc/passwd", filepath.Join(root, "link")); err != nil {
 		t.Fatal(err)
 	}
-	if err := audit(root); err == nil {
+	if err := Audit(root); err == nil {
 		t.Fatal("accepted filesystem symlink")
 	}
 }

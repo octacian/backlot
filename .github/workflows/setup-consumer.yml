@@ -82,6 +82,13 @@ jobs:
           args=(--shard=${{ matrix.shard }}/2)
           if [ "$MODE" = failure ]; then args=(--config=failure.config.mjs failure.spec.mjs); fi
           if [ "$MODE" = cancel ]; then args=(--config=failure.config.mjs hold.spec.mjs); fi
+          if [ "$MODE" = cancel ]; then
+            # Bounded observer exits once the existing real-browser fixture is live.
+            (for attempt in $(seq 1 150); do
+              if [ -f reports/holding.json ]; then echo '::notice title=Backlot cancellation checkpoint::real browser holding'; exit 0; fi
+              sleep 0.2
+            done; echo '::error::real browser hold checkpoint unavailable'; exit 1) &
+          fi
           exec backlot run browser --project "$PWD" --config "$BACKLOT_CONFIG" --state-dir "$BACKLOT_STATE_DIR" --json -- "${args[@]}"
       - name: Collect independent application evidence
         if: always() && env.BACKLOT_SETUP_OWNER != ''

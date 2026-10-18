@@ -23,7 +23,7 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: backlot-source-ubuntu24-amd64-go1.27.1-6e61582f72e29db14f544c6690bae2a07e3c4fc9-caddy2.11.6
+          key: backlot-source-ubuntu24-amd64-go1.27.1-c5ccd7a2bdfe1b85927c698fb7903621e3269f9b-caddy2.11.6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 26.8.1
@@ -35,9 +35,9 @@ jobs:
           npx --no-install playwright install --with-deps chromium
       - id: node
         run: echo "binary=$(command -v node)" >> "$GITHUB_OUTPUT"
-      - uses: octacian/backlot/actions/setup@6e61582f72e29db14f544c6690bae2a07e3c4fc9 # Initial action candidate; review and update the action SHA independently.
+      - uses: octacian/backlot/actions/setup@c5ccd7a2bdfe1b85927c698fb7903621e3269f9b # Initial action candidate; review and update the action SHA independently.
         with:
-          backlot-ref: 6e61582f72e29db14f544c6690bae2a07e3c4fc9
+          backlot-ref: c5ccd7a2bdfe1b85927c698fb7903621e3269f9b
           node-binary: ${{ steps.node.outputs.binary }}
       - name: Test application
         # Run directly: shell/Actions preserves the original CLI exit, including failure/cancellation.

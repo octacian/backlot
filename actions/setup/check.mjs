@@ -202,8 +202,8 @@ for (const scenario of [
 ]) test(`native wrapper preserves original results and complete-evidence availability: ${scenario.name}`, async () => {
   const { signal, auditFails, collectionFailure, lateFailure, logGap, expired } = scenario;
   const unavailable = Boolean(auditFails || collectionFailure || logGap || expired);
-  const cliCode = collectionFailure || !signal ? 1 : signal === 'SIGTERM' ? 143 : 130;
   const nativeCode = signal ? -1 : 23;
+  const cliCode = collectionFailure ? 1 : !signal ? nativeCode : signal === 'SIGTERM' ? 143 : 130;
   const { spawn } = await import('node:child_process');
   const owner = await createOwner();
   const id = 'a'.repeat(64);

@@ -70,7 +70,7 @@ export async function listInstances(listPage, deadline) {
     assert.ok(remaining > 0, 'instance discovery deadline exceeded; preserve state');
     const page = JSON.parse(await listPage(after, Math.min(20_000, remaining)));
     assert.ok(Date.now() < deadline, 'instance discovery deadline exceeded; preserve state');
-    assert.ok(page?.api_version === 'backlot/v1' && Array.isArray(page.instances) &&
+    assert.ok(page?.api_version === 'v1' && Array.isArray(page.instances) &&
       page.instances.length <= 100, 'malformed instance discovery page; preserve state');
     let previous = after;
     for (const item of page.instances) {

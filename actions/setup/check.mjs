@@ -53,15 +53,40 @@ test('real setup failure after daemon start is cleaned by native post hook', {
   skip: process.env.BACKLOT_BINARY ? false : 'requires action-installed binary on Ubuntu; no daemon allocated'
 }, async () => {
   const owner = await createOwner();
+  const emptyOutput = owner.root + '-empty-evidence';
+  const preparedOutput = owner.root + '-prepared-evidence';
   try {
     await mkdir(join(owner.root, 'tools'));
     await symlink(process.env.BACKLOT_BINARY, join(owner.root, 'tools/backlot'));
     await writeFile(join(owner.root, 'daemon-attempted'), '');
     await assert.rejects(prepare({ root: owner.root, binary: process.env.BACKLOT_BINARY,
       caddy: join(owner.root, 'missing-caddy'), node: process.execPath }), /gateway.*failed/s);
+    const cli = (...args) => command(process.env.BACKLOT_BINARY,
+      [...args, '--state-dir', join(owner.root, 'd'), '--json']);
+    // Bind the protocol fixture to actual CLI output, including an empty daemon.
+    const empty = JSON.parse(await cli('list'));
+    assert.equal(empty.api_version, 'v1');
+    assert.deepEqual(empty.instances, []);
+    const collect = output => command(process.execPath, [script('job.mjs'), 'collect', output], {
+      env: { ...process.env, BACKLOT_SETUP_OWNER: JSON.stringify(owner) }
+    });
+    await collect(emptyOutput);
+    assert.deepEqual(await readdir(emptyOutput), []);
+    // Reuse the existing persistent metadata scene: no application is launched.
+    const { instance } = JSON.parse(await cli('prepare', 'dev', '--project', script('../../examples/adoption')));
+    await collect(preparedOutput);
+    assert.equal(JSON.parse(await readFile(join(preparedOutput, instance.id, 'result.json'))).status, 'prepared');
     await command(process.execPath, [script('post.mjs')], { env: { ...process.env, STATE_owner: JSON.stringify(owner) }, timeout: 100_000 });
     await assert.rejects(lstat(owner.root), { code: 'ENOENT' });
-  } finally { await cleanup(owner); }
+    assert.deepEqual(await readdir(emptyOutput), []);
+    assert.equal((await readdir(preparedOutput)).length, 1);
+  } finally {
+    await cleanup(owner);
+    await rm(emptyOutput, { recursive: true, force: true });
+    await rm(preparedOutput, { recursive: true, force: true });
+    await assert.rejects(lstat(emptyOutput), { code: 'ENOENT' });
+    await assert.rejects(lstat(preparedOutput), { code: 'ENOENT' });
+  }
 });
 
 test('export waits for disposable final evidence, bounds timeout and leaves persistent services live', async () => {
@@ -93,7 +118,7 @@ const after = args.includes('--after') ? args[args.indexOf('--after') + 1] : '';
 if (args[0] === 'list') {
   const page = ids.filter(id => id > after).slice(0, 100);
   const bad = existsSync(root + '/malformed');
-  console.log(JSON.stringify({api_version: 'backlot/v1', instances: page.map(id => ({id})),
+  console.log(JSON.stringify({api_version: 'v1', instances: page.map(id => ({id})),
     next_after_id: bad && after ? 'stuck' : page.at(-1) !== ids.at(-1) ? page.at(-1) : undefined}));
 } else if (args[0] === 'inspect') {
   console.log(JSON.stringify({instance: {id: args[1], status: args[1] === ids.at(-1) ? 'ready' : 'destroyed',
@@ -140,8 +165,10 @@ if (args[0] === 'list') {
 
 test('discovery rejects malformed, incomplete, stuck pages and expired deadlines', async () => {
   const ids = Array.from({ length: 100 }, (_, i) => ({ id: (i + 1).toString(16).padStart(64, '0') }));
-  const page = { api_version: 'backlot/v1', instances: ids, next_after_id: ids.at(-1).id };
-  for (const bad of [{}, { ...page, instances: null }, { ...page, next_after_id: null },
+  const page = { api_version: 'v1', instances: ids, next_after_id: ids.at(-1).id };
+  assert.deepEqual(await listInstances(async () => JSON.stringify({ api_version: 'v1', instances: [] }), Date.now() + 1000), []);
+  for (const bad of [{}, { api_version: 'backlot/v1', instances: [] },
+    { ...page, api_version: 'backlot/v1' }, { ...page, instances: null }, { ...page, next_after_id: null },
     { ...page, next_after_id: 'invalid' }, { ...page, instances: ids.slice(0, 1) }]) {
     await assert.rejects(listInstances(async () => JSON.stringify(bad), Date.now() + 1000), /malformed/);
   }
@@ -156,6 +183,6 @@ test('discovery rejects malformed, incomplete, stuck pages and expired deadlines
   await assert.rejects(listInstances(() => { throw Error('must not call'); }, Date.now()), /deadline exceeded/);
   await assert.rejects(listInstances(async () => {
     await new Promise(resolve => setTimeout(resolve, 15));
-    return JSON.stringify({ api_version: 'backlot/v1', instances: [] });
+    return JSON.stringify({ api_version: 'v1', instances: [] });
   }, Date.now() + 5), /deadline exceeded/);
 });

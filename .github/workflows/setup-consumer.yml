@@ -70,7 +70,7 @@ jobs:
           if [ "$MODE" = cancel ]; then args='["--config=failure.config.mjs","hold.spec.mjs"]'; fi
           echo "value=$args" >> "$GITHUB_OUTPUT"
       - name: Run independent application with private lifecycle
-        uses: octacian/backlot/actions/quickrun@a6dfe1ec23721720545d490e1ef43e503d8c113f
+        uses: octacian/backlot/actions/quickrun@1b42fc840fb4178385dbbc9beb4b849e632eb2eb
         id: backlot
         with:
           backlot-ref: f2490060cd2562dce0d3ea32f465beae8849e8ac

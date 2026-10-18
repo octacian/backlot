@@ -6,8 +6,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -62,52 +60,70 @@ func TestDoctorOwnedProbeCancellationAndRecovery(t *testing.T) {
 	snap := plan.Snapshot{Docker: &v1.DockerConfig{Endpoint: endpoint}}
 	instance := v1.Instance{Execution: &v1.ExecutionResult{Origin: "https://unavailable.example.invalid:443"}}
 	request := v1.DoctorRequest{ContainerProbeImage: image}
-	t.Run("inherited-healthcheck-disabled", func(t *testing.T) {
-		base, err := d.ImageInspect(context.Background(), image)
-		if err != nil {
-			t.Fatal(err)
-		}
-		buildDir := t.TempDir()
-		// Delay DNS so the actual diagnostic stays alive across healthcheck ticks.
-		if err := os.WriteFile(filepath.Join(buildDir, "getent"), []byte("#!/bin/sh\nsleep 4\nexit 1\n"), 0700); err != nil {
-			t.Fatal(err)
-		}
-		dockerfile := "FROM " + base.ID + "\nCOPY getent /usr/local/bin/getent\nHEALTHCHECK --interval=100ms --timeout=1s CMD echo INHERITED_WORKLOAD\n"
-		if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte(dockerfile), 0600); err != nil {
-			t.Fatal(err)
-		}
-		iid := filepath.Join(buildDir, "image-id")
-		build := exec.Command("docker", "--host", endpoint, "build", "--pull=false", "--network=none", "--label", "io.backlot.fixture="+newID(), "--iidfile", iid, buildDir)
-		// The classic builder accepts an exact local image ID without registry metadata lookup.
-		build.Env = append(os.Environ(), "DOCKER_BUILDKIT=0")
-		if out, err := build.CombinedOutput(); err != nil {
-			t.Fatalf("owned local fixture build: %v: %s", err, out)
-		}
-		data, err := os.ReadFile(iid)
-		if err != nil {
-			t.Fatal(err)
-		}
-		fixtureImage := strings.TrimSpace(string(data))
-		t.Logf("owned healthcheck fixture image %s from local base %s", fixtureImage, base.ID)
-		t.Cleanup(func() {
-			if _, err := d.ImageRemove(context.Background(), fixtureImage, moby.ImageRemoveOptions{PruneChildren: false}); err != nil {
-				t.Error("preserved fixture image after cleanup failure", fixtureImage, err)
-			} else if _, err := d.ImageInspect(context.Background(), fixtureImage); !errdefs.IsNotFound(err) {
-				t.Error("fixture image absence unverified", fixtureImage, err)
+	for _, fault := range []string{"build-failure", "iidfile-failure", "positive-control-failure"} {
+		t.Run("fixture-cleanup/"+fault, func(t *testing.T) {
+			fixture := newDoctorImageFixture(t, d, &svc, image)
+			fixtureImage, buildErr := fixture.build(endpoint, fault)
+			if fault == "positive-control-failure" {
+				if buildErr != nil {
+					t.Fatal(buildErr)
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				created, err := d.ContainerCreate(ctx, moby.ContainerCreateOptions{Config: &container.Config{Image: fixtureImage, Entrypoint: []string{"/bin/sh"}, Cmd: []string{"-c", "sleep 30"}, Labels: resourceLabels(ownedResource{Token: fixture.token})}, HostConfig: &container.HostConfig{NetworkMode: "none"}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := d.ContainerStart(ctx, created.ID, moby.ContainerStartOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				observed, err := d.ContainerInspect(ctx, created.ID, moby.ContainerInspectOptions{})
+				if err != nil || !observed.Container.State.Running {
+					t.Fatal("failure control must be live before cleanup", err)
+				}
+				// Simulate returning on a failed positive-control assertion, without
+				// weakening the real control's assertions below or failing this test.
+				buildErr = errors.New("injected positive-control failure")
+			}
+			if buildErr == nil {
+				t.Fatal("fixture fault did not fail")
+			}
+			if fault == "build-failure" && !strings.Contains(buildErr.Error(), "23") {
+				t.Fatal("build failed before injected RUN exit 23", buildErr)
+			}
+			if fault == "iidfile-failure" && !errors.Is(buildErr, os.ErrNotExist) {
+				t.Fatal("expected missing iidfile after successful build", buildErr)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			ownedImages, err := d.ImageList(ctx, moby.ImageListOptions{All: true, Filters: moby.Filters{}.Add("label", "io.backlot.fixture="+fixture.token)})
+			if err != nil || len(ownedImages.Items) == 0 {
+				t.Fatal("fault must leave actual owned images for cleanup", ownedImages, err)
+			}
+			t.Log("observed expected fixture failure:", buildErr)
+			// No iid/effect ID is needed: the same pre-registered cleanup must
+			// reconcile exact labels, remove live consumers, then owned images.
+			if err := fixture.cleanup(); err != nil {
+				t.Fatal(err)
 			}
 		})
+	}
+	t.Run("inherited-healthcheck-disabled", func(t *testing.T) {
+		fixture := newDoctorImageFixture(t, d, &svc, image)
+		fixtureImage, err := fixture.build(endpoint, "")
+		if err != nil {
+			t.Fatal(err)
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		// Positive control proves this exact image's inherited healthcheck executes.
 		key := newID()
-		record := diagnosticProbeRecord{Endpoint: endpoint, Resource: ownedResource{Kind: "container", Name: "backlot-doctor-" + key, Token: newID()}}
-		records[key] = record
+		record := diagnosticProbeRecord{Endpoint: endpoint, Resource: ownedResource{Kind: "container", Name: "backlot-doctor-" + key, Token: fixture.token}}
 		created, err := d.ContainerCreate(ctx, moby.ContainerCreateOptions{Name: record.Resource.Name, Config: &container.Config{Image: fixtureImage, Entrypoint: []string{"/bin/sh"}, Cmd: []string{"-c", "sleep 30"}, Labels: resourceLabels(record.Resource)}, HostConfig: &container.HostConfig{NetworkMode: "none"}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		record.Resource.ID = created.ID
-		records[key] = record
 		if _, err := d.ContainerStart(ctx, created.ID, moby.ContainerStartOptions{}); err != nil {
 			t.Fatal(err)
 		}
@@ -128,7 +144,6 @@ func TestDoctorOwnedProbeCancellationAndRecovery(t *testing.T) {
 		if err := cleanupDiagnosticProbe(ctx, d, record); err != nil {
 			t.Fatal(err)
 		}
-		delete(records, key)
 		inspected := false
 		svc.checkpoint = func(point string) error {
 			if point != "doctor-started" {
@@ -297,6 +312,6 @@ func TestDoctorOwnedProbeCancellationAndRecovery(t *testing.T) {
 			delete(records, key)
 		})
 	}
-	// No probe images, existing gateways, DNS/trust settings or foreign resources
-	// are modified by these fault/recovery controls.
+	// Existing images, gateways, DNS/trust settings and foreign resources
+	// are preserved by these fault/recovery controls.
 }

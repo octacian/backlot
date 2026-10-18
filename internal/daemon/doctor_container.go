@@ -199,7 +199,7 @@ case "$code" in 0) exit 0;; 124|137) exit 14;; *) exit 12;; esac`
 		port = "443"
 	}
 
-	config := &container.Config{Image: image.ID, Entrypoint: []string{"/bin/sh", "-c", script, "backlot-doctor"}, Cmd: []string{origin.Hostname(), instance.Execution.Origin, ca, port, net.JoinHostPort(origin.Hostname(), port)}, Labels: resourceLabels(resource), Env: []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/tmp"}, WorkingDir: "/", User: "0:0"}
+	config := &container.Config{Image: image.ID, Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}, Entrypoint: []string{"/bin/sh", "-c", script, "backlot-doctor"}, Cmd: []string{origin.Hostname(), instance.Execution.Origin, ca, port, net.JoinHostPort(origin.Hostname(), port)}, Labels: resourceLabels(resource), Env: []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/tmp"}, WorkingDir: "/", User: "0:0"}
 	created, err := d.ContainerCreate(ctx, moby.ContainerCreateOptions{Name: resource.Name, Config: config, HostConfig: host})
 	if err != nil {
 		diagnosticAdd(r, "container_probe", execution, v1.DoctorFailed, "owned probe creation failed; inspect image contract and selected endpoint, cleanup reconciles uncertain effect")

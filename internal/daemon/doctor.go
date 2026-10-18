@@ -281,7 +281,7 @@ func (s *service) doctorGateway(ctx context.Context, r *v1.DoctorResponse, snap 
 		listener = net.JoinHostPort("127.0.0.1", strconv.Itoa(*config.HTTPSPort))
 	} else if instance.Execution != nil && instance.Execution.Origin != "" {
 		if origin, e := url.Parse(instance.Execution.Origin); e == nil {
-			listener = origin.Host
+			listener = diagnosticHTTPSAddress(origin)
 		}
 	}
 	if listener == "" {
@@ -341,13 +341,19 @@ func diagnosticCA(path string) (*x509.CertPool, error) {
 	}
 	return pool, nil
 }
-func doctorTLS(ctx context.Context, r *v1.DoctorResponse, origin *url.URL, roots *x509.CertPool, name, execution string) {
+
+// diagnosticHTTPSAddress preserves explicit ports and IPv6 while supplying the
+// HTTPS default for canonical origins that omit port 443.
+func diagnosticHTTPSAddress(origin *url.URL) string {
 	port := origin.Port()
 	if port == "" {
 		port = "443"
 	}
+	return net.JoinHostPort(origin.Hostname(), port)
+}
+func doctorTLS(ctx context.Context, r *v1.DoctorResponse, origin *url.URL, roots *x509.CertPool, name, execution string) {
 	dialer := tls.Dialer{NetDialer: &net.Dialer{Timeout: 3 * time.Second}, Config: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, ServerName: origin.Hostname()}}
-	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(origin.Hostname(), port))
+	conn, err := dialer.DialContext(ctx, "tcp", diagnosticHTTPSAddress(origin))
 	if err == nil {
 		_ = conn.Close()
 	}

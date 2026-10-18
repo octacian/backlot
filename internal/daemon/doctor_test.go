@@ -223,3 +223,40 @@ func TestDoctorTLSHandshakeTimeoutIsBounded(t *testing.T) {
 	doctorTLS(ctx, &r, origin, nil, "timeout", "fixture system trust")
 	assertDoctorCheck(t, r, "timeout", v1.DoctorFailed)
 }
+
+func TestDoctorHTTPSAddress(t *testing.T) {
+	for _, tc := range []struct{ origin, address string }{
+		{"https://example.test", "example.test:443"},
+		{"https://example.test:443", "example.test:443"},
+		{"https://example.test:8443", "example.test:8443"},
+		{"https://[::1]", "[::1]:443"},
+		{"https://[::1]:8443", "[::1]:8443"},
+	} {
+		t.Run(tc.origin, func(t *testing.T) {
+			origin, err := url.Parse(tc.origin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := diagnosticHTTPSAddress(origin); got != tc.address {
+				t.Fatalf("dial address = %q, want %q", got, tc.address)
+			}
+		})
+	}
+}
+
+func TestDoctorExternalListener(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	// The external API is deliberately unavailable: listener reachability is an
+	// independent observation and must still succeed on the canonical origin.
+	svc := service{}
+	r := v1.DoctorResponse{Healthy: true, Checks: []v1.DoctorCheck{}}
+	svc.doctorGateway(context.Background(), &r,
+		plan.Snapshot{Caddy: &v1.CaddyConfig{Mode: "external", Endpoint: "http://127.0.0.1:0"}},
+		v1.Instance{Execution: &v1.ExecutionResult{Origin: "https://" + listener.Addr().String()}})
+	assertDoctorCheck(t, r, "gateway_listener", v1.DoctorOK)
+	assertDoctorCheck(t, r, "gateway_api_scope", v1.DoctorFailed)
+}

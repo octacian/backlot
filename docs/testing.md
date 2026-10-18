@@ -379,5 +379,11 @@ or DNS. The fixture bound listener is joined on cleanup. These tests include
 nonzero missing-trust failure/recovery, provenance drift, deferred unavailable
 runtime, retained data, cancellation after creation/start, shutdown joins,
 lost-create-effect recovery and mismatched-authority preservation. Missing opt-in
-settings skip and do not establish provider evidence. The private diagnostic
-image is never pulled/built; production/default gateway exposure stays unchanged.
+settings skip and do not establish provider evidence. The ownership suite also
+requires Docker CLI's classic builder (`DOCKER_BUILDKIT=0`) to build a uniquely
+labeled healthcheck fixture from the exact inspected local diagnostic base ID,
+with `--pull=false --network=none`. A positive control proves the inherited
+healthcheck executes; the actual probe's effective Engine config disables it
+and has no healthcheck execution state. Consumers stop before the exact created
+image is removed and its absence verified. Production doctor never pulls/builds
+images; production/default gateway exposure stays unchanged.

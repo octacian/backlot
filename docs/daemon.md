@@ -336,7 +336,8 @@ GNU-compatible `timeout` (exit 124 on timeout), and OpenSSL `s_client` supportin
 For example a preexisting Debian-based `golang:1.27.1` image provides these tools;
 operators select their own compatible image. Missing tools are `unsupported`.
 Images declaring volumes are unsupported. Image/app entrypoint and command are
-replaced by the bounded probe script; scene environment and workloads are not run.
+replaced by the bounded probe script and image healthchecks are explicitly disabled;
+scene environment and workloads are not run.
 
 The probe resolves the canonical hostname normally, checks TCP with bounded Bash
 `/dev/tcp`, then verifies SNI, hostname, chain and dates using OpenSSL. A selected

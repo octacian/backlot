@@ -18,7 +18,7 @@ test('ownership fencing and pre-daemon post cleanup are idempotent', async () =>
     await cleanup(owner);
   } finally { await cleanup(owner); }
 });
-test('shared exporter rejects links, plaintext keys and keys hidden inside trace ZIPs', async () => {
+test('shared exporter rejects links and plaintext keys; archive contracts are Go tests', async () => {
   const owner = await createOwner();
   try {
     const source = join(owner.root, 'input');
@@ -29,24 +29,6 @@ test('shared exporter rejects links, plaintext keys and keys hidden inside trace
     await assert.rejects(safeCopy(join(owner.root, 'link'), join(owner.root, 'out')), /evidence link/);
     await writeFile(join(owner.root, 'private.txt'), '-----BEGIN PRIVATE KEY-----');
     await assert.rejects(safeCopy(join(owner.root, 'private.txt'), join(owner.root, 'out')), /private key in evidence/);
-    // Exercise safeCopy followed by the publication auditor, with no real key.
-    for (const [label, name, nested] of [['lowercase', 'trace.zip', false],
-      ['uppercase', 'trace.ZIP', false], ['nested-uppercase', 'trace.zip', true]]) {
-      const source = join(owner.root, label); await mkdir(source);
-      await command('python3', ['-c', `import io,sys,zipfile
-buf=io.BytesIO()
-with zipfile.ZipFile(buf,"w",compression=zipfile.ZIP_DEFLATED) as z:
-    z.writestr("nested/root.pem", "-----BEGIN PRIVATE KEY-----")
-with zipfile.ZipFile(sys.argv[1],"w",compression=zipfile.ZIP_DEFLATED) as z:
-    z.writestr("inner.ZIP",buf.getvalue()) if sys.argv[2] == "true" else z.writestr("nested/root.pem", "-----BEGIN PRIVATE KEY-----")
-`, join(source, name), String(nested)]);
-      const copied = join(owner.root, label + '-copy');
-      await safeCopy(source, copied);
-      await assert.rejects(command('python3', [script('audit.py'), copied]), /private key rejected/);
-    }
-    const invalid = join(owner.root, 'invalid-archive'); await mkdir(invalid);
-    await writeFile(join(invalid, 'trace.ZIP'), 'uninspected data');
-    await assert.rejects(command('python3', [script('audit.py'), invalid]), /not a zip file/);
   } finally { await cleanup(owner); }
 });
 test('real setup failure after daemon start is cleaned by native post hook', {
@@ -142,7 +124,6 @@ if (args[0] === 'list') {
       env: { ...process.env, BACKLOT_SETUP_OWNER: JSON.stringify(owner) }
     }), /discovery cursor/);
     await assert.rejects(lstat(output), { code: 'ENOENT' });
-    await rm(join(owner.root, 'export-staging'), { recursive: true });
     await rm(join(owner.root, 'malformed'));
     await command(process.execPath, [script('job.mjs'), 'collect', output], {
       env: { ...process.env, BACKLOT_SETUP_OWNER: JSON.stringify(owner) }

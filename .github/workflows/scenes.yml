@@ -43,15 +43,12 @@ jobs:
       - name: Install native and browser OS prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y lsof libnss3-tools
-      - id: application-node
-        run: echo "binary=$(command -v node)" >> "$GITHUB_OUTPUT"
+          sudo apt-get install -y libnss3-tools
       - name: Set up private Backlot job
         id: backlot
         uses: ./actions/setup
         with:
           backlot-ref: ${{ github.sha }}
-          node-binary: ${{ steps.application-node.outputs.binary }}
       - name: Action ownership, private export and setup-failure checks
         if: matrix.shard == 1
         run: node --test actions/setup/check.mjs
@@ -65,6 +62,34 @@ jobs:
           cd examples/ci-scenes
           npm ci --ignore-scripts --no-audit --no-fund
           npx --no-install playwright install --with-deps chromium
+      - name: One invocation through reusable run with setup retained
+        uses: ./actions/run
+        id: first-run
+        with:
+          project: examples/ci-scenes
+          scene: browser
+          args: '["--shard=${{ matrix.shard }}/2"]'
+      - name: Sequential invocation reuses setup and retains earlier evidence
+        uses: ./actions/run
+        id: second-run
+        with:
+          project: examples/ci-scenes
+          scene: browser
+          args: '["--shard=${{ matrix.shard }}/2"]'
+          upload-artifacts: false
+      - name: Verify invocation isolation and shared runtime survival
+        env:
+          FIRST: ${{ steps.first-run.outputs.instance-id }}
+          SECOND: ${{ steps.second-run.outputs.instance-id }}
+          FIRST_EVIDENCE: ${{ steps.first-run.outputs.evidence-path }}
+          SECOND_EVIDENCE: ${{ steps.second-run.outputs.evidence-path }}
+        run: |
+          test "$FIRST" != "$SECOND"
+          test "$FIRST_EVIDENCE" != "$SECOND_EVIDENCE"
+          test -f "$FIRST_EVIDENCE/$FIRST/result.json"
+          test -f "$SECOND_EVIDENCE/$SECOND/result.json"
+          backlot gateway status --state-dir "$BACKLOT_STATE_DIR" --json
+          backlot inspect "$FIRST" --state-dir "$BACKLOT_STATE_DIR" --json
       - name: Early real HTTPS, missing trust, interaction, failure and recovery
         run: node examples/ci-scenes/ci.mjs run --shard=${{ matrix.shard }}/2
       - name: Outer runner cancellation during overlapping clients

@@ -136,7 +136,7 @@ try {
       // Check exported text/logs too. Never copy daemon/gateway state or logs wholesale.
       await safeCopy(staging, join(root, 'export-audit'));
       checkpoint();
-      execFileSync('python3', [fileURLToPath(new URL('../../actions/setup/audit.py', import.meta.url)), join(root, 'export-audit')], { stdio: 'inherit' });
+      execFileSync(process.env.BACKLOT_AUDIT_BINARY, [join(root, 'export-audit')], { stdio: 'inherit' });
       await rename(join(root, 'export-audit'), output);
       await rm(staging, { recursive: true });
       console.log('Collected allowlisted results, application logs and Playwright reports before runner teardown');

@@ -74,7 +74,7 @@ func TestProviderRecoveryCLIHelper(t *testing.T) {
 		if os.Getenv("BACKLOT_RECOVERY_BLOCK_READINESS") != "" {
 			// A real model response is witnessed before deliberately withholding
 			// CLI readiness, independently of race instrumentation or exit delay.
-			if err := os.WriteFile(filepath.Join(state, "readiness-blocked"), []byte("live model responded before explicit readiness failure"), 0600); err != nil {
+			if err := publishReadinessWitness(filepath.Join(state, "readiness-blocked"), nil); err != nil {
 				os.Exit(6)
 			}
 			os.Exit(1)
@@ -138,6 +138,28 @@ func TestProviderRecoveryCLIHelper(t *testing.T) {
 	default:
 		os.Exit(2)
 	}
+}
+
+const readinessWitness = "live model responded before explicit readiness failure"
+
+// publishReadinessWitness preserves a completed observation when a later status
+// helper is killed by its command deadline. The optional checkpoint lets the
+// interruption regression kill its retained child before the write completes.
+func publishReadinessWitness(path string, beforeWrite func()) error {
+	file, err := os.CreateTemp(filepath.Dir(path), ".readiness-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(file.Name()) }()
+	if beforeWrite != nil {
+		beforeWrite()
+	}
+	_, writeErr := file.WriteString(readinessWitness)
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), path)
 }
 
 func modelControlCall(path, method, route string) (int, error) {

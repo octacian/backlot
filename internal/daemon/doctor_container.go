@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	moby "github.com/moby/moby/client"
@@ -297,13 +299,69 @@ func ptrInt64(value int64) *int64 { return &value }
 // cleanupDiagnosticProbe removes consumers before their exact owned bridge.
 // An unresolved container effect prevents releasing network ownership.
 func cleanupDiagnosticProbe(ctx context.Context, d *dockerEngine, r diagnosticProbeRecord) error {
-	if err := removeContainer(ctx, d, r.Resource); err != nil {
+	resource, err := resolveDiagnosticResource(ctx, d, r.Resource)
+	if err != nil && !errdefs.IsNotFound(err) {
 		return err
 	}
+	if err == nil {
+		if err := removeContainer(ctx, d, resource); err != nil && !errdefs.IsNotFound(err) {
+			return err
+		}
+	}
 	if r.Network.Kind != "" {
-		return removeDockerResource(ctx, d, r.Network)
+		network, err := resolveDiagnosticResource(ctx, d, r.Network)
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		err = removeDockerResource(ctx, d, network)
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
+		return err
 	}
 	return nil
+}
+
+// resolveDiagnosticResource treats a lost create's name only as an observation.
+// Authenticate the returned full Engine ID before any subsequent request; never
+// fall back to the name if that immutable identity disappears or becomes uncertain.
+func resolveDiagnosticResource(ctx context.Context, d *dockerEngine, r ownedResource) (ownedResource, error) {
+	if d == nil {
+		return r, problem("missing_provider", "recorded Docker engine required for diagnostic cleanup")
+	}
+	var id string
+	var labels map[string]string
+	switch r.Kind {
+	case "container":
+		out, err := d.ContainerInspect(ctx, resourceHandle(r), moby.ContainerInspectOptions{})
+		if err != nil {
+			return r, err
+		}
+		if out.Container.Config == nil {
+			return r, problem("cleanup_failed", "container configuration missing; preserved")
+		}
+		id, labels = out.Container.ID, out.Container.Config.Labels
+	case "network":
+		out, err := d.NetworkInspect(ctx, resourceHandle(r), moby.NetworkInspectOptions{})
+		if err != nil {
+			return r, err
+		}
+		id, labels = out.Network.ID, out.Network.Labels
+	default:
+		return r, problem("state_corrupt", "unknown diagnostic Docker allocation kind")
+	}
+	if err := owned(labels, r); err != nil {
+		return r, err
+	}
+	decoded, err := hex.DecodeString(id)
+	if err != nil || len(decoded) != 32 || (r.ID != "" && r.ID != id) {
+		return r, problem("cleanup_failed", "Docker identity uncertain; resource preserved")
+	}
+	r.ID = id
+	return r, nil
 }
 
 func (s *store) diagnosticPending(active map[string]bool) (bool, error) {

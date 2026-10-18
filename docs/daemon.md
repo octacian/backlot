@@ -360,7 +360,10 @@ unrelated network attachments are provided.
 Ownership intent is persisted before each create; exact capability labels and
 engine IDs gate activation/removal. Cancellation and daemon shutdown join the
 probe before storage ownership is released. Recovery reconciles exact owned effects,
-including a lost create response, without deleting by name alone. Cleanup failure
-is nonzero and retains private journals/uncertain resources; restore the recorded
+resolving lost create responses by name only to authenticate the ownership label
+and capture the full Engine ID. All subsequent cleanup requests use that ID;
+disappearance never permits falling back to a replacement under the same name.
+Cleanup failure is nonzero and retains private journals/uncertain resources;
+restore the recorded
 provider access and restart the daemon to retry recovery. Foreign/mismatched
 ownership is preserved. Existing images and global settings remain untouched.

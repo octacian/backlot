@@ -27,7 +27,7 @@ jobs:
           sudo apt-get install -y libnss3-tools
           npm ci --ignore-scripts --no-audit --no-fund
           npx --no-install playwright install --with-deps chromium
-      - uses: octacian/backlot/actions/quickrun@f2490060cd2562dce0d3ea32f465beae8849e8ac # Review and update action SHA independently.
+      - uses: octacian/backlot/actions/quickrun@1731d0f6b9413b87a2a5360a8df6cb358704b17a # Review and update action SHA independently.
         with:
           backlot-ref: f2490060cd2562dce0d3ea32f465beae8849e8ac
           scene: browser

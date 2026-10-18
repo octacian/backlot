@@ -1,7 +1,7 @@
 # Published HTTPS and mixed execution
 
 Windows stock-Caddy/Edge/native/container HTTPS is planned in #38. The
-[Windows design](windows-design.md#docker-desktop-and-managed-https-proposal-38)
+[Windows design](windows-design.md#docker-desktop-and-managed-https-design-38)
 defines separate DNS, listener, system/browser and application-trust gates; current
 macOS/Linux fixture evidence does not prove them.
 

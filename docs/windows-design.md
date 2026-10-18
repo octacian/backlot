@@ -1,6 +1,6 @@
-# Native Windows proposal and implementation handoff
+# Native Windows architecture and implementation handoff
 
-This is the documentation-only design for [#36](https://github.com/octacian/backlot/issues/36),
+This is the accepted architecture and documentation-only design for [#36](https://github.com/octacian/backlot/issues/36),
 under the independent [Windows epic #34](https://github.com/octacian/backlot/issues/34).
 Windows is planned, **not supported or runtime-verified by this change**.
 [#37](https://github.com/octacian/backlot/issues/37) delivers native runtime;
@@ -17,12 +17,14 @@ Windows checkout. Windows services, Windows containers, remote engines, ARM64,
 other browsers, privileged installers and broad packaging are deferred. Coordinate
 ordinary binary distribution with #25 only after verification.
 
-The two linked ADRs are proposals with alternatives and review gates:
+The maintainer accepted both Windows ADRs on 2026-10-18 after reviewing the
+architecture, alternatives and unverified runtime assumptions:
 [private IPC and identity](adr/20261018T210000000Z-propose-windows-private-ipc-and-filesystem-identity.md)
 and [supervision and integration](adr/20261018T210001000Z-propose-windows-owned-runtime-and-managed-https.md).
-No accepted ADR is silently superseded. If review approves a material replacement,
-accept the replacement and update reciprocal supersession metadata in a separate
-explicit decision change, retaining all macOS/Linux requirements.
+These Windows-only extensions do not supersede existing macOS/Linux decisions.
+Their acceptance establishes the implementation direction, not runtime support.
+If implementation evidence requires a material change, obtain a reviewed decision
+and follow the ADR lifecycle while retaining all macOS/Linux requirements.
 
 ## Current source and implementation boundaries
 
@@ -44,7 +46,7 @@ Prefer maintained Go adapters (evaluate Microsoft go-winio and golang.org/x/sys/
 against needed ACL/cancellation/handle features); do not add dependencies in #36.
 A library default ACL or default endpoint is not the product security policy.
 
-## Proposed private transport, state and identity (#37)
+## Windows private transport, state and identity (#37)
 
 Keep HTTP/JSON `/v1` framing, shared named types, version rejection, bounded bodies,
 streaming and structured errors. Transport is a local byte-mode named pipe, not
@@ -61,7 +63,7 @@ write. Validate the connecting user's token, and have the client verify server
 identity against private generation metadata and an authenticated handshake before
 sending sensitive requests. Bind each handshake to a fresh nonce, API version,
 state-root identity and random generation capability; no replayable public token.
-Propose HMAC-SHA256 challenge/response with a private 32-byte generation key,
+Use HMAC-SHA256 challenge/response with a private 32-byte generation key,
 distinct client/server domain tags and both nonces; never transmit the key. Bound
 handshake time/size and reject replay, wrong generation and version mismatch.
 A SID boundary is per-user across sessions, not a hostile same-user sandbox.
@@ -101,12 +103,12 @@ worktrees differ, and moved/replaced checkouts fail without adopting old state.
 Preserve ancestry protections against private-state mounts across junctions,
 symlinks, case variants and hard links to files; deny ambiguous resolution.
 
-## Proposed owned runtime (#37)
+## Windows owned runtime (#37)
 
 Use one out-of-job guardian per workload with a retained **unnamed job object**.
 Set kill-on-last-job-handle-close and disallow breakaway. Guardian is the sole job
 handle owner; never inherit/duplicate that handle into the workload. Configure the
-job and completion tracking before root creation. Propose `CreateProcessW` with
+job and completion tracking before root creation. Use `CreateProcessW` with
 `STARTUPINFOEX`, `EXTENDED_STARTUPINFO_PRESENT`, `CREATE_SUSPENDED` and
 `PROC_THREAD_ATTRIBUTE_JOB_LIST` containing that retained job handle. Keep attribute
 storage and the job handle live through the call; job assignment is distinct from
@@ -127,7 +129,7 @@ and [job lifetime rules](https://learn.microsoft.com/en-us/windows/win32/procthr
 support this inference; it is not Windows execution evidence. Microsoft documents
 [creation-time job lists](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)
 from Windows 10/Server 2016 and the [extended CreateProcessW attributes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw).
-This proposal removes the user-space create/assign interval; those API descriptions
+This design removes the user-space create/assign interval; those API descriptions
 alone do not prove every in-call guardian-crash or partial-failure outcome. #37 must
 review those outcomes and demonstrate the startup fault gates below before this
 adapter is accepted. If creation-time association cannot establish the boundary,
@@ -150,7 +152,7 @@ Missing authenticated proof remains uncertain, even if a port is closed. Preserv
 manual diagnosis; do not automatically resume/retry work or delete the journal.
 
 For console commands, give the guardian an isolated console and launch the root
-in its own console process group. Propose targeted `CTRL_BREAK_EVENT` as the graceful
+in its own console process group. Use targeted `CTRL_BREAK_EVENT` as the graceful
 request; `CTRL_C_EVENT` cannot target an arbitrary process group. Retain the root
 handle until after every group control event so its group ID cannot be reused;
 never broadcast to the user's terminal. Commands must handle BREAK or tolerate
@@ -209,7 +211,7 @@ job handle into the controller: that would defeat the last-close experiment.
   fail this regression. The controller then terminates/waits the residual through
   its retained handle; fixture disposal is not a successful product cleanup receipt.
   This hazardous sequence is never a shipping adapter or compatibility fallback.
-- **After assignment, before resume:** the proposed creation-time adapter returns a
+- **After assignment, before resume:** the creation-time adapter returns a
   suspended root, verifies membership and transfers fixture cleanup authority, then
   blocks before resume. Crash the guardian after the controller's acknowledgement.
   Observe kernel-triggered root termination by waiting on the retained handle within
@@ -256,7 +258,7 @@ fixture and recorded host policy, not only a prefix rewrite. Initially reject
 unsupported forms explicitly; product expansion needs review. JSON/YAML examples
 must quote Windows backslashes correctly (single-quoted YAML is simplest).
 
-## Docker Desktop and managed HTTPS proposal (#38)
+## Docker Desktop and managed HTTPS design (#38)
 
 Accept an explicitly configured local named-pipe URL such as
 `npipe:////./pipe/docker_engine`, confirmed with `docker context inspect`; the actual
@@ -338,7 +340,7 @@ The future README must supply literal copyable commands, exact tool/image setup,
 normal canonical URLs, expected JSON/exit results and verified cleanup. Planned
 PowerShell command shape below uses existing CLI flag placement, but **does not
 run successfully on this baseline**. `C:\BacklotOwned` means a future granted
-private fixture root, not a directory created or authorized by this proposal.
+private fixture root, not a directory created or authorized by this design.
 
 ```powershell
 $state = 'C:\BacklotOwned\daemon'
@@ -412,9 +414,9 @@ by this walkthrough with exact fingerprint and approved store scope; never reset
 the user's stores. Retain private CA state when resources remain; do not uninstall
 trust while other accepted scenes depend on it.
 
-Before implementation, review proposed ADRs and stop for consequential decisions
-if the native resolver, required console behavior, single-file private mount or
-listener reachability cannot satisfy this proposal. #37/#38 must establish exact
+Implement the accepted ADRs and stop for consequential decisions if the native
+resolver, required console behavior, single-file private mount or listener
+reachability cannot satisfy this design. #37/#38 must establish exact
 API/state migration and Windows CLI exit mappings with contract tests before
 shipping. No persisted Unix state is automatically adopted as Windows state.
 

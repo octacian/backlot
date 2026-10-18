@@ -218,9 +218,11 @@ reviews and frozen published-HEAD gates remain required before readiness.
 ## Native Windows expansion (independent epic 34)
 
 [Design slice #36](https://github.com/octacian/backlot/issues/36) supplies the
-[Windows implementation handoff](windows-design.md), two proposed ADRs and an
-acceptance matrix. It changes the intended roadmap, not current support or accepted
-Unix supervision/HTTPS decisions. It contains no runtime or CI implementation.
+[Windows implementation handoff](windows-design.md), two Windows ADRs accepted
+on 2026-10-18 following maintainer review, and an acceptance matrix. These
+Windows-only decisions establish the implementation direction without superseding
+existing Unix supervision/HTTPS decisions or claiming runtime support. This slice
+contains no runtime or CI implementation.
 
 [#37](https://github.com/octacian/backlot/issues/37) implements native Windows
 private IPC/ACLs/identity, authenticated job supervision, Windows command semantics,

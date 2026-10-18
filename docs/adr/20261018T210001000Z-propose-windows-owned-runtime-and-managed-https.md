@@ -1,21 +1,23 @@
 ---
-title: 'Propose Windows owned runtime and managed HTTPS'
+title: 'Use Windows job-object supervision and managed HTTPS'
 date: '2026-10-18'
-status: proposed
-summary: 'Propose retained Windows job-object authority and explicit Docker Desktop and Caddy integration while requiring native runtime and desktop adoption evidence before support.'
+status: accepted
+summary: 'Use retained Windows job-object authority and explicit Docker Desktop and Caddy integration while requiring native runtime and desktop adoption evidence before support.'
 tags: [windows, lifecycle, ownership, docker, https, trust]
 supersedes: []
 superseded_by: []
 ---
 
-# Propose Windows owned runtime and managed HTTPS
+# Use Windows job-object supervision and managed HTTPS
 
-Propose an outside guardian holding a private unnamed Windows job object, with
+Use an outside guardian holding a private unnamed Windows job object, with
 authenticated durable control and bounded cleanup, plus explicit local Docker
 Desktop Linux-container and native stock Caddy integration. The
 [Windows handoff](../windows-design.md) defines concrete rules and validation for
-#37/#38. This record is proposed only; accepted cooperative Unix supervision and
-Linux HTTPS decisions are unchanged, and Windows execution is not verified.
+#37/#38. Accepted on 2026-10-18 following maintainer review of the Windows design.
+This Windows-only extension does not supersede the accepted cooperative Unix
+supervision or Linux HTTPS decisions. Windows execution remains unimplemented
+and unverified by this change; architecture acceptance does not waive runtime gates.
 
 ## Context
 
@@ -29,7 +31,7 @@ Edge, stock Caddy and Docker Desktop Linux containers from the outset.
 ## Decision
 
 Configure a guardian-retained non-breakaway job with kill-on-last-close and
-completion tracking before root creation; prevent job-handle inheritance. Propose
+completion tracking before root creation; prevent job-handle inheritance. Use
 creation-time association with `PROC_THREAD_ATTRIBUTE_JOB_LIST` in `STARTUPINFOEX`
 and `CreateProcessW` using `EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED`.
 Retain attribute storage/job authority through the call, verify membership through
@@ -45,14 +47,14 @@ not a runtime observation. Microsoft documents job-list attributes on Windows 10
 Server 2016 and newer. Creation-time assignment removes the user-space interval,
 but documentation alone does not establish every in-call crash/partial-failure
 outcome. #37 must review and demonstrate that boundary before adapter acceptance;
-otherwise return for a reviewed retained-authority proposal. If a child may exist
+otherwise return for a reviewed retained-authority design. If a child may exist
 without retained authority, name the possible suspended unassigned residual,
 quarantine the journal/state, block conflicting restart and report cleanup failure.
 No failed create, guardian exit or closed port proves absence.
 
 Require the [deterministic startup fault gates](../windows-design.md#deterministic-startup-fault-acceptance-37):
 a reproduction-only two-step fixture crashes after creation/before assignment and
-exposes the surviving root; the proposed adapter crashes after association/before
+exposes the surviving root; the creation-time adapter crashes after association/before
 resume and must demonstrate bounded root termination without activation. Before
 either fault an independent controller acknowledges retained root termination/wait
 and guardian launch handles and registers cleanup; it retains no owned-job handle.
@@ -120,10 +122,10 @@ Desktop evidence requires it; private admin never widens.
 ## Revisit when
 
 Creation-time association/crash evidence, actual Windows console/nesting tests,
-canonical DNS, public-file mount permissions or Desktop networking cannot meet the
-proposal; a native GUI/service workload is
-required; or the operator changes backend/Engine/trust policy. Record alternatives
-and seek consequential product decisions before dependent changes.
+canonical DNS, public-file mount permissions or Desktop networking cannot meet this
+design; a native GUI/service workload is required; or the operator changes backend,
+Engine or trust policy. Record alternatives and seek consequential product
+decisions before dependent changes.
 
 ## References
 

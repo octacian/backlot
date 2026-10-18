@@ -16,7 +16,7 @@ clean up Docker state.
 Use a per-user permissioned Unix socket for local HTTP/JSON. Socket placement,
 single-daemon locking, and stale-socket recovery belong in the platform/runtime
 adapter. Do not expose administrative HTTP on the LAN. Keep transport selection
-separate from API types. The [Windows proposal](windows-design.md) plans named
+separate from API types. The [accepted Windows design](windows-design.md) specifies named
 pipes and Windows supervision for #37/#38; current runtime support is unchanged.
 
 The lifecycle coordinator consumes a validated, resolved plan and runs its graph.

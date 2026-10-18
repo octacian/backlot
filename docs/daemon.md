@@ -1,6 +1,6 @@
 # Local daemon and execution
 
-The Windows equivalent is a [proposal for #37](windows-design.md#proposed-owned-runtime-37),
+The Windows equivalent is the [accepted design for #37](windows-design.md#windows-owned-runtime-37),
 not an implemented daemon. Unix permissions, signals and socket commands below
 describe the existing macOS/Linux boundary.
 

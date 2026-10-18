@@ -1,21 +1,22 @@
 ---
-title: 'Propose Windows private IPC and filesystem identity'
+title: 'Use Windows private IPC and filesystem identity'
 date: '2026-10-18'
-status: proposed
-summary: 'Propose local named pipes, explicit Windows ACLs and handle-derived filesystem identity to preserve the existing per-user daemon boundary on Windows.'
+status: accepted
+summary: 'Use local named pipes, explicit Windows ACLs and handle-derived filesystem identity to preserve the existing per-user daemon boundary on Windows.'
 tags: [windows, ipc, privacy, identity, platforms]
 supersedes: []
 superseded_by: []
 ---
 
-# Propose Windows private IPC and filesystem identity
+# Use Windows private IPC and filesystem identity
 
-Propose a Windows-only named-pipe transport and handle-based privacy/identity
+Use a Windows-only named-pipe transport and handle-based privacy/identity
 adapter, preserving the shared typed HTTP/JSON API and macOS/Linux contracts.
-This is a review proposal for #37, not implemented support. The
-[Windows handoff](../windows-design.md) specifies the implementation and evidence
-matrix. Accepted API and Linux ADRs remain in force; acceptance of a replacement
-requires an explicit lifecycle change with reciprocal supersession links.
+Accepted on 2026-10-18 following maintainer review of the Windows design.
+Implementation and runtime evidence remain required in #37; this decision does not
+claim shipped support. The [Windows handoff](../windows-design.md) specifies the
+implementation and evidence matrix. This Windows-only extension leaves the
+accepted API and Linux decisions in force for macOS/Linux and does not supersede them.
 
 ## Context
 
@@ -27,7 +28,7 @@ code and administrator compromise are outside the existing trusted-user boundary
 
 ## Decision
 
-Propose byte-mode local named pipes with explicit owner-SID DACLs, remote-client
+Use byte-mode local named pipes with explicit owner-SID DACLs, remote-client
 rejection, first-instance protection, private generation metadata and a
 nonce-bound authenticated handshake. Derive locators from user and state identity;
 never treat a name as ownership. Preserve shared `/v1` framing/version checks.
@@ -49,8 +50,8 @@ Implementation must close substitution races at private-file and mount boundarie
 Native Windows can preserve per-user local access without a TCP admin listener
 or elevated installer. ACL/handle correctness and cross-user denial require actual
 Windows tests. Failures are conservative and may require operator diagnosis.
-No dependency or runtime change is authorized by this record. Release/support
-claims remain pending #37/#38 and exact revision-bound evidence.
+This documentation change adds no dependencies or runtime implementation.
+Release/support claims remain pending #37/#38 and exact revision-bound evidence.
 
 ## Alternatives considered
 

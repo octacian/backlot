@@ -8,7 +8,7 @@ the tested revision, dependency versions, failures/skips and cleanup; a target i
 this policy is not evidence that an untested release passed. Other distributions,
 architectures, rootless/remote engines and alternative container runtimes are
 experimental. Native Windows is a planned expansion under independent epic #34,
-not a supported target yet; see the [Windows proposal](windows-design.md). WSL
+not a supported target yet; see the [accepted Windows design](windows-design.md). WSL
 guidance below is configuration guidance only, with no WSL QA or support guarantee.
 
 macOS keeps the existing native/process-group/Unix-socket and Docker Desktop

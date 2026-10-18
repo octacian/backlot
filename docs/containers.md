@@ -1,7 +1,7 @@
 # Containers and retained private state
 
 Windows Docker Desktop Linux-container integration is planned in #38; see the
-[Windows handoff](windows-design.md#docker-desktop-and-managed-https-proposal-38).
+[Windows handoff](windows-design.md#docker-desktop-and-managed-https-design-38).
 Named-pipe endpoints and Windows mount identities are not implemented here.
 
 Milestone 4 runs generic containers through the official Docker Go client, alongside

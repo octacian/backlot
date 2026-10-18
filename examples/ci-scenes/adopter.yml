@@ -41,7 +41,7 @@ jobs:
           node-binary: ${{ steps.node.outputs.binary }}
       - name: Test application
         # Run directly: shell/Actions preserves the original CLI exit, including failure/cancellation.
-        run: backlot run browser --project "$PWD" --config "$BACKLOT_CONFIG" --state-dir "$BACKLOT_STATE_DIR" --json -- --shard=${{ matrix.shard }}/2
+        run: exec backlot run browser --project "$PWD" --config "$BACKLOT_CONFIG" --state-dir "$BACKLOT_STATE_DIR" --json -- --shard=${{ matrix.shard }}/2
       - name: Collect application evidence
         if: always() && env.BACKLOT_SETUP_OWNER != ''
         run: node "$BACKLOT_SETUP_HELPER" collect "$RUNNER_TEMP/evidence"

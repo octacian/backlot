@@ -71,6 +71,8 @@ Uncertain cleanup fails and preserves state for authenticated diagnosis.
 
 The action starts only the job daemon/gateway. The workflow explicitly runs
 `backlot run`, then **collect → upload → final cleanup** with `always()`.
+Use `exec backlot run` as the test step's final command so runner cancellation
+reaches the CLI directly, rather than leaving a shell child renewing its lease.
 Do not use `|| true` on tests or fold cleanup into their exit status. Backlot
 retains the original terminal exit separately from infrastructure, collection
 and cleanup failures. Cancellation propagates through the CLI's supervised

@@ -82,7 +82,7 @@ jobs:
           args=(--shard=${{ matrix.shard }}/2)
           if [ "$MODE" = failure ]; then args=(--config=failure.config.mjs failure.spec.mjs); fi
           if [ "$MODE" = cancel ]; then args=(--config=failure.config.mjs hold.spec.mjs); fi
-          backlot run browser --project "$PWD" --config "$BACKLOT_CONFIG" --state-dir "$BACKLOT_STATE_DIR" --json -- "${args[@]}"
+          exec backlot run browser --project "$PWD" --config "$BACKLOT_CONFIG" --state-dir "$BACKLOT_STATE_DIR" --json -- "${args[@]}"
       - name: Collect independent application evidence
         if: always() && env.BACKLOT_SETUP_OWNER != ''
         run: node "$BACKLOT_SETUP_HELPER" collect "$RUNNER_TEMP/consumer-evidence"

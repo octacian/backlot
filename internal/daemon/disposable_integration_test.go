@@ -252,3 +252,77 @@ func waitComponentLog(t *testing.T, h *nativeHarness, id, component, needle stri
 	}
 	t.Fatal("job output did not arrive")
 }
+
+func TestCancelledOutputWaiterArtifacts(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "backlot")
+	if output, err := exec.Command("go", "build", "-race", "-o", binary, "../../cmd/backlot").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, output)
+	}
+	h := newNativeHarness(t, binary, "30s")
+	h.manifest.Tools["sh"] = "/bin/sh"
+	h.manifest.Outputs = map[string]v1.Output{"evidence": {Path: "evidence", ConcurrencyGroup: "reports"}}
+	job := h.manifest.Components["job"]
+	job.Outputs = []string{"evidence"}
+	job.Environment.Assign["RUN_ID"] = v1.Value{Ref: &v1.Reference{Kind: "instance", Field: "id"}}
+	job.Command = &v1.Command{Tool: "sh", Args: []string{"-c", "mkdir -p evidence; printf '%s' \"$RUN_ID\" > evidence/report; echo report-owned; exec sleep 60"}}
+	job.Artifacts = map[string]v1.ArtifactSource{"report": {Path: "evidence/report"}}
+	h.manifest.Components["job"] = job
+	h.write()
+	request := h.request("test")
+	request.Options.JobTimeout = "0s"
+	first, err := h.cli.Run(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitComponentLog(t, h, first.Instance.ID, "job", "report-owned")
+	waiter, err := h.cli.Run(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.cli.StopExecution(context.Background(), waiter.Instance.ID); err != nil {
+		t.Fatal(err)
+	}
+	queued := h.state(waiter.Instance.ID, v1.Cancelled).Instance.Execution
+	if queued == nil || !queued.Cancelled || queued.TerminalExitCode != nil || len(queued.Components) != 0 {
+		t.Fatalf("waiter launched work or lost cancellation: %+v", queued)
+	}
+	if queued.Failure != "" || queued.CollectionFailure != "" || queued.CleanupFailure != "" {
+		t.Fatalf("unlaunched waiter failed: %+v", queued)
+	}
+	if len(queued.Artifacts) != 0 {
+		t.Fatalf("unlaunched waiter collected peer artifacts: %+v", queued.Artifacts)
+	}
+	if _, err := os.Stat(filepath.Join(h.dir, "artifacts", waiter.Instance.ID)); !os.IsNotExist(err) {
+		t.Fatal("unlaunched waiter created artifact storage", err)
+	}
+	peer, err := h.cli.Inspect(context.Background(), first.Instance.ID)
+	if err != nil || peer.Instance.Status != v1.Starting || peer.Instance.Execution.Cancelled {
+		t.Fatal("waiter cancellation affected live peer", peer.Instance.Status, err)
+	}
+	connection, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", peer.Instance.Execution.Ports["port"]), time.Second)
+	if err != nil {
+		t.Fatal("waiter cancellation stopped peer service", err)
+	}
+	_ = connection.Close()
+	data, err := os.ReadFile(filepath.Join(h.project, "evidence", "report"))
+	if err != nil || string(data) != first.Instance.ID {
+		t.Fatal("waiter changed peer report", string(data), err)
+	}
+	if _, err := h.cli.StopExecution(context.Background(), first.Instance.ID); err != nil {
+		t.Fatal(err)
+	}
+	owned := h.state(first.Instance.ID, v1.Cancelled).Instance.Execution
+	if owned.CollectionFailure != "" || owned.CleanupFailure != "" || len(owned.Artifacts) != 1 || owned.TerminalExitCode == nil {
+		t.Fatalf("launched cancellation lost evidence/result: %+v", owned)
+	}
+	data, err = os.ReadFile(filepath.Join(owned.Artifacts[0].Path, "report"))
+	if err != nil || string(data) != first.Instance.ID {
+		t.Fatal("owned report lost provenance", string(data), err)
+	}
+	for _, id := range []string{waiter.Instance.ID, first.Instance.ID} {
+		if _, err := h.cli.Destroy(context.Background(), id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.absent()
+}

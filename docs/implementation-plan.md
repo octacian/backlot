@@ -203,3 +203,13 @@ Debian 13.4 amd64 actual-host evidence, complete frozen provider/native/macOS
 regressions, independent reviews and exact published-HEAD CI remain required
 before readiness. WSL is configuration guidance only, without WSL QA or guarantees;
 native Windows execution and compile-only CI are outside the platform roadmap.
+
+## Application scenes in CI (issue 22)
+
+The [Ubuntu example](../examples/ci-scenes/README.md) adds a native directory-backed
+application and disposable Playwright Chromium scenes, with explicit job-local
+Caddy trust and an automatic two-shard matrix. The application owns test-worker
+data isolation; Backlot retains lifecycle, checkout output locking and evidence
+ownership. The initial Ubuntu Chromium checkpoint passed at `1fef82b`; see the
+example's revision-bound evidence link. Lifecycle/isolation acceptance, independent
+reviews and frozen published-HEAD gates remain required before readiness.

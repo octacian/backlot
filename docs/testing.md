@@ -3,8 +3,10 @@
 ## Setup
 
 Use the Go version declared in `go.mod` (currently 1.27.1), Git, and Make.
-Repository tooling is Go-only; Node and a JavaScript package manager are not
-required. Download module dependencies with `go mod download`.
+Repository contributor tooling is Go-only; Node and a JavaScript package manager
+are not required by `make check`. The optional [application CI example](../examples/ci-scenes/README.md)
+pins its own Node/Playwright dependencies and runs in a separate Ubuntu workflow.
+Download module dependencies with `go mod download`.
 
 `make tools` installs the pinned golangci-lint version into `.tools/bin` using
 the current Go toolchain. This first build can take several minutes. It does

@@ -1,0 +1,19 @@
+{
+  "name": "backlot-action-tooling",
+  "version": "1.0.0",
+  "description": "Optional reproducible SDK bundling for native Backlot actions",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:check": "node build.mjs --check"
+  },
+  "license": "BSD-3-Clause",
+  "type": "module",
+  "dependencies": {
+    "@actions/artifact": "6.3.1",
+    "@actions/cache": "6.3.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "private": true
+}

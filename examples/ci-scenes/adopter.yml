@@ -1,0 +1,34 @@
+# Copy to .github/workflows/browser.yml in your application repository.
+name: Browser tests
+on: [pull_request, push]
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Required while Backlot installs pinned source; release integration is #25.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.27.1
+          cache: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.8.1
+          cache: npm
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libnss3-tools
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx --no-install playwright install --with-deps chromium
+      - uses: octacian/backlot/actions/quickrun@1b42fc840fb4178385dbbc9beb4b849e632eb2eb # Review and update action SHA independently.
+        with:
+          backlot-ref: f2490060cd2562dce0d3ea32f465beae8849e8ac
+          scene: browser
+          args: '["--shard=${{ matrix.shard }}/2"]'

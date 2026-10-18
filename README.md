@@ -97,6 +97,9 @@ WSL QA or a guarantee. Native Windows is planned under independent epic #34;
 Windows runtime support yet. This is not a V1 release declaration; the
 [release verification guide](docs/release-acceptance/README.md) records broader gates.
 
+For GitHub Actions, follow the [CI quickstart](docs/ci.md) and minimal two-shard
+[adopter workflow](examples/ci-scenes/adopter.yml).
+
 ## Development
 
 See [Developer documentation](docs/README.md) for contributor setup and checks.

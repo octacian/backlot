@@ -2,3 +2,5 @@
 /.tools/
 /coverage.out
 /.DS_Store
+
+/actions/tooling/node_modules/

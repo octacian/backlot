@@ -21,15 +21,12 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2]
-    env:
-      BACKLOT_BINARY: ${{ github.workspace }}/bin/backlot-linux-amd64
     defaults:
       run:
         shell: bash
     steps:
       - name: Configure job-owned paths
         run: |
-          echo "BACKLOT_CADDY_BINARY=$RUNNER_TEMP/scene-tools/caddy" >> "$GITHUB_ENV"
           echo "BACKLOT_CI_POINTER=$RUNNER_TEMP/scene-root" >> "$GITHUB_ENV"
           echo "BACKLOT_CI_EXPORT=$RUNNER_TEMP/scene-evidence" >> "$GITHUB_ENV"
           echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/playwright-browsers" >> "$GITHUB_ENV"
@@ -43,25 +40,56 @@ jobs:
           node-version: 26.8.1
           cache: npm
           cache-dependency-path: examples/ci-scenes/package-lock.json
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: |
-            ${{ runner.temp }}/scene-tools
-            ${{ runner.temp }}/playwright-browsers
-          key: scenes-ubuntu24-amd64-caddy2.11.6-go1.27.1-${{ hashFiles('examples/ci-scenes/package-lock.json') }}
-      - name: Bootstrap Ubuntu application prerequisites
+      - name: Install native and browser OS prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y lsof libnss3-tools
-          mkdir -p "$RUNNER_TEMP/scene-tools"
-          if [ ! -x "$BACKLOT_CADDY_BINARY" ]; then
-            GOBIN="$RUNNER_TEMP/scene-tools" go install github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.6
-          fi
-          make release-build RELEASE_GOOS=linux RELEASE_GOARCH=amd64
+          sudo apt-get install -y libnss3-tools
+      - name: Set up private Backlot job
+        id: backlot
+        uses: ./actions/setup
+        with:
+          backlot-ref: ${{ github.sha }}
+      - name: Action ownership, private export and setup-failure checks
+        if: matrix.shard == 1
+        run: node --test actions/setup/check.mjs
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/playwright-browsers
+          key: scenes-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('examples/ci-scenes/package-lock.json') }}
+      - name: Register example paths and install application dependencies
+        run: |
+          node -e 'require("fs").writeFileSync(process.env.BACKLOT_CI_POINTER, JSON.parse(process.env.BACKLOT_SETUP_OWNER).root, {flag:"wx", mode:0o600})'
           cd examples/ci-scenes
           npm ci --ignore-scripts --no-audit --no-fund
           npx --no-install playwright install --with-deps chromium
-          node ci.mjs bootstrap
+      - name: One invocation through reusable run with setup retained
+        uses: ./actions/run
+        id: first-run
+        with:
+          project: examples/ci-scenes
+          scene: browser
+          args: '["--shard=${{ matrix.shard }}/2"]'
+      - name: Sequential invocation reuses setup and retains earlier evidence
+        uses: ./actions/run
+        id: second-run
+        with:
+          project: examples/ci-scenes
+          scene: browser
+          args: '["--shard=${{ matrix.shard }}/2"]'
+          upload-artifacts: false
+      - name: Verify invocation isolation and shared runtime survival
+        env:
+          FIRST: ${{ steps.first-run.outputs.instance-id }}
+          SECOND: ${{ steps.second-run.outputs.instance-id }}
+          FIRST_EVIDENCE: ${{ steps.first-run.outputs.evidence-path }}
+          SECOND_EVIDENCE: ${{ steps.second-run.outputs.evidence-path }}
+        run: |
+          test "$FIRST" != "$SECOND"
+          test "$FIRST_EVIDENCE" != "$SECOND_EVIDENCE"
+          test -f "$FIRST_EVIDENCE/$FIRST/result.json"
+          test -f "$SECOND_EVIDENCE/$SECOND/result.json"
+          backlot gateway status --state-dir "$BACKLOT_STATE_DIR" --json
+          backlot inspect "$FIRST" --state-dir "$BACKLOT_STATE_DIR" --json
       - name: Early real HTTPS, missing trust, interaction, failure and recovery
         run: node examples/ci-scenes/ci.mjs run --shard=${{ matrix.shard }}/2
       - name: Outer runner cancellation during overlapping clients

@@ -1,0 +1,66 @@
+name: Run Backlot with private setup and cleanup
+description: Execute one disposable scene and retain audited application evidence
+inputs:
+  backlot-ref:
+    description: Full lowercase Backlot source commit SHA
+    required: true
+  node-binary:
+    description: Absolute application Node override (defaults to PATH)
+    required: false
+  project:
+    description: Application project directory
+    default: .
+  scene:
+    description: Disposable scene name
+    required: true
+  args:
+    description: Exact JSON array of terminal arguments (no shell interpretation)
+    default: '[]'
+  upload-artifacts:
+    description: Upload audited evidence using the official artifact SDK
+    default: 'true'
+  artifact-name:
+    description: Artifact name prefix (invocation identity is always appended)
+    default: backlot
+outputs:
+  evidence-path:
+    description: Audited evidence outside private runtime state; survives cleanup
+  evidence-available:
+    description: True only after complete successful evidence audit
+  instance-id:
+    description: Owned invocation identity when returned by CLI
+  status:
+    description: Final runtime status when available
+  cli-exit-code:
+    description: Original CLI exit code when available
+  cli-signal:
+    description: Signal terminating the CLI when available
+  terminal-exit-code:
+    description: Original native terminal exit code when available
+  cancelled:
+    description: Runtime cancellation when known
+  wrapper-signal:
+    description: First cancellation signal received by wrapper
+  runtime-failure:
+    description: Original runtime infrastructure failure
+  runtime-collection-failure:
+    description: Original runtime artifact collection failure
+  runtime-cleanup-failure:
+    description: Original runtime cleanup failure
+  infrastructure-error:
+    description: Wrapper infrastructure error
+  collection-error:
+    description: Wrapper collection error
+  upload-error:
+    description: Artifact upload error
+  cleanup-error:
+    description: Invocation cleanup error
+  job-cleanup-error:
+    description: Final private job cleanup error
+  artifact-id:
+    description: Uploaded artifact ID
+runs:
+  using: node24
+  main: quickrun.mjs
+  post: ../setup/post.mjs
+  post-if: always()

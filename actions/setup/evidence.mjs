@@ -19,3 +19,16 @@ export async function safeCopy(source, destination, checkpoint = () => {}) {
     await writeFile(destination, data, { mode: 0o600 });
   }
 }
+
+// Actions may advance to always() steps before a killed client lease settles.
+// Observe only: never start/cancel work or wait for a persistent service to exit.
+export async function settleForExport(instance, inspect, deadline) {
+  while (instance.plan?.lifetime === 'disposable' && !instance.execution?.completed_at &&
+      (instance.execution || ['preparing', 'prepared', 'starting', 'stopping'].includes(instance.status))) {
+    const remaining = deadline - Date.now();
+    assert.ok(remaining > 0, 'disposable result did not settle before export deadline; evidence not published');
+    await new Promise(resolve => setTimeout(resolve, Math.min(100, remaining)));
+    instance = await inspect(instance.id, Math.max(1, deadline - Date.now()));
+  }
+  return instance;
+}

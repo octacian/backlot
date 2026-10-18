@@ -78,7 +78,10 @@ clients; the 3-second disconnected-client lease bounds detached disposable work.
 The action's post hook is a final cleanup fallback, never an evidence-upload
 replacement. Abrupt VM destruction cannot guarantee upload or post execution.
 
-Collection uses an allowlist of result fields, application logs and declared
+Before export, collection waits at most 45 seconds for disposable runs to settle
+(including client lease expiry after runner cancellation). It never waits for
+persistent services to exit or starts new work. A timeout fails collection without
+publishing partial final results; final cleanup still runs. Collection uses an allowlist of result fields, application logs and declared
 artifacts under daemon evidence storage. It rejects symlinks, special files,
 private-key filenames and PEM keys, including ZIP contents, before publishing
 staging. It excludes daemon snapshots, capabilities, CA storage and browser NSS

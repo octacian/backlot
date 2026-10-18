@@ -5,7 +5,7 @@ import { mkdir, writeFile, lstat, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { command, createOwner, verifyOwner, prepare, cleanup } from './runtime.mjs';
-import { safeCopy } from './evidence.mjs';
+import { safeCopy, settleForExport } from './evidence.mjs';
 
 const script = name => fileURLToPath(new URL(name, import.meta.url));
 test('ownership fencing and pre-daemon post cleanup are idempotent', async () => {
@@ -47,4 +47,16 @@ test('real setup failure after daemon start is cleaned by native post hook', {
     await command(process.execPath, [script('post.mjs')], { env: { ...process.env, STATE_owner: JSON.stringify(owner) }, timeout: 100_000 });
     await assert.rejects(lstat(owner.root), { code: 'ENOENT' });
   } finally { await cleanup(owner); }
+});
+
+test('export waits for disposable final evidence, bounds timeout and leaves persistent services live', async () => {
+  const active = { id: 'run', status: 'starting', plan: { lifetime: 'disposable' }, execution: {} };
+  let calls = 0;
+  const final = { ...active, status: 'failed', execution: { completed_at: 'done', cancelled: true, terminal_exit_code: -1, artifacts: ['reports'] } };
+  const result = await settleForExport(active, async () => ++calls === 1 ? active : final, Date.now() + 1000);
+  assert.deepEqual(result, final);
+  assert.equal(calls, 2);
+  await assert.rejects(settleForExport(active, async () => active, Date.now()), /did not settle/);
+  const persistent = { ...active, plan: { lifetime: 'persistent' } };
+  assert.equal(await settleForExport(persistent, () => { throw Error('must not poll persistent service'); }, Date.now()), persistent);
 });

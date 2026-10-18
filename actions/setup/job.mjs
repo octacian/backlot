@@ -1,10 +1,10 @@
 // Workflow-owned collection and final cleanup. Never invokes application tests.
 import assert from 'node:assert/strict';
-import { mkdir, writeFile, rename, rm } from 'node:fs/promises';
+import { mkdir, writeFile, rename } from 'node:fs/promises';
 import { join, relative, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { command, verifyOwner, cleanup } from './runtime.mjs';
-import { safeCopy } from './evidence.mjs';
+import { safeCopy, settleForExport } from './evidence.mjs';
 
 try {
   const owner = JSON.parse(process.env.BACKLOT_SETUP_OWNER);
@@ -18,13 +18,16 @@ try {
     const cli = (...args) => command(join(owner.root, 'tools/backlot'), [...args, '--state-dir', join(owner.root, 'd'), '--json']);
     const staging = join(owner.root, 'export-staging');
     await mkdir(staging); // Existing/partial staging requires diagnosis, never reuse it.
+    const deadline = Date.now() + 45_000;
     for (const item of JSON.parse(await cli('list')).instances) {
-      const { instance } = JSON.parse(await cli('inspect', item.id));
+      const inspect = async (id, timeout) => JSON.parse(await command(join(owner.root, 'tools/backlot'),
+        ['inspect', id, '--state-dir', join(owner.root, 'd'), '--json'], { timeout })).instance;
+      const instance = await settleForExport(await inspect(item.id, 20_000), inspect, deadline);
       const e = instance.execution;
       const destination = join(staging, instance.id);
       await mkdir(destination);
       await writeFile(join(destination, 'result.json'), JSON.stringify({ id: instance.id, status: instance.status,
-        origin: e?.origin, terminal_exit_code: e?.terminal_exit_code, cancelled: e?.cancelled,
+        origin: e?.origin, completed_at: e?.completed_at, terminal_exit_code: e?.terminal_exit_code, cancelled: e?.cancelled,
         failure: e?.failure, collection_failure: e?.collection_failure, cleanup_failure: e?.cleanup_failure }, null, 2));
       await writeFile(join(destination, 'logs.ndjson'), await cli('logs', instance.id));
       for (const [index, artifact] of (e?.artifacts ?? []).entries()) {

@@ -7,7 +7,8 @@ import { join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 export async function command(binary, args, options = {}) {
-  const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], ...options });
+  const { rejectStderr = false, ...spawnOptions } = options;
+  const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], ...spawnOptions });
   let stdout = '', stderr = '';
   child.stdout.on('data', chunk => { stdout += chunk; });
   child.stderr.on('data', chunk => { stderr += chunk; });
@@ -20,6 +21,7 @@ export async function command(binary, args, options = {}) {
       child.on('close', (code, signal) => resolve(code ?? signal));
     });
     assert.equal(code, 0, `${binary} ${args[0]} failed (${code}): ${stderr || stdout}`);
+    assert.ok(!rejectStderr || !stderr.trim(), `${binary} ${args[0]} reported incomplete evidence: ${stderr}`);
     return stdout;
   } finally { clearTimeout(timer); clearTimeout(hardTimer); }
 }

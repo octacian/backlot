@@ -191,7 +191,19 @@ test('native wrapper preserves exact argv and fences scalar output records', asy
   }
 });
 
-for (const auditFails of [false, true]) test(`native wrapper joins cancelled CLI and preserves original results (audit failure: ${auditFails})`, async () => {
+for (const scenario of [
+  { name: 'clean cancellation', signal: 'SIGINT' },
+  { name: 'audit rejection', signal: 'SIGINT', auditFails: true },
+  { name: 'declared artifact collection failure', signal: 'SIGINT', collectionFailure: 'declared artifact missing' },
+  { name: 'settled native collection failure', signal: 'SIGTERM', collectionFailure: 'application output collection failed', lateFailure: true },
+  { name: 'native logs gap', signal: 'SIGINT', logGap: 'retained output interrupted' },
+  { name: 'expired evidence', signal: 'SIGTERM', expired: true },
+  { name: 'ordinary assertion failure' }
+]) test(`native wrapper preserves original results and complete-evidence availability: ${scenario.name}`, async () => {
+  const { signal, auditFails, collectionFailure, lateFailure, logGap, expired } = scenario;
+  const unavailable = Boolean(auditFails || collectionFailure || logGap || expired);
+  const cliCode = collectionFailure || !signal ? 1 : signal === 'SIGTERM' ? 143 : 130;
+  const nativeCode = signal ? -1 : 23;
   const { spawn } = await import('node:child_process');
   const owner = await createOwner();
   const id = 'a'.repeat(64);
@@ -203,14 +215,20 @@ for (const auditFails of [false, true]) test(`native wrapper joins cancelled CLI
 import { writeFileSync, readFileSync, appendFileSync } from 'node:fs';
 const root = ${JSON.stringify(owner.root)}, id = ${JSON.stringify(id)};
 const args = process.argv.slice(2);
-const instance = {id, status:'cancelled', plan:{lifetime:'disposable'}, execution:{completed_at:'done', terminal_exit_code:-1, cancelled:true}};
+const instance = {id, status:${JSON.stringify(collectionFailure || !signal ? 'failed' : 'cancelled')}, plan:{lifetime:'disposable'},
+  execution:{completed_at:'2026-10-18T00:00:00Z', terminal_exit_code:${nativeCode}, cancelled:${Boolean(signal)},
+    collection_failure:${JSON.stringify(collectionFailure)}, evidence_expired:${Boolean(expired)}}};
 if (args[0] === 'plan') console.log(JSON.stringify({api_version:'v1', lifetime:'disposable'}));
 else if (args[0] === 'run') {
+  if (${!signal}) { console.log(JSON.stringify({api_version:'v1',instance})); process.exit(${cliCode}); }
   const done = signal => {
     writeFileSync(root+'/cli-signal', signal);
     // A final result after signal proves the wrapper joined rather than
     // exiting on delivery and leaving its owned child renewing a lease.
-    setTimeout(() => { console.log(JSON.stringify({api_version:'v1',instance})); process.exit(130); }, 100);
+    setTimeout(() => {
+      if (${Boolean(lateFailure)}) { instance.status = 'stopping'; delete instance.execution.completed_at; delete instance.execution.collection_failure; }
+      console.log(JSON.stringify({api_version:'v1',instance})); process.exit(${cliCode});
+    }, 100);
   };
   process.once('SIGINT', () => done('SIGINT'));
   process.once('SIGTERM', () => done('SIGTERM'));
@@ -218,7 +236,11 @@ else if (args[0] === 'run') {
   setInterval(() => {}, 1000);
   setTimeout(() => process.exit(9), 10000); // Bound a broken signal relay without orphaning a fixture.
 } else if (args[0] === 'inspect') console.log(JSON.stringify({api_version:'v1',instance}));
-else if (args[0] === 'logs') console.log(${auditFails} ? 'invalid NDJSON' : JSON.stringify({api_version:'v1',entries:[]}));
+else if (args[0] === 'logs') {
+  console.log(${Boolean(auditFails)} ? 'invalid NDJSON' : JSON.stringify({instance_id:id, component:'tests',
+    time:'2026-10-18T00:00:00Z', stream:'stdout', attempt:'1', message:'retained output'}));
+  if (${Boolean(logGap)}) console.error(${JSON.stringify(logGap)});
+}
 else if (args[0] === 'destroy') {
   if (args[1] !== id) throw Error('foreign record');
   appendFileSync(root+'/destroyed',args[1]);
@@ -229,28 +251,36 @@ else if (args[0] === 'destroy') {
     wrapper = spawn(process.execPath, [script('../run/run.mjs')], { env: { ...process.env,
       BACKLOT_SETUP_OWNER: JSON.stringify(owner), GITHUB_OUTPUT: output,
       INPUT_SCENE: 'browser', INPUT_PROJECT: owner.root, INPUT_ARGS: '[]',
-      'INPUT_UPLOAD-ARTIFACTS': 'false', RUNNER_TEMP: owner.root + '-exports' }, stdio: ['ignore', 'pipe', 'pipe'] });
+      // Rejected exports must never reach the SDK even with upload enabled.
+      'INPUT_UPLOAD-ARTIFACTS': unavailable ? 'true' : 'false', RUNNER_TEMP: owner.root + '-exports' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let logs = '';
     wrapper.stdout.on('data', chunk => { logs += chunk; }); wrapper.stderr.on('data', chunk => { logs += chunk; });
     done = new Promise((resolve, reject) => { wrapper.once('error', reject); wrapper.once('close', (code, signal) => resolve({ code, signal })); });
-    for (let attempt = 0; ; attempt++) {
+    for (let attempt = 0; signal; attempt++) {
       try { await lstat(join(owner.root, 'running')); break; }
       catch (error) { assert.equal(error.code, 'ENOENT'); assert.ok(attempt < 100, logs); await new Promise(resolve => setTimeout(resolve, 20)); }
     }
-    wrapper.kill('SIGINT');
+    if (signal) wrapper.kill(signal);
     const result = await done;
-    assert.equal(result.code, 130, logs); assert.equal(result.signal, null);
-    assert.equal(await readFile(join(owner.root, 'cli-signal'), 'utf8'), 'SIGINT');
+    assert.equal(result.code, signal === 'SIGTERM' ? 143 : signal ? 130 : cliCode, logs); assert.equal(result.signal, null);
+    if (signal) assert.equal(await readFile(join(owner.root, 'cli-signal'), 'utf8'), signal);
     assert.equal(await readFile(join(owner.root, 'destroyed'), 'utf8'), id);
     const values = await readFile(output, 'utf8');
-    assert.match(values, /cli-exit-code<<[^\n]+\n130\n/);
-    assert.match(values, /terminal-exit-code<<[^\n]+\n-1\n/);
-    if (auditFails) {
+    assert.match(values, new RegExp(`cli-exit-code<<[^\\n]+\\n${cliCode}\\n`));
+    assert.match(values, new RegExp(`terminal-exit-code<<[^\\n]+\\n${nativeCode}\\n`));
+    assert.match(values, new RegExp(`cancelled<<[^\\n]+\\n${Boolean(signal)}\\n`));
+    assert.match(values, new RegExp(`status<<[^\\n]+\\n${collectionFailure || !signal ? 'failed' : 'cancelled'}\\n`));
+    if (collectionFailure) assert.match(values, new RegExp(`runtime-collection-failure<<[^\\n]+\\n${collectionFailure}\\n`));
+    if (unavailable) {
       assert.doesNotMatch(values, /evidence-available<<[^\n]+\ntrue\n/);
       assert.match(values, /collection-error<</);
       assert.doesNotMatch(values, /evidence-path<</);
+      assert.doesNotMatch(values, /(?:upload-error|artifact-id)<</);
+      const parents = await readdir(owner.root + '-exports');
+      for (const parent of parents) await assert.rejects(lstat(join(owner.root + '-exports', parent, 'evidence')), { code: 'ENOENT' });
+      assert.match(logs, auditFails ? /NDJSON|JSON/ : collectionFailure ? /runtime evidence collection failed/ : expired ? /expired/ : /reported incomplete evidence/);
     } else assert.match(values, /evidence-available<<[^\n]+\ntrue\n/);
-    assert.match(values, /wrapper-signal<<[^\n]+\nSIGINT\n/);
+    if (signal) assert.match(values, new RegExp(`wrapper-signal<<[^\\n]+\\n${signal}\\n`));
     await verifyOwner(owner); // Shared setup state remains available.
   } finally {
     if (wrapper && wrapper.exitCode === null) { wrapper.kill('SIGINT'); await done; }

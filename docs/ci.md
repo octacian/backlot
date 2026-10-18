@@ -118,6 +118,9 @@ root are removed. For your own uploader later in the **same job**:
 `evidence-available` becomes `true` only after full audit and publication;
 `evidence-path` is absent on failed collection/audit. Collection waits at most
 45 seconds for final disposable results; it never publishes partial results.
+Known runtime collection failures, expired evidence and native log-gap diagnostics
+prevent publication and upload, while successfully collected evidence remains
+available after an assertion failure or clean cancellation.
 It allowlists result fields, application logs and declared retained artifacts.
 The Go audit rejects filesystem/archive links, special files, private-key names
 and PEM keys, traversal, malformed/over-deep ZIPs (including uppercase/nested ZIPs),

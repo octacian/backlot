@@ -6,12 +6,11 @@ import { fileURLToPath } from 'node:url';
 import { command, verifyOwner, cleanup, listInstances } from './runtime.mjs';
 import { safeCopy, settleForExport } from './evidence.mjs';
 
-export async function collect(owner, destination, ids) {
+export async function collect(owner, destination, ids, onResult = async () => {}) {
  const output = resolve(destination);
     await verifyOwner(owner);
     const rel = relative(owner.root, output);
     assert.ok(rel.startsWith('..') && !isAbsolute(rel), 'export must be outside private job state');
-    const cli = (...args) => command(join(owner.root, 'tools/backlot'), [...args, '--state-dir', join(owner.root, 'd'), '--json']);
     const staging = await mkdtemp(join(owner.root, 'export-staging-'));
     const deadline = Date.now() + 45_000;
     const instances = ids ? ids.map(id => ({ id })) : await listInstances((after, timeout) => command(join(owner.root, 'tools/backlot'),
@@ -21,12 +20,20 @@ export async function collect(owner, destination, ids) {
         ['inspect', id, '--state-dir', join(owner.root, 'd'), '--json'], { timeout })).instance;
       const instance = await settleForExport(await inspect(item.id, 20_000), inspect, deadline);
       const e = instance.execution;
+      const result = { id: instance.id, status: instance.status,
+        origin: e?.origin, completed_at: e?.completed_at, terminal_exit_code: e?.terminal_exit_code, cancelled: e ? e.cancelled ?? false : undefined,
+        failure: e?.failure, collection_failure: e?.collection_failure, cleanup_failure: e?.cleanup_failure };
+      // Preserve final runtime outcomes even when their evidence cannot be published.
+      await onResult(result);
+      assert.ok(!e?.collection_failure, `runtime evidence collection failed: ${e?.collection_failure}`);
+      assert.ok(!e?.evidence_expired, 'runtime evidence expired by retention policy');
       const destination = join(staging, instance.id);
       await mkdir(destination);
-      await writeFile(join(destination, 'result.json'), JSON.stringify({ id: instance.id, status: instance.status,
-        origin: e?.origin, completed_at: e?.completed_at, terminal_exit_code: e?.terminal_exit_code, cancelled: e ? e.cancelled ?? false : undefined,
-        failure: e?.failure, collection_failure: e?.collection_failure, cleanup_failure: e?.cleanup_failure }, null, 2));
-      await writeFile(join(destination, 'logs.ndjson'), await cli('logs', instance.id));
+      await writeFile(join(destination, 'result.json'), JSON.stringify(result, null, 2));
+      // The native CLI emits LogRecord NDJSON, but reports gaps on stderr and
+      // can still exit zero. Reject diagnostics rather than losing that signal.
+      await writeFile(join(destination, 'logs.ndjson'), await command(join(owner.root, 'tools/backlot'),
+        ['logs', instance.id, '--state-dir', join(owner.root, 'd'), '--json'], { rejectStderr: true }));
       for (const [index, artifact] of (e?.artifacts ?? []).entries()) {
         const rel = relative(join(owner.root, 'd/artifacts'), artifact.path);
         assert.ok(rel && !rel.startsWith('..') && !isAbsolute(rel), 'artifact outside daemon evidence');

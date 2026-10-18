@@ -1,7 +1,7 @@
 // One-scene adapter: the CLI owns execution, this adapter owns only its result.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { appendFile, mkdtemp, readdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { command, verifyOwner } from './runtime.mjs';
@@ -71,9 +71,7 @@ export async function invoke() {
     const parent = await mkdtemp(join(process.env.RUNNER_TEMP, 'backlot-evidence-'));
     evidence = join(parent, 'evidence');
     try {
-      await collect(owner, evidence, [instance.id]);
-      const result = JSON.parse(await readFile(join(evidence, instance.id, 'result.json'), 'utf8'));
-      await resultOutputs(result);
+      await collect(owner, evidence, [instance.id], resultOutputs);
       await output('evidence-path', evidence);
       await output('evidence-available', true);
     } catch (error) { evidence = undefined; await fail('collection', error); }

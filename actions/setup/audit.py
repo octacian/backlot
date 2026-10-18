@@ -14,7 +14,7 @@ def check(name, data, depth=0):
         raise ValueError("private key rejected: " + name)
     if depth > 2:
         raise ValueError("nested evidence archive rejected")
-    if name.endswith(".zip"):
+    if name.lower().endswith(".zip"):
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             for item in archive.infolist():
                 path = PurePosixPath(item.filename)

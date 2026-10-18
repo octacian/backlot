@@ -6,7 +6,7 @@ import { join, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyReports } from './reports.mjs';
 import { safeCopy as copyEvidence } from '../../actions/setup/evidence.mjs';
-import { cleanup } from '../../actions/setup/runtime.mjs';
+import { cleanup, listInstances } from '../../actions/setup/runtime.mjs';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
 const binary = resolve(process.env.BACKLOT_BINARY);
@@ -62,7 +62,10 @@ function command(args, options = {}) {
 const state = () => join(root, 'd');
 const config = () => join(root, 'machine.json');
 async function cli(...args) { return command([...args, '--state-dir', state(), '--json']); }
-async function instances() { return JSON.parse((await cli('list')).stdout).instances; }
+async function instances() {
+  return listInstances(async (after, timeout) => (await command(
+    ['list', ...(after ? ['--after', after] : []), '--state-dir', state(), '--json'], { timeout })).stdout, Date.now() + 45_000);
+}
 async function inspect(id) { return JSON.parse((await cli('inspect', id)).stdout).instance; }
 async function run(args, cwd = project, options = {}) {
   return command(['run', 'browser', '--project', cwd, '--config', config(), '--state-dir', state(), '--json', '--', ...args], { ...options, ok: false, cwd });

@@ -1,4 +1,4 @@
-// The action and example share only job preparation and authenticated cleanup.
+// Shared job preparation, paginated discovery and authenticated cleanup.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readFile, lstat, rm } from 'node:fs/promises';
@@ -60,6 +60,33 @@ export async function prepare({ root, binary, caddy, node }) {
   await command(binary, ['gateway', 'start', '--config', config, '--state-dir', state, '--json']);
   return { state, config };
 }
+// Discover every page before callers export or destroy anything. The CLI returns
+// sorted recorded IDs, with the last ID as cursor only when another page exists.
+export async function listInstances(listPage, deadline) {
+  const instances = [];
+  let after = '';
+  for (;;) {
+    const remaining = deadline - Date.now();
+    assert.ok(remaining > 0, 'instance discovery deadline exceeded; preserve state');
+    const page = JSON.parse(await listPage(after, Math.min(20_000, remaining)));
+    assert.ok(Date.now() < deadline, 'instance discovery deadline exceeded; preserve state');
+    assert.ok(page?.api_version === 'backlot/v1' && Array.isArray(page.instances) &&
+      page.instances.length <= 100, 'malformed instance discovery page; preserve state');
+    let previous = after;
+    for (const item of page.instances) {
+      assert.ok(typeof item?.id === 'string' && /^[0-9a-f]{64}$/.test(item.id) && item.id > previous,
+        'malformed or stuck instance discovery IDs; preserve state');
+      previous = item.id;
+    }
+    const next = page.next_after_id === undefined ? '' : page.next_after_id;
+    assert.ok(typeof next === 'string' && (next === '' ||
+      (page.instances.length === 100 && next === previous && next > after)),
+    'malformed or stuck instance discovery cursor; preserve state');
+    instances.push(...page.instances);
+    if (!next) return instances;
+    after = next;
+  }
+}
 export async function cleanup(owner, beforeRemove = async () => {}) {
   try { await lstat(owner.root); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
   await verifyOwner(owner);
@@ -74,7 +101,8 @@ export async function cleanup(owner, beforeRemove = async () => {}) {
     assert.ok(remaining > 0, 'cleanup exceeded 90-second budget; preserve state');
     return command(binary, [...args, '--state-dir', state, '--json'], { timeout: Math.min(20_000, remaining) });
   };
-  const { instances } = JSON.parse(await cli('list'));
+  const instances = await listInstances((after, timeout) => command(binary,
+    ['list', ...(after ? ['--after', after] : []), '--state-dir', state, '--json'], { timeout }), deadline);
   for (const item of instances) await cli('destroy', item.id);
   await cli('gateway', 'stop');
   await cli('daemon', 'stop');

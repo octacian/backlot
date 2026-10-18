@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile, rename } from 'node:fs/promises';
 import { join, relative, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { command, verifyOwner, cleanup } from './runtime.mjs';
+import { command, verifyOwner, cleanup, listInstances } from './runtime.mjs';
 import { safeCopy, settleForExport } from './evidence.mjs';
 
 try {
@@ -19,7 +19,9 @@ try {
     const staging = join(owner.root, 'export-staging');
     await mkdir(staging); // Existing/partial staging requires diagnosis, never reuse it.
     const deadline = Date.now() + 45_000;
-    for (const item of JSON.parse(await cli('list')).instances) {
+    const instances = await listInstances((after, timeout) => command(join(owner.root, 'tools/backlot'),
+      ['list', ...(after ? ['--after', after] : []), '--state-dir', join(owner.root, 'd'), '--json'], { timeout }), deadline);
+    for (const item of instances) {
       const inspect = async (id, timeout) => JSON.parse(await command(join(owner.root, 'tools/backlot'),
         ['inspect', id, '--state-dir', join(owner.root, 'd'), '--json'], { timeout })).instance;
       const instance = await settleForExport(await inspect(item.id, 20_000), inspect, deadline);

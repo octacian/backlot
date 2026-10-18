@@ -56,7 +56,7 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: setup-consumer-ubuntu24-amd64-go1.27.1-3d7c57cdb20a1bd7d14496d63f687920bbef0c87-caddy2.11.6
+          key: setup-consumer-ubuntu24-amd64-go1.27.1-6e61582f72e29db14f544c6690bae2a07e3c4fc9-caddy2.11.6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 26.8.1
@@ -71,10 +71,10 @@ jobs:
           npx --no-install playwright install --with-deps chromium
       - id: node
         run: echo "binary=$(command -v node)" >> "$GITHUB_OUTPUT"
-      - uses: octacian/backlot/actions/setup@3d7c57cdb20a1bd7d14496d63f687920bbef0c87
+      - uses: octacian/backlot/actions/setup@6e61582f72e29db14f544c6690bae2a07e3c4fc9
         id: backlot
         with:
-          backlot-ref: 3d7c57cdb20a1bd7d14496d63f687920bbef0c87
+          backlot-ref: 6e61582f72e29db14f544c6690bae2a07e3c4fc9
           node-binary: ${{ steps.node.outputs.binary }}
       - name: Run application tests with original exit result
         working-directory: application

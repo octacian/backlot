@@ -92,7 +92,9 @@ Native commands and descendants must stay in their supervised process group;
 detachment and delegation to another supervisor are unsupported. The support
 boundary includes the bounded Linux rootful bridge topology in the
 [platform guide](docs/platforms.md). WSL has configuration guidance only, without
-WSL QA or a guarantee; native Windows execution is out of scope. This is not a V1 release declaration; the
+WSL QA or a guarantee. Native Windows is planned under independent epic #34;
+[the Windows design and acceptance plan](docs/windows-design.md) establishes no
+Windows runtime support yet. This is not a V1 release declaration; the
 [release verification guide](docs/release-acceptance/README.md) records broader gates.
 
 ## Development

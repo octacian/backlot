@@ -7,8 +7,9 @@ actual-machine evidence in addition to CI. Every readiness report must identify
 the tested revision, dependency versions, failures/skips and cleanup; a target in
 this policy is not evidence that an untested release passed. Other distributions,
 architectures, rootless/remote engines and alternative container runtimes are
-experimental. Native Windows execution is outside the roadmap. WSL guidance below
-is configuration guidance only, with no WSL QA or support guarantee.
+experimental. Native Windows is a planned expansion under independent epic #34,
+not a supported target yet; see the [accepted Windows design](windows-design.md). WSL
+guidance below is configuration guidance only, with no WSL QA or support guarantee.
 
 macOS keeps the existing native/process-group/Unix-socket and Docker Desktop
 contracts. Linux uses the same permissioned local Unix API, private retained state,
@@ -98,8 +99,9 @@ which current Chromium still honors when it exists.
 Run the Linux binary inside WSL2, preferably with the checkout, executable and
 private state on the distribution's Linux filesystem (`~/...`), rather than
 `/mnt/c`: Unix permissions, sockets and filesystem identity are part of the contract.
-Native Windows binaries, a Windows daemon and Windows process supervision are out
-of scope. WSL has not been QA'd by this feature.
+This WSL guidance does not cover native Windows binaries, a Windows daemon or
+Windows process supervision; that planned work has separate #37/#38 gates.
+WSL has not been QA'd by this feature.
 
 Choose and configure the Docker endpoint explicitly. A Docker Desktop integration
 socket inside WSL and a rootful Engine inside the distribution are different

@@ -1,5 +1,9 @@
 # Local daemon and execution
 
+The Windows equivalent is the [accepted design for #37](windows-design.md#windows-owned-runtime-37),
+not an implemented daemon. Unix permissions, signals and socket commands below
+describe the existing macOS/Linux boundary.
+
 Milestone 2 adds explicit local daemon control and durable metadata preparation.
 `prepared` means a validated snapshot was recorded. It never means an application
 was executed, a resource was reserved, or readiness was observed. Native execution

@@ -50,13 +50,6 @@ jobs:
         with:
           go-version: 1.27.1
           cache: false
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        id: go-cache
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: setup-consumer-ubuntu24-amd64-go1.27.1-c5ccd7a2bdfe1b85927c698fb7903621e3269f9b-caddy2.11.6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 26.8.1
@@ -66,44 +59,45 @@ jobs:
         working-directory: application
         run: |
           sudo apt-get update
-          sudo apt-get install -y lsof libnss3-tools
+          sudo apt-get install -y libnss3-tools
           npm ci --ignore-scripts --no-audit --no-fund
           npx --no-install playwright install --with-deps chromium
-      - id: node
-        run: echo "binary=$(command -v node)" >> "$GITHUB_OUTPUT"
-      - uses: octacian/backlot/actions/setup@c5ccd7a2bdfe1b85927c698fb7903621e3269f9b
+      - name: Select exact terminal argument array
+        id: args
+        run: |
+          args='["--shard=${{ matrix.shard }}/2"]'
+          if [ "$MODE" = failure ]; then args='["--config=failure.config.mjs","failure.spec.mjs"]'; fi
+          if [ "$MODE" = cancel ]; then args='["--config=failure.config.mjs","hold.spec.mjs"]'; fi
+          echo "value=$args" >> "$GITHUB_OUTPUT"
+      - name: Run independent application with private lifecycle
+        uses: octacian/backlot/actions/quickrun@d57ab719ba436dafa7bd0ac67f93a18340baaedb
         id: backlot
         with:
-          backlot-ref: c5ccd7a2bdfe1b85927c698fb7903621e3269f9b
-          node-binary: ${{ steps.node.outputs.binary }}
-      - name: Run application tests with original exit result
-        working-directory: application
+          backlot-ref: d57ab719ba436dafa7bd0ac67f93a18340baaedb
+          project: application
+          scene: browser
+          args: ${{ steps.args.outputs.value }}
+          upload-artifacts: ${{ matrix.shard == 1 }}
+          artifact-name: consumer-${{ matrix.shard }}-${{ env.MODE }}
+      - name: Verify custom evidence remains after private cleanup
+        if: always() && steps.backlot.outputs.evidence-available == 'true'
+        env:
+          EVIDENCE: ${{ steps.backlot.outputs.evidence-path }}
         run: |
-          args=(--shard=${{ matrix.shard }}/2)
-          if [ "$MODE" = failure ]; then args=(--config=failure.config.mjs failure.spec.mjs); fi
-          if [ "$MODE" = cancel ]; then args=(--config=failure.config.mjs hold.spec.mjs); fi
-          if [ "$MODE" = cancel ]; then
-            # Bounded observer exits once the existing real-browser fixture is live.
-            (for attempt in $(seq 1 150); do
-              if [ -f reports/holding.json ]; then echo '::notice title=Backlot cancellation checkpoint::real browser holding'; exit 0; fi
-              sleep 0.2
-            done; echo '::error::real browser hold checkpoint unavailable'; exit 1) &
-          fi
-          exec backlot run browser --project "$PWD" --config "$BACKLOT_CONFIG" --state-dir "$BACKLOT_STATE_DIR" --json -- "${args[@]}"
-      - name: Collect independent application evidence
-        if: always() && env.BACKLOT_SETUP_OWNER != ''
-        run: node "$BACKLOT_SETUP_HELPER" collect "$RUNNER_TEMP/consumer-evidence"
+          node -e 'const fs=require("fs"); const {root}=JSON.parse(process.env.BACKLOT_SETUP_OWNER); if(fs.existsSync(root)) throw Error("private root remains"); if(!fs.readdirSync(process.env.EVIDENCE).length) throw Error("missing exported evidence"); console.log("audited evidence readable after private cleanup")'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always() && env.BACKLOT_SETUP_OWNER != ''
+        if: always() && matrix.shard == 2 && steps.backlot.outputs.evidence-available == 'true'
         with:
-          name: consumer-${{ matrix.shard }}-${{ inputs.mode || 'success' }}
-          path: ${{ runner.temp }}/consumer-evidence
+          name: custom-consumer-${{ matrix.shard }}-${{ env.MODE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.backlot.outputs.evidence-path }}
           if-no-files-found: error
-      - name: Final cleanup and absence check
-        if: always() && env.BACKLOT_SETUP_OWNER != ''
-        run: |
-          node "$BACKLOT_SETUP_HELPER" cleanup
-          node -e 'const fs=require("fs"), {root}=JSON.parse(process.env.BACKLOT_SETUP_OWNER); if(fs.existsSync(root)) throw Error("owned private root remains"); console.log("owned root absent after cleanup")'
-      - name: Record setup timing and cache context
+      - name: Record original and wrapper results
         if: always()
-        run: echo 'setup_seconds=${{ steps.backlot.outputs.setup-seconds }} go_cache_hit=${{ steps.go-cache.outputs.cache-hit }} mode=${{ env.MODE }} shard=${{ matrix.shard }}'
+        env:
+          CLI_EXIT: ${{ steps.backlot.outputs.cli-exit-code }}
+          TERMINAL_EXIT: ${{ steps.backlot.outputs.terminal-exit-code }}
+          CANCELLED: ${{ steps.backlot.outputs.cancelled }}
+          EVIDENCE_AVAILABLE: ${{ steps.backlot.outputs.evidence-available }}
+          COLLECTION_ERROR: ${{ steps.backlot.outputs.collection-error }}
+          CLEANUP_ERROR: ${{ steps.backlot.outputs.job-cleanup-error }}
+        run: env | sort | grep -E '^(CLI_EXIT|TERMINAL_EXIT|CANCELLED|EVIDENCE_AVAILABLE|COLLECTION_ERROR|CLEANUP_ERROR)='

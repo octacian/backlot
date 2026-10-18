@@ -113,9 +113,11 @@ instances. Continue with `--after NEXT_AFTER_ID`; concurrent additions with earl
 random IDs may require a fresh traversal. `status` aliases recorded-instance
 inspection; `daemon status` reports daemon connectivity and `gateway status`
 reports managed process/listener readiness independently of TLS trust. Neither ordinary command
-reveals private ownership authority or fixture secrets. `doctor` checks local
-access/compatibility; provider checks are explicitly deferred. Validate selected
-provider workflows separately. Raw API clients use the local permissioned Unix
+reveals private ownership authority or fixture secrets. bare `doctor` checks local
+access/compatibility and shows state/socket/log paths plus an unloaded default
+config candidate. Use `doctor --project PATH --scene NAME --config PATH` or
+`doctor --instance ID` for scoped provider observations and defining/storage paths;
+see [scoped diagnostics and opt-in container probes](daemon.md#scoped-provider-diagnostics). Raw API clients use the local permissioned Unix
 socket, required API headers and named [contracts](daemon.md#local-api-and-doctor).
 
 Closing a persistent run client leaves accepted startup daemon-owned. Disposable
@@ -135,12 +137,14 @@ A zero test exit cannot override failed collection/cleanup.
 | Database TCP ready but application unavailable | Use application preparation or a command probe that verifies credentials/schema; do not equate an open port with application readiness. |
 | Probe or preparation failed | Inspect component logs and failure detail; correct the application, then explicitly restart. Failed fresh-only initialization is not recorded as successful. |
 | Scene failed after readiness | Read the required-service exit/supervision diagnostic and historical logs. No automatic restart; fix the cause before explicit restart. |
+| Need machine/project/public CA paths | Use scoped doctor; distinguish effective scene inputs, recorded launch files and current file drift. `public_ca_certificate` locates the actual public root for explicit manual trust; no key is printed or trust installed. |
+| Container origin fails while host succeeds | Use explicit `--instance ID --container-probe-image ALREADY_PRESENT_IMAGE`; compare default image trust against optional `--probe-public-ca`, DNS, TCP and normally verified TLS. Follow the documented image contract; no implicit pull/workload/resolver override occurs. |
 | Public origin unavailable | Verify selected gateway status, normal DNS and TLS trust, and exact owned scope first. Check host and container consumers separately. Keep unrelated routes intact; never reload a stale bootstrap. |
 | Manifest drift | Repeated run reports preserved snapshot drift. Restart applies compatible changes; retained storage/initialization/sensitive contract changes require explicit reset/destroy. |
 | Kept disposable failure | Inspect status/logs/artifacts/fixtures, then explicitly destroy by ID. Successful runs still clean up. |
 | Cleanup uncertain or foreign consumer present | Preserve journal/resources; restore provider access or remove only your verified consumer, then retry stop/destroy. Never prune by name, PID or hostname. |
 | Daemon crash | Start the same binary/state directory; recovery stops verifiably owned survivors and marks interrupted, retains data/managed CA and reports evidence gaps. Inspect, explicitly start the managed gateway, then restart scenes. Unavailable gateway retains exact route cleanup uncertainty for retry. |
-| Unsupported state version | Incompatible state is rejected without modification; use a matching state format. |
+| Unsupported state version | Version 5 is required; v4 and older are rejected without migration or deletion. Use the matching older binary for owned cleanup and gateway/daemon shutdown, then select a fresh `--state-dir`; preserve old state until cleanup is verified. |
 | Evidence expired | Status retains `evidence_expired`; expired logs/artifacts cannot be recovered from deleted containers. Configure daemon age/size retention before runs. |
 
 Never remove retained data while a consumer may still run. A cleanup failure is a

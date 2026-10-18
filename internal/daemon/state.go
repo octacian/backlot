@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,7 +47,7 @@ func openStore(directory string) (*store, error) {
 		if meta != nil {
 			version := meta.Get([]byte("version"))
 			if string(version) != strconv.Itoa(v1.StateVersion) {
-				return problem("state_version", "unsupported state format; use a compatible binary; state was not modified")
+				return problem("state_version", fmt.Sprintf("unsupported state format; this binary requires version %d and does not migrate older state; use the matching older binary to clean up and shut down owned resources before selecting a new --state-dir; state was not modified", v1.StateVersion))
 			}
 		} else {
 			// Existing buckets without a version are not safe to adopt.

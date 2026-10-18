@@ -237,3 +237,23 @@ implementation slices require independent review, frozen applicable regression
 checks and exact published-HEAD CI. Runtime execution is expected directly on the
 user's Windows VM with separately granted resources; WSL and cross-builds cannot
 substitute. Release artifact work coordinates with #25 after verification.
+
+## Scoped diagnostic follow-up (#26)
+
+Implemented for independent review: selected-scene and recorded-instance doctor,
+shared validated request/response/status contracts, explicit defining/storage/public
+CA paths with launch versus current-file provenance, relevant read-only Docker and
+gateway/listener/certificate/host DNS/TLS/upstream observations, and explicitly
+opted-in bounded owned container probes. Host-only selection avoids Docker and
+offline planning stays provider/mutation-free. Probe ownership is journaled before
+effects, cancellation/shutdown joins owners and recovery preserves uncertainty.
+See [contracts and image requirements](daemon.md#scoped-provider-diagnostics).
+
+Early real CLI/API/daemon/native/Docker/Caddy/data success, missing container trust
+failure/recovery and preserved-data cleanup were exercised before broad regressions;
+revision-bound private delivery evidence records fixture/tool/image dependencies.
+Private state advances to version 5 without migration: v4 and older are rejected
+without modification so incompatible binaries cannot ignore probe ownership.
+See the [state compatibility guidance](containers.md). Independent
+reviews, frozen provider/browser/macOS suites and published-HEAD CI remain required
+before delivery readiness; no browser/application trust adoption is claimed.

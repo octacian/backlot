@@ -61,7 +61,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 	httpClient := *c.http
 	// Cleanup/restart can use a configured grace exceeding the transport default.
 	// The daemon bounds cleanup; callers retain context cancellation authority.
-	if path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
+	if path == "/v1/doctor" || path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
 		httpClient.Timeout = 0
 	}
 	res, err := httpClient.Do(req)
@@ -94,6 +94,8 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 		return &v1.PlanError{Code: "invalid_response", Message: "invalid daemon response contract"}
 	}
 	switch value := response.(type) {
+	case *v1.DoctorResponse:
+		return value.Validate()
 	case *v1.GatewayResponse:
 		if value.APIVersion != v1.Version || value.Mode != "managed" {
 			return responseError()
@@ -212,4 +214,14 @@ func (c *Client) Renew(ctx context.Context, id, token string) (v1.InstanceRespon
 	var r v1.InstanceResponse
 	err := c.call(ctx, http.MethodPost, "/v1/renew", v1.LeaseRequest{APIVersion: v1.Version, InstanceID: id, LeaseToken: token}, &r)
 	return r, err
+}
+
+// Doctor performs explicitly scoped provider diagnostics through the daemon.
+func (c *Client) Doctor(ctx context.Context, request v1.DoctorRequest) (v1.DoctorResponse, error) {
+	var response v1.DoctorResponse
+	if err := request.Validate(); err != nil {
+		return response, err
+	}
+	err := c.call(ctx, http.MethodPost, "/v1/doctor", request, &response)
+	return response, err
 }

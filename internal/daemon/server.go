@@ -100,6 +100,11 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	} else if !os.IsNotExist(err) {
 		return problem("permissions", "cannot inspect daemon socket")
 	}
+	diagnosticRecoveryErr := state.recoverDiagnosticProbes()
+	var diagnosticDetail *v1.PlanError
+	if errors.As(diagnosticRecoveryErr, &diagnosticDetail) && diagnosticDetail.Code == "state_corrupt" {
+		return diagnosticRecoveryErr
+	}
 	if err := state.recoverRuntime(); err != nil {
 		return err
 	}
@@ -139,7 +144,7 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	if err := os.Chmod(path, 0600); err != nil {
 		return problem("permissions", "cannot protect daemon socket")
 	}
-	svc := &service{store: state, lease: options.LeaseDuration, directory: options.Directory, evidence: evidencePolicy{age: options.RetentionAge, bytes: options.RetentionBytes}}
+	svc := &service{diagnosticRecoveryErr: diagnosticRecoveryErr, store: state, lease: options.LeaseDuration, directory: options.Directory, evidence: evidencePolicy{age: options.RetentionAge, bytes: options.RetentionBytes}}
 	stopping := make(chan struct{})
 	var once sync.Once
 	status := v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, Status: "running", PID: os.Getpid(), LeaseDuration: options.LeaseDuration.String()}
@@ -225,6 +230,17 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				return
 			}
 			response, err := s.gatewayControl(r.Context(), action, request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+		case "/v1/doctor":
+			var request v1.DoctorRequest
+			if !decode(w, r, &request) {
+				return
+			}
+			response, err := s.doctor(r.Context(), request)
 			if err != nil {
 				writeError(w, err)
 				return

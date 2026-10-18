@@ -399,7 +399,8 @@ cleanup categories in `execution.cleanup_details`, alongside readable failure
 strings. Gateway diagnostics distinguish scope/configuration, hostname conflict,
 concurrency exhaustion, unavailable API and uncertain ownership/effect.
 
-State format is now 4. Older formats are rejected without modification; an older
-binary cannot safely interpret managed gateway ownership. See [testing](testing.md)
+State format is now 5. Version 4 and older are rejected without modification or
+migration. Follow the [private-state compatibility guidance](containers.md) for
+legacy-compatible owned cleanup/shutdown and a fresh `--state-dir`. See [testing](testing.md)
 for isolated fixture commands and separate managed macOS/browser and external
 real-domain acceptance gates.

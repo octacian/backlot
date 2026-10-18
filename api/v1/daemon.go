@@ -1,7 +1,7 @@
 package v1
 
 // StateVersion identifies the supported durable database format.
-const StateVersion = 4
+const StateVersion = 5
 
 // InstanceStatus distinguishes metadata preparation from observed execution.
 type InstanceStatus string
@@ -119,18 +119,4 @@ type DaemonStatusResponse struct {
 	Status        string `json:"status"`
 	PID           int    `json:"pid"`
 	LeaseDuration string `json:"lease_duration"`
-}
-
-// DoctorCheck is a local diagnostic, with provider checks explicitly deferred.
-type DoctorCheck struct {
-	Name    string `json:"name"`
-	Status  string `json:"status"`
-	Message string `json:"message"`
-}
-
-// DoctorResponse reports only local permissions, connectivity and compatibility.
-type DoctorResponse struct {
-	APIVersion string        `json:"api_version"`
-	Healthy    bool          `json:"healthy"`
-	Checks     []DoctorCheck `json:"checks"`
 }

@@ -27,8 +27,8 @@ jobs:
           sudo apt-get install -y libnss3-tools
           npm ci --ignore-scripts --no-audit --no-fund
           npx --no-install playwright install --with-deps chromium
-      - uses: octacian/backlot/actions/quickrun@d57ab719ba436dafa7bd0ac67f93a18340baaedb # Review and update action SHA independently.
+      - uses: octacian/backlot/actions/quickrun@f2490060cd2562dce0d3ea32f465beae8849e8ac # Review and update action SHA independently.
         with:
-          backlot-ref: d57ab719ba436dafa7bd0ac67f93a18340baaedb
+          backlot-ref: f2490060cd2562dce0d3ea32f465beae8849e8ac
           scene: browser
           args: '["--shard=${{ matrix.shard }}/2"]'

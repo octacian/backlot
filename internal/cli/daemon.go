@@ -78,8 +78,13 @@ func output(c *urfave.Command, value any, err error) error {
 			_, err = fmt.Fprintf(c.Writer, "Continue with --after %s\n", result.NextAfterID)
 		}
 	case v1.DoctorResponse:
+		for _, path := range result.Paths {
+			if _, err = fmt.Fprintf(c.Writer, "%s: %s (%s)\n", path.Name, path.Path, path.State); err != nil {
+				return err
+			}
+		}
 		for _, check := range result.Checks {
-			if _, err = fmt.Fprintf(c.Writer, "%s: %s — %s\n", check.Name, check.Status, check.Message); err != nil {
+			if _, err = fmt.Fprintf(c.Writer, "%s [%s]: %s — %s\n", check.Name, check.Context, check.Status, check.Message); err != nil {
 				break
 			}
 		}
@@ -187,22 +192,6 @@ func preparationCommands() []*urfave.Command {
 			return output(c, response, err)
 		}})
 	}
-	commands = append(commands, &urfave.Command{Name: "doctor", Usage: "Diagnose local daemon access (provider checks deferred)", Flags: daemonFlags(false), Action: func(ctx context.Context, c *urfave.Command) error {
-		if c.Args().Len() != 0 {
-			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "doctor takes flags only"})
-		}
-		dir, err := directory(c)
-		if err != nil {
-			return output(c, nil, err)
-		}
-		response := daemon.Doctor(ctx, dir)
-		if err := output(c, response, nil); err != nil {
-			return err
-		}
-		if !response.Healthy {
-			return &v1.PlanError{Code: "doctor_failed", Message: "local daemon checks failed; inspect diagnostic checks"}
-		}
-		return nil
-	}})
+	commands = append(commands, doctorCommand())
 	return commands
 }

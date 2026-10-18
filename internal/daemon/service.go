@@ -18,18 +18,20 @@ import (
 )
 
 type service struct {
-	gatewayGroup  *native.Group
-	evidence      evidencePolicy
-	store         *store
-	lease         time.Duration
-	mu            sync.Mutex
-	closing       bool
-	directory     string
-	executions    map[string]*execution
-	outputs       map[string]chan struct{}
-	mutations     map[string]*sync.Mutex
-	expiryWorkers map[string]chan struct{}
-	expiryErr     error
+	diagnosticRecoveryErr error
+	diagnosticOwners      map[string]*diagnosticOwner
+	gatewayGroup          *native.Group
+	evidence              evidencePolicy
+	store                 *store
+	lease                 time.Duration
+	mu                    sync.Mutex
+	closing               bool
+	directory             string
+	executions            map[string]*execution
+	outputs               map[string]chan struct{}
+	mutations             map[string]*sync.Mutex
+	expiryWorkers         map[string]chan struct{}
+	expiryErr             error
 	// checkpoint is a test-only interruption seam after durable intent/effect.
 	checkpoint func(string) error
 	// resolve lets tests control the input-read boundary while using the real planner.
@@ -115,7 +117,7 @@ func (s *service) stop() error {
 		ids = append(ids, id)
 	}
 	s.mu.Unlock()
-	result := s.stopExecutions(ids)
+	result := errors.Join(s.stopDiagnostics(), s.stopExecutions(ids))
 	// Shutdown fences acceptance before joining. Expiry coordinators retain their
 	// own channels so storage cannot close while they finish durable results.
 	result = errors.Join(result, s.joinExpiryWorkers())

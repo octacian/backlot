@@ -996,6 +996,12 @@ func (s *service) ownerChannels() []<-chan struct{} {
 	return channels
 }
 func (s *service) ownersJoined() bool {
+	s.mu.Lock()
+	diagnosticsJoined := len(s.diagnosticOwners) == 0
+	s.mu.Unlock()
+	if !diagnosticsJoined {
+		return false
+	}
 	for _, done := range s.ownerChannels() {
 		select {
 		case <-done:
@@ -1006,6 +1012,15 @@ func (s *service) ownersJoined() bool {
 	return true
 }
 func (s *service) waitOwners() {
+	s.mu.Lock()
+	diagnostics := []<-chan struct{}{}
+	for _, owner := range s.diagnosticOwners {
+		diagnostics = append(diagnostics, owner.done)
+	}
+	s.mu.Unlock()
+	for _, done := range diagnostics {
+		<-done
+	}
 	for _, done := range s.ownerChannels() {
 		<-done
 	}

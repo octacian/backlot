@@ -66,6 +66,14 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 			}
 		}
 	}
+	if snapshot != nil {
+		snapshot.ConfigProvenance = &ConfigProvenance{Path: configFile, Present: configFile != ""}
+		if configFile == "" {
+			if dir, err := os.UserConfigDir(); err == nil {
+				snapshot.ConfigProvenance.Path = filepath.Join(dir, "backlot", "config.yaml")
+			}
+		}
+	}
 	var configDigest string
 	if configFile != "" {
 		data, err := readFile(configFile)

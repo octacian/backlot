@@ -167,3 +167,94 @@ test('discovery rejects malformed, incomplete, stuck pages and expired deadlines
     return JSON.stringify({ api_version: 'v1', instances: [] });
   }, Date.now() + 5), /deadline exceeded/);
 });
+
+test('native wrapper preserves exact argv and fences scalar output records', async () => {
+  const { argumentsInput, output } = await import('./invocation.mjs');
+  assert.deepEqual(argumentsInput('["--grep","a b", "$(echo no)", "", "--shard=1/2"]'),
+    ['--grep', 'a b', '$(echo no)', '', '--shard=1/2']);
+  for (const value of ['{}', '[1]', '[null]', '"text"', '["\\u0000"]']) {
+    assert.throws(() => argumentsInput(value));
+  }
+  const owner = await createOwner();
+  const previous = process.env.GITHUB_OUTPUT;
+  try {
+    process.env.GITHUB_OUTPUT = join(owner.root, 'outputs');
+    await output('runtime-failure', 'first\ninjected=value\nlast');
+    await output('terminal-exit-code', undefined);
+    const lines = (await readFile(process.env.GITHUB_OUTPUT, 'utf8')).trimEnd().split('\n');
+    assert.match(lines[0], /^runtime-failure<</);
+    assert.deepEqual(lines.slice(1, -1), ['first', 'injected=value', 'last']);
+    assert.equal(lines.at(-1), lines[0].slice('runtime-failure<<'.length));
+  } finally {
+    if (previous === undefined) delete process.env.GITHUB_OUTPUT; else process.env.GITHUB_OUTPUT = previous;
+    await cleanup(owner);
+  }
+});
+
+for (const auditFails of [false, true]) test(`native wrapper joins cancelled CLI and preserves original results (audit failure: ${auditFails})`, async () => {
+  const { spawn } = await import('node:child_process');
+  const owner = await createOwner();
+  const id = 'a'.repeat(64);
+  let wrapper, done;
+  const exports = [];
+  try {
+    await mkdir(join(owner.root, 'tools'));
+    await writeFile(join(owner.root, 'tools/backlot'), `#!${process.execPath}
+import { writeFileSync, readFileSync, appendFileSync } from 'node:fs';
+const root = ${JSON.stringify(owner.root)}, id = ${JSON.stringify(id)};
+const args = process.argv.slice(2);
+const instance = {id, status:'cancelled', plan:{lifetime:'disposable'}, execution:{completed_at:'done', terminal_exit_code:-1, cancelled:true}};
+if (args[0] === 'plan') console.log(JSON.stringify({api_version:'v1', lifetime:'disposable'}));
+else if (args[0] === 'run') {
+  const done = signal => {
+    writeFileSync(root+'/cli-signal', signal);
+    // A final result after signal proves the wrapper joined rather than
+    // exiting on delivery and leaving its owned child renewing a lease.
+    setTimeout(() => { console.log(JSON.stringify({api_version:'v1',instance})); process.exit(130); }, 100);
+  };
+  process.once('SIGINT', () => done('SIGINT'));
+  process.once('SIGTERM', () => done('SIGTERM'));
+  writeFileSync(root+'/running','ready');
+  setInterval(() => {}, 1000);
+  setTimeout(() => process.exit(9), 10000); // Bound a broken signal relay without orphaning a fixture.
+} else if (args[0] === 'inspect') console.log(JSON.stringify({api_version:'v1',instance}));
+else if (args[0] === 'logs') console.log(${auditFails} ? 'invalid NDJSON' : JSON.stringify({api_version:'v1',entries:[]}));
+else if (args[0] === 'destroy') {
+  if (args[1] !== id) throw Error('foreign record');
+  appendFileSync(root+'/destroyed',args[1]);
+} else throw Error('wrapper must not list, stop gateway or stop daemon');
+`, { mode: 0o700 });
+    const output = join(owner.root, 'outputs');
+    await mkdir(owner.root + '-exports'); exports.push(owner.root + '-exports');
+    wrapper = spawn(process.execPath, [script('../run/run.mjs')], { env: { ...process.env,
+      BACKLOT_SETUP_OWNER: JSON.stringify(owner), GITHUB_OUTPUT: output,
+      INPUT_SCENE: 'browser', INPUT_PROJECT: owner.root, INPUT_ARGS: '[]',
+      'INPUT_UPLOAD-ARTIFACTS': 'false', RUNNER_TEMP: owner.root + '-exports' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let logs = '';
+    wrapper.stdout.on('data', chunk => { logs += chunk; }); wrapper.stderr.on('data', chunk => { logs += chunk; });
+    done = new Promise((resolve, reject) => { wrapper.once('error', reject); wrapper.once('close', (code, signal) => resolve({ code, signal })); });
+    for (let attempt = 0; ; attempt++) {
+      try { await lstat(join(owner.root, 'running')); break; }
+      catch (error) { assert.equal(error.code, 'ENOENT'); assert.ok(attempt < 100, logs); await new Promise(resolve => setTimeout(resolve, 20)); }
+    }
+    wrapper.kill('SIGINT');
+    const result = await done;
+    assert.equal(result.code, 130, logs); assert.equal(result.signal, null);
+    assert.equal(await readFile(join(owner.root, 'cli-signal'), 'utf8'), 'SIGINT');
+    assert.equal(await readFile(join(owner.root, 'destroyed'), 'utf8'), id);
+    const values = await readFile(output, 'utf8');
+    assert.match(values, /cli-exit-code<<[^\n]+\n130\n/);
+    assert.match(values, /terminal-exit-code<<[^\n]+\n-1\n/);
+    if (auditFails) {
+      assert.doesNotMatch(values, /evidence-available<<[^\n]+\ntrue\n/);
+      assert.match(values, /collection-error<</);
+      assert.doesNotMatch(values, /evidence-path<</);
+    } else assert.match(values, /evidence-available<<[^\n]+\ntrue\n/);
+    assert.match(values, /wrapper-signal<<[^\n]+\nSIGINT\n/);
+    await verifyOwner(owner); // Shared setup state remains available.
+  } finally {
+    if (wrapper && wrapper.exitCode === null) { wrapper.kill('SIGINT'); await done; }
+    await cleanup(owner);
+    for (const path of exports) await rm(path, { recursive: true, force: true });
+  }
+});

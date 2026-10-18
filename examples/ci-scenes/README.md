@@ -22,7 +22,11 @@ For application adoption, use the [CI quickstart](../../docs/ci.md) and
 adopter template; the acceptance harness is deliberately absent from that flow.
 The automatic workflow installs workflow-owned application dependencies and
 uses [`actions/setup`](../../actions/setup/action.yml) for pinned source/Caddy
-installation and private daemon/gateway preparation. Go module/build, npm and
+installation and private daemon/gateway preparation. It then exercises two
+sequential `actions/run` calls, verifies distinct retained exports and a live
+shared gateway, and runs the original fault/trust/lifecycle suite below. The
+independent application workflow uses remote `actions/quickrun`, including a
+custom uploader reading exports after private cleanup. Go module/build, npm and
 browser download caches contain no private job state.
 
 After setup, the verification workflow records its private root pointer and runs:

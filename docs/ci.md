@@ -1,119 +1,164 @@
 # GitHub Actions quickstart
 
-Use [`actions/setup`](../actions/setup/action.yml) on **ephemeral Ubuntu 24.04
-amd64** hosted runners for a native application and Playwright Chromium. Copy
-[the adopter workflow](../examples/ci-scenes/adopter.yml) to your application's
-`.github/workflows/browser.yml`, review/update the pinned action commit, and commit your application's npm lockfile.
-The [runnable application](../examples/ci-scenes/README.md) supplies the matching
+Copy [the adopter workflow](../examples/ci-scenes/adopter.yml) into your application
+repository for **ephemeral Ubuntu 24.04 amd64** hosted runners. Install your own
+application Node, npm dependencies and browser first, then use
+[`actions/quickrun`](../actions/quickrun/action.yml) to run one disposable scene.
+It prepares private Backlot/Caddy, runs the scene, collects and audits its evidence,
+uploads an artifact by default, and removes its private job runtime. A failed test
+still fails the action after evidence and cleanup are attempted.
+
+The [existing application](../examples/ci-scenes/README.md) supplies a matching
 [manifest](../examples/ci-scenes/backlot.yaml), [browser launcher](../examples/ci-scenes/scene.mjs)
 and [Playwright configuration](../examples/ci-scenes/playwright.config.mjs).
-Copy these three small files and adapt the manifest build/service commands,
-readiness probe, output paths, `PORT`, `APP_DATA` and application origin settings.
-Keep your application's own tests and dependency/build steps. The example's
-`ci.mjs`, faults, signal checks and acceptance harness are product verification;
-they are not part of the adopter workflow.
+Adapt the build/service commands, readiness probe, output paths, `PORT`, `APP_DATA`
+and origin mappings to your application. Keep your own tests and lockfile.
+The example's acceptance/fault/signal harness is product verification, outside the
+adopter workflow. Shards and Playwright worker isolation remain application-owned;
+these actions do not schedule shards.
 
-The terminal launcher forwards arguments unchanged to Playwright, including
-`--shard=1/2` and `--shard=2/2`. Backlot creates one fresh origin/port/data directory
-per scene. Playwright schedules workers inside that scene: applications must
-separate test accounts, keys or database schemas between workers. Output
-concurrency groups serialize builds/reports sharing one daemon and checkout;
-use independent worktrees for parallel stacks, and never use multiple daemons
-against one writable checkout.
+## Installation and independent versions
 
-## Installation, versions and permissions
+For now, install **exact Go 1.27.1** using pinned `actions/setup-go` with
+`cache: false` before Backlot setup/quickrun. This single explicit toolchain step
+keeps source installation clear while the native actions preserve their bounded
+post hooks. Backlot encapsulates Go module/build caching through the official
+Actions cache SDK; workflows need no Backlot cache paths or keys. Cache failures
+are warnings, while fetch, checksum, identity and build failures fail setup.
+Only Go module/build caches are cached; runtime state, capabilities and CA storage
+are never cached or uploaded.
 
-The action requires **exact Go 1.27.1**, Git, `lsof`, and an absolute application
-Node executable (`node-binary`). A mismatch fails explicitly; no automatic
-installation fallback occurs. Pinned `actions/setup-go` in the workflow installs
-Go; cache its immutable module downloads and build data only. Non-Go consumers
-use explicit `actions/cache` paths as shown. npm, application Node, Chromium,
-`libnss3-tools` and browser OS libraries stay workflow-owned and configurable.
-The action itself runs on the runner's **Node24 Actions runtime**; this is separate
-from the example application's Node 26.8.1 and pinned Playwright 1.64.1.
+Setup owns `lsof`, installing it with apt/sudo if absent on the bounded runner.
+Git and Go must be available. Application Node defaults to the executable named
+`node` on **PATH**, separately from the Node24 Actions interpreter. Set optional
+`node-binary` to an absolute executable to override it. Application Node versions,
+npm/build/test dependencies, Chromium, browser OS dependencies and `libnss3-tools`
+remain workflow-owned. The example pins Node 26.8.1 and Playwright 1.64.1; these
+are example choices, not versions installed by Backlot.
 
-`backlot-ref` is a required full lowercase 40-character commit SHA. The action
-fetches only `https://github.com/octacian/backlot.git`, verifies the checked-out
-commit and Go module identity, downloads/verifies modules with the public Go
-checksum database, and builds a static trimmed binary. It installs **stock Caddy
-v2.11.6** through the Go proxy/checksum database and verifies the executable's
-main module path/version and absence of module replacements. Failed fetches,
-checks or builds fail setup. No unpublished release assets are assumed: issue
-[#25](https://github.com/octacian/backlot/issues/25) owns checksum-verified release
-asset integration. Source installation remains explicit until then.
+Pin both the action `uses: octacian/backlot/actions/quickrun@<full SHA>` and required
+`backlot-ref: <full lowercase 40-character SHA>`. The former selects action code
+and the archive auditor; the latter independently selects the Backlot executable.
+Setup fetches only `https://github.com/octacian/backlot.git`, verifies the source
+commit/module, downloads/verifies Go modules through the public checksum database,
+and builds static Backlot. Stock Caddy **v2.11.6** is installed with `go install`
+and its module identity/version/replacements are verified. No release binary or
+silent fallback is used. [Issue #25](https://github.com/octacian/backlot/issues/25)
+owns release integration, including future helper packaging without Go.
 
-The SHA after `uses: octacian/backlot/actions/setup@…` selects **action code**;
-`backlot-ref` selects the **Backlot executable** independently. Pin both and
-review upgrades separately. `actions/setup` is the stable path; use full SHAs
-now. No action version tags or release compatibility promises are created by
-this change; future action tags must describe action contract changes separately
-from Backlot releases. The manifest remains `backlot/v1`.
+The small auditor is compiled from the **action's own** Go source using standard
+`archive/zip`; the selected Backlot runtime needs no new CLI feature. These native
+actions share modules from the downloaded action repository, so remote sibling
+actions work even when the application checkout contains no Backlot files.
+`permissions: {contents: read}` suffices; cache/artifact SDKs use normal job-scoped
+credentials. No OIDC, repository writes or administrator token is needed.
+Self-hosted runners and action version tags are outside this slice.
 
-Only `permissions: {contents: read}` is needed for checkout. The public action
-source fetch uses no token; artifact/cache actions use their normal job-scoped
-service credentials. No repository write, OIDC, secret or administrator privilege
-is needed by Backlot setup. Workflow apt/browser dependency installation uses
-the disposable hosted runner's sudo. Self-hosted runners are outside this slice.
-Never cache/upload private job state, CA directories, or authenticated sockets.
+## Setup plus sequential runs
 
-## Environment and lifecycle contract
+Use [`actions/setup`](../actions/setup/action.yml) once when intermediate steps or
+multiple scenes need the same job daemon/gateway, then
+[`actions/run`](../actions/run/action.yml) for each disposable scene:
 
-Inputs are `backlot-ref` and `node-binary`. Outputs are `binary`, `config`,
-`state-dir`, `helper` and elapsed `setup-seconds`. Setup adds `backlot` to PATH
-and exports `BACKLOT_BINARY`, `BACKLOT_CONFIG`, `BACKLOT_STATE_DIR`,
-`BACKLOT_SETUP_HELPER` and a private `BACKLOT_SETUP_OWNER` cleanup capability.
-Do not print or upload that capability. The short mode-0700 `/tmp/bl-ci-*` root
-holds downloads, config, daemon state and private CA. Dynamic unprivileged HTTPS
-ports and loopback-only administration avoid existing services. A port collision
-fails without takeover. The action registers its bounded native post hook before
-allocating a daemon/gateway; setup errors attempt scoped cleanup immediately.
-Uncertain cleanup fails and preserves state for authenticated diagnosis.
+```yaml
+- uses: octacian/backlot/actions/setup@<reviewed-action-SHA>
+  with:
+    backlot-ref: <reviewed-runtime-SHA>
+- uses: octacian/backlot/actions/run@<reviewed-action-SHA>
+  with:
+    project: .
+    scene: browser
+    args: '["--shard=1/2"]'
+- uses: octacian/backlot/actions/run@<reviewed-action-SHA>
+  with:
+    scene: browser
+    args: '["--grep", "checkout flow"]'
+```
 
-The action starts only the job daemon/gateway. The workflow explicitly runs
-`backlot run`, then **collect → upload → final cleanup** with `always()`.
-Use `exec backlot run` as the test step's final command so runner cancellation
-reaches the CLI directly, rather than leaving a shell child renewing its lease.
-Do not use `|| true` on tests or fold cleanup into their exit status. Backlot
-retains the original terminal exit separately from infrastructure, collection
-and cleanup failures. Cancellation propagates through the CLI's supervised
-clients; the 3-second disconnected-client lease bounds detached disposable work.
-The action's post hook is a final cleanup fallback, never an evidence-upload
-replacement. Abrupt VM destruction cannot guarantee upload or post execution.
+`args` is an exact JSON array of strings, forwarded without shell parsing.
+`project` defaults to `.`; `scene` is required and must be disposable. Run collects
+and destroys only its returned invocation ID, leaving earlier history, peer
+instances and shared daemon/gateway available. Setup's native post hook performs
+bounded final job cleanup. Quickrun uses the same implementation and performs
+that private cleanup immediately before returning, with a native post fallback.
+Do not use independent daemons against the same writable checkout.
 
-Before export, collection waits at most 45 seconds for disposable runs to settle
-(including client lease expiry after runner cancellation). It never waits for
-persistent services to exit or starts new work. A timeout fails collection without
-publishing partial final results; final cleanup still runs. Collection uses an allowlist of result fields, application logs and declared
-artifacts under daemon evidence storage. It rejects symlinks, special files,
-private-key filenames and PEM keys, including ZIP contents, before publishing
-staging. It excludes daemon snapshots, capabilities, CA storage and browser NSS
-state. Application outputs still need application-level secret discipline.
-Inspect each artifact's `result.json`, `logs.ndjson` and reports/HTML/trace files;
-collection errors remain failed steps and final cleanup still runs.
+Setup exports `BACKLOT_BINARY`, `BACKLOT_CONFIG`, `BACKLOT_STATE_DIR`,
+`BACKLOT_SETUP_HELPER`, `BACKLOT_AUDIT_BINARY` and a private ownership capability
+`BACKLOT_SETUP_OWNER`. Never print/upload that capability or private state.
+Its mode-0700 `/tmp/bl-ci-*` root contains downloads, authenticated sockets and CA
+keys. Ownership is registered for post cleanup before downloads or daemon startup;
+setup failures attempt cleanup immediately. Uncertain ownership is preserved and
+reported rather than killed by PID/name or hidden by deleting state.
+
+## Evidence, custom upload and results
+
+Run/quickrun default to `upload-artifacts: 'true'` using the official Actions
+artifact SDK. Optional `artifact-name` is a prefix; invocation ID and a unique
+suffix prevent collisions. Each invocation exports to a unique directory under
+`RUNNER_TEMP`, **outside private runtime state**, before destroying its record.
+Quickrun's exported evidence remains readable after its daemon/gateway/private
+root are removed. For your own uploader later in the **same job**:
+
+```yaml
+- uses: octacian/backlot/actions/quickrun@<reviewed-action-SHA>
+  id: tests
+  with:
+    backlot-ref: <reviewed-runtime-SHA>
+    scene: browser
+    upload-artifacts: 'false'
+- uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+  if: always() && steps.tests.outputs.evidence-available == 'true'
+  with:
+    name: application-evidence
+    path: ${{ steps.tests.outputs.evidence-path }}
+    if-no-files-found: error
+```
+
+`evidence-available` becomes `true` only after full audit and publication;
+`evidence-path` is absent on failed collection/audit. Collection waits at most
+45 seconds for final disposable results; it never publishes partial results.
+It allowlists result fields, application logs and declared retained artifacts.
+The Go audit rejects filesystem/archive links, special files, private-key names
+and PEM keys, traversal, malformed/over-deep ZIPs (including uppercase/nested ZIPs),
+invalid trace/NDJSON/Playwright JSON and PNG headers. Daemon snapshots, internal
+capabilities, gateway state and browser NSS databases are excluded. Applications
+still own secret discipline in their logs/reports.
+
+Outputs keep the original `cli-exit-code`, `cli-signal`, `wrapper-signal`,
+`terminal-exit-code`, `status`, `cancelled` and `instance-id` separate from
+`runtime-failure`, `runtime-collection-failure`, `runtime-cleanup-failure` and
+wrapper `infrastructure-error`, `collection-error`, `upload-error`, `cleanup-error`,
+`job-cleanup-error`. Missing native results stay absent. Original nonzero CLI exits
+and cancellation are preserved; other collection/upload/cleanup failures fail the
+action without rewriting the test result. A signal reaches the retained actual
+CLI and the wrapper joins it, preventing an abandoned lease-renewing child.
+If no final instance identity is returned, run preserves uncertain state for the
+setup post hook rather than discovering/destroying other invocations.
+
+Use `always()` and the availability output for custom upload after failure or
+cancellation. Runner hard termination can interrupt collection; native post remains
+a bounded private-cleanup fallback. A destroyed VM cannot promise outputs, post
+execution or upload. Exports last only for that job unless uploaded.
 
 ## Trust and troubleshooting
 
-The action gives only the daemon explicit private Go root settings for HTTPS
-readiness (`SSL_CERT_FILE` and an empty private `SSL_CERT_DIR`). Applications and
-tests must map the origin's `ca_cert_path` to `NODE_EXTRA_CA_CERTS` in the
-manifest. Node reads this at startup; explicit client `ca` options must include
-it deliberately. The launcher imports only the public root into an instance-owned
-Chromium NSS database and supplies a disposable browser HOME/profile. See
-[application trust](https.md#explicit-application-trust). No global trust or DNS
-mutation, TLS-ignore flags, or browser warning bypass is used.
+Only the daemon gets private Go root settings for HTTPS readiness (`SSL_CERT_FILE`
+and an empty `SSL_CERT_DIR`). Applications/tests must explicitly map origin
+`ca_cert_path` to `NODE_EXTRA_CA_CERTS` in the manifest. Node reads it at startup;
+explicit client `ca` options must include it deliberately. The launcher imports
+only the public root into an instance-owned Chromium NSS database and uses a
+disposable browser HOME/profile. See [application trust](https.md#explicit-application-trust).
+No global trust/DNS changes, TLS-ignore flags or browser warning bypass are used.
 
-- Bootstrap failure: check pinned SHA, exact Go version, proxy/network access,
-  `lsof`, Caddy build identity and the action log. Failed setup publishes no usable
-  daemon outputs; the native post hook still checks its recorded ownership.
-- DNS failure: verify ordinary `getent hosts bl-check.backlot.localhost`; use a
-  supported runner resolver. Do not substitute URLs, hosts files or resolver flags.
-- TLS failure: check the explicit mapping separately for daemon, SSR, Node tests
-  and browser. A trusted Node client does not establish browser trust.
-- Cleanup failure: inspect the failed step and retained private root locally in
-  the disposable job. Retry only with the recorded capability and daemon API;
-  never scan/kill by PID/name, prune resources, or upload the private root.
+For bootstrap errors check exact Go, pinned source, network/checksums and Caddy
+identity. DNS requires ordinary `getent hosts bl-check.backlot.localhost` resolution.
+Check daemon, SSR, Node tests and browser trust separately. For cleanup uncertainty,
+retain private state locally for authenticated diagnosis; never prune unrelated
+resources or upload the private root.
 
-[The automatic scenes workflow](../.github/workflows/scenes.yml) exercises both
-shards through this action and reuses failure/recovery, trust and lifecycle checks.
-Revision-bound independent-consumer evidence is recorded with the delivery;
-these examples do not establish broader macOS/provider/release readiness.
+[The scenes workflow](../.github/workflows/scenes.yml) exercises sequential setup/run
+and existing browser/trust/fault/lifecycle checks. [The independent consumer](../.github/workflows/setup-consumer.yml)
+exercises remote quickrun and custom upload after private cleanup from a separate
+application Git root. New revision-bound evidence and remaining gates are recorded
+with the delivery; these examples make no broader release/provider readiness claim.

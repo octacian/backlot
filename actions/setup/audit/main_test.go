@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -38,6 +39,7 @@ func TestAudit(t *testing.T) {
 		"absolute.zip": archive(t, "/root", []byte("x"), 0o600),
 		"windows.zip":  archive(t, `C:\root`, []byte("x"), 0o600),
 		"deep.zip":     archive(t, "inner.zip", archive(t, "inner.zip", archive(t, "file", []byte("x"), 0o600), 0o600), 0o600),
+		"blank.ndjson": []byte("{}\n\n"),
 		"root.KEY":     []byte("x"), "bad.trace": []byte("not JSON"), "playwright.json": []byte(`{"suites":[],"stats":[]}`), "screen.png": []byte("bad"),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -50,6 +52,9 @@ func TestAudit(t *testing.T) {
 		if err := check(name, data, 0); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := check("large.trace", []byte(`{"payload":"`+strings.Repeat("x", 200000)+`"}`+"\n"), 0); err != nil {
+		t.Fatal(err)
 	}
 	root := t.TempDir()
 	if err := os.Symlink("/etc/passwd", filepath.Join(root, "link")); err != nil {

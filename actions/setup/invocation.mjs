@@ -21,6 +21,12 @@ export async function output(name, value) {
   await appendFile(process.env.GITHUB_OUTPUT, `${name}<<${delimiter}\n${value}\n${delimiter}\n`);
 }
 
+async function resultOutputs(result) {
+  for (const [key, value] of Object.entries({ status: result.status, 'terminal-exit-code': result.terminal_exit_code,
+    cancelled: result.cancelled, 'runtime-failure': result.failure, 'runtime-collection-failure': result.collection_failure,
+    'runtime-cleanup-failure': result.cleanup_failure })) await output(key, value);
+}
+
 export async function invoke() {
   const failures = [];
   let interrupted = '', child;
@@ -41,6 +47,8 @@ export async function invoke() {
     const base = ['--project', project, '--config', join(owner.root, 'machine.json'), '--json'];
     const plan = JSON.parse(await command(binary, ['plan', scene, ...base, '--', ...args]));
     assert.equal(plan.lifetime, 'disposable', 'actions/run requires a disposable scene');
+    if (interrupted) throw Error('cancelled before scene launch');
+    assert.ok(['true', 'false', undefined].includes(process.env['INPUT_UPLOAD-ARTIFACTS']), 'upload-artifacts must be true or false');
     let stdout = '';
     child = spawn(binary, ['run', scene, ...base, '--state-dir', join(owner.root, 'd'), '--', ...args], { cwd: project, stdio: ['ignore', 'pipe', 'inherit'] });
     child.stdout.on('data', chunk => { stdout += chunk; });
@@ -56,15 +64,16 @@ export async function invoke() {
     await output('cancelled', interrupted ? true : instance?.execution?.cancelled);
     assert.match(instance?.id ?? '', /^[a-f0-9]{64}$/, 'CLI returned no owned instance identity; preserve state for setup post');
     await output('instance-id', instance.id);
+    // Publish known original results before collection/audit can fail.
+    await resultOutputs({ status: instance.status, ...instance.execution,
+      cancelled: instance.execution ? instance.execution.cancelled ?? false : undefined });
     assert.equal(instance.plan?.lifetime, 'disposable');
     const parent = await mkdtemp(join(process.env.RUNNER_TEMP, 'backlot-evidence-'));
     evidence = join(parent, 'evidence');
     try {
       await collect(owner, evidence, [instance.id]);
       const result = JSON.parse(await readFile(join(evidence, instance.id, 'result.json'), 'utf8'));
-      for (const [key, value] of Object.entries({ status: result.status, 'terminal-exit-code': result.terminal_exit_code,
-        cancelled: result.cancelled, 'runtime-failure': result.failure, 'runtime-collection-failure': result.collection_failure,
-        'runtime-cleanup-failure': result.cleanup_failure })) await output(key, value);
+      await resultOutputs(result);
       await output('evidence-path', evidence);
       await output('evidence-available', true);
     } catch (error) { evidence = undefined; await fail('collection', error); }

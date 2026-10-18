@@ -24,7 +24,7 @@ export async function collect(owner, destination, ids) {
       const destination = join(staging, instance.id);
       await mkdir(destination);
       await writeFile(join(destination, 'result.json'), JSON.stringify({ id: instance.id, status: instance.status,
-        origin: e?.origin, completed_at: e?.completed_at, terminal_exit_code: e?.terminal_exit_code, cancelled: e?.cancelled,
+        origin: e?.origin, completed_at: e?.completed_at, terminal_exit_code: e?.terminal_exit_code, cancelled: e ? e.cancelled ?? false : undefined,
         failure: e?.failure, collection_failure: e?.collection_failure, cleanup_failure: e?.cleanup_failure }, null, 2));
       await writeFile(join(destination, 'logs.ndjson'), await cli('logs', instance.id));
       for (const [index, artifact] of (e?.artifacts ?? []).entries()) {

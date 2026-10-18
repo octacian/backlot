@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
+        description: Application test outcome to exercise
         type: choice
         options: [success, failure, cancel]
         default: success
@@ -20,9 +21,9 @@ jobs:
       matrix:
         shard: [1, 2]
     env:
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
       MODE: ${{ inputs.mode || 'success' }}
     steps:
+      - run: echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/playwright-browsers" >> "$GITHUB_ENV"
       - name: Prepare independent application checkout from existing fixture
         env:
           GH_TOKEN: ${{ github.token }}

@@ -1,0 +1,57 @@
+# Copy to .github/workflows/browser.yml in your application repository.
+name: Browser tests
+on: [pull_request, push]
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.27.1
+          cache: false # Non-Go applications can cache ~/go/pkg/mod and ~/.cache/go-build explicitly.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: backlot-source-ubuntu24-amd64-go1.27.1-2fa3131017188f056bb5d4cfd129e005ac83c0fc-caddy2.11.6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.8.1
+          cache: npm
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y lsof libnss3-tools
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx --no-install playwright install --with-deps chromium
+      - id: node
+        run: echo "binary=$(command -v node)" >> "$GITHUB_OUTPUT"
+      - uses: octacian/backlot/actions/setup@ACTION_COMMIT_SHA # Replace with reviewed full action SHA.
+        with:
+          backlot-ref: 2fa3131017188f056bb5d4cfd129e005ac83c0fc
+          node-binary: ${{ steps.node.outputs.binary }}
+      - name: Test application
+        # Run directly: shell/Actions preserves the original CLI exit, including failure/cancellation.
+        run: backlot run browser --project "$PWD" --config "$BACKLOT_CONFIG" --state-dir "$BACKLOT_STATE_DIR" --json -- --shard=${{ matrix.shard }}/2
+      - name: Collect application evidence
+        if: always() && env.BACKLOT_SETUP_OWNER != ''
+        run: node "$BACKLOT_SETUP_HELPER" collect "$RUNNER_TEMP/evidence"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && env.BACKLOT_SETUP_OWNER != ''
+        with:
+          name: browser-${{ matrix.shard }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
+      - name: Final scoped cleanup
+        if: always() && env.BACKLOT_SETUP_OWNER != ''
+        run: node "$BACKLOT_SETUP_HELPER" cleanup

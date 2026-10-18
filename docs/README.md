@@ -31,7 +31,8 @@ publication ownership and milestone 5.
 
 The [disposable results and evidence guide](evidence.md) documents terminal exits,
 artifacts, fixtures, cancellation, kept resources and daemon-wide retention.
-The [Ubuntu application CI example](../examples/ci-scenes/README.md) supplies a
+The [GitHub Actions quickstart](ci.md) describes the reusable setup action and
+minimal adopter workflow. The [Ubuntu application CI example](../examples/ci-scenes/README.md) supplies a
 native application, disposable Playwright Chromium scene and automatic sharded CI.
 
 The [manifest and offline planning guide](manifest.md) documents milestone 1.

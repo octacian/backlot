@@ -17,32 +17,22 @@ distributions, and containerized browsers are not claimed.
 
 ## Bootstrap and run
 
-Use an ephemeral Ubuntu 24.04 amd64 runner with its ordinary `.localhost`
-resolver, Git, Make, Go, Node, Python 3 (evidence audit), and a C compiler. The workflow installs `lsof`,
-`libnss3-tools`, and Chromium's OS libraries with apt, builds stock Caddy with
-`go install github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.6`, and builds the
-static Backlot executable with `make release-build RELEASE_GOOS=linux
-RELEASE_GOARCH=amd64`. Run `npm ci --ignore-scripts` and `npx --no-install
-playwright install --with-deps chromium` in this directory. The workflow caches
-Go modules/builds, npm downloads, Caddy, and the pinned Playwright browser
-downloads; apt dependencies remain explicit on each fresh runner.
+For application adoption, use the [CI quickstart](../../docs/ci.md) and
+[minimal workflow](adopter.yml). The existing manifest/launcher/config are the
+adopter template; the acceptance harness is deliberately absent from that flow.
+The automatic workflow installs workflow-owned application dependencies and
+uses [`actions/setup`](../../actions/setup/action.yml) for pinned source/Caddy
+installation and private daemon/gateway preparation. Go module/build, npm and
+browser download caches contain no private job state.
 
-Set these **absolute**, job-owned paths (the export path and pointer must not
-already exist). The short private root itself is created under `/tmp` to fit
-Unix socket path limits:
+After setup, the verification workflow records its private root pointer and runs:
 
 ```sh
-export BACKLOT_BINARY="$PWD/bin/backlot-linux-amd64"
-export BACKLOT_CADDY_BINARY="$RUNNER_TEMP/scene-tools/caddy"
-export BACKLOT_CI_POINTER="$RUNNER_TEMP/scene-root"
-export BACKLOT_CI_EXPORT="$RUNNER_TEMP/scene-evidence"
-export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/playwright-browsers"
-node examples/ci-scenes/ci.mjs bootstrap
 node examples/ci-scenes/ci.mjs run --shard=1/2
 node examples/ci-scenes/signal-check.mjs
 node examples/ci-scenes/ci.mjs acceptance
 node examples/ci-scenes/ci.mjs collect
-# Upload only BACKLOT_CI_EXPORT here, before runner teardown.
+# Upload only BACKLOT_CI_EXPORT before final scoped cleanup.
 node examples/ci-scenes/ci.mjs cleanup
 ```
 

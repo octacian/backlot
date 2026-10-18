@@ -29,12 +29,13 @@ export async function collect(owner, destination, ids, onResult = async () => {}
       let failed;
       try { failed = JSON.parse(error.stdout); } catch {}
       if (failed?.api_version === 'v1' && failed.result?.instance_id === item.id) await onResult(failed.result);
-      if (/unknown command|unknown v1 endpoint|not_found/.test(error.message)) {
+      if (/unknown command|unknown v1 endpoint/.test(error.message)) {
         throw Error('Selected Backlot runtime does not support public export; pin an export-capable revision for issue #41.');
       }
       throw error;
     }
     assert.equal(exported.api_version, 'v1');
+    assert.equal(exported.published, true, 'export did not publish a bundle');
     assert.equal(exported.complete, true, 'action requires complete evidence');
     assert.equal(exported.result.instance_id, item.id);
     await onResult(exported.result);

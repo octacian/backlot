@@ -102,6 +102,7 @@ jobs:
           name: early-export-preview-${{ matrix.shard }}
           path: ${{ runner.temp }}/early-preview
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 7
       - name: Outer runner cancellation during overlapping clients
         if: matrix.shard == 1
@@ -119,6 +120,7 @@ jobs:
           name: chromium-scene-${{ matrix.shard }}
           path: ${{ runner.temp }}/scene-evidence
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 7
       - name: Destroy only job-owned resources
         if: always()

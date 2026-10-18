@@ -59,9 +59,15 @@ func (s *service) export(ctx context.Context, request v1.ExportRequest) (v1.Expo
 					joined = false
 				}
 			}
-			settled := joined && !active(instance.Status) && instance.Execution != nil && !instance.Execution.Kept && instance.Execution.CleanupFailure == ""
-			// A cleanup error may leave producers alive. Explicit destroy/stop must prove
-			// shutdown before export; partial mode cannot turn live evidence into a snapshot.
+			settled := joined && !active(instance.Status) && instance.Execution != nil && !instance.Execution.Kept
+			if settled && entry != nil {
+				settled = exportProducersJoined(entry)
+			}
+			if settled && entry == nil && instance.Execution.CleanupFailure != "" {
+				settled = false
+			}
+			// Require joined collectors even when cleanup of other owned resources failed.
+			// Partial mode cannot turn live evidence into a settled snapshot.
 			if settled {
 				response, err = s.exportSnapshot(ctx, request, instance)
 				lock.Unlock()
@@ -143,7 +149,7 @@ func (s *service) exportSnapshot(ctx context.Context, request v1.ExportRequest, 
 	defer func() { _ = source.Close() }()
 	e := instance.Execution
 	report := v1.ExportReport{SchemaVersion: v1.ExportSchemaVersion, ExportedAt: time.Now().UTC().Format(time.RFC3339Nano), CreatedAt: instance.CreatedAt, CompletedAt: e.CompletedAt,
-		Result:   v1.ExportResult{InstanceID: instance.ID, Attempt: e.Attempt, Status: instance.Status, TerminalExitCode: e.TerminalExitCode, Cancelled: e.Cancelled, Failure: e.Failure, CollectionFailure: e.CollectionFailure, CleanupFailure: e.CleanupFailure, Components: e.Components},
+		Result:   v1.ExportResult{InstanceID: instance.ID, Attempt: e.Attempt, Status: instance.Status, TerminalExitCode: e.TerminalExitCode, Cancelled: e.Cancelled, Failure: e.Failure, CollectionFailure: e.CollectionFailure, CleanupFailure: e.CleanupFailure, Components: append([]v1.ComponentResult{}, e.Components...)},
 		Source:   v1.ExportSource{Project: instance.Plan.Project, Scene: instance.Plan.Scene, Lifetime: instance.Plan.Lifetime, CheckoutID: instance.Checkout.ID, ManifestDigest: instance.Plan.ManifestDigest, ConfigDigest: instance.Plan.ConfigDigest},
 		Complete: true, Omissions: []string{}, Evidence: []v1.ExportEvidence{}}
 	journal, err := s.store.runtime(instance.ID)
@@ -168,44 +174,28 @@ func (s *service) exportSnapshot(ctx context.Context, request v1.ExportRequest, 
 	}
 
 	if !e.EvidenceExpired {
-		// Logs are parsed using the same validation/gap semantics as the public log API.
-		page, err := s.logsLocked(v1.LogsRequest{InstanceID: instance.ID})
-		if err != nil {
-			return response, err
-		}
-		if page.Gap != "" {
-			omit("Retained logs have a known collection gap.")
-		}
-		file, err := stage.OpenFile("logs.ndjson", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-		if err != nil {
-			return response, err
-		}
-		encoder := json.NewEncoder(file)
-		for {
-			for _, record := range page.Records {
-				if record.Attempt == e.Attempt {
-					if err := encoder.Encode(record); err != nil {
-						_ = file.Close()
-						return response, err
-					}
-				}
+		expectedLogs := false
+		for _, component := range e.Components {
+			if component.Status != "skipped" {
+				expectedLogs = true
 			}
-			next, err := s.logsLocked(v1.LogsRequest{InstanceID: instance.ID, Offset: page.NextOffset})
-			if err != nil {
-				_ = file.Close()
+		}
+		logPath := filepath.Join("logs", instance.ID+"-output.ndjson")
+		if expectedLogs {
+			if _, err := source.Lstat(logPath); os.IsNotExist(err) {
+				omit("Retained log file is unavailable.")
+			} else if err != nil {
 				return response, err
 			}
-			if next.NextOffset == page.NextOffset {
-				break
-			}
-			page = next
 		}
-		if err := file.Close(); err != nil {
+		// Logs are parsed using the same validation/gap semantics as the public log API.
+		if err := s.exportLogs(ctx, stage, instance, request.AllowPartial, omit); err != nil {
 			return response, err
 		}
 		if err := inventoryExport(stage, "logs.ndjson", "logs", "", "", &report); err != nil {
 			return response, err
 		}
+
 		for index, artifact := range e.Artifacts {
 			if artifact.Attempt != e.Attempt {
 				return response, problem("export_unsafe", "artifact attempt does not match selected execution")
@@ -216,6 +206,13 @@ func (s *service) exportSnapshot(ctx context.Context, request v1.ExportRequest, 
 			}
 			rel, _ := filepath.Rel(s.directory, expected)
 			target := fmt.Sprintf("artifacts/%d", index)
+			if err := exportSourcePath(source, rel); err != nil {
+				if os.IsNotExist(err) {
+					omit("Declared retained artifact unavailable: " + artifact.Component + "/" + artifact.Name)
+					continue
+				}
+				return response, err
+			}
 			if _, err := source.Lstat(rel); os.IsNotExist(err) {
 				omit("Declared retained artifact unavailable: " + artifact.Component + "/" + artifact.Name)
 				continue
@@ -243,7 +240,12 @@ func (s *service) exportSnapshot(ctx context.Context, request v1.ExportRequest, 
 	if err != nil {
 		return response, err
 	}
-	renderErr := exportTemplate.Execute(html, report)
+	preview, previewErr := readExportLogPreview(stage)
+	if previewErr != nil {
+		_ = html.Close()
+		return response, previewErr
+	}
+	renderErr := exportTemplate.Execute(html, exportHTMLView{ExportReport: report, Logs: preview})
 	if err := errors.Join(renderErr, html.Close()); err != nil {
 		return response, err
 	}
@@ -294,7 +296,7 @@ func copyExportTree(ctx context.Context, source, destination *os.Root, from, to 
 		if item.IsDir() {
 			return destination.MkdirAll(target, 0700)
 		}
-		if !info.Mode().IsRegular() {
+		if !info.Mode().IsRegular() || exportFileLinked(info) {
 			return problem("export_unsafe", "evidence links and special files are unsupported")
 		}
 		if err := destination.MkdirAll(filepath.Dir(target), 0700); err != nil {
@@ -309,7 +311,7 @@ func copyExportTree(ctx context.Context, source, destination *os.Root, from, to 
 		if err != nil {
 			return err
 		}
-		_, err = io.Copy(output, input)
+		_, err = io.Copy(output, exportReader{ctx: ctx, input: input})
 		return errors.Join(err, output.Close())
 	})
 }
@@ -331,8 +333,98 @@ func inventoryExport(root *os.Root, from, kind, component, name string, report *
 		if err != nil {
 			return err
 		}
+		if len(report.Evidence) >= 10000 {
+			return problem("export_limit", "evidence inventory exceeds 10000 files")
+		}
 		report.Evidence = append(report.Evidence, v1.ExportEvidence{Path: filepath.ToSlash(path), Kind: kind, Component: component, Name: name, Bytes: size, SHA256: hex.EncodeToString(hash.Sum(nil))})
 		sort.Slice(report.Evidence, func(i, j int) bool { return report.Evidence[i].Path < report.Evidence[j].Path })
 		return nil
 	})
+}
+
+// exportProducersJoined is called only after entry.done has closed.
+func exportProducersJoined(entry *execution) bool {
+	for _, group := range entry.groups {
+		if group.Alive() {
+			return false
+		}
+	}
+	for _, work := range entry.containers {
+		select {
+		case <-work.logDone:
+		default:
+			return false
+		}
+	}
+	return true
+}
+func exportSourcePath(root *os.Root, name string) error {
+	parts := strings.Split(filepath.ToSlash(name), "/")
+	for i := range parts {
+		info, err := root.Lstat(filepath.Join(parts[:i+1]...))
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return problem("export_unsafe", "evidence source contains a link")
+		}
+	}
+	return nil
+}
+
+type exportReader struct {
+	ctx   context.Context
+	input io.Reader
+}
+
+func (r exportReader) Read(data []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.input.Read(data)
+}
+
+func (s *service) exportLogs(ctx context.Context, stage *os.Root, instance v1.Instance, allowPartial bool, omit func(string)) error {
+	file, err := stage.OpenFile("logs.ndjson", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(file)
+	offset := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			_ = file.Close()
+			return err
+		}
+		page, err := s.logsLocked(v1.LogsRequest{InstanceID: instance.ID, Offset: offset})
+		if err != nil {
+			var detail *v1.PlanError
+			if allowPartial && errors.As(err, &detail) && detail.Code == "collection_failed" {
+				omit("Retained log records are corrupt or interrupted; unavailable records were omitted.")
+				break
+			}
+			_ = file.Close()
+			return err
+		}
+		if page.Gap != "" {
+			omit("Retained logs have a known collection gap.")
+		}
+		for _, record := range page.Records {
+			if record.InstanceID != instance.ID || record.Attempt == "" {
+				_ = file.Close()
+				return problem("export_unsafe", "retained log identity is invalid")
+			}
+			if record.Attempt == instance.Execution.Attempt {
+				if err := encoder.Encode(record); err != nil {
+					_ = file.Close()
+					return err
+				}
+			}
+		}
+		if page.NextOffset == offset {
+			break
+		}
+		offset = page.NextOffset
+	}
+	return file.Close()
 }

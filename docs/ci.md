@@ -113,6 +113,7 @@ root are removed. For your own uploader later in the **same job**:
     name: application-evidence
     path: ${{ steps.tests.outputs.evidence-path }}
     if-no-files-found: error
+    include-hidden-files: true
 ```
 
 `evidence-available` becomes `true` only after full audit and publication;
@@ -147,7 +148,9 @@ setup post hook rather than discovering/destroying other invocations.
 Use `always()` and the availability output for custom upload after failure or
 cancellation. Runner hard termination can interrupt collection; native post remains
 a bounded private-cleanup fallback. A destroyed VM cannot promise outputs, post
-execution or upload. Exports last only for that job unless uploaded.
+execution or upload. Exports last only for that job unless uploaded. Preserve audited hidden files when
+uploading a bundle (`include-hidden-files: true` with upload-artifact); otherwise
+the uploaded directory may no longer match its report inventory.
 
 ## Trust and troubleshooting
 

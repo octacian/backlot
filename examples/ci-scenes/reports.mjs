@@ -15,11 +15,20 @@ export async function verifyReports(instance, artifact) {
   const invocation = JSON.parse(await readFile(join(artifact.path, 'reports/invocation.json')));
   assert.equal(invocation.origin, instance.execution.origin, 'reports belong to a different run');
   assert.deepEqual(invocation.args, terminal.command.args.slice(1), 'reports contain a different argument vector');
+  let heldBrowser = false;
   try {
     const holding = JSON.parse(await readFile(join(artifact.path, 'reports/holding.json')));
     assert.equal(holding.origin, instance.execution.origin, 'holding report belongs to a different run');
+    heldBrowser = true;
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const report = JSON.parse(await readFile(join(artifact.path, 'reports/playwright.json')));
-  assert.ok(Array.isArray(report.suites) && report.stats && !Array.isArray(report.stats));
+  try {
+    const report = JSON.parse(await readFile(join(artifact.path, 'reports/playwright.json')));
+    assert.ok(Array.isArray(report.suites) && report.stats && !Array.isArray(report.stats));
+  } catch (error) {
+    // The real held-browser cancellation is allowed to end before Playwright's
+    // final reporter writes JSON. Its invocation/holding evidence still binds it
+    // to this exact cancelled execution; absence is not a successful test report.
+    if (error.code !== 'ENOENT' || !instance.execution.cancelled || !heldBrowser) throw error;
+  }
   return invocation;
 }

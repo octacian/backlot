@@ -110,6 +110,7 @@ jobs:
           name: custom-consumer-${{ matrix.shard }}-${{ env.MODE }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.BACKLOT_CONSUMER_EVIDENCE }}
           if-no-files-found: error
+          include-hidden-files: true
       - name: Record original and wrapper results
         if: always()
         env:

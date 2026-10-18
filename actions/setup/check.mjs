@@ -85,7 +85,7 @@ if (args[0] === 'list') {
   const fs=await import('node:fs/promises');await fs.mkdir(target);
   await fs.writeFile(target+'/report.json',JSON.stringify({schema_version:'backlot.export/v1',result:{instance_id:args[1],status:'succeeded',terminal_exit_code:0}}));
   await fs.writeFile(target+'/logs.ndjson','retained evidence');
-  console.log(JSON.stringify({api_version:'v1',complete:true,result:{instance_id:args[1],status:'succeeded',terminal_exit_code:0}}));
+  console.log(JSON.stringify({api_version:'v1',published:true,complete:true,result:{instance_id:args[1],status:'succeeded',terminal_exit_code:0}}));
 } else if (args[0] === 'destroy') {
   assert.ok(existsSync(output + '/' + args[1] + '/report.json'), 'collection must precede destruction');
   appendFileSync(root + '/destroyed', args[1] + '\\n');
@@ -221,7 +221,7 @@ else if (args[0] === 'export') {
     console.error(${JSON.stringify(auditFails ? 'evidence safety audit failed' : collectionFailure ? 'runtime evidence collection failed: '+collectionFailure : expired ? 'evidence expired' : 'known log gap')});process.exit(1);
   }
   const fs=await import('node:fs/promises');await fs.mkdir(args[args.indexOf('--output')+1]);
-  console.log(JSON.stringify({api_version:'v1',complete:true,result}));
+  console.log(JSON.stringify({api_version:'v1',published:true,complete:true,result}));
 }
 else if (args[0] === 'destroy') {
   if (args[1] !== id) throw Error('foreign record');

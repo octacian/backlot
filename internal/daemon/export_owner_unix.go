@@ -14,3 +14,8 @@ func exportParentOwned(info os.FileInfo) bool {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	return ok && stat.Uid == uint32(os.Getuid()) && info.IsDir() && info.Mode().Perm()&0022 == 0
 }
+
+func exportFileLinked(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return !ok || stat.Nlink != 1
+}

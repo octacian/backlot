@@ -39,6 +39,11 @@ parser framework. Preserve application report bytes and assets as labelled conte
 
 Version the portable report separately from API/state. Inventory only copied
 relative paths and hashes, bounded provenance, timestamps and original outcomes.
+The HTML embeds escaped logs in a collapsed script-free section, using the
+user-approved 256 KiB decoded text/context head-and-tail display budget. Exact
+omissions are visible and the full original NDJSON stays copied and inventoried.
+Primary report/log/media/archive links precede a collapsed complete file list.
+
 Do not serialize plans, machine paths/configuration, secrets, fixtures or private
 records. Missing historical facts remain unknown. A publication failure may
 return a settled original result alongside its typed error; it never claims a

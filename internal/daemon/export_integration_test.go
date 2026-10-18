@@ -5,6 +5,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,6 +48,14 @@ func TestExportNativeFlow(t *testing.T) {
 	if _, err := h.cli.Export(context.Background(), v1.ExportRequest{APIVersion: v1.Version, InstanceID: instance.ID, Output: destination}); err == nil {
 		t.Fatal("replaced existing bundle")
 	}
+	for index, wait := range []string{"45", "45s"} {
+		target := filepath.Join(filepath.Dir(destination), fmt.Sprintf("bounded-%d", index))
+		cmd := exec.Command(binary, "export", instance.ID, "--output", target, "--wait="+wait, "--state-dir", h.dir, "--json")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("bounded wait: %v %s", err, output)
+		}
+	}
+
 	if _, err := h.cli.Destroy(context.Background(), instance.ID); err != nil {
 		t.Fatal(err)
 	}

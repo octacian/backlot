@@ -176,7 +176,12 @@ the report's directory. `ExportResponse` is the bounded CLI/API publication resu
 not the full file inventory.
 
 `index.html` is a script-free local-file summary of the same report, with escaped
-untrusted text and relative evidence links. Application artifacts retain their
+untrusted text and relative evidence links. A collapsed-by-default, script-free
+log section embeds up to 256 KiB of decoded text including record context. Larger
+logs keep complete head/tail records within that display budget, state exact
+formatted bytes/record counts omitted and link the complete original NDJSON.
+Binary chunks are labelled and retain original base64. The summary and embedded
+log preview are standalone; other application evidence remains relative. Application artifacts retain their
 original bytes/assets and are explicitly labelled application-provided content;
 those HTML reports may execute their own scripts and some need a local static
 server. Use the producing application's viewer; Playwright traces can be opened
@@ -187,7 +192,10 @@ export retention and upload, independent of daemon pruning.
 
 The reusable generic audit rejects filesystem/archive links, special files,
 private-key filenames and PEM private keys, unsafe ZIP paths, malformed ZIPs and
-over-deep nested ZIPs (case-insensitive). Application format assertions belong in
+over-deep nested ZIPs (case-insensitive). Unsupported compressed/archive formats
+are rejected. Safety bounds are 128 MiB per file or expanded archive entry,
+512 MiB cumulative audited bytes (including expanded entries), and 10000 files/
+entries; these fail export explicitly rather than truncate copied evidence. Application format assertions belong in
 application tests; Backlot does not parse framework reports or invent missing ones.
 Applications remain responsible for credentials printed into logs or artifacts.
 The same-user administrative socket remains the authorization boundary.

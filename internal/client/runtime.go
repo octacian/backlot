@@ -4,6 +4,7 @@ import (
 	"context"
 	v1 "github.com/octacian/backlot/api/v1"
 	"net/http"
+	"path/filepath"
 )
 
 // Run accepts daemon-owned native startup and returns its durable identity.
@@ -97,11 +98,20 @@ func validateFixtures(response v1.FixturesResponse, request v1.FixturesRequest, 
 func (c *Client) Export(ctx context.Context, request v1.ExportRequest) (v1.ExportResponse, error) {
 	var response v1.ExportResponse
 	err := c.call(ctx, http.MethodPost, "/v1/export", request, &response)
-	if err == nil && (response.APIVersion != v1.Version || response.Published && (response.Output == "" || response.Report != "report.json" || response.HTML != "index.html") || response.Result.InstanceID != request.InstanceID) {
-		err = responseError()
-	}
-	if err == nil && response.Error != nil {
-		err = response.Error
+	if err == nil {
+		if response.APIVersion != v1.Version || response.Result.InstanceID != request.InstanceID || !validID(response.Result.Attempt) {
+			return response, responseError()
+		}
+		if response.Published {
+			if response.Error != nil || !filepath.IsAbs(response.Output) || response.Report != "report.json" || response.HTML != "index.html" {
+				return response, responseError()
+			}
+		} else if response.Error == nil || response.Error.Code == "" || response.Error.Message == "" || response.Output != "" || response.Report != "" || response.HTML != "" || response.Complete {
+			return response, responseError()
+		}
+		if response.Error != nil {
+			err = response.Error
+		}
 	}
 	return response, err
 }

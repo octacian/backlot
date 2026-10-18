@@ -24,7 +24,9 @@ Ship a Go daemon and CLI in one executable for macOS ARM64 and the bounded Linux
 amd64 targets in the [platform policy](platforms.md). A future UI must use the same
 typed API. Keep OS-specific process and transport operations behind explicit
 boundaries. WSL runs the Linux runtime with configuration guidance only; no WSL QA
-or support guarantee is claimed. Native Windows execution is not a target.
+or support guarantee is claimed. Native Windows is a planned follow-on target in
+independent epic #34, pending the [Windows design and acceptance gates](windows-design.md);
+it is not part of the currently verified runtime boundary.
 
 Operate on one machine with a local Docker engine. Publishing supports an
 explicitly managed stock native Caddy local-CA gateway
@@ -274,7 +276,7 @@ must not serialize secret values; application stdout/stderr is captured as emitt
 
 ## Out of scope
 
-Frontend UI; remote/multi-host orchestration; native Windows execution; WSL QA/support guarantees;
+Frontend UI; remote/multi-host orchestration; WSL QA/support guarantees;
 toolchain/version-manager installation; automatic watch/build/restart; arbitrary
 job retriggering; shared-database provisioning; Compose import/export; CI scene
 execution guarantees; DNS/router management; public certificate provisioning; automatic trust installation;

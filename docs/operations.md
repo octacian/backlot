@@ -1,5 +1,9 @@
 # Install and operate Backlot
 
+Native Windows installation/operations are planned, not supported by this change.
+Use the [Windows implementation handoff](windows-design.md) for prerequisites and
+future #37/#38 gates; the commands below remain for existing macOS/Linux targets.
+
 Runtime targets are macOS ARM64, Ubuntu 24.04 amd64 and Debian 13.4 amd64; see
 [platform prerequisites and WSL guidance](platforms.md). Install Go 1.27.1 or a
 compatible newer patch, Git for project worktrees, and `lsof` (included with macOS). Make is needed only for the source-build

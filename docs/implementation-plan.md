@@ -202,7 +202,8 @@ retains private administration and explicit host-gateway/public-root trust.
 Debian 13.4 amd64 actual-host evidence, complete frozen provider/native/macOS
 regressions, independent reviews and exact published-HEAD CI remain required
 before readiness. WSL is configuration guidance only, without WSL QA or guarantees;
-native Windows execution and compile-only CI are outside the platform roadmap.
+compile-only CI does not establish support. Native Windows is now planned separately
+under independent epic #34; it is not evidence delivered by the Linux expansion.
 
 ## Application scenes in CI (issue 22)
 
@@ -213,3 +214,26 @@ data isolation; Backlot retains lifecycle, checkout output locking and evidence
 ownership. The initial Ubuntu Chromium checkpoint passed at `1fef82b`; see the
 example's revision-bound evidence link. Lifecycle/isolation acceptance, independent
 reviews and frozen published-HEAD gates remain required before readiness.
+
+## Native Windows expansion (independent epic 34)
+
+[Design slice #36](https://github.com/octacian/backlot/issues/36) supplies the
+[Windows implementation handoff](windows-design.md), two proposed ADRs and an
+acceptance matrix. It changes the intended roadmap, not current support or accepted
+Unix supervision/HTTPS decisions. It contains no runtime or CI implementation.
+
+[#37](https://github.com/octacian/backlot/issues/37) implements native Windows
+private IPC/ACLs/identity, authenticated job supervision, Windows command semantics,
+leases/results/recovery and real native runtime CI. It must first prove an actual
+Windows CLI/daemon/native-app success and failure/recovery flow. Native-only evidence
+does not complete the epic.
+
+[#38](https://github.com/octacian/backlot/issues/38) integrates explicit Docker
+Desktop Linux named pipes/mount ownership, stock native Caddy/persistent CA,
+canonical host/Edge/native/container DNS/TLS and the owned Windows runnable example.
+It adds provider CI and actual Windows 11 desktop trust/adoption evidence, including
+correct/missing/wrong trust, recovery and unrelated-resource preservation. Both
+implementation slices require independent review, frozen applicable regression
+checks and exact published-HEAD CI. Runtime execution is expected directly on the
+user's Windows VM with separately granted resources; WSL and cross-builds cannot
+substitute. Release artifact work coordinates with #25 after verification.

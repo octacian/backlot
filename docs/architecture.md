@@ -16,7 +16,8 @@ clean up Docker state.
 Use a per-user permissioned Unix socket for local HTTP/JSON. Socket placement,
 single-daemon locking, and stale-socket recovery belong in the platform/runtime
 adapter. Do not expose administrative HTTP on the LAN. Keep transport selection
-separate from API types. Native Windows execution is outside the platform scope.
+separate from API types. The [Windows proposal](windows-design.md) plans named
+pipes and Windows supervision for #37/#38; current runtime support is unchanged.
 
 The lifecycle coordinator consumes a validated, resolved plan and runs its graph.
 It owns idempotency, instance mutation locking, dependency gates, initialization
@@ -91,7 +92,8 @@ Keep platform-specific supervision and socket operations separate from domain
 code. The [platform policy](platforms.md) targets macOS ARM64, Ubuntu 24.04 amd64
 and Debian 13.4 amd64. Linux runtime support requires actual lifecycle, IPC,
 permissions, trust and cleanup evidence plus Ubuntu runtime CI; compilation is
-insufficient. WSL receives configuration guidance only; native Windows is out of scope.
+insufficient. WSL receives configuration guidance only. Native Windows is planned
+under independent epic #34, with no runtime support claim before #37/#38 evidence.
 
 ## Configuration and routing design work
 

@@ -1,5 +1,10 @@
 # Published HTTPS and mixed execution
 
+Windows stock-Caddy/Edge/native/container HTTPS is planned in #38. The
+[Windows design](windows-design.md#docker-desktop-and-managed-https-proposal-38)
+defines separate DNS, listener, system/browser and application-trust gates; current
+macOS/Linux fixture evidence does not prove them.
+
 Backlot supports an explicit daemon-managed native local-CA gateway and an
 externally managed Caddy JSON API. Omitted `caddy.mode` retains external mode.
 Only published scenes require a gateway; other scenes and metadata-only `prepare`

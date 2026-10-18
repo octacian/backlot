@@ -23,6 +23,8 @@ Before planning or editing, read:
 
 The [platform guide](platforms.md) defines macOS/Linux targets and WSL configuration
 guidance, including Linux resolver, bridge reachability and separate trust prerequisites.
+The [Windows design and handoff](windows-design.md) covers planned #34/#37/#38 work;
+it does not claim native Windows support.
 
 The [local daemon guide](daemon.md) documents preparation and native execution.
 The [container/private-state guide](containers.md) documents milestone 4.

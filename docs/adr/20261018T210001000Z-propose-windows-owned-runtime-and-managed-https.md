@@ -28,12 +28,44 @@ Edge, stock Caddy and Docker Desktop Linux containers from the outset.
 
 ## Decision
 
-Create each root suspended, assign it to a guardian-retained non-breakaway job
-before activation, and prevent job-handle inheritance. Configure kill-on-last-close;
-retain root status and collectors independently. Journal private generation/control
+Configure a guardian-retained non-breakaway job with kill-on-last-close and
+completion tracking before root creation; prevent job-handle inheritance. Propose
+creation-time association with `PROC_THREAD_ATTRIBUTE_JOB_LIST` in `STARTUPINFOEX`
+and `CreateProcessW` using `EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED`.
+Retain attribute storage/job authority through the call, verify membership through
+returned handles, and only then resume. On setup/creation/membership/resume failure,
+abort activation and terminate/wait any returned child through retained authority.
+No create-then-assign compatibility fallback is allowed.
+
+A suspended create followed by `AssignProcessToJobObject` leaves a crash interval:
+parent termination does not kill children and job closure affects associated
+processes only. An unassigned suspended root can survive guardian loss outside
+kill-on-close coverage. This is an inference from Microsoft's termination/job rules,
+not a runtime observation. Microsoft documents job-list attributes on Windows 10/
+Server 2016 and newer. Creation-time assignment removes the user-space interval,
+but documentation alone does not establish every in-call crash/partial-failure
+outcome. #37 must review and demonstrate that boundary before adapter acceptance;
+otherwise return for a reviewed retained-authority proposal. If a child may exist
+without retained authority, name the possible suspended unassigned residual,
+quarantine the journal/state, block conflicting restart and report cleanup failure.
+No failed create, guardian exit or closed port proves absence.
+
+Require the [deterministic startup fault gates](../windows-design.md#deterministic-startup-fault-acceptance-37):
+a reproduction-only two-step fixture crashes after creation/before assignment and
+exposes the surviving root; the proposed adapter crashes after association/before
+resume and must demonstrate bounded root termination without activation. Before
+either fault an independent controller acknowledges retained root termination/wait
+and guardian launch handles and registers cleanup; it retains no owned-job handle.
+Fixture disposal cannot become a product cleanup receipt. In-call death before
+handles return needs separately retained cleanup authority (such as granted disposable
+VM teardown), not an observed PID; absent that authority/evidence the gate is blocked,
+the boundary remains unproven, and #37 acceptance requires further review.
+
+Retain root status and collectors independently. Journal private generation/control
 capabilities before activation. Recover through the exact authenticated guardian,
 never by reopening a job name or signaling an observed PID. Guardian loss remains
-uncertain without authenticated completed cleanup proof, even with kernel kill-on-close.
+uncertain without authenticated completed cleanup proof, even with kernel kill-on-close
+for associated processes; preserve diagnostics and do not resume/retry work.
 Use isolated-console targeted BREAK for cooperative grace, then retained-job
 termination and separately bounded job/root/collector/guardian joins. Require real
 nested-job, console, descendant and crash tests before accepting this adapter.
@@ -71,6 +103,11 @@ reviews and published-HEAD CI; #37 alone must not advertise complete support.
 
 ## Alternatives considered
 
+Create-suspended then assign-to-job is rejected as a production fallback because
+guardian death can strand an unassigned child; suspension is not cleanup authority.
+Creation-time job lists avoid that user-space interval but require #37 crash evidence.
+A second runtime owner retaining root authority would need a reviewed handoff and
+failure contract; duplicating a job handle also delays kill-on-last-close.
 Taskkill tree/PID enumeration has ownership and fork/reuse races. Named-job reopen
 from journal text is not retained authority. Leader-only stop loses descendants.
 A privileged service adds installation and authority beyond this baseline.
@@ -82,8 +119,9 @@ Desktop evidence requires it; private admin never widens.
 
 ## Revisit when
 
-Actual Windows console/nesting tests, canonical DNS, public-file mount permissions
-or Desktop networking cannot meet the proposal; a native GUI/service workload is
+Creation-time association/crash evidence, actual Windows console/nesting tests,
+canonical DNS, public-file mount permissions or Desktop networking cannot meet the
+proposal; a native GUI/service workload is
 required; or the operator changes backend/Engine/trust policy. Record alternatives
 and seek consequential product decisions before dependent changes.
 
@@ -94,6 +132,8 @@ and seek consequential product decisions before dependent changes.
 - [Accepted lifecycle](20261007T052013565Z-use-explicit-scene-lifetimes-and-daemon-owned-execution.md)
 - [Accepted HTTPS boundary and retained decisions](20261016T201500000Z-support-explicit-linux-managed-https-reachability.md)
 - [Microsoft jobs, handle lifetime and descendant caveats](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+- [Microsoft creation-time job-list attributes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)
+- [Microsoft parent/child termination rules](https://learn.microsoft.com/en-us/windows/win32/procthread/terminating-a-process)
 - [Microsoft nested jobs](https://learn.microsoft.com/en-us/windows/win32/procthread/nested-jobs)
 - [Microsoft CreateProcessW](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw)
 - [Go Windows argument conventions](https://pkg.go.dev/os/exec#Command)

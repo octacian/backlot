@@ -105,13 +105,37 @@ symlinks, case variants and hard links to files; deny ambiguous resolution.
 
 Use one out-of-job guardian per workload with a retained **unnamed job object**.
 Set kill-on-last-job-handle-close and disallow breakaway. Guardian is the sole job
-handle owner; never inherit/duplicate that handle into the workload. Create root
-suspended, assign to the job before resume, and abort through retained process
-handles if assignment fails. Establish completion tracking before activation.
+handle owner; never inherit/duplicate that handle into the workload. Configure the
+job and completion tracking before root creation. Propose `CreateProcessW` with
+`STARTUPINFOEX`, `EXTENDED_STARTUPINFO_PRESENT`, `CREATE_SUSPENDED` and
+`PROC_THREAD_ATTRIBUTE_JOB_LIST` containing that retained job handle. Keep attribute
+storage and the job handle live through the call; job assignment is distinct from
+handle inheritance. Verify returned root membership through retained handles before
+resuming its primary thread. Attribute setup, creation, membership or resume failure
+aborts activation; terminate/wait any returned child through retained authority.
+Never fall back to creating a root and then calling `AssignProcessToJobObject`.
 Test nested jobs imposed by CI/agent launchers; incompatible nesting fails before
 application activation, with no unsupervised fallback. Delegation to services,
 WMI or external supervisors remains unsupported; job membership is not a hostile
 workload security boundary.
+
+Creation followed by assignment is **two operations**, even with a suspended root.
+If the guardian crashes between them, an unassigned suspended child can survive:
+parent exit does not terminate children, and kill-on-job-close covers only associated
+processes. Microsoft's [process termination rules](https://learn.microsoft.com/en-us/windows/win32/procthread/terminating-a-process)
+and [job lifetime rules](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+support this inference; it is not Windows execution evidence. Microsoft documents
+[creation-time job lists](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)
+from Windows 10/Server 2016 and the [extended CreateProcessW attributes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw).
+This proposal removes the user-space create/assign interval; those API descriptions
+alone do not prove every in-call guardian-crash or partial-failure outcome. #37 must
+review those outcomes and demonstrate the startup fault gates below before this
+adapter is accepted. If creation-time association cannot establish the boundary,
+stop for a reviewed retained-authority design; do not ship the two-step fallback.
+Any possibly created child lacking retained authority is a named residual, including
+a possibly suspended unassigned root. Quarantine the launch journal/state, block
+conflicting restart and report unresolved cleanup; do not infer absence from a
+failed call, guardian exit or closed port, or recover authority from an observed PID.
 
 Journal launch intent, create inactive guardian and private pipe, persist guardian
 creation identity, random capability, generation and protocol version, then activate.
@@ -120,9 +144,9 @@ handles independently of descendants. Daemon crash must leave guardian authority
 available for authenticated cleanup. Recovery challenges that exact generation;
 a discovered PID, job name, executable or open port never authorizes termination.
 Do not reopen a named job from journal text. A guardian crash closes its sole job
-handle and requests kernel termination, but does **not** itself prove all descendants
-and collectors joined. Missing authenticated proof remains uncertain, even if a
-port is closed. Preserve state, block conflicting restart and give an actionable
+handle and requests kernel termination of associated processes only, but does **not**
+itself prove all descendants and collectors joined or cover an unassigned root.
+Missing authenticated proof remains uncertain, even if a port is closed. Preserve state, block conflicting restart and give an actionable
 manual diagnosis; do not automatically resume/retry work or delete the journal.
 
 For console commands, give the guardian an isolated console and launch the root
@@ -165,6 +189,50 @@ conflicts and Caddy admin/HTTPS families. PID tables are observations only; they
 never authorize cleanup. Access denied, vanished/reused process or ambiguous
 membership fails closed. Exercise races with a foreign listener replacing an owned
 one; a TCP/HTTP response alone cannot make that listener ready.
+
+### Deterministic startup fault acceptance (#37)
+
+Use private authenticated fixture barriers, disabled outside explicitly owned tests,
+with a cleanup controller outside the faulted guardian. Before **each of the first
+two faults below**, that controller must retain the guardian's direct launch handle and receive
+and acknowledge a duplicated root process handle with termination/wait rights from
+the creator over authenticated fixture IPC. Register bounded cleanup first; never
+inject if the handle transfer fails. Retain thread authority where suspension must
+be inspected, but never resume the residual to clean it. Do not duplicate the owned
+job handle into the controller: that would defeat the last-close experiment.
+
+- **After creation, before assignment:** a deliberately two-step, reproduction-only
+  fixture creates a suspended root and blocks before `AssignProcessToJobObject`.
+  After the controller acknowledges cleanup authority, crash the guardian. Record
+  root survival through the retained handle, absence of application activation and
+  the product's launch-failure/quarantine diagnosis. The job-close assumption must
+  fail this regression. The controller then terminates/waits the residual through
+  its retained handle; fixture disposal is not a successful product cleanup receipt.
+  This hazardous sequence is never a shipping adapter or compatibility fallback.
+- **After assignment, before resume:** the proposed creation-time adapter returns a
+  suspended root, verifies membership and transfers fixture cleanup authority, then
+  blocks before resume. Crash the guardian after the controller's acknowledgement.
+  Observe kernel-triggered root termination by waiting on the retained handle within
+  a finite deadline, before any controller termination. Require no activation and
+  preserved failed/uncertain product status without an authenticated completed receipt. If the root survives, fail the gate and dispose of it through
+  the controller's retained handle; do not report kill-on-close success.
+- **Creation-time boundary:** also gate before the create call (no root allocated),
+  attribute/creation errors and membership/resume errors, and review guardian death
+  during the call before returned handles can be transferred. The two barriers above
+  do not prove this in-call case. Before any such destructive experiment, retain
+  independent cleanup authority covering even a child whose handle was never returned
+  (for example, an explicitly granted disposable VM with retained teardown control).
+  An enclosing fixture job can mask the result and cannot prove the owned job's
+  last-close behavior. If safe independent authority or crash/failure evidence is
+  unavailable, record the case blocked and the association boundary unproven; keep
+  uncertainty/quarantine semantics and return for review before accepting #37.
+
+For every case record the exact fault barrier, handle-authority acknowledgement,
+launcher/nested jobs, create/assignment/resume result, root/guardian waits, collector
+joins, product diagnosis and fixture cleanup/residuals. Retained-root observation
+and cleanup must remain separate from product recovery authority. Unrelated sentinel
+processes survive. Timeouts or missing proof fail acceptance and preserve diagnostic
+state; never reopen a PID from logs, job accounting or process enumeration to kill it.
 
 ## Windows commands, environment and paths (#37)
 
@@ -301,7 +369,7 @@ execution rows are pending. Shared macOS/Linux regressions remain required.
 | --- | --- | --- |
 | Private API/state/locking/stale endpoints | #37: two clients, typed handshake, private DACL/owner inspection, one concurrent daemon winner | Other-user/remote denial with granted account fixture; unsafe inherited ACL, reparse swap, busy/foreign pipe, timeout, crash lock release; no deletion/repair |
 | Checkout identity and concurrency | #37: alias convergence, two actual Git worktrees and concurrent scenes with distinct resources | Case-sensitive dirs, junction/short paths, moves/replacement during snapshot, missing Git directory; preserve original records/data |
-| Supervision/listeners/readiness | #37: root/descendant tree, owned IPv4/IPv6 endpoints and command probes | Root exits early, child holds output, nested-job refusal, PID reuse/replacement, unrelated listener, denied table access; no foreign termination |
+| Supervision/listeners/readiness | #37: root/descendant tree, owned IPv4/IPv6 endpoints and command probes | Root exits early, child holds output, nested-job refusal, [startup faults before assignment and before resume](#deterministic-startup-fault-acceptance-37), creation-time uncertainty, PID reuse/replacement, unrelated listener, denied table access; no foreign termination |
 | Lifecycle/leases/results/evidence | #37: idempotent dev, disposable success/exit-7, original result/log/artifact access, stop/start/restart/reset/destroy | Ctrl-C, second interrupt, client loss/lease expiry, hung probes, grace expiry, collector failure, daemon/guardian crash, wrong/replayed capability; uncertainty retained |
 | Windows argv/env/paths | #37: native exe and explicit pwsh, Unicode/space/empty/quote/backslash args, env precedence | Shell metacharacters remain args, case-duplicate env rejected, drive-relative/unsupported paths diagnosed, missing executable and replaced snapshot source rejected |
 | Docker dependencies/consumers | #38: actual local npipe, Linux Engine, private network/volume/directory, published ports, inspected mounts | Denied/missing/wrong engine, Engine restart, create intent/effect crash, foreign consumers, alias overlap, readonly/non-root root mount; host-only zero contacts; unrelated resources preserved |

@@ -1,2 +1,4 @@
 # The reproducible third-party SDK bundle contains whitespace inside string literals.
 actions/setup/sdk.mjs -whitespace
+# Preserve upstream license text verbatim, including whitespace-only lines.
+actions/setup/SDK_NOTICES.md -whitespace

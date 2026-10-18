@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "Optional reproducible SDK bundling for native Backlot actions",
   "scripts": {
-    "build": "esbuild sdk.mjs --bundle --minify-whitespace --minify-syntax --platform=node --format=esm --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=../setup/sdk.mjs"
+    "build": "node build.mjs",
+    "build:check": "node build.mjs --check"
   },
   "license": "BSD-3-Clause",
   "type": "module",

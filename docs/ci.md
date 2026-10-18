@@ -3,8 +3,7 @@
 Use [`actions/setup`](../actions/setup/action.yml) on **ephemeral Ubuntu 24.04
 amd64** hosted runners for a native application and Playwright Chromium. Copy
 [the adopter workflow](../examples/ci-scenes/adopter.yml) to your application's
-`.github/workflows/browser.yml`, replace `ACTION_COMMIT_SHA` with a reviewed full
-Backlot repository commit, and commit your application's npm lockfile.
+`.github/workflows/browser.yml`, review/update the pinned action commit, and commit your application's npm lockfile.
 The [runnable application](../examples/ci-scenes/README.md) supplies the matching
 [manifest](../examples/ci-scenes/backlot.yaml), [browser launcher](../examples/ci-scenes/scene.mjs)
 and [Playwright configuration](../examples/ci-scenes/playwright.config.mjs).

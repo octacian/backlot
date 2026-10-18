@@ -36,7 +36,7 @@ jobs:
           npx --no-install playwright install --with-deps chromium
       - id: node
         run: echo "binary=$(command -v node)" >> "$GITHUB_OUTPUT"
-      - uses: octacian/backlot/actions/setup@ACTION_COMMIT_SHA # Replace with reviewed full action SHA.
+      - uses: octacian/backlot/actions/setup@4c4203f599da7118098546b00d2898d0b7cdb9cc # Initial action candidate; review and update the action SHA independently.
         with:
           backlot-ref: 2fa3131017188f056bb5d4cfd129e005ac83c0fc
           node-binary: ${{ steps.node.outputs.binary }}

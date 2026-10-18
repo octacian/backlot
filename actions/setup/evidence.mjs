@@ -19,4 +19,3 @@ export async function safeCopy(source, destination, checkpoint = () => {}) {
     await writeFile(destination, data, { mode: 0o600 });
   }
 }
-

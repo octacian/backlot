@@ -22,7 +22,7 @@ Run these from the repository root:
 | `make release-build` | Reproducible binary (defaults macOS ARM64; explicit RELEASE_GOOS/RELEASE_GOARCH for Linux) |
 | `make notices`, `make notices-check` | Generate/verify linked dependency license notices |
 | `bin/backlot daemon start --state-dir /absolute/private/path --json` | Start an explicit local metadata daemon after building |
-| `bin/backlot doctor --state-dir /absolute/private/path --json` | Check local daemon access; provider checks deferred |
+| `bin/backlot doctor --state-dir /absolute/private/path --json` | Check local daemon access and paths; select scene/instance for providers |
 | `go run ./cmd/backlot version --json` | Inspect the typed version result |
 | `go run ./cmd/backlot plan test --project examples/adoption --json -- -run TestExample` | Validate an offline fixture plan and forward terminal arguments |
 | `make fmt` | Format Go source |
@@ -357,3 +357,27 @@ requirements remain unchanged. An unavailable configured prerequisite fails;
 absent opt-in settings skip and are never passes. Exact published-HEAD CI remains
 required for readiness. Debian actual-host and Ubuntu fresh-runner results are
 separate evidence, and neither establishes WSL UX.
+
+
+## Scoped doctor integration
+
+With an exclusive owned fixture grant, stock Caddy, local Docker endpoint and an
+already-present diagnostic image satisfying the [probe contract](daemon.md#explicit-owned-container-probe):
+
+```sh
+BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+BACKLOT_DOCTOR_TEST_IMAGE=golang:1.27.1 \
+  go test -race ./internal/daemon -run '^TestDoctor(Runtime|OwnedProbeCancellationAndRecovery)$' -count=1 -v
+```
+
+The runtime fixture also requires preexisting `alpine:3.21` for its selected
+application consumer. It uses normal DNS, explicit private fixture daemon trust,
+verified container TLS and a dynamic explicitly IPv4-wildcard HTTPS fixture bind;
+admin stays loopback. It never changes existing gateways, machine/browser trust
+or DNS. The fixture bound listener is joined on cleanup. These tests include
+nonzero missing-trust failure/recovery, provenance drift, deferred unavailable
+runtime, retained data, cancellation after creation/start, shutdown joins,
+lost-create-effect recovery and mismatched-authority preservation. Missing opt-in
+settings skip and do not establish provider evidence. The private diagnostic
+image is never pulled/built; production/default gateway exposure stays unchanged.

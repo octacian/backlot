@@ -116,6 +116,7 @@ migration. See the [private-state guide](containers.md) for compatibility.
 | Endpoint | Named request | Named response |
 | --- | --- | --- |
 | `GET /v1/status` | None | `DaemonStatusResponse` |
+| `POST /v1/doctor` | `DoctorRequest` | `DoctorResponse` |
 | `POST /v1/instances` | `ListRequest` | `ListResponse` (at most 100 summaries) |
 | `POST /v1/stop` | `ControlRequest` | `DaemonStatusResponse` (`stopping`) |
 | `POST /v1/prepare` | `PrepareRequest` | `InstanceResponse` |
@@ -145,8 +146,8 @@ versions and invalid response identities/statuses/lifetimes.
 `doctor` checks local directory/socket/database permissions, socket connectivity,
 and API/state compatibility through the daemon. It never opens the database beside
 the daemon. Failed local checks return nonzero with a typed diagnostic result.
-Docker/Caddy checks are explicitly `deferred`; their absence is not a failure and
-neither is contacted. A daemon that rejects state at startup reports the actionable
+Bare doctor leaves Docker/Caddy checks explicitly `deferred` and contacts neither.
+See [scoped provider diagnostics](#scoped-provider-diagnostics) for explicit scene/instance checks. A daemon that rejects state at startup reports the actionable
 startup error in foreground output or the private `daemon.log` for background start.
 
 
@@ -270,3 +271,95 @@ may reuse the retained configuration; stop/status reject configuration arguments
 Responses omit guardian capabilities and CA private keys. Gateway process/listener
 readiness is independent of client trust. See [HTTPS operations](https.md) for
 separate stock trust installation, lifecycle fences and retained recovery state.
+
+## Scoped provider diagnostics
+
+Bare `backlot doctor` preserves daemon-only access checks. It shows state, socket,
+log/evidence/data locations and the default machine-config candidate, explicitly
+without loading a project or configuration. Select a scene or recorded instance:
+
+```sh
+backlot doctor --project /absolute/checkout --scene dev --config /absolute/machine.yaml --json
+backlot doctor --instance INSTANCE_ID --json
+```
+
+Both accept the same `--state-dir`. `--scene` discovers a project if `--project`
+is omitted. Project/config flags require a scene; `--instance` rejects all three.
+Scene diagnostics validate selected tools, inputs, seeds and machine declarations,
+then read only relevant providers. Host-only work does not contact Docker even
+when the machine file or unselected declarations contain Docker settings.
+Offline `plan` remains provider-free and mutation-free.
+
+The named `DoctorRequest`/`DoctorResponse` contract serves `POST /v1/doctor`.
+Decoded selections, enum outcomes and response consistency are validated. Each
+check carries a context and `ok`, `failed`, `unsupported`, or `deferred` status.
+Any failed check produces nonzero CLI exit. `healthy` means no observed failure;
+it is not aggregate readiness and does not turn incomplete evidence into success.
+Unavailable runtime ports/origins are explicitly deferred; doctor never starts an
+application to obtain them. Checks distinguish configured Docker access, managed
+saved configuration/pinned CA, Caddy API/scope/exact recorded route, TCP listener,
+public CA and normally verified leaf/chain dates, normal host DNS/TLS, and actual
+recorded TCP upstream reachability. An external gateway's filesystem and network
+context remain operator-owned and cannot be inferred from daemon-host success.
+
+Human output and JSON `paths` expose the selected manifest and effective machine
+file. Instance output distinguishes `launch_manifest`/`launch_machine_config`
+(recorded paths and digests) from `current_*` observations. Changed/missing current
+files do not redirect recorded runtime diagnostics. Older snapshots without a
+recorded config path say `unrecorded`; a recorded absent default says `absent` and
+is not presented as a loaded config. State, socket, data, logs, artifacts, managed
+saved configuration and the actual `public_ca_certificate` file are locatable.
+A printed path may be absent/unavailable; its status is explicit.
+
+For a managed gateway, `public_ca_certificate` is the actual public PEM root file
+under private daemon state, usable for a separate explicit manual trust action.
+No key path/content, provider credential, ownership token or application environment
+is emitted. Preserve private state; do not publish raw database/log files.
+`daemon/host system trust` and `daemon/host explicit public CA` are separate TLS
+observations. Neither establishes browser or application trust. Doctor never
+installs trust, changes DNS/resolver/router settings, repairs providers, replaces
+foreign routes, or bypasses certificate/hostname verification.
+
+### Explicit owned container probe
+
+```sh
+backlot doctor --instance INSTANCE_ID --container-probe-image local-diagnostics:tag
+backlot doctor --instance INSTANCE_ID --container-probe-image local-diagnostics:tag --probe-public-ca
+```
+
+This is explicit authorization for a temporary owned diagnostic bridge/container,
+not an application launch. The image must already exist at the recorded local
+Docker endpoint; Backlot inspects and pins its image ID and never pulls/builds it.
+The image contract requires executable `/bin/sh`, `/bin/bash`, `getent hosts`,
+GNU-compatible `timeout` (exit 124 on timeout), and OpenSSL `s_client` supporting
+`-connect`, `-servername`, `-verify_hostname`, `-verify_return_error` and `-CAfile`.
+For example a preexisting Debian-based `golang:1.27.1` image provides these tools;
+operators select their own compatible image. Missing tools are `unsupported`.
+Images declaring volumes are unsupported. Image/app entrypoint and command are
+replaced by the bounded probe script; scene environment and workloads are not run.
+
+The probe resolves the canonical hostname normally, checks TCP with bounded Bash
+`/dev/tcp`, then verifies SNI, hostname, chain and dates using OpenSSL. A selected
+managed consumer's declared origin `host-gateway` mapping is preserved verbatim;
+no IP inference, resolver helper or TLS bypass is added. Default image trust and
+explicit public-CA trust are separate invocations. `--probe-public-ca` mounts only
+the actual public root file read-only at `/backlot-public-ca.crt`; it never mounts
+keys/directories or changes image/system trust. TCP/TLS failures remain distinct
+from DNS failures; none establishes other application images' trust. Curl clients
+can have different `.localhost` resolution behavior and are not this probe contract.
+
+Execution is bounded to ten seconds (within the overall fifteen-second observation
+budget); independent cleanup has twenty seconds. The root filesystem is read-only,
+capabilities are dropped, privileges cannot escalate, memory/process counts are
+bounded, and stdout/stderr are discarded. No command/provider output is exposed.
+The probe runs as container root so it can read the existing mode-protected public
+root without weakening host permissions. No application mounts, secrets or
+unrelated network attachments are provided.
+
+Ownership intent is persisted before each create; exact capability labels and
+engine IDs gate activation/removal. Cancellation and daemon shutdown join the
+probe before storage ownership is released. Recovery reconciles exact owned effects,
+including a lost create response, without deleting by name alone. Cleanup failure
+is nonzero and retains private journals/uncertain resources; restore the recorded
+provider access and restart the daemon to retry recovery. Foreign/mismatched
+ownership is preserved. Existing images and global settings remain untouched.

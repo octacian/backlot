@@ -106,9 +106,14 @@ func Start(ctx context.Context, options Options) (v1.DaemonStatusResponse, error
 // Doctor inspects only local permissions, connectivity and versioned state access.
 // It never opens the daemon database independently or contacts external providers.
 func Doctor(ctx context.Context, directory string) v1.DoctorResponse {
-	response := v1.DoctorResponse{APIVersion: v1.Version, Healthy: true, Checks: []v1.DoctorCheck{}}
+	response := v1.DoctorResponse{APIVersion: v1.Version, Healthy: true, Scope: "daemon", Paths: []v1.DoctorPath{}, Checks: []v1.DoctorCheck{}}
+	addStoragePaths(&response, directory, "")
+	if configDir, err := os.UserConfigDir(); err == nil {
+		addPath(&response, "default_machine_config_candidate_not_loaded", filepath.Join(configDir, "backlot", "config.yaml"), "")
+	}
+	diagnosticAdd(&response, "selection", "cli/host", v1.DoctorDeferred, "no project or machine configuration selected or loaded; default config path is only a candidate, select --scene/--project or --instance for provider diagnostics")
 	add := func(name string, err error, message string) {
-		check := v1.DoctorCheck{Name: name, Status: "ok", Message: message}
+		check := v1.DoctorCheck{Name: name, Status: v1.DoctorOK, Context: "cli/host", Message: message}
 		if err != nil {
 			check.Status = "failed"
 			check.Message = err.Error()
@@ -126,6 +131,6 @@ func Doctor(ctx context.Context, directory string) v1.DoctorResponse {
 		_, err = c.Status(ctx)
 		add("connectivity_api_state", err, "v1 API and supported state format reachable")
 	}
-	response.Checks = append(response.Checks, v1.DoctorCheck{Name: "providers", Status: "deferred", Message: "Docker/Caddy checks are deferred; metadata preparation requires neither"})
+	response.Checks = append(response.Checks, v1.DoctorCheck{Name: "providers", Context: "daemon", Status: "deferred", Message: "Docker/Caddy checks are deferred; metadata preparation requires neither"})
 	return response
 }

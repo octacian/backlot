@@ -1,7 +1,7 @@
 ---
 title: 'Publish daemon-owned portable run reports'
 date: '2026-10-18'
-status: proposed
+status: accepted
 summary: 'Export a fenced settled attempt through the typed daemon API into an audited no-replacement directory with an independently versioned report.'
 tags: [evidence, api, security]
 supersedes: []

@@ -69,7 +69,14 @@ The runner tracks all live CLI clients, rejects new commands after cancellation,
 interrupts acceptance waits and joins clients before exiting in every mode.
 Native terminal results remain separate from the outer and CLI signal exits.
 Queued clients that never launch must have no terminal result or collected
-reports. Before export, each launched report's invocation origin and exact
+reports. The verification harness uses workflow-owned Python 3 (`zipfile`/`json` standard
+libraries) to validate PNG signatures and each trace/network NDJSON record inside
+actual ZIP entries, including compressed entries. The independent consumer repeats
+these application format assertions after cleanup and relocation; generic product
+audit contains no Playwright parsing. Run its positive/negative controls with
+`node --test examples/ci-scenes/reports.test.mjs`.
+
+Before export, each launched report's invocation origin and exact
 argument vector must match that run's retained execution and plan.
 
 ## Trust and isolation

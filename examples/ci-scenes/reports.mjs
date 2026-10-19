@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+
+const exec = promisify(execFile);
 
 // Storage containment alone cannot prove who produced a shared checkout report.
 // Bind the browser invocation to the destination run's retained plan and origin.
@@ -23,12 +28,13 @@ export async function verifyReports(instance, artifact) {
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
   try {
     const report = JSON.parse(await readFile(join(artifact.path, 'reports/playwright.json')));
-    assert.ok(Array.isArray(report.suites) && report.stats && !Array.isArray(report.stats));
+    assert.ok(Array.isArray(report.suites) && report.stats && typeof report.stats === 'object' && !Array.isArray(report.stats));
   } catch (error) {
     // The real held-browser cancellation is allowed to end before Playwright's
     // final reporter writes JSON. Its invocation/holding evidence still binds it
     // to this exact cancelled execution; absence is not a successful test report.
     if (error.code !== 'ENOENT' || !instance.execution.cancelled || !heldBrowser) throw error;
   }
+  await exec('python3', [fileURLToPath(new URL('./report-formats.py', import.meta.url)), artifact.path], { timeout: 30_000 });
   return invocation;
 }

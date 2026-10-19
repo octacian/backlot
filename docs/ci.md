@@ -38,7 +38,9 @@ are example choices, not versions installed by Backlot.
 
 Pin both the action `uses: octacian/backlot/actions/quickrun@<full SHA>` and required
 `backlot-ref: <full lowercase 40-character SHA>`. The former selects action code
-and the archive auditor; the latter independently selects the Backlot executable.
+while the latter independently selects the Backlot executable, which owns public
+export and generic evidence auditing. Both pins must select compatible revisions
+containing the issue #41 public export contract.
 Setup fetches only `https://github.com/octacian/backlot.git`, verifies the source
 commit/module, downloads/verifies Go modules through the public checksum database,
 and builds static Backlot. Stock Caddy **v2.11.6** is installed with `go install`
@@ -46,9 +48,8 @@ and its module identity/version/replacements are verified. No release binary or
 silent fallback is used. [Issue #25](https://github.com/octacian/backlot/issues/25)
 owns release integration, including future helper packaging without Go.
 
-The small auditor is compiled from the **action's own** Go source using standard
-`archive/zip`; the selected Backlot runtime needs no new CLI feature. These native
-actions share modules from the downloaded action repository, so remote sibling
+An older runtime fails with a clear unsupported-export error; there is no
+private-storage fallback or migration framework. These native actions share modules from the downloaded action repository, so remote sibling
 actions work even when the application checkout contains no Backlot files.
 `permissions: {contents: read}` suffices; cache/artifact SDKs use normal job-scoped
 credentials. No OIDC, repository writes or administrator token is needed.

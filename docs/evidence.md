@@ -166,7 +166,9 @@ only complete published evidence.
 `report.json` is the independent `backlot.export/v1` agent contract, defined by
 `api/v1.ExportReport`. It contains bounded run/attempt identity, status, original
 results, creation/completion/export timestamps, project/scene/lifetime, checkout
-identity, available launch Git revision and manifest/config digests. Historical
+identity, available immutable launch Git commit (`source.git_head`) and manifest/config
+digests. Symbolic branch names are not revisions; unborn or unavailable history
+stays unknown. Historical
 facts that were not captured remain absent/unknown. It excludes plans, environment,
 fixture secrets, ownership capabilities, machine configuration and snapshots.
 `complete` and `omissions` describe evidence availability. `evidence` inventories

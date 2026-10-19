@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -39,7 +40,9 @@ func (s *service) export(ctx context.Context, request v1.ExportRequest) (v1.Expo
 		if err := ctx.Err(); err != nil {
 			return response, problem("export_interrupted", "export wait interrupted or deadline exceeded; run was not cancelled")
 		}
-		s.evidence.mu.Lock()
+		if err := lockExportEvidence(ctx, &s.evidence.mu); err != nil {
+			return response, problem("export_interrupted", "export wait interrupted or deadline exceeded; run was not cancelled")
+		}
 		lock := s.mutationLock(request.InstanceID)
 		if lock.TryLock() {
 			instance, err := s.store.inspect(request.InstanceID)
@@ -91,6 +94,27 @@ func (s *service) export(ctx context.Context, request v1.ExportRequest) (v1.Expo
 		case <-ctx.Done():
 			timer.Stop()
 		case <-timer.C:
+		}
+	}
+}
+
+// lockExportEvidence observes the request budget even while another snapshot or
+// retention sweep owns the global fence. The caller keeps the fence through
+// publication, so cancellation does not weaken snapshot/retention exclusion.
+func lockExportEvidence(ctx context.Context, lock *sync.Mutex) error {
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if lock.TryLock() {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
 		}
 	}
 }
@@ -158,6 +182,8 @@ func (s *service) exportSnapshot(ctx context.Context, request v1.ExportRequest, 
 	}
 	if journal.Attempt == e.Attempt && journal.ExportSource != nil {
 		report.Source = *journal.ExportSource
+		// Older journals may contain symbolic HEAD text, which is not a revision.
+		report.Source.GitHead = immutableGitCommit(report.Source.GitHead)
 		report.StartedAt = journal.StartedAt
 	}
 	if e.Outcome != "" {

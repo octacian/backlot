@@ -434,3 +434,200 @@ func TestExportIndefiniteWaitObservesWithoutCancellation(t *testing.T) {
 		t.Fatal("wait cancelled original execution", err)
 	}
 }
+
+func TestExportEvidenceFenceInterruption(t *testing.T) {
+	for _, mode := range []string{"deadline", "cancel", "already-cancelled"} {
+		t.Run(mode, func(t *testing.T) {
+			s, instance, request := exportFixture(t)
+			// An unrelated instance's copy or a retention sweep owns this same global
+			// fence. Keep it held until the request has returned, rather than letting
+			// release accidentally satisfy the interruption assertion.
+			s.evidence.mu.Lock()
+			var release sync.Once
+			unlock := func() { release.Do(s.evidence.mu.Unlock) }
+			t.Cleanup(unlock)
+			before, err := s.store.inspect(instance.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Wait = true
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if mode == "deadline" {
+				request.WaitTimeout = "20ms"
+			}
+			if mode == "already-cancelled" {
+				cancel()
+			}
+			done := make(chan error, 1)
+			go func() { _, err := s.export(ctx, request); done <- err }()
+			if mode == "cancel" {
+				cancel()
+			}
+			select {
+			case err := <-done:
+				code(t, err, "export_interrupted")
+			case <-time.After(time.Second):
+				unlock()
+				<-done
+				t.Fatal("export ignored interruption while evidence fence was owned")
+			}
+			current, err := s.store.inspect(instance.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a, _ := json.Marshal(before)
+			b, _ := json.Marshal(current)
+			if string(a) != string(b) {
+				t.Fatal("interrupted export mutated recorded run")
+			}
+			if _, err := os.Lstat(request.Output); !os.IsNotExist(err) {
+				t.Fatal("interrupted export published", err)
+			}
+			unlock()
+			// A later uncancelled caller can still acquire and publish a full snapshot.
+			if response, err := s.export(context.Background(), request); err != nil || !response.Complete {
+				t.Fatal(response, err)
+			}
+		})
+	}
+}
+
+func TestExportEvidenceFenceWaitsForRetention(t *testing.T) {
+	s, instance, request := exportFixture(t)
+	// A real retention sweep holds the global fence while waiting for its store
+	// update. Keep that writer owned until the export has returned independently.
+	tx, err := s.store.db.Begin(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retention := make(chan error, 1)
+	go func() { retention <- s.pruneEvidence() }()
+	var rollback sync.Once
+	releaseWriter := func() {
+		rollback.Do(func() {
+			if err := tx.Rollback(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	t.Cleanup(func() {
+		releaseWriter()
+		if err := <-retention; err != nil {
+			t.Error(err)
+		}
+	})
+
+	deadline := time.Now().Add(time.Second)
+	for s.evidence.mu.TryLock() {
+		s.evidence.mu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("retention did not acquire evidence fence")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	request.Wait = true
+	request.WaitTimeout = "20ms"
+	done := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _, err := s.export(ctx, request); done <- err }()
+	select {
+	case err := <-done:
+		code(t, err, "export_interrupted")
+	case <-time.After(time.Second):
+		// Release and join on regression rather than leak the blocked export.
+		cancel()
+		releaseWriter()
+		<-done
+		t.Fatal("retention blocked bounded export")
+	}
+	current, err := s.store.inspect(instance.ID)
+	if err != nil || current.Execution.Cancelled || current.Execution.EvidenceExpired {
+		t.Fatal("export changed run", err)
+	}
+}
+
+func TestExportEvidenceFenceWaitsForUnrelatedSnapshot(t *testing.T) {
+	s, instance, request := exportFixture(t)
+	project := shortTemp(t)
+	config := writeFixture(t, project)
+	peer, err := s.prepare(context.Background(), v1.PrepareRequest{APIVersion: v1.Version, Plan: v1.PlanRequest{ProjectPath: project, ConfigPath: config, Scene: "test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := *instance.Execution
+	result.Components = nil // This service-free peer has no log producers.
+	other, err := s.store.execution(peer.Instance.ID, v1.Failed, &result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.ID == instance.ID {
+		t.Fatal("fixture did not create independent instance")
+	}
+	artifact := addExportArtifact(t, s, other)
+	if err := os.WriteFile(filepath.Join(artifact, "report.txt"), []byte("peer evidence"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	other, err = s.store.inspect(other.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Exercise the actual snapshot copy under its required fences. Hold the fence
+	// after copying too, so waiter completion cannot be explained by owner release.
+	lock := s.mutationLock(other.ID)
+	lock.Lock()
+	s.evidence.mu.Lock()
+	var release sync.Once
+	unlock := func() { release.Do(func() { lock.Unlock(); s.evidence.mu.Unlock() }) }
+	t.Cleanup(unlock)
+	copied := request
+	copied.InstanceID = other.ID
+	copied.Output = filepath.Join(t.TempDir(), "peer-bundle")
+	if response, err := s.exportSnapshot(context.Background(), copied, other); err != nil || !response.Published {
+		t.Fatal(response, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := s.export(ctx, request); done <- err }()
+	select {
+	case err := <-done:
+		t.Fatal("export bypassed snapshot fence", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case err := <-done:
+		code(t, err, "export_interrupted")
+	case <-time.After(time.Second):
+		unlock()
+		<-done
+		t.Fatal("snapshot blocked export cancellation")
+	}
+	if current, err := s.store.inspect(instance.ID); err != nil || current.Execution.Cancelled {
+		t.Fatal("export cancelled original", err)
+	}
+	if readExportReport(t, copied.Output).Result.InstanceID != other.ID {
+		t.Fatal("peer snapshot identity lost")
+	}
+}
+
+func TestExportHistoricalSymbolicRevisionStaysUnknown(t *testing.T) {
+	s, instance, request := exportFixture(t)
+	journal, err := s.store.runtime(instance.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal.Attempt = instance.Execution.Attempt
+	journal.ExportSource = &v1.ExportSource{Project: instance.Plan.Project, Scene: instance.Plan.Scene, Lifetime: instance.Plan.Lifetime, CheckoutID: instance.Checkout.ID, GitHead: "ref: refs/heads/main"}
+	if err := s.store.saveRuntime(instance.ID, journal); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.export(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if report := readExportReport(t, request.Output); report.Source.GitHead != "" {
+		t.Fatal("symbolic history claimed as launch revision", report.Source.GitHead)
+	}
+}

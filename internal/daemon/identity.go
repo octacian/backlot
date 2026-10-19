@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -109,4 +111,29 @@ func (original capturedSource) verify() error {
 		return changed()
 	}
 	return nil
+}
+
+// launchGitCommit captures provenance only; neither HEAD nor branch metadata
+// participates in checkout ownership. Git resolves loose/packed refs and linked
+// worktrees. Unborn or unavailable history stays unknown.
+func launchGitCommit(ctx context.Context, checkout v1.CheckoutIdentity) string {
+	if checkout.GitDirectory == "" {
+		return ""
+	}
+	command := exec.CommandContext(ctx, "git", "--git-dir="+checkout.GitDirectory, "rev-parse", "--verify", "HEAD^{commit}")
+	output, err := command.Output()
+	if err != nil {
+		return ""
+	}
+	return immutableGitCommit(strings.TrimSpace(string(output)))
+}
+
+func immutableGitCommit(value string) string {
+	if len(value) != 40 && len(value) != 64 {
+		return ""
+	}
+	if _, err := hex.DecodeString(value); err != nil {
+		return ""
+	}
+	return value
 }

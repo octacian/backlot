@@ -27,11 +27,26 @@ func TestExportNativeFlow(t *testing.T) {
 	job.Artifacts = map[string]v1.ArtifactSource{"report": {Path: "evidence/report.txt"}}
 	h.manifest.Components["job"] = job
 	h.write()
+	git(t, h.project, "init", "-q", "-b", "main")
+	git(t, h.project, "add", ".")
+	git(t, h.project, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Launch source")
+	checkout, err := identify(h.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launchCommit := launchGitCommit(context.Background(), checkout)
+	if len(launchCommit) != 40 {
+		t.Fatal("missing normal-branch launch commit", launchCommit)
+	}
 	started, err := h.cli.Run(context.Background(), h.request("test"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	instance := h.state(started.Instance.ID, v1.Failed).Instance
+	git(t, h.project, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "Move branch after launch")
+	if current := launchGitCommit(context.Background(), checkout); current == launchCommit {
+		t.Fatal("branch did not move")
+	}
 	destination := filepath.Join(t.TempDir(), "bundle")
 	command := exec.Command(binary, "export", instance.ID, "--output", destination, "--wait", "--state-dir", h.dir, "--json")
 	output, err := command.CombinedOutput()
@@ -59,6 +74,14 @@ func TestExportNativeFlow(t *testing.T) {
 	if _, err := h.cli.Destroy(context.Background(), instance.ID); err != nil {
 		t.Fatal(err)
 	}
+	h.close()
+	if err := os.RemoveAll(h.dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(h.project); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("owned runtime and source removed before relocation: %s %s", h.dir, h.project)
 	relocated := filepath.Join(t.TempDir(), "moved")
 	if err := os.Rename(destination, relocated); err != nil {
 		t.Fatal(err)
@@ -70,6 +93,9 @@ func TestExportNativeFlow(t *testing.T) {
 	var report v1.ExportReport
 	if err := json.Unmarshal(data, &report); err != nil {
 		t.Fatal(err)
+	}
+	if report.Source.GitHead != launchCommit {
+		t.Fatalf("launch provenance changed after branch movement/relocation: %q want %q", report.Source.GitHead, launchCommit)
 	}
 	for _, file := range report.Evidence {
 		if !filepath.IsLocal(file.Path) {

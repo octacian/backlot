@@ -267,7 +267,11 @@ intentional agent report, script-free local HTML, strict/explicit partial eviden
 optional indefinite/bounded observation and atomic no-replacement publication.
 Actions run/quickrun and the existing scenes collector consume the public export
 contract. Generic evidence safety is product logic; application format validation
-remains in the application fixture. See [export semantics](evidence.md#portable-per-instance-export).
+remains in the application fixture, including PNG signatures and ZIP-contained
+trace/network NDJSON assertions. Launch provenance captures an immutable Git commit
+when available, independent of checkout ownership. Export fence acquisition
+observes cancellation and bounded waits even during another snapshot or retention.
+See [export semantics](evidence.md#portable-per-instance-export).
 
 The early real Ubuntu ci-scenes success/failure/recovery, teardown/relocation and
 browser preview precede broader feature regression development. Independent Low

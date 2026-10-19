@@ -37,6 +37,8 @@ type ComponentResult struct {
 
 // ExecutionResult is the durable redacted runtime view.
 type ExecutionResult struct {
+	// Outcome preserves the terminal execution status across later stop/destroy operations.
+	Outcome          InstanceStatus  `json:"outcome,omitempty"`
 	Fixtures         []FixtureRecord `json:"fixtures,omitempty"`
 	TerminalExitCode *int            `json:"terminal_exit_code,omitempty"`
 	Kept             bool            `json:"kept,omitempty"`

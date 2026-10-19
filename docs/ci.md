@@ -38,7 +38,9 @@ are example choices, not versions installed by Backlot.
 
 Pin both the action `uses: octacian/backlot/actions/quickrun@<full SHA>` and required
 `backlot-ref: <full lowercase 40-character SHA>`. The former selects action code
-and the archive auditor; the latter independently selects the Backlot executable.
+while the latter independently selects the Backlot executable, which owns public
+export and generic evidence auditing. Both pins must select compatible revisions
+containing the issue #41 public export contract.
 Setup fetches only `https://github.com/octacian/backlot.git`, verifies the source
 commit/module, downloads/verifies Go modules through the public checksum database,
 and builds static Backlot. Stock Caddy **v2.11.6** is installed with `go install`
@@ -46,9 +48,8 @@ and its module identity/version/replacements are verified. No release binary or
 silent fallback is used. [Issue #25](https://github.com/octacian/backlot/issues/25)
 owns release integration, including future helper packaging without Go.
 
-The small auditor is compiled from the **action's own** Go source using standard
-`archive/zip`; the selected Backlot runtime needs no new CLI feature. These native
-actions share modules from the downloaded action repository, so remote sibling
+An older runtime fails with a clear unsupported-export error; there is no
+private-storage fallback or migration framework. These native actions share modules from the downloaded action repository, so remote sibling
 actions work even when the application checkout contains no Backlot files.
 `permissions: {contents: read}` suffices; cache/artifact SDKs use normal job-scoped
 credentials. No OIDC, repository writes or administrator token is needed.
@@ -84,7 +85,7 @@ that private cleanup immediately before returning, with a native post fallback.
 Do not use independent daemons against the same writable checkout.
 
 Setup exports `BACKLOT_BINARY`, `BACKLOT_CONFIG`, `BACKLOT_STATE_DIR`,
-`BACKLOT_SETUP_HELPER`, `BACKLOT_AUDIT_BINARY` and a private ownership capability
+`BACKLOT_SETUP_HELPER` and a private ownership capability
 `BACKLOT_SETUP_OWNER`. Never print/upload that capability or private state.
 Its mode-0700 `/tmp/bl-ci-*` root contains downloads, authenticated sockets and CA
 keys. Ownership is registered for post cleanup before downloads or daemon startup;
@@ -113,6 +114,7 @@ root are removed. For your own uploader later in the **same job**:
     name: application-evidence
     path: ${{ steps.tests.outputs.evidence-path }}
     if-no-files-found: error
+    include-hidden-files: true
 ```
 
 `evidence-available` becomes `true` only after full audit and publication;
@@ -121,12 +123,17 @@ root are removed. For your own uploader later in the **same job**:
 Known runtime collection failures, expired evidence and native log-gap diagnostics
 prevent publication and upload, while successfully collected evidence remains
 available after an assertion failure or clean cancellation.
-It allowlists result fields, application logs and declared retained artifacts.
-The Go audit rejects filesystem/archive links, special files, private-key names
-and PEM keys, traversal, malformed/over-deep ZIPs (including uppercase/nested ZIPs),
-invalid trace/NDJSON/Playwright JSON and PNG headers. Daemon snapshots, internal
-capabilities, gateway state and browser NSS databases are excluded. Applications
-still own secret discipline in their logs/reports.
+Run calls `backlot export INSTANCE --output NEW_DIRECTORY --wait=45s --json`.
+The daemon owns report construction, completeness, safety audit and publication;
+the action handles upload, outputs, signals and authenticated cleanup. The bundle
+contains `report.json` (`backlot.export/v1`), `index.html`, logs and copied retained
+artifacts; see [the portable contract](evidence.md#portable-per-instance-export).
+Application-format assertions live in the scenes fixture.
+
+Pin `backlot-ref` to a full reviewed revision containing issue #41 public export,
+and select an action revision using that contract. An older runtime fails with
+an actionable unsupported-export error; there is no fallback to private storage.
+Release binaries/version tags remain tracked separately in #25.
 
 Outputs keep the original `cli-exit-code`, `cli-signal`, `wrapper-signal`,
 `terminal-exit-code`, `status`, `cancelled` and `instance-id` separate from
@@ -142,7 +149,9 @@ setup post hook rather than discovering/destroying other invocations.
 Use `always()` and the availability output for custom upload after failure or
 cancellation. Runner hard termination can interrupt collection; native post remains
 a bounded private-cleanup fallback. A destroyed VM cannot promise outputs, post
-execution or upload. Exports last only for that job unless uploaded.
+execution or upload. Exports last only for that job unless uploaded. Preserve audited hidden files when
+uploading a bundle (`include-hidden-files: true` with upload-artifact); otherwise
+the uploaded directory may no longer match its report inventory.
 
 ## Trust and troubleshooting
 

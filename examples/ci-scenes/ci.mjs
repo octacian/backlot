@@ -1,11 +1,11 @@
 // Runner-owned bootstrap and evidence export; lifecycle remains in Backlot.
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdir, writeFile, readFile, rm, rename } from 'node:fs/promises';
-import { join, resolve, relative, isAbsolute } from 'node:path';
+import { mkdir, readFile, rm } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyReports } from './reports.mjs';
-import { safeCopy as copyEvidence } from '../../actions/setup/evidence.mjs';
+import { copyFile } from 'node:fs/promises';
 import { cleanup, listInstances } from '../../actions/setup/runtime.mjs';
 
 const project = fileURLToPath(new URL('.', import.meta.url));
@@ -18,7 +18,7 @@ const children = new Set();
 const pending = new Set();
 const cancellation = new AbortController();
 function checkpoint() { cancellation.signal.throwIfAborted(); }
-const safeCopy = (source, destination) => copyEvidence(source, destination, checkpoint);
+
 let interrupted = 0;
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   process.on(signal, () => {
@@ -107,39 +107,18 @@ try {
       const { acceptance } = await import('./acceptance.mjs');
       await acceptance({ root, project, state: state(), cli, inspect, instances, run, signal: cancellation.signal });
     } else if (mode === 'collect') {
-      const staging = join(root, 'export-staging');
-      await mkdir(staging);
+      // This example consumes the public export contract, never retained paths.
+      await mkdir(output);
       for (const item of await instances()) {
         const instance = await inspect(item.id);
-        const destination = join(staging, instance.id);
-        await mkdir(destination, { recursive: true });
-        const e = instance.execution;
-        // Deliberate allowlist excludes API capabilities and internal snapshots.
-        await writeFile(join(destination, 'result.json'), JSON.stringify({ id: instance.id, status: instance.status,
-          checkout: instance.checkout.id, origin: e?.origin, ports: e?.ports, terminal_exit_code: e?.terminal_exit_code,
-          cancelled: e?.cancelled ?? false, failure: e?.failure, collection_failure: e?.collection_failure,
-          cleanup_failure: e?.cleanup_failure }, null, 2));
-        const logs = await cli('logs', instance.id);
-        await writeFile(join(destination, 'logs.ndjson'), logs.stdout);
-        for (const artifact of e?.artifacts ?? []) {
-          assert.equal(artifact.name, 'reports');
-          const rel = relative(join(state(), 'artifacts'), artifact.path);
-          assert.ok(rel && !rel.startsWith('..') && !isAbsolute(rel));
-          await verifyReports(instance, artifact);
-          await safeCopy(artifact.path, join(destination, 'artifacts'));
-        }
+        if (!instance.execution) continue; // A queued cancellation never executed.
+        await command(['export', item.id, '--output', join(output, item.id), '--wait=45s', '--state-dir', state(), '--json']);
       }
-      try { await safeCopy(join(root, 'acceptance.json'), join(staging, 'acceptance.json')); }
-      catch (error) { if (error.code !== 'ENOENT') throw error; }
-      try { await safeCopy(join(root, 'outer-cancellation.json'), join(staging, 'outer-cancellation.json')); }
-      catch (error) { if (error.code !== 'ENOENT') throw error; }
-      // Check exported text/logs too. Never copy daemon/gateway state or logs wholesale.
-      await safeCopy(staging, join(root, 'export-audit'));
-      checkpoint();
-      execFileSync(process.env.BACKLOT_AUDIT_BINARY, [join(root, 'export-audit')], { stdio: 'inherit' });
-      await rename(join(root, 'export-audit'), output);
-      await rm(staging, { recursive: true });
-      console.log('Collected allowlisted results, application logs and Playwright reports before runner teardown');
+      for (const name of ['acceptance.json', 'outer-cancellation.json']) {
+        try { await copyFile(join(root, name), join(output, name)); }
+        catch (error) { if (error.code !== 'ENOENT') throw error; }
+      }
+      console.log('Collected public portable reports before authenticated teardown');
     } else if (mode === 'cleanup') {
       await cleanup(JSON.parse(process.env.BACKLOT_SETUP_OWNER), async () => {
         // Only this runner-created, recorded worktree may be removed.

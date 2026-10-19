@@ -78,8 +78,8 @@ func validateExecution(instance v1.Instance) error {
 	if result == nil {
 		return nil
 	}
-	if result.TerminalExitCode != nil && (*result.TerminalExitCode < -1 || *result.TerminalExitCode > 255) {
-		return responseError()
+	if err := validateOutcome(instance.Status, result.TerminalExitCode, result.Cancelled, result.Failure, result.CollectionFailure, result.CleanupFailure, result.Components); err != nil {
+		return err
 	}
 	for _, timestamp := range []string{result.CompletedAt, result.EvidenceObservedAt} {
 		if timestamp != "" {
@@ -105,29 +105,12 @@ func validateExecution(instance v1.Instance) error {
 			return responseError()
 		}
 	}
-	seen := map[string]bool{}
-	for _, component := range result.Components {
-		if component.Name == "" || seen[component.Name] {
-			return responseError()
-		}
-		seen[component.Name] = true
-		switch component.Status {
-		case "starting", "running", "ready", "completed", "stopped", "unknown", "skipped":
-		default:
-			return responseError()
-		}
-		if component.ExitCode != nil && (*component.ExitCode < -1 || *component.ExitCode > 255) {
-			return responseError()
-		}
-	}
 	for _, port := range result.Ports {
 		if port < 1 || port > 65535 {
 			return responseError()
 		}
 	}
-	if instance.Status == v1.Succeeded && (result.Cancelled || result.Failure != "" || result.CleanupFailure != "" || result.CollectionFailure != "") {
-		return responseError()
-	}
+
 	return nil
 }
 
@@ -145,4 +128,42 @@ func validateOrigin(id, originText string) error {
 		}
 	}
 	return nil
+}
+
+// validateOutcome keeps portable results and runtime responses on the same named
+// component/exit contract. Failed and cancelled outcomes retain original exits.
+func validateOutcome(status v1.InstanceStatus, exit *int, cancelled bool, failure, collection, cleanup string, components []v1.ComponentResult) error {
+	if exit != nil && (*exit < -1 || *exit > 255) {
+		return responseError()
+	}
+	seen := map[string]bool{}
+	for _, component := range components {
+		if component.Name == "" || seen[component.Name] {
+			return responseError()
+		}
+		seen[component.Name] = true
+		switch component.Status {
+		case "starting", "running", "ready", "completed", "stopped", "unknown", "skipped":
+		default:
+			return responseError()
+		}
+		if component.ExitCode != nil && (*component.ExitCode < -1 || *component.ExitCode > 255) {
+			return responseError()
+		}
+	}
+	if status == v1.Succeeded {
+		if cancelled || failure != "" || collection != "" || cleanup != "" || exit != nil && *exit != 0 {
+			return responseError()
+		}
+	}
+	return nil
+}
+
+func validateExportResult(result v1.ExportResult) error {
+	switch result.Status {
+	case v1.Cancelled, v1.Interrupted, v1.Stopped, v1.Destroyed, v1.Succeeded, v1.Failed:
+	default:
+		return responseError()
+	}
+	return validateOutcome(result.Status, result.TerminalExitCode, result.Cancelled, result.Failure, result.CollectionFailure, result.CleanupFailure, result.Components)
 }

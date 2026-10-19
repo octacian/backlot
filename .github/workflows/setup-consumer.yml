@@ -32,7 +32,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/fixture-source" "$GITHUB_WORKSPACE/application"
           gh api "repos/octacian/backlot/tarball/$FIXTURE_REF" | tar xz --strip-components=1 -C "$RUNNER_TEMP/fixture-source"
           src="$RUNNER_TEMP/fixture-source/examples/ci-scenes"
-          cp "$src/"{app.mjs,build.mjs,backlot.yaml,scene.mjs,playwright.config.mjs,package.json,package-lock.json} "$GITHUB_WORKSPACE/application/"
+          cp "$src/"{app.mjs,build.mjs,backlot.yaml,scene.mjs,playwright.config.mjs,package.json,package-lock.json,report-formats.py} "$GITHUB_WORKSPACE/application/"
           cp -R "$src/tests" "$GITHUB_WORKSPACE/application/tests"
           if [ "$MODE" != success ]; then
             cp "$src/failure.config.mjs" "$GITHUB_WORKSPACE/application/"
@@ -59,7 +59,7 @@ jobs:
         working-directory: application
         run: |
           sudo apt-get update
-          sudo apt-get install -y libnss3-tools
+          sudo apt-get install -y libnss3-tools python3
           npm ci --ignore-scripts --no-audit --no-fund
           npx --no-install playwright install --with-deps chromium
       - name: Select exact terminal argument array
@@ -70,10 +70,10 @@ jobs:
           if [ "$MODE" = cancel ]; then args='["--config=failure.config.mjs","hold.spec.mjs"]'; fi
           echo "value=$args" >> "$GITHUB_OUTPUT"
       - name: Run independent application with private lifecycle
-        uses: octacian/backlot/actions/quickrun@1b42fc840fb4178385dbbc9beb4b849e632eb2eb
+        uses: octacian/backlot/actions/quickrun@91af51b460401c174120aeb9e003cde3e6a8aea3
         id: backlot
         with:
-          backlot-ref: f2490060cd2562dce0d3ea32f465beae8849e8ac
+          backlot-ref: 91af51b460401c174120aeb9e003cde3e6a8aea3
           project: application
           scene: browser
           args: ${{ steps.args.outputs.value }}
@@ -84,13 +84,37 @@ jobs:
         env:
           EVIDENCE: ${{ steps.backlot.outputs.evidence-path }}
         run: |
-          node -e 'const fs=require("fs"); const {root}=JSON.parse(process.env.BACKLOT_SETUP_OWNER); if(fs.existsSync(root)) throw Error("private root remains"); if(!fs.readdirSync(process.env.EVIDENCE).length) throw Error("missing exported evidence"); console.log("audited evidence readable after private cleanup")'
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import crypto from 'node:crypto';
+          import {execFileSync} from 'node:child_process';
+          const {root}=JSON.parse(process.env.BACKLOT_SETUP_OWNER);
+          if(fs.existsSync(root)) throw Error('private root remains');
+          const moved=process.env.EVIDENCE+'-relocated';
+          fs.renameSync(process.env.EVIDENCE,moved);
+          const report=JSON.parse(fs.readFileSync(path.join(moved,'report.json')));
+          if(report.schema_version!=='backlot.export/v1'||!report.complete) throw Error('unsupported or incomplete agent report');
+          for(const file of report.evidence){
+            const target=path.resolve(moved,file.path);
+            if(path.isAbsolute(file.path)||!target.startsWith(moved+path.sep)) throw Error('unsafe inventory path');
+            const bytes=fs.readFileSync(target);
+            if(bytes.length!==file.bytes||crypto.createHash('sha256').update(bytes).digest('hex')!==file.sha256) throw Error('retained file mismatch');
+          }
+          execFileSync('python3',['application/report-formats.py',moved],{stdio:'inherit',timeout:30000});
+          const launchCommit=execFileSync('git',['-C','application','rev-parse','HEAD'],{encoding:'utf8'}).trim();
+          if(report.source.git_head!==launchCommit) throw Error('launch commit missing or changed');
+          if(!fs.readFileSync(path.join(moved,'index.html'),'utf8').includes('Backlot')) throw Error('missing HTML summary');
+          fs.appendFileSync(process.env.GITHUB_ENV,`BACKLOT_CONSUMER_EVIDENCE=${moved}\n`);
+          console.log(JSON.stringify({checkpoint:'independent JSON consumer after cleanup and relocation',schema:report.schema_version,result:report.result,files:report.evidence.length}));
+          NODE
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always() && matrix.shard == 2 && steps.backlot.outputs.evidence-available == 'true'
         with:
           name: custom-consumer-${{ matrix.shard }}-${{ env.MODE }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ steps.backlot.outputs.evidence-path }}
+          path: ${{ env.BACKLOT_CONSUMER_EVIDENCE }}
           if-no-files-found: error
+          include-hidden-files: true
       - name: Record original and wrapper results
         if: always()
         env:

@@ -235,6 +235,25 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				return
 			}
 			writeJSON(w, response)
+		case "/v1/export":
+			var request v1.ExportRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.export(r.Context(), request)
+			if err != nil {
+				if response.Result.InstanceID == "" {
+					writeError(w, err)
+					return
+				}
+				detail := &v1.PlanError{Code: "export_failed", Message: "export failed; no bundle was published"}
+				var typed *v1.PlanError
+				if errors.As(err, &typed) {
+					detail = typed
+				}
+				response.Error = detail
+			}
+			writeJSON(w, response)
 		case "/v1/doctor":
 			var request v1.DoctorRequest
 			if !decode(w, r, &request) {

@@ -84,6 +84,22 @@ manifest-drift handling. Test simultaneous runs/worktrees, partial provisioning,
 initialization failures, interrupted cleanup, output concurrency groups, and
 preservation of unrelated resources. Never introduce SQL-aware provisioning here.
 
+### Foreign bind cleanup policy
+
+Implemented for independent review: authenticated directory ownership permits
+cleanup despite unknown foreign bind identities by default. Positive overlaps
+through any viable raw or verified Desktop identity still block deletion, and
+ordinary project mounts/private-state validation remains strict. See the
+[policy decision](adr/20261019T023642577Z-authorize-owned-directory-cleanup-despite-unknown-foreign-binds.md)
+and [runtime risk and diagnostics](containers.md#ownership-and-recovery).
+
+The early owned Docker stale declaration/native directory job checkpoint precedes
+broader regression expansion. Focused unit/provider coverage exercises unknown
+classification, independent candidates, known consumers, disposable exits, empty
+reset generations, exact-ID retries and ownership/path preservation. Independent
+Low/High reviews, frozen complete provider gates, actual supported Linux host
+validation and exact published-revision CI remain required before readiness.
+
 ## 5. Published HTTPS and mixed execution
 
 Implemented for independent review: configured existing Caddy JSON subroute

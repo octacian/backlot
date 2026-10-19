@@ -148,8 +148,9 @@ exports remove their staging directory and never replace the destination.
 
 Without `--wait`, active execution is rejected. Bare `--wait` observes indefinitely;
 `--wait=45`, `--wait=45s` and `--wait=2m` set positive bounds. Interrupting export
-does not cancel the run. All evidence producers must settle, including services
-kept for investigation; explicitly stop/destroy them before exporting. Unknown IDs
+does not cancel the run. SIGINT/SIGTERM, caller cancellation and wait deadlines
+report `export_interrupted`, independently of daemon availability. All evidence
+producers must settle, including services kept for investigation; explicitly stop/destroy them before exporting. Unknown IDs
 and instances with no execution are errors. Export selects one latest attempt,
 identified in both outputs; it never merges evidence from earlier restarts.
 
@@ -197,7 +198,8 @@ private-key filenames and PEM private keys, unsafe ZIP paths, malformed ZIPs and
 over-deep nested ZIPs (case-insensitive). Unsupported compressed/archive formats
 are rejected. Safety bounds are 128 MiB per file or expanded archive entry,
 512 MiB cumulative audited bytes (including expanded entries), and 10000 files/
-entries; these fail export explicitly rather than truncate copied evidence. Application format assertions belong in
-application tests; Backlot does not parse framework reports or invent missing ones.
+entries (including every ZIP directory header, shared across nested and sibling
+archives); these fail export explicitly rather than truncate copied evidence.
+Application format assertions belong in application tests; Backlot does not parse framework reports or invent missing ones.
 Applications remain responsible for credentials printed into logs or artifacts.
 The same-user administrative socket remains the authorization boundary.

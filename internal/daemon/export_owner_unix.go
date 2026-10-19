@@ -19,3 +19,11 @@ func exportFileLinked(info os.FileInfo) bool {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	return !ok || stat.Nlink != 1
 }
+
+func exportLogOwned(info os.FileInfo) bool {
+	if info == nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || exportFileLinked(info) {
+		return false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && stat.Uid == uint32(os.Getuid())
+}

@@ -631,3 +631,57 @@ func TestExportHistoricalSymbolicRevisionStaysUnknown(t *testing.T) {
 		t.Fatal("symbolic history claimed as launch revision", report.Source.GitHead)
 	}
 }
+
+func TestExportRejectsUnsafeLogSources(t *testing.T) {
+	for _, mode := range []string{"hardlink", "other-log-hardlink", "corrupt-before-hardlink", "file-link", "directory-link", "public-mode"} {
+		t.Run(mode, func(t *testing.T) {
+			s, instance, request := exportFixture(t)
+			log := filepath.Join(s.directory, "logs", instance.ID+"-output.ndjson")
+			switch mode {
+			case "corrupt-before-hardlink":
+				if err := os.WriteFile(filepath.Join(s.directory, "logs", instance.ID+"-aaa.ndjson"), []byte("corrupt\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Link(log, filepath.Join(t.TempDir(), "alias.ndjson")); err != nil {
+					t.Fatal(err)
+				}
+			case "hardlink", "other-log-hardlink":
+				alias := filepath.Join(t.TempDir(), "alias.ndjson")
+				if mode == "other-log-hardlink" {
+					alias = filepath.Join(s.directory, "logs", instance.ID+"-other.ndjson")
+				}
+				if err := os.Link(log, alias); err != nil {
+					t.Fatal(err)
+				}
+			case "file-link":
+				if err := os.Remove(log); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), log); err != nil {
+					t.Fatal(err)
+				}
+			case "directory-link":
+				if err := os.RemoveAll(filepath.Dir(log)); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(t.TempDir(), filepath.Dir(log)); err != nil {
+					t.Fatal(err)
+				}
+			case "public-mode":
+				if err := os.Chmod(log, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, partial := range []bool{false, true} {
+				request.AllowPartial = partial
+				response, err := s.export(context.Background(), request)
+				if err == nil || response.Published {
+					t.Fatalf("unsafe log accepted (partial=%t): %+v %v", partial, response, err)
+				}
+				if _, err := os.Lstat(request.Output); !os.IsNotExist(err) {
+					t.Fatal("unsafe log published", err)
+				}
+			}
+		})
+	}
+}

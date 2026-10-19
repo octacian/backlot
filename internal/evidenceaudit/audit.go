@@ -71,6 +71,10 @@ func checkBudget(name string, data []byte, depth int, limit *budget) error {
 				return fmt.Errorf("unsafe archive entry type: %s", item.Name)
 			}
 			if item.FileInfo().IsDir() {
+				// Directories consume headers and traversal work even without payloads.
+				if err := checkBudget(item.Name, nil, depth+1, limit); err != nil {
+					return err
+				}
 				continue
 			}
 			reader, err := item.Open()

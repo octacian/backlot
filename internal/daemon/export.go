@@ -38,10 +38,10 @@ func (s *service) export(ctx context.Context, request v1.ExportRequest) (v1.Expo
 	}
 	for {
 		if err := ctx.Err(); err != nil {
-			return response, problem("export_interrupted", "export wait interrupted or deadline exceeded; run was not cancelled")
+			return response, exportInterruption(err)
 		}
 		if err := lockExportEvidence(ctx, &s.evidence.mu); err != nil {
-			return response, problem("export_interrupted", "export wait interrupted or deadline exceeded; run was not cancelled")
+			return response, exportInterruption(err)
 		}
 		lock := s.mutationLock(request.InstanceID)
 		if lock.TryLock() {
@@ -73,6 +73,9 @@ func (s *service) export(ctx context.Context, request v1.ExportRequest) (v1.Expo
 			// Partial mode cannot turn live evidence into a settled snapshot.
 			if settled {
 				response, err = s.exportSnapshot(ctx, request, instance)
+				if err != nil && ctx.Err() != nil {
+					err = exportInterruption(ctx.Err())
+				}
 				lock.Unlock()
 				s.evidence.mu.Unlock()
 				return response, err
@@ -215,7 +218,7 @@ func (s *service) exportSnapshot(ctx context.Context, request v1.ExportRequest, 
 			}
 		}
 		// Logs are parsed using the same validation/gap semantics as the public log API.
-		if err := s.exportLogs(ctx, stage, instance, request.AllowPartial, omit); err != nil {
+		if err := s.exportLogs(ctx, source, stage, instance, request.AllowPartial, omit); err != nil {
 			return response, err
 		}
 		if err := inventoryExport(stage, "logs.ndjson", "logs", "", "", &report); err != nil {
@@ -279,7 +282,7 @@ func (s *service) exportSnapshot(ctx context.Context, request v1.ExportRequest, 
 		return response, problem("export_unsafe", "evidence safety audit failed: "+err.Error())
 	}
 	if err := ctx.Err(); err != nil {
-		return response, problem("export_interrupted", "export interrupted before publication; run was not cancelled")
+		return response, exportInterruption(err)
 	}
 	if err := publishExport(int(dir.Fd()), staging, name); err != nil {
 		return response, problem("export_publish", "atomic publication failed; destination was not replaced")
@@ -410,7 +413,7 @@ func (r exportReader) Read(data []byte) (int, error) {
 	return r.input.Read(data)
 }
 
-func (s *service) exportLogs(ctx context.Context, stage *os.Root, instance v1.Instance, allowPartial bool, omit func(string)) error {
+func (s *service) exportLogs(ctx context.Context, source, stage *os.Root, instance v1.Instance, allowPartial bool, omit func(string)) error {
 	file, err := stage.OpenFile("logs.ndjson", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
@@ -422,7 +425,7 @@ func (s *service) exportLogs(ctx context.Context, stage *os.Root, instance v1.In
 			_ = file.Close()
 			return err
 		}
-		page, err := s.logsLocked(v1.LogsRequest{InstanceID: instance.ID, Offset: offset})
+		page, err := s.logsSourceLocked(v1.LogsRequest{InstanceID: instance.ID, Offset: offset}, source)
 		if err != nil {
 			var detail *v1.PlanError
 			if allowPartial && errors.As(err, &detail) && detail.Code == "collection_failed" {
@@ -453,4 +456,11 @@ func (s *service) exportLogs(ctx context.Context, stage *os.Root, instance v1.In
 		offset = page.NextOffset
 	}
 	return file.Close()
+}
+
+func exportInterruption(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return problem("export_interrupted", "export deadline exceeded; run was not cancelled")
+	}
+	return problem("export_interrupted", "export interrupted by caller; run was not cancelled")
 }

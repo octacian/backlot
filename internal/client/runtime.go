@@ -98,20 +98,36 @@ func validateFixtures(response v1.FixturesResponse, request v1.FixturesRequest, 
 func (c *Client) Export(ctx context.Context, request v1.ExportRequest) (v1.ExportResponse, error) {
 	var response v1.ExportResponse
 	err := c.call(ctx, http.MethodPost, "/v1/export", request, &response)
-	if err == nil {
-		if response.APIVersion != v1.Version || response.Result.InstanceID != request.InstanceID || !validID(response.Result.Attempt) {
-			return response, responseError()
+	if err != nil {
+		if ctx.Err() != nil {
+			return v1.ExportResponse{}, exportContextError(ctx.Err())
 		}
-		if response.Published {
-			if response.Error != nil || !filepath.IsAbs(response.Output) || response.Report != "report.json" || response.HTML != "index.html" {
-				return response, responseError()
-			}
-		} else if response.Error == nil || response.Error.Code == "" || response.Error.Message == "" || response.Output != "" || response.Report != "" || response.HTML != "" || response.Complete {
-			return response, responseError()
-		}
-		if response.Error != nil {
-			err = response.Error
-		}
+		return v1.ExportResponse{}, err
 	}
-	return response, err
+	// Never expose rejected wire fields as a usable publication. Valid failed
+	// publications below still retain their independently validated run result.
+	if response.APIVersion != v1.Version || response.Result.InstanceID != request.InstanceID || !validID(response.Result.Attempt) {
+		return v1.ExportResponse{}, responseError()
+	}
+	if err := validateExportResult(response.Result); err != nil {
+		return v1.ExportResponse{}, err
+	}
+	if response.Published {
+		if !response.Complete && !request.AllowPartial || response.Error != nil || !filepath.IsAbs(response.Output) || response.Report != "report.json" || response.HTML != "index.html" {
+			return v1.ExportResponse{}, responseError()
+		}
+	} else if response.Error == nil || response.Error.Code == "" || response.Error.Message == "" || response.Output != "" || response.Report != "" || response.HTML != "" || response.Complete {
+		return v1.ExportResponse{}, responseError()
+	}
+	if response.Error != nil {
+		return response, response.Error
+	}
+	return response, nil
+}
+
+func exportContextError(err error) error {
+	if err == context.DeadlineExceeded {
+		return &v1.PlanError{Code: "export_interrupted", Message: "export deadline exceeded; run was not cancelled"}
+	}
+	return &v1.PlanError{Code: "export_interrupted", Message: "export interrupted by caller; run was not cancelled"}
 }

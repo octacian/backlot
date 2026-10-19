@@ -6,6 +6,7 @@ import (
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/localipc"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -18,6 +19,12 @@ func (s *service) logs(request v1.LogsRequest) (v1.LogsResponse, error) {
 
 // logsLocked requires evidence.mu, also held by portable snapshot collection.
 func (s *service) logsLocked(request v1.LogsRequest) (v1.LogsResponse, error) {
+	return s.logsSourceLocked(request, nil)
+}
+
+// logsSourceLocked additionally fences export reads to the private state root and
+// rejects unsafe sources before decoding can turn them into copied records.
+func (s *service) logsSourceLocked(request v1.LogsRequest, source *os.Root) (v1.LogsResponse, error) {
 	response := v1.LogsResponse{APIVersion: v1.Version, Records: []v1.LogRecord{}, NextOffset: request.Offset}
 	if !validID(request.InstanceID) || request.Offset < 0 {
 		return response, problem("invalid_request", "recorded instance_id and nonnegative log offset required")
@@ -36,6 +43,11 @@ func (s *service) logsLocked(request v1.LogsRequest) (v1.LogsResponse, error) {
 		response.Active = response.Active || instance.Execution.Kept || instance.Execution.CleanupFailure != ""
 	}
 	logDir := filepath.Join(s.directory, "logs")
+	if source != nil {
+		if err := exportSourcePath(source, "logs"); err != nil && !os.IsNotExist(err) {
+			return response, err
+		}
+	}
 	if _, err := os.Lstat(logDir); os.IsNotExist(err) {
 		return response, nil
 	} else if err != nil {
@@ -45,6 +57,28 @@ func (s *service) logsLocked(request v1.LogsRequest) (v1.LogsResponse, error) {
 		return response, err
 	}
 	paths, err := filepath.Glob(filepath.Join(logDir, request.InstanceID+"-*.ndjson"))
+	if source != nil {
+		// Preflight every selected source before decoding any records. A corrupt
+		// early page in partial mode must not hide a later unsafe source.
+		var names []string
+		names, err = fs.Glob(source.FS(), "logs/"+request.InstanceID+"-*.ndjson")
+		paths = nil
+		if err == nil {
+			for _, name := range names {
+				if err := exportSourcePath(source, name); err != nil {
+					return response, err
+				}
+				info, err := source.Lstat(name)
+				if err != nil {
+					return response, err
+				}
+				if !exportLogOwned(info) {
+					return response, problem("export_unsafe", "retained log source must be private, owned, regular and single-linked")
+				}
+				paths = append(paths, filepath.Join(s.directory, name))
+			}
+		}
+	}
 	if err != nil {
 		return response, err
 	}
@@ -54,7 +88,30 @@ func (s *service) logsLocked(request v1.LogsRequest) (v1.LogsResponse, error) {
 		if err := localipc.File(path, false); err != nil {
 			return response, err
 		}
-		file, err := os.Open(path)
+		var file *os.File
+		if source != nil {
+			name := filepath.Join("logs", filepath.Base(path))
+			if err := exportSourcePath(source, name); err != nil {
+				return response, err
+			}
+			info, err := source.Lstat(name)
+			if err != nil {
+				return response, err
+			}
+			if !exportLogOwned(info) {
+				return response, problem("export_unsafe", "retained log source must be private, owned, regular and single-linked")
+			}
+			file, err = source.Open(name)
+			if err == nil {
+				info, statErr := file.Stat()
+				if statErr != nil || !exportLogOwned(info) {
+					_ = file.Close()
+					return response, problem("export_unsafe", "opened retained log source is unsafe")
+				}
+			}
+		} else {
+			file, err = os.Open(path)
+		}
 		if err != nil {
 			return response, err
 		}

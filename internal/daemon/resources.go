@@ -353,8 +353,14 @@ func verifyResource(ctx context.Context, d *dockerEngine, r ownedResource) error
 }
 func (s *store) removeResources(ctx context.Context, id string) error {
 	g, err := s.resources(id)
-	if err != nil || g.ID == "" {
+	if err != nil {
 		return err
+	}
+	if err = s.markSharedRelease(ctx, id); err != nil {
+		return err
+	}
+	if g.ID == "" {
+		return s.releaseSharedAllocations(ctx, id)
 	}
 	var d *dockerEngine
 	needsEngine := false
@@ -424,6 +430,11 @@ func (s *store) removeResources(ctx context.Context, id string) error {
 	return s.saveResources(id, resourceGeneration{})
 }
 func (s *service) destroy(ctx context.Context, id string) (v1.Instance, error) {
+	ctx, finish, admissionErr := s.beginMutation(ctx)
+	if admissionErr != nil {
+		return v1.Instance{}, admissionErr
+	}
+	defer finish()
 	unlock := s.lockMutation(id)
 	defer unlock()
 	instance, err := s.stopExecution(id)
@@ -450,6 +461,7 @@ func (s *service) destroy(ctx context.Context, id string) (v1.Instance, error) {
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if err = s.store.removeResources(cleanup, id); err != nil {
+		err = s.store.recordCleanupFailure(id, err)
 		return instance, problem("cleanup_failed", fmt.Sprintf("destroy preserved remaining resources: %v", err))
 	}
 	if instance.Execution == nil {
@@ -513,4 +525,21 @@ func recoverResourceEffect(ctx context.Context, d *dockerEngine, r ownedResource
 		return out.Network.ID, nil
 	}
 	return "", problem("state_corrupt", "unknown retained allocation kind")
+}
+
+// Record explicit cleanup failures separately from the preserved execution
+// outcome. Allocation release intent independently survives later consumer recovery.
+func (s *store) recordCleanupFailure(id string, cause error) error {
+	instance, err := s.inspect(id)
+	if err != nil {
+		return errors.Join(cause, err)
+	}
+	result := instance.Execution
+	if result == nil {
+		result = &v1.ExecutionResult{Attempt: newID(), Components: []v1.ComponentResult{}}
+	}
+	result.CleanupFailure = "resource cleanup incomplete; remaining ownership retained; restore provider and retry explicit reset/destroy"
+	result.CleanupDetails = cleanupDetails(cause)
+	_, err = s.execution(id, instance.Status, result)
+	return errors.Join(cause, err)
 }

@@ -81,6 +81,11 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 	return s.runMode(ctx, request, false)
 }
 func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool) (v1.InstanceResponse, error) {
+	ctx, finish, admissionErr := s.beginMutation(ctx)
+	if admissionErr != nil {
+		return v1.InstanceResponse{}, admissionErr
+	}
+	defer finish()
 	var empty v1.InstanceResponse
 	if request.InstanceID != "" && request.Plan.ConfigPath == "" {
 		previous, err := s.store.runtime(request.InstanceID)
@@ -183,7 +188,7 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 		cleanupErr := s.store.removeResources(cleanup, id)
 		cancel()
 		if cleanupErr != nil {
-			return empty, problem("cleanup_failed", cleanupErr.Error())
+			return empty, problem("cleanup_failed", s.store.recordCleanupFailure(id, cleanupErr).Error())
 		}
 	}
 	s.mu.Lock()
@@ -306,6 +311,9 @@ func (s *service) joinExecution(id string) (v1.Instance, error) {
 	entry.mu.Lock()
 	entry.cancel()
 	entry.mu.Unlock()
+	if err := s.store.sharedPoint("cancel-effect"); err != nil {
+		return v1.Instance{}, err
+	}
 	select {
 	case <-entry.done:
 	case <-time.After(time.Until(time.Now().Add(entry.grace).Add(20 * time.Second))):
@@ -926,6 +934,11 @@ func (s *service) lockMutation(id string) func() {
 	return lock.Unlock
 }
 func (s *service) stopRuntime(id string) (v1.Instance, error) {
+	_, finish, err := s.beginMutation(context.Background())
+	if err != nil {
+		return v1.Instance{}, err
+	}
+	defer finish()
 	unlock := s.lockMutation(id)
 	defer unlock()
 	return s.stopExecution(id)
@@ -937,6 +950,11 @@ func mustGrace(options v1.ExecutionOptions) time.Duration {
 }
 
 func (s *service) cancelRuntime(id string) (v1.Instance, error) {
+	_, finish, err := s.beginMutation(context.Background())
+	if err != nil {
+		return v1.Instance{}, err
+	}
+	defer finish()
 	unlock := s.lockMutation(id)
 	defer unlock()
 	s.mu.Lock()
@@ -990,6 +1008,9 @@ func (s *service) ownerChannels() []<-chan struct{} {
 	channels := make([]<-chan struct{}, 0, len(s.executions)+len(s.expiryWorkers))
 	for _, entry := range s.executions {
 		channels = append(channels, entry.done)
+	}
+	for owner := range s.mutationOwners {
+		channels = append(channels, owner.done)
 	}
 	for _, done := range s.expiryWorkers {
 		channels = append(channels, done)

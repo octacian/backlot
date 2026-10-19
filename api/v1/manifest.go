@@ -157,7 +157,7 @@ type Component struct {
 	Image           *Value                    `json:"image,omitempty" yaml:"image,omitempty" jsonschema_description:"Container image literal or declared input reference."`
 	Args            []string                  `json:"args,omitempty" yaml:"args,omitempty" jsonschema_description:"Direct argument vector; shell expansion requires an explicit shell command."`
 	Policy          JobPolicy                 `json:"policy,omitempty" yaml:"policy,omitempty" jsonschema_description:"Job scheduling policy; services omit this field."`
-	Initializes     []string                  `json:"initializes,omitempty" yaml:"initializes,omitempty" jsonschema_description:"Attached volume/directory generations initialized by a fresh-only job."`
+	Initializes     []string                  `json:"initializes,omitempty" yaml:"initializes,omitempty" jsonschema_description:"Attached volume/directory/allocation generations initialized by a fresh-only job."`
 	DependsOn       []Dependency              `json:"depends_on,omitempty" yaml:"depends_on,omitempty" jsonschema_description:"Explicit ready-service or completed-job dependencies."`
 	EnvironmentSets []string                  `json:"environment_sets,omitempty" yaml:"environment_sets,omitempty" jsonschema_description:"Reusable environment sets included in this order."`
 	Environment     Environment               `json:"environment,omitempty" yaml:"environment,omitempty" jsonschema_description:"Component environment layers applied after included sets."`

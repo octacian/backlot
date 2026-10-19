@@ -412,3 +412,34 @@ A configured unavailable endpoint fails; an unset endpoint skips and is incomple
 evidence. This bounded checkpoint does not replace the Gate 2 lifecycle/crash
 matrix, Gate 3 PostgreSQL/custom-manager evidence, or frozen full provider/platform
 and published-HEAD CI requirements.
+
+## Shared MariaDB lifecycle and recovery (#43 Gate 2)
+
+Use the same exclusive owned-fixture grant, local MariaDB 11.4/Alpine images and
+Unix endpoint as the early checkpoint. Run the complete shared suite serially:
+
+```sh
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^(TestSharedMariaDB.*|TestSharedUnselectedOfflinePrivacy)$' -count=1 -v -timeout=30m
+```
+
+The suite includes the early checkpoints plus live native/container persistence,
+fresh target reset, additional persistent scenes and simultaneous disposable runs;
+success/failure/cancel/deadline/client-loss retention policies; explicit cleanup and
+server fences; graceful shutdown and active crash without transparent continuation;
+SQL database/user/grant and Docker create/remove effect/acknowledgment gaps;
+provider outage/restoration; preexisting objects, ownership mismatch and missing
+acknowledged effects; multiple allocations and unselected/offline privacy. Random
+parent-written SQL witnesses cannot be recreated by application initialization.
+Private retained-child barriers observe real effects before killing/reaping the
+fixture daemon; they do not enable production fault injection. Child diagnostics
+are checked after reaping, before replacement. Cleanup verifies actual SQL absence,
+owned runtime resources and the exact image commits recorded before faults; cached
+base images remain. An unavailable configured provider fails rather than skips.
+The overall timeout accommodates the serial multi-fixture suite; operation,
+cancellation and five-second recovery API expectations are unchanged.
+
+Run the existing `TestDockerRuntime` and `TestDisposableEvidenceDocker` gates
+serially on the same frozen inputs as regression evidence, in addition to required
+`make check`. This local MariaDB evidence does not establish PostgreSQL/custom
+manager, other-platform, full feature or published-revision CI readiness.

@@ -152,5 +152,5 @@ and conservative recovery. Shared server volume/network/container effects use th
 existing official Docker client and capability verification. The same named
 `api/v1` contracts serve `shared` CLI/client/daemon control; manager messages are
 private provisioning contracts and never public status. See the
-[proposed decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
+[accepted decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
 and [current bounded runtime](containers.md#project-scoped-shared-services-gate-1).

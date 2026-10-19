@@ -363,8 +363,8 @@ func component(m v1.Manifest, name string, c v1.Component) error {
 	}
 	for _, r := range c.Initializes {
 		res, ok := m.Resources[r]
-		if !ok || !slices.Contains(c.Resources, r) || (res.Kind != "volume" && res.Kind != "directory") {
-			return invalid(f+".initializes", "initialize a declared, attached volume or directory")
+		if !ok || !slices.Contains(c.Resources, r) || (res.Kind != "volume" && res.Kind != "directory" && res.Kind != "allocation") {
+			return invalid(f+".initializes", "initialize a declared, attached volume, directory or allocation")
 		}
 	}
 	for _, o := range c.Outputs {

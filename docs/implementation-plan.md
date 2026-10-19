@@ -297,13 +297,13 @@ Binary distribution/version tags remain #25, with no legacy storage migration.
 
 ## Shared services (issue 43)
 
-Gate 1 implementation for review adds project common-directory identity separate
+The bounded implementation adds project common-directory identity separate
 from checkout identity, explicit shared MariaDB declarations and allocation
-references, separate private server/allocation journals (state version 6), a focused
+references, separate private server/allocation journals (state version 7), a focused
 SQL manager, typed `shared` CLI/API/client operations and context-correct native/
 container values. Configuration conflicts cannot replace peers; generated admin
 credentials remain private. Existing private per-instance containers remain available.
-The [proposed decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
+The [accepted decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
 and [runtime guide](containers.md#project-scoped-shared-services-gate-1) define the
 bounded contract and operational limits.
 
@@ -314,10 +314,13 @@ conflict, recovery and peer-preserving cleanup. Revision-bound external evidence
 records original attempts, exact image/tool/source provenance and cleanup; a passed
 fixture is not acceptance of unexecuted cases or other engines/platforms.
 
-Gate 1 still requires independent standard review/fixes and explicit user approval
-before expansion/publication. Gate 2 is the comprehensive persistence/concurrency/
-disposable/cancellation/client-loss/keep/shutdown/crash/lost-acknowledgment/ownership/
-provider-unavailable matrix. Gate 3 adds PostgreSQL 17 and a non-Go non-database
+Gate 1 was independently reviewed, fixed and explicitly accepted before draft
+publication. Gate 2 implementation adds durable release/destruction intent and
+joined lifecycle mutation owners. Its expanded real MariaDB suite covers live
+persistence/concurrency/disposable/cancellation/client-loss/keep/shutdown/crash/
+lost-acknowledgment/ownership/provider-unavailable behavior, including independent
+SQL witnesses and exact owned-fixture cleanup. Full frozen validation and independent
+review remain required before Gate 2 acceptance. Gate 3 adds PostgreSQL 17 and a non-Go non-database
 custom command manager, refining the initial structured JSON protocol as evidence
 demands. Gate 4 completes runnable examples/docs, standard and fresh sensitive
 review, frozen complete provider/native/platform/browser suites and exact published

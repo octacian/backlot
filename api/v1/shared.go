@@ -22,12 +22,14 @@ type SharedRequest struct {
 // SharedStatus is a safe view of durable server intent and allocation counts.
 // Private engine capabilities, administrative and application secrets are absent.
 type SharedStatus struct {
-	ID            string `json:"id"`
-	ProjectID     string `json:"project_id"`
-	Name          string `json:"name"`
-	Configuration string `json:"configuration"`
-	Status        string `json:"status"`
-	Allocations   int    `json:"allocations"`
+	ID              string `json:"id"`
+	ProjectID       string `json:"project_id"`
+	Name            string `json:"name"`
+	Configuration   string `json:"configuration"`
+	Status          string `json:"status"`
+	Allocations     int    `json:"allocations"`
+	PendingReleases int    `json:"pending_releases"`
+	Failure         string `json:"failure,omitempty"`
 }
 
 // SharedResponse returns project-scoped retained services without private authority.

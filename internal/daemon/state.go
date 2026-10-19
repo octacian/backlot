@@ -26,8 +26,10 @@ type record struct {
 
 type store struct {
 	sharedLocks sync.Map
-	db          *bolt.DB
-	directory   string
+	// sharedCheckpoint is an internal fixture seam, never activated by project input.
+	sharedCheckpoint func(string) error
+	db               *bolt.DB
+	directory        string
 }
 
 func openStore(directory string) (*store, error) {

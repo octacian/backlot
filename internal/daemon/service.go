@@ -21,6 +21,7 @@ import (
 type service struct {
 	diagnosticRecoveryErr error
 	diagnosticOwners      map[string]*diagnosticOwner
+	mutationOwners        map[*mutationOwner]struct{}
 	gatewayGroup          *native.Group
 	evidence              evidencePolicy
 	store                 *store
@@ -127,7 +128,7 @@ func (s *service) stop() error {
 		ids = append(ids, id)
 	}
 	s.mu.Unlock()
-	result := errors.Join(s.stopDiagnostics(), s.stopExecutions(ids))
+	result := errors.Join(s.stopMutations(), s.stopDiagnostics(), s.stopExecutions(ids))
 	// Shutdown fences acceptance before joining. Expiry coordinators retain their
 	// own channels so storage cannot close while they finish durable results.
 	result = errors.Join(result, s.joinExpiryWorkers())

@@ -1,7 +1,7 @@
 ---
 title: 'Add project-scoped shared-service allocations'
 date: '2026-10-19'
-status: proposed
+status: accepted
 summary: 'Separate retained project-owned servers from instance allocations with explicit ownership observations, private provisioning and exact configuration conflicts.'
 tags: [shared-services, identity, sql, security, lifecycle]
 supersedes: []
@@ -14,7 +14,7 @@ Extend the generic private-container runtime with separately owned project share
 services and per-instance allocations. Backlot owns durable identity, intent,
 credentials, serialization and lifecycle ordering; a focused manager provisions,
 verifies and reclaims engine-specific effects. Existing private containers remain
-available. This is the approved #43 direction proposed for concrete Gate 1 review;
+available. This is the accepted #43 direction after Gate 1 and concrete Gate 2 scope review;
 implementation and evidence status live in the implementation plan.
 
 ## Context
@@ -55,7 +55,7 @@ identity mismatch or unavailable verification preserve the resources. Applicatio
 schema/migrations/fixtures remain project jobs; shared servers are a common
 performance/failure boundary, not container-level isolation.
 
-Advance private state to version 6. Reject older and newer unsupported formats
+Private state version 7 fences durable destructive progress from older binaries. Reject older and newer unsupported formats
 unchanged; matching old binaries must clean their resources before a fresh state
 directory is selected. Record server/allocation intent and credentials before
 effects. Release only after consumers stop/join. Stop/start retains allocations;

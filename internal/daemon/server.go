@@ -21,10 +21,11 @@ import (
 
 // Options selects private state placement and the bounded disposable client lease.
 type Options struct {
-	Directory      string
-	LeaseDuration  time.Duration
-	RetentionAge   time.Duration
-	RetentionBytes int64
+	Directory        string
+	LeaseDuration    time.Duration
+	RetentionAge     time.Duration
+	RetentionBytes   int64
+	sharedCheckpoint func(string) error
 }
 
 // DefaultLeaseDuration is the disposable disconnect grace period.
@@ -100,6 +101,7 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	} else if !os.IsNotExist(err) {
 		return problem("permissions", "cannot inspect daemon socket")
 	}
+	state.sharedCheckpoint = options.sharedCheckpoint
 	diagnosticRecoveryErr := state.recoverDiagnosticProbes()
 	var diagnosticDetail *v1.PlanError
 	if errors.As(diagnosticRecoveryErr, &diagnosticDetail) && diagnosticDetail.Code == "state_corrupt" {

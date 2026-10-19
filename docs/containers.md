@@ -49,7 +49,7 @@ own application migrations or seed logic. Applications own those operations and 
 probe. A TCP probe observes connectivity, which may precede application setup;
 use a declared native command probe when connectivity is insufficient.
 
-The durable state format is version 6. Older formats, including version 5, are
+The durable state format is version 7. Older formats, including version 6, are
 rejected without modification or migration because older binaries cannot
 interpret the separate shared-service/allocation recovery journals. Use the matching older
 binary to clean up owned instances and stop its gateway/daemon before selecting
@@ -182,7 +182,8 @@ requirements. A passing local suite is milestone evidence, not all-V1 acceptance
 
 ## Project-scoped shared services (Gate 1)
 
-This early #43 slice implements a local MariaDB 11.4 path for review. It does not
+This #43 slice implements a local MariaDB 11.4 path, with Gate 2 lifecycle work
+in progress after Gate 1 acceptance. It does not
 claim the full concurrency/crash/lifecycle acceptance matrix, PostgreSQL, custom
 command execution, final examples or platform CI. See [implementation status](implementation-plan.md#shared-services-issue-43).
 
@@ -214,8 +215,9 @@ backlot shared restart --state-dir /absolute/private/daemon --json SERVICE_ID
 backlot shared destroy --state-dir /absolute/private/daemon --json SERVICE_ID
 ```
 
-List/inspect report durable lifecycle state and retained allocation counts; they
-are not SQL health probes. Start also happens for selected scene dependencies.
+List/inspect report durable lifecycle state, retained allocation counts and pending
+release counts with bounded control-failure diagnostics; they are not SQL health
+probes. Instance inspect also retains failed explicit cleanup diagnostics. Start also happens for selected scene dependencies.
 Stop/restart refuse active/kept dependents. Destroy refuses every retained allocation;
 explicitly destroy those instances first. Scene stop never stops the shared server.
 Server declarations/endpoint must match retained configuration exactly; use distinct
@@ -226,6 +228,10 @@ Allocation intent, names, ownership and passwords are durable before SQL effects
 Atomic database comments contain an ownership fingerprint, never the raw private
 authority. User authentication and bounded grants are checked before reclaiming
 partial effects. Missing acknowledged allocations are not silently recreated.
+Release intent is durable before SQL deletion; ordinary start cannot reopen an
+interrupted release as provisioning. Shared destruction intent survives individual
+stop/removal observations and blocks start until explicit destruction completes.
+Accepted shared-control requests are canceled and joined during daemon shutdown.
 Uncertain identities/effects and unavailable SQL retain cleanup obligations and
 return failure; restore the provider and retry explicit reset/destroy. Never delete
 SQL objects or Docker resources by name. Shared storage/servers survive individual

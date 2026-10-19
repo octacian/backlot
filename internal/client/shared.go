@@ -25,7 +25,7 @@ func (c *Client) Shared(ctx context.Context, action string, request v1.SharedReq
 		}
 		seen := map[string]bool{}
 		for _, service := range response.Services {
-			if !validID(service.ID) || !validID(service.ProjectID) || !validID(service.Configuration) || service.Name == "" || service.Allocations < 0 || seen[service.ID] {
+			if !validID(service.ID) || !validID(service.ProjectID) || !validID(service.Configuration) || service.Name == "" || service.Allocations < 0 || service.PendingReleases < 0 || service.PendingReleases > service.Allocations || seen[service.ID] {
 				return response, responseError()
 			}
 			seen[service.ID] = true

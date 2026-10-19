@@ -43,6 +43,13 @@ func TestSharedNamedWireContract(t *testing.T) {
 		t.Fatal("unvalidated shared state")
 	}
 	response.Services[0].Status = "running"
+	for _, pending := range []int{-1, 3} {
+		response.Services[0].PendingReleases = pending
+		if _, err := c.Shared(context.Background(), "inspect", request); err == nil {
+			t.Fatal("invalid pending release count accepted")
+		}
+	}
+	response.Services[0].PendingReleases = 0
 	response.Services[0].ID = strings.Repeat("d", 64)
 	if _, err := c.Shared(context.Background(), "inspect", request); err == nil {
 		t.Fatal("wrong shared identity accepted")

@@ -141,7 +141,7 @@ service port carries enough identity for a future adapter to resolve its address
 no numeric port is invented here.
 
 Jobs require `policy: fresh-only|each-start`. Fresh-only jobs declare nonempty
-`initializes`, naming attached volume/directory generations. Two selected jobs
+`initializes`, naming attached volume/directory/allocation generations. Two selected jobs
 cannot initialize the same generation. Each-start jobs cannot declare initializes.
 The executor will record fresh initialization only after successful completion;
 planning preserves eligibility policy, without claiming a job was run or skipped.

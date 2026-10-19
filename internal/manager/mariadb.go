@@ -124,7 +124,8 @@ func inspect(ctx context.Context, db *sql.DB, request v1.ManagerRequest) (observ
 // authenticate interrupted effects; names alone never authorize adoption/deletion.
 // Generated names contain no SQL grant wildcard characters. All errors are safe:
 // driver diagnostics can include credentials and never cross this boundary.
-func MariaDB(ctx context.Context, db *sql.DB, request v1.ManagerRequest) (v1.ManagerResult, error) {
+// The optional checkpoint observes statement effects for private fault fixtures.
+func MariaDB(ctx context.Context, db *sql.DB, request v1.ManagerRequest, checkpoint func(string) error) (v1.ManagerResult, error) {
 	result := v1.ManagerResult{Version: v1.ManagerProtocolVersion, AllocationID: request.AllocationID, Ownership: "uncertain", Effect: "partial"}
 	if err := ValidateRequest(request); err != nil {
 		return result, err
@@ -144,9 +145,12 @@ func MariaDB(ctx context.Context, db *sql.DB, request v1.ManagerRequest) (v1.Man
 		}
 		return result, nil
 	}
-	exec := func(query string) error {
+	exec := func(step, query string) error {
 		if _, err := db.ExecContext(ctx, query); err != nil {
 			return errors.New("MariaDB manager effect failed; inspect/reconcile required; resources preserved")
+		}
+		if checkpoint != nil {
+			return checkpoint("sql-" + request.Operation + ":" + step)
 		}
 		return nil
 	}
@@ -156,12 +160,12 @@ func MariaDB(ctx context.Context, db *sql.DB, request v1.ManagerRequest) (v1.Man
 		// Verify both identities before deleting either. A partial release remains
 		// reconcilable with the same retained request, including lost acknowledgments.
 		if observed.user {
-			if err = exec("DROP USER " + user); err != nil {
+			if err = exec("user", "DROP USER "+user); err != nil {
 				return result, err
 			}
 		}
 		if observed.database {
-			if err = exec("DROP DATABASE " + database); err != nil {
+			if err = exec("database", "DROP DATABASE "+database); err != nil {
 				return result, err
 			}
 		}
@@ -178,16 +182,16 @@ func MariaDB(ctx context.Context, db *sql.DB, request v1.ManagerRequest) (v1.Man
 	result.Ownership = "uncertain"
 	result.Effect = "partial"
 	if !observed.database {
-		if err = exec("CREATE DATABASE " + database + " COMMENT '" + fingerprint(request.Ownership) + "'"); err != nil {
+		if err = exec("database", "CREATE DATABASE "+database+" COMMENT '"+fingerprint(request.Ownership)+"'"); err != nil {
 			return result, err
 		}
 	}
 	if !observed.user {
-		if err = exec("CREATE USER " + user + " IDENTIFIED BY '" + request.Password + "'"); err != nil {
+		if err = exec("user", "CREATE USER "+user+" IDENTIFIED BY '"+request.Password+"'"); err != nil {
 			return result, err
 		}
 	}
-	if err = exec("GRANT ALL PRIVILEGES ON " + database + ".* TO " + user); err != nil {
+	if err = exec("grant", "GRANT ALL PRIVILEGES ON "+database+".* TO "+user); err != nil {
 		return result, err
 	}
 	result.Ownership = "owned"

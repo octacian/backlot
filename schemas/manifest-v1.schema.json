@@ -352,7 +352,7 @@
           },
           "type": "array",
           "uniqueItems": true,
-          "description": "Attached volume/directory generations initialized by a fresh-only job."
+          "description": "Attached volume/directory/allocation generations initialized by a fresh-only job."
         },
         "depends_on": {
           "items": {

@@ -1,7 +1,7 @@
 ---
 title: 'Authorize owned directory cleanup despite unknown foreign binds'
 date: '2026-10-19'
-status: proposed
+status: accepted
 summary: 'Let authenticated directory ownership authorize cleanup despite uncertain foreign bind identities while preserving positively identified consumer blocks.'
 tags: [cleanup, ownership, containers, storage]
 supersedes: []

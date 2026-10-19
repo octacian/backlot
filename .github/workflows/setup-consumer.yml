@@ -70,10 +70,10 @@ jobs:
           if [ "$MODE" = cancel ]; then args='["--config=failure.config.mjs","hold.spec.mjs"]'; fi
           echo "value=$args" >> "$GITHUB_OUTPUT"
       - name: Run independent application with private lifecycle
-        uses: octacian/backlot/actions/quickrun@99c690afe655e693237cd1274989e437225a14ca
+        uses: octacian/backlot/actions/quickrun@91af51b460401c174120aeb9e003cde3e6a8aea3
         id: backlot
         with:
-          backlot-ref: 99c690afe655e693237cd1274989e437225a14ca
+          backlot-ref: 91af51b460401c174120aeb9e003cde3e6a8aea3
           project: application
           scene: browser
           args: ${{ steps.args.outputs.value }}

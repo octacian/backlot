@@ -59,7 +59,7 @@ jobs:
         working-directory: application
         run: |
           sudo apt-get update
-          sudo apt-get install -y libnss3-tools
+          sudo apt-get install -y libnss3-tools python3
           npm ci --ignore-scripts --no-audit --no-fund
           npx --no-install playwright install --with-deps chromium
       - name: Select exact terminal argument array
@@ -70,10 +70,10 @@ jobs:
           if [ "$MODE" = cancel ]; then args='["--config=failure.config.mjs","hold.spec.mjs"]'; fi
           echo "value=$args" >> "$GITHUB_OUTPUT"
       - name: Run independent application with private lifecycle
-        uses: octacian/backlot/actions/quickrun@1a8ce9e5c127918a47b37f131f7cbbf094f78518
+        uses: octacian/backlot/actions/quickrun@99c690afe655e693237cd1274989e437225a14ca
         id: backlot
         with:
-          backlot-ref: 1a8ce9e5c127918a47b37f131f7cbbf094f78518
+          backlot-ref: 99c690afe655e693237cd1274989e437225a14ca
           project: application
           scene: browser
           args: ${{ steps.args.outputs.value }}

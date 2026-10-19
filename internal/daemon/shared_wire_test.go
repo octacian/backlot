@@ -74,5 +74,5 @@ func TestSharedWirePrivacyAndStrictness(t *testing.T) {
 	}
 	_, err = svc.sharedControl(context.Background(), "stop", v1.SharedRequest{APIVersion: v1.Version, ServiceID: record.ID})
 	code(t, err, "shared_in_use")
-	code(t, state.stopSharedServices(), "shared_in_use")
+	code(t, state.stopSharedServices(context.Background()), "shared_in_use")
 }

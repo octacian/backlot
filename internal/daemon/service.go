@@ -145,7 +145,7 @@ func (s *service) stop() error {
 	s.mu.Unlock()
 	var sharedErr error
 	if result == nil && s.ownersJoined() {
-		sharedErr = s.store.stopSharedServices()
+		sharedErr = s.store.stopSharedServices(context.Background())
 	}
 	return errors.Join(result, expiryErr, gatewayErr, sharedErr, s.store.reconcile("daemon shutdown interrupted preparation", false), s.store.cleanupFailures())
 }

@@ -52,6 +52,40 @@ type sharedConnection struct {
 	Port    int
 }
 
+// lockShared serializes effects and durable updates per service. Callers that
+// mutate allocation maps also hold the existing instance lifecycle ownership.
+// Ordered acquisition avoids cycles when one instance uses multiple services.
+func (s *store) lockShared(ctx context.Context, ids ...string) (func(), error) {
+	ids = slices.Clone(ids)
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	var acquired []chan struct{}
+	release := func() {
+		for _, lock := range acquired {
+			<-lock
+		}
+	}
+	for _, id := range ids {
+		candidate := make(chan struct{}, 1)
+		value, _ := s.sharedLocks.LoadOrStore(id, candidate)
+		lock := value.(chan struct{})
+		select {
+		case lock <- struct{}{}:
+			acquired = append(acquired, lock)
+		case <-ctx.Done():
+			release()
+			return nil, ctx.Err()
+		}
+	}
+	// A ready lock and cancellation can both win select; never begin effects
+	// after observing cancellation, even when every lock was immediately free.
+	if err := ctx.Err(); err != nil {
+		release()
+		return nil, err
+	}
+	return release, nil
+}
+
 func sharedDigest(declaration v1.SharedService, endpoint string) string {
 	data, _ := json.Marshal(struct {
 		Declaration v1.SharedService
@@ -309,15 +343,21 @@ func (s *service) ensureSharedAllocations(ctx context.Context, id string, snap p
 	if len(snap.Plan.SharedServices) == 0 {
 		return nil
 	}
-	s.store.sharedMu.Lock()
-	defer s.store.sharedMu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	project, err := identifyShared(entry.source.source, snap.Plan.Project)
 	if err != nil {
 		return err
 	}
+	var ids []string
+	for _, resource := range snap.Plan.Resources {
+		if resource.Kind == "allocation" {
+			ids = append(ids, hash(project.ID+"/"+resource.SharedService))
+		}
+	}
+	release, err := s.store.lockShared(ctx, ids...)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err = s.store.db.Update(func(tx *bolt.Tx) error { return registerSharedProject(tx, project) }); err != nil {
 		return err
 	}
@@ -397,9 +437,23 @@ func (s *service) ensureSharedAllocations(ctx context.Context, id string, snap p
 }
 
 func (s *store) releaseSharedAllocations(ctx context.Context, id string) error {
-	s.sharedMu.Lock()
-	defer s.sharedMu.Unlock()
 	allocations, err := s.sharedAllocations(id)
+	if err != nil {
+		return err
+	}
+	if len(allocations) == 0 {
+		return nil
+	}
+	var ids []string
+	for _, allocation := range allocations {
+		ids = append(ids, allocation.ServiceID)
+	}
+	release, err := s.lockShared(ctx, ids...)
+	if err != nil {
+		return err
+	}
+	defer release()
+	allocations, err = s.sharedAllocations(id)
 	if err != nil {
 		return err
 	}
@@ -516,8 +570,6 @@ func (s *service) sharedControl(ctx context.Context, action string, request v1.S
 	if action != "list" && !validID(request.ServiceID) || action == "list" && request.ServiceID != "" {
 		return response, problem("invalid_request", "shared operation requires the recorded service ID; list takes no ID")
 	}
-	s.store.sharedMu.Lock()
-	defer s.store.sharedMu.Unlock()
 	ids := []string{request.ServiceID}
 	if action == "list" {
 		var err error
@@ -526,6 +578,11 @@ func (s *service) sharedControl(ctx context.Context, action string, request v1.S
 			return response, err
 		}
 	}
+	release, err := s.store.lockShared(ctx, ids...)
+	if err != nil {
+		return response, err
+	}
+	defer release()
 	for _, id := range ids {
 		record, err := s.store.sharedService(id)
 		if err != nil {
@@ -603,35 +660,44 @@ func (s *service) sharedControl(ctx context.Context, action string, request v1.S
 
 // stopSharedServices follows consumer join during shutdown/recovery. It never
 // releases allocations or storage, and never restarts application execution.
-func (s *store) stopSharedServices() error {
-	s.sharedMu.Lock()
-	defer s.sharedMu.Unlock()
+func (s *store) stopSharedServices(ctx context.Context) error {
 	ids, err := s.sharedIDs()
 	if err != nil {
 		return err
 	}
 	var failures error
 	for _, id := range ids {
-		record, err := s.sharedService(id)
-		if err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			dependents, dependencyErr := s.sharedDependents(id, false)
-			err = dependencyErr
-			if err == nil && dependents > 0 {
-				err = problem("shared_in_use", "shared consumers are active or cleanup is uncertain; server preserved")
-			}
-			if err == nil {
-				err = s.stopShared(ctx, &record)
-			}
-			cancel()
-			if err != nil {
-				record.Status = "uncertain"
-				err = errors.Join(err, s.saveShared(record))
-			}
-		}
-		failures = errors.Join(failures, err)
+		failures = errors.Join(failures, s.stopSharedService(ctx, id))
 	}
+
 	return failures
+}
+
+// The shutdown/recovery budget includes waiting for the current effect owner.
+func (s *store) stopSharedService(ctx context.Context, id string) error {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	release, err := s.lockShared(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer release()
+	record, err := s.sharedService(id)
+	if err != nil {
+		return err
+	}
+	dependents, err := s.sharedDependents(id, false)
+	if err == nil && dependents > 0 {
+		err = problem("shared_in_use", "shared consumers are active or cleanup is uncertain; server preserved")
+	}
+	if err == nil {
+		err = s.stopShared(ctx, &record)
+	}
+	if err != nil {
+		record.Status = "uncertain"
+		err = errors.Join(err, s.saveShared(record))
+	}
+	return err
 }
 
 // Engine errors can contain private generated names/capabilities. Preserve

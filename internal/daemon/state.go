@@ -25,9 +25,9 @@ type record struct {
 }
 
 type store struct {
-	sharedMu  sync.Mutex
-	db        *bolt.DB
-	directory string
+	sharedLocks sync.Map
+	db          *bolt.DB
+	directory   string
 }
 
 func openStore(directory string) (*store, error) {

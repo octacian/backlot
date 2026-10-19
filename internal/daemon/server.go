@@ -108,7 +108,7 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	if err := state.recoverRuntime(); err != nil {
 		return err
 	}
-	if recoveryErr := state.stopSharedServices(); recoveryErr != nil {
+	if recoveryErr := state.stopSharedServices(context.Background()); recoveryErr != nil {
 		var detail *v1.PlanError
 		if errors.As(recoveryErr, &detail) && detail.Code == "state_corrupt" {
 			return recoveryErr

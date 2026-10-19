@@ -389,3 +389,26 @@ healthcheck executes; the actual probe's effective Engine config disables it
 and has no healthcheck execution state. Consumers stop before the exact created
 image is removed and its absence verified. Production doctor never pulls/builds
 images; production/default gateway exposure stays unchanged.
+
+## Early shared MariaDB checkpoint (#43 Gate 1)
+
+Run serially with an exclusive owned fixture grant and existing local MariaDB 11.4
+and Alpine 3.21 images; runtime never pulls/builds:
+
+```sh
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^TestSharedMariaDBGate1$' -count=1 -v -timeout=6m
+```
+
+The suite builds real native/static Linux application consumers plus a uniquely
+owned local fixture image from the inspected Alpine ID (classic Docker builder,
+`--pull=false --network=none`). Two actual linked worktrees and independent scenes
+use the race CLI/daemon and one owned MariaDB server. It checks empty databases,
+DDL/DML, distinct credentials, actual bidirectional peer-data and administrative
+permission denial, server-configuration conflict/recovery and peer-preserving
+allocation destruction. Cleanup joins consumers before releasing allocations/server
+and verifies owned container/network/volume/image absence; cached base images stay.
+A configured unavailable endpoint fails; an unset endpoint skips and is incomplete
+evidence. This bounded checkpoint does not replace the Gate 2 lifecycle/crash
+matrix, Gate 3 PostgreSQL/custom-manager evidence, or frozen full provider/platform
+and published-HEAD CI requirements.

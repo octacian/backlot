@@ -141,3 +141,16 @@ ownership boundaries.
 External Caddy retains operator TLS/DNS/lifecycle ownership. Validate the shared origin through HTTPS
 from every required consumer context. Keep listener readiness separate from final
 public-origin readiness to avoid proxy/SSR dependency cycles.
+
+## Shared-service allocation boundary
+
+Project-scoped server records and instance allocation records are separate from
+checkout identity and private resource generations. A focused `internal/manager`
+boundary owns MariaDB-specific create/inspect/release effects; the daemon owns
+private intent, credentials, exact server configuration, locking, consumer ordering
+and conservative recovery. Shared server volume/network/container effects use the
+existing official Docker client and capability verification. The same named
+`api/v1` contracts serve `shared` CLI/client/daemon control; manager messages are
+private provisioning contracts and never public status. See the
+[proposed decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
+and [current bounded runtime](containers.md#project-scoped-shared-services-gate-1).

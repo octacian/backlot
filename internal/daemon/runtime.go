@@ -21,6 +21,7 @@ import (
 )
 
 type execution struct {
+	shared        map[string]sharedConnection
 	caCertPath    string
 	kept          bool
 	cancel        context.CancelFunc

@@ -108,6 +108,12 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	if err := state.recoverRuntime(); err != nil {
 		return err
 	}
+	if recoveryErr := state.stopSharedServices(); recoveryErr != nil {
+		var detail *v1.PlanError
+		if errors.As(recoveryErr, &detail) && detail.Code == "state_corrupt" {
+			return recoveryErr
+		}
+	}
 	if err := state.recoverManaged(); err != nil {
 		return err
 	}
@@ -219,6 +225,19 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/shared/list", "/v1/shared/inspect", "/v1/shared/start", "/v1/shared/stop", "/v1/shared/restart", "/v1/shared/destroy":
+			var request v1.SharedRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+			defer cancel()
+			response, err := s.sharedControl(ctx, strings.TrimPrefix(r.URL.Path, "/v1/shared/"), request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
 		case "/v1/gateway/start", "/v1/gateway/stop", "/v1/gateway/restart", "/v1/gateway/status":
 			var request v1.GatewayRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {

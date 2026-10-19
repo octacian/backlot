@@ -45,7 +45,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## filippo.io/edwards25519 v1.1.0
 
-Linked into: optional acceptance application (darwin/arm64); optional acceptance application (linux/arm64 container).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64); optional acceptance application (darwin/arm64); optional acceptance application (linux/arm64 container).
 
 ### LICENSE
 
@@ -1774,7 +1774,7 @@ Apache License
 
 ## github.com/go-sql-driver/mysql v1.9.3
 
-Linked into: optional acceptance application (darwin/arm64); optional acceptance application (linux/arm64 container).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64); optional acceptance application (darwin/arm64); optional acceptance application (linux/arm64 container).
 
 ### LICENSE
 

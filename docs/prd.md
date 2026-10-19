@@ -61,8 +61,9 @@ framework, database engine, or test-runner conventions on adopting projects.
 - **Service:** a long-running native process or generic container.
 - **Job:** finite native or container work, such as build, migrate, seed, or test.
 - **Resource:** an instance-owned volume, directory, generated secret, network,
-  port allocation, or published origin. A database is a generic container with
-  explicit image/environment/storage/probes, not a specialized V1 resource.
+  port allocation, published origin, or per-instance shared-service allocation.
+  Private databases remain generic containers; optional project shared servers
+  provision empty databases and restricted application users through managers.
 - **Machine configuration:** executable overrides, local Docker access, Caddy
   endpoint and route scope, upstream reachability, domain suffix, and daemon
   storage settings. Machine credentials never belong in a project manifest.
@@ -278,7 +279,7 @@ must not serialize secret values; application stdout/stderr is captured as emitt
 
 Frontend UI; remote/multi-host orchestration; WSL QA/support guarantees;
 toolchain/version-manager installation; automatic watch/build/restart; arbitrary
-job retriggering; shared-database provisioning; Compose import/export; CI scene
+job retriggering; machine-wide automatic shared-server pooling; Compose import/export; CI scene
 execution guarantees; DNS/router management; public certificate provisioning; automatic trust installation;
 raw Caddyfiles; generated application config; atomic multi-service rollouts;
 transparent continuation across daemon crashes.
@@ -315,3 +316,39 @@ Demonstrate these behaviors using generic fixtures on macOS ARM64:
 
 Run the complete acceptance set before declaring V1 shipped. Compilation on
 another OS, unit tests, or migration of one application are insufficient evidence.
+
+## Project-scoped shared services
+
+Issue #43 extends the product scope with project-owned shared servers and separate
+instance allocations. Linked Git worktrees share only when common-directory
+filesystem identity, relative project location and declared project ID match;
+clones do not. Non-Git sharing requires the same canonical directory. Moves,
+replacements and exact retained server-configuration conflicts fail conservatively.
+See the [proposed allocation decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md).
+
+The server lifecycle is independent of allocations. Automatically ensure selected
+servers before provisioning empty allocations and starting consumers. Stop/start
+and restart preserve paired data/credentials; reset and destroy join consumers
+before replacing/releasing only their own allocation. Successful disposable work
+releases allocations; existing keep-on-failure policy applies to failures and
+cancellation. Idle servers remain until explicit stop. Stop/restart refuse active
+or kept dependents; destruction refuses every retained allocation. Never cascade
+through peers or adopt by names. Shutdown/crash recovery joins consumers before
+servers, preserves data and truthful cleanup obligations, and requires explicit
+execution restart. Unavailable providers or trusted cleanup code cannot erase
+ownership obligations.
+
+Application users need useful permissions inside their allocation and denial of
+peer application data and server administration. Native/container consumers receive
+explicit host, port, database, username and password references appropriate to their
+execution context. Administrative credentials remain private provisioning inputs;
+ordinary results redact application secrets. Migrations/fixtures remain project
+jobs. Unselected services stay untouched, planning stays offline and runtime never
+pulls/builds images. Shared performance/failure remains common; private containers
+remain available for privileged operations and stronger separation.
+
+Overall acceptance still requires maintained MariaDB and PostgreSQL managers, a
+bounded language-neutral custom command protocol with a non-database fixture,
+full lifecycle/concurrency/crash recovery and real provider/platform evidence.
+[Implementation status](implementation-plan.md#shared-services-issue-43) distinguishes
+the early MariaDB checkpoint from those uncompleted requirements.

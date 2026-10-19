@@ -105,9 +105,18 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 	result = v1.PlanResponse{APIVersion: v1.Version, Project: m.Project, Checkout: source.CheckoutPath, ManifestPath: file, ManifestDigest: digest(data), ConfigDigest: configDigest, Scene: request.Scene, Lifetime: scene.Lifetime, TerminalJob: scene.TerminalJob, Resources: map[string]v1.Resource{}, Outputs: map[string]v1.Output{}, Publish: scene.Publish}
 	for _, name := range scene.Resources {
 		result.Resources[name] = m.Resources[name]
+		if r := m.Resources[name]; r.Kind == "allocation" {
+			if result.SharedServices == nil {
+				result.SharedServices = map[string]v1.SharedService{}
+			}
+			result.SharedServices[r.SharedService] = m.SharedServices[r.SharedService]
+		}
 	}
 	if snapshot == nil && scene.Publish != nil && config.Caddy == nil {
 		return v1.PlanResponse{}, problem("missing_provider", "config.caddy", "published scene requires Caddy settings; supply --config PATH")
+	}
+	if snapshot == nil && len(result.SharedServices) > 0 && config.Docker == nil {
+		return v1.PlanResponse{}, problem("missing_provider", "config.docker", "shared allocations require explicit local Docker configuration")
 	}
 	order, err := manifest.Order(m, scene)
 	if err != nil {
@@ -315,7 +324,7 @@ func resolveValue(m v1.Manifest, c v1.MachineConfig, v v1.Value, project string,
 		result.literal = &literal
 	case "resource":
 		result.symbolic = r
-		result.secret = result.secret || m.Resources[r.Name].Kind == "secret"
+		result.secret = result.secret || (m.Resources[r.Name].Kind == "secret" || m.Resources[r.Name].Kind == "allocation" && r.Field == "password")
 	case "service":
 		result.symbolic = r
 	case "output":

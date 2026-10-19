@@ -294,3 +294,32 @@ browser preview precede broader feature regression development. Independent Low
 and fresh High reviews, final frozen complete provider/browser/action gates and
 published-revision CI remain required; this paragraph does not claim readiness.
 Binary distribution/version tags remain #25, with no legacy storage migration.
+
+## Shared services (issue 43)
+
+Gate 1 implementation for review adds project common-directory identity separate
+from checkout identity, explicit shared MariaDB declarations and allocation
+references, separate private server/allocation journals (state version 6), a focused
+SQL manager, typed `shared` CLI/API/client operations and context-correct native/
+container values. Configuration conflicts cannot replace peers; generated admin
+credentials remain private. Existing private per-instance containers remain available.
+The [proposed decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
+and [runtime guide](containers.md#project-scoped-shared-services-gate-1) define the
+bounded contract and operational limits.
+
+The early real two-worktree CLI/daemon/MariaDB checkpoint preceded focused
+regression expansion. It exercised initially empty allocations, useful application
+DDL/DML, distinct credentials and actual peer/admin denial, exact configuration
+conflict, recovery and peer-preserving cleanup. Revision-bound external evidence
+records original attempts, exact image/tool/source provenance and cleanup; a passed
+fixture is not acceptance of unexecuted cases or other engines/platforms.
+
+Gate 1 still requires independent standard review/fixes and explicit user approval
+before expansion/publication. Gate 2 is the comprehensive persistence/concurrency/
+disposable/cancellation/client-loss/keep/shutdown/crash/lost-acknowledgment/ownership/
+provider-unavailable matrix. Gate 3 adds PostgreSQL 17 and a non-Go non-database
+custom command manager, refining the initial structured JSON protocol as evidence
+demands. Gate 4 completes runnable examples/docs, standard and fresh sensitive
+review, frozen complete provider/native/platform/browser suites and exact published
+HEAD CI. Those gates remain uncompleted; this slice does not claim overall #43 or
+V1 readiness, native Windows support, or broader MySQL compatibility.

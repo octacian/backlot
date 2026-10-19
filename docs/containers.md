@@ -43,14 +43,15 @@ paths by default; explicit `--config` may select a new machine file. Destroy use
 only recorded ownership, so a missing or changed checkout cannot redirect cleanup.
 
 The fixture image owns database initialization through `MARIADB_*` environment
-settings. Backlot has no SQL provisioning, shared database, migrations or seed
-logic. Applications own those operations and any application-level readiness
+settings. This private-container path remains available alongside the optional
+[shared-service manager](#project-scoped-shared-services-gate-1). Backlot does not
+own application migrations or seed logic. Applications own those operations and any application-level readiness
 probe. A TCP probe observes connectivity, which may precede application setup;
 use a declared native command probe when connectivity is insufficient.
 
-The durable state format is version 5. Older formats, including version 4, are
+The durable state format is version 6. Older formats, including version 5, are
 rejected without modification or migration because older binaries cannot
-interpret the owned diagnostic probe recovery journal. Use the matching older
+interpret the separate shared-service/allocation recovery journals. Use the matching older
 binary to clean up owned instances and stop its gateway/daemon before selecting
 a fresh `--state-dir` with the new binary. Preserve old state until cleanup is
 verified; a new directory does not clean up resources from the old one. Backlot
@@ -177,3 +178,67 @@ paged/NDJSON contracts. Resource capabilities and credential values stay private
 
 See [testing/tooling](testing.md) for the provider integration command and resource
 requirements. A passing local suite is milestone evidence, not all-V1 acceptance.
+
+
+## Project-scoped shared services (Gate 1)
+
+This early #43 slice implements a local MariaDB 11.4 path for review. It does not
+claim the full concurrency/crash/lifecycle acceptance matrix, PostgreSQL, custom
+command execution, final examples or platform CI. See [implementation status](implementation-plan.md#shared-services-issue-43).
+
+Declare `shared_services` and select `kind: allocation` resources as documented in
+[manifest references](manifest.md#shared-service-declarations). Generated root
+credentials stay only in private provisioning state and the owned server's Engine
+configuration. The public API has no administrative-secret reference. Application
+passwords are automatically sensitive; use named fixtures and existing explicit
+`secret` access if inspection is needed. Database/user names contain no grant
+wildcards. Fresh databases have no application schema; project jobs perform it.
+
+The first selected start pins the existing local image ID, records volume/network/
+server intent, then ensures readiness before allocating. Native connection values
+use 127.0.0.1 and a dynamically published loopback port. Containers attach to a
+separate owned shared network and receive its alias and port 3306. No host DNS,
+extra gateway, runtime pull/build or widened bind is needed. The administrative
+password never enters consumer environment. Engine access is trusted administration.
+The bundled path checks MariaDB 11.4 and enabled grant enforcement before allocating.
+Only the exercised MariaDB 11.4 image is evidence; this is not generic MySQL support.
+
+List recorded services, then control the recorded service ID through the daemon:
+
+```sh
+backlot shared list --state-dir /absolute/private/daemon --json
+backlot shared inspect --state-dir /absolute/private/daemon --json SERVICE_ID
+backlot shared stop --state-dir /absolute/private/daemon --json SERVICE_ID
+backlot shared start --state-dir /absolute/private/daemon --json SERVICE_ID
+backlot shared restart --state-dir /absolute/private/daemon --json SERVICE_ID
+backlot shared destroy --state-dir /absolute/private/daemon --json SERVICE_ID
+```
+
+List/inspect report durable lifecycle state and retained allocation counts; they
+are not SQL health probes. Start also happens for selected scene dependencies.
+Stop/restart refuse active/kept dependents. Destroy refuses every retained allocation;
+explicitly destroy those instances first. Scene stop never stops the shared server.
+Server declarations/endpoint must match retained configuration exactly; use distinct
+names for incompatible servers. No automatic upgrades, relinking or external
+adoption occur. Separate daemon state roots do not pool resources.
+
+Allocation intent, names, ownership and passwords are durable before SQL effects.
+Atomic database comments contain an ownership fingerprint, never the raw private
+authority. User authentication and bounded grants are checked before reclaiming
+partial effects. Missing acknowledged allocations are not silently recreated.
+Uncertain identities/effects and unavailable SQL retain cleanup obligations and
+return failure; restore the provider and retry explicit reset/destroy. Never delete
+SQL objects or Docker resources by name. Shared storage/servers survive individual
+allocation release. Shutdown/recovery joins consumers before stopping servers and
+preserves data/credentials; execution requires explicit restart.
+
+The initial private `backlot.manager/v1` protocol reads one JSON stdin request and
+writes one JSON stdout result, bounded to 64 KiB per document. Requests carry the
+operation, durable allocation ID/ownership and generated allocation values. Results
+bind the same ID and report ownership (`owned`, `absent`, `uncertain`) separately
+from effect (`ready`, `partial`, `released`); success exit alone proves nothing.
+Backlot owns cancellation/deadlines/serialization and persists partial/unknown
+obligations. Trusted project code must cooperate with inspect/reconcile/release;
+unavailable/unverifiable code preserves obligations. Gate 1 validates message
+contracts using the bundled MariaDB path; executable custom managers and the
+non-Go non-database fixture arrive at Gate 3 and may refine these initial fields.

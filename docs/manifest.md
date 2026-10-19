@@ -45,7 +45,7 @@ moved-checkout reconciliation belongs to milestone 2.
 `--config` reads an explicit YAML/JSON machine file relative to the working
 directory. Otherwise use `backlot/config.yaml` beneath Go's `os.UserConfigDir()`
 (on macOS, `~/Library/Application Support`). If absent, machine configuration is
-optional. Container scenes require Docker settings; published scenes require
+optional. Selected container work or shared allocations require Docker settings; published scenes require
 Caddy settings. Native-only unpublished scenes need neither. Only the selected
 scene's tools and referenced inputs are required. Supplied configuration is
 always strictly validated, including unused settings. Tool/input overrides must
@@ -85,7 +85,9 @@ literal values or declared input references; there is no image-building engine.
 Build jobs may invoke the project's existing tools.
 
 `resources` maps names to a `kind`: `port`, `directory`, `volume`, `network`,
-`secret`, or `origin`. Every resource is instance-owned intent, never an existing
+`secret`, `origin`, or `allocation`. An allocation names a declared
+`shared_service`; see [shared-service declarations](#shared-service-declarations).
+Every resource is instance-owned intent, never an existing
 external resource to adopt by name. A scene selects its resources, and components
 explicitly attach the resources they consume. Secret generations will be retained
 with persistent storage; the offline planner does not generate or rotate them.
@@ -183,7 +185,9 @@ service port, `port`. Supported shapes are:
 | `output` | Attached output | `path` | Resolve project-relative output path |
 
 Resource fields are `port.port`, `directory.path`, `volume.name`, `network.name`,
-`secret.value`, and `origin.url` or `origin.ca_cert_path`. The latter is only for
+`secret.value`, `origin.url` or `origin.ca_cert_path`, and allocation
+`host`, `port`, `database`, `username`, `password`. Allocation passwords are
+automatically sensitive. `ca_cert_path` is only for
 explicit component environment assignments (including explicitly selected reusable sets), requires
 a selected/attached/published origin and explicit managed Caddy configuration,
 and stays symbolic offline. Container assignments also require an explicit
@@ -256,3 +260,50 @@ MariaDB/native/frontend definitions across development, production preview,
 backend tests and UI tests. They exercise planning only: application commands
 are illustrative adoption inputs, and providers are not provisioned. Their
 machine example contains illustrative endpoints and an image name, no credentials.
+
+## Shared-service declarations
+
+Gate 1 adds the following bounded MariaDB declaration; this is an early #43 slice,
+not final PostgreSQL/custom-manager acceptance. The image must already exist in
+the local Engine. Prefer an immutable image digest for reviewed configuration.
+
+```yaml
+shared_services:
+  sql:
+    manager: mariadb
+    image: mariadb:11.4
+    storage: volume
+    admin: generated
+    port: 3306
+    readiness_timeout: 60s
+    # Optional direct server arguments; exact order/configuration is retained.
+    args: [--max-connections=100]
+resources:
+  database: {kind: allocation, shared_service: sql}
+environments:
+  database:
+    assign:
+      DB_HOST: {ref: {kind: resource, name: database, field: host}}
+      DB_PORT: {ref: {kind: resource, name: database, field: port}}
+      DB_DATABASE: {ref: {kind: resource, name: database, field: database}}
+      DB_USERNAME: {ref: {kind: resource, name: database, field: username}}
+      DB_PASSWORD: {ref: {kind: resource, name: database, field: password}}
+```
+
+Select `database` in scene `resources` and each consuming component's `resources`;
+include the reusable environment set explicitly with `environment_sets: [database]`.
+The server is selected only through allocation resources. Every allocation field
+stays symbolic offline, except automatically redacted `password`. Administrative
+credentials have no application reference. Existing resource kinds cannot name a
+`shared_service`. Different allocation resources receive different empty databases,
+users and credentials, including different scenes/worktrees. Migrations/fixtures
+remain ordinary dependent project jobs. Unselected declarations require no Docker
+contact, and planning never provisions a server or allocation.
+
+The initial declaration requires explicit `manager: mariadb`, nonempty `image`,
+`storage: volume`, `admin: generated`, `port: 3306` and a positive
+`readiness_timeout` up to 24h. Unknown fields remain errors. Configuration conflicts
+preserve the retained server and peers; they do not trigger upgrades. Native and
+container environments resolve the actual consumer's connection context, described
+in [shared runtime operation](containers.md#project-scoped-shared-services-gate-1).
+Custom command declarations/execution and PostgreSQL are later user gates.

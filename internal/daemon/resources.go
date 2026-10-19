@@ -80,6 +80,9 @@ func (s *store) saveResources(id string, g resourceGeneration) error {
 	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, "resources", id, g) })
 }
 func hasDocker(p v1.PlanResponse) bool {
+	if len(p.SharedServices) > 0 {
+		return true
+	}
 	for _, c := range p.Components {
 		if c.Runtime == v1.Container {
 			return true
@@ -110,6 +113,9 @@ func safeRestart(old, next plan.Snapshot) error {
 	}
 	// JSON omits empty resource maps; nil and allocated-empty mean the same
 	// resource-free contract. Nonempty declarations still require exact equality.
+	if !reflect.DeepEqual(old.Plan.SharedServices, next.Plan.SharedServices) && (len(old.Plan.SharedServices) > 0 || len(next.Plan.SharedServices) > 0) {
+		return unsafe()
+	}
 	if (len(old.Plan.Resources) != 0 || len(next.Plan.Resources) != 0) && !reflect.DeepEqual(old.Plan.Resources, next.Plan.Resources) {
 		return unsafe()
 	}
@@ -223,9 +229,12 @@ func (s *service) allocateResources(ctx context.Context, id string, snap plan.Sn
 			return err
 		}
 	}
+	if err := s.ensureSharedAllocations(ctx, id, snap, entry); err != nil {
+		return err
+	}
 	declarations := map[string]v1.Resource{}
 	for name, r := range snap.Plan.Resources {
-		if r.Kind != "port" && r.Kind != "origin" {
+		if r.Kind != "port" && r.Kind != "origin" && r.Kind != "allocation" {
 			declarations[name] = r
 		}
 	}
@@ -376,6 +385,9 @@ func (s *store) removeResources(ctx context.Context, id string) error {
 		if err = d.noConsumers(ctx, g); err != nil {
 			return err
 		}
+	}
+	if err = s.releaseSharedAllocations(ctx, id); err != nil {
+		return err
 	}
 	names := make([]string, 0, len(g.Resources))
 	for name := range g.Resources {

@@ -54,7 +54,7 @@ func Validate(m v1.Manifest) error {
 	if len(m.Components) == 0 || len(m.Scenes) == 0 {
 		return invalid("manifest", "declare components and scenes")
 	}
-	checks := []error{names(m.Tools, "tools"), names(m.Inputs, "inputs"), names(m.Environments, "environments"), names(m.Resources, "resources"), names(m.Outputs, "outputs"), names(m.Components, "components"), names(m.Scenes, "scenes")}
+	checks := []error{names(m.SharedServices, "shared_services"), names(m.Tools, "tools"), names(m.Inputs, "inputs"), names(m.Environments, "environments"), names(m.Resources, "resources"), names(m.Outputs, "outputs"), names(m.Components, "components"), names(m.Scenes, "scenes")}
 	for _, err := range checks {
 		if err != nil {
 			return err
@@ -66,8 +66,28 @@ func Validate(m v1.Manifest) error {
 		}
 	}
 	for name, r := range m.Resources {
-		if !slices.Contains([]string{"port", "volume", "directory", "secret", "network", "origin"}, r.Kind) {
+		if !slices.Contains([]string{"port", "volume", "directory", "secret", "network", "origin", "allocation"}, r.Kind) {
 			return invalid("resources."+name, "unsupported resource kind")
+		}
+	}
+	for name, shared := range m.SharedServices {
+		if shared.Manager != "mariadb" || shared.Image == "" || strings.ContainsRune(shared.Image, 0) || shared.Storage != "volume" || shared.Admin != "generated" || shared.Port != 3306 {
+			return invalid("shared_services."+name, "Gate 1 requires mariadb, an explicit image, volume storage, generated admin and port 3306")
+		}
+		duration, err := time.ParseDuration(shared.ReadinessTimeout)
+		if err != nil || duration <= 0 || duration > 24*time.Hour {
+			return invalid("shared_services."+name, "readiness_timeout must be positive and at most 24h")
+		}
+		for _, arg := range shared.Args {
+			if strings.ContainsRune(arg, 0) {
+				return invalid("shared_services."+name, "NUL is not permitted")
+			}
+		}
+	}
+	for name, resource := range m.Resources {
+		_, exists := m.SharedServices[resource.SharedService]
+		if resource.Kind == "allocation" && !exists || resource.Kind != "allocation" && resource.SharedService != "" {
+			return invalid("resources."+name, "allocation requires a declared shared_service; other kinds cannot select one")
 		}
 	}
 	outputPaths := map[string]string{}
@@ -200,7 +220,8 @@ func value(m v1.Manifest, v v1.Value, field string) error {
 	case "resource":
 		resource, ok := m.Resources[r.Name]
 		fields := map[string]string{"port": "port", "directory": "path", "volume": "name", "network": "name", "secret": "value", "origin": "url"}
-		validField := r.Field == fields[resource.Kind] || (resource.Kind == "origin" && r.Field == "ca_cert_path")
+		defaultField, simple := fields[resource.Kind]
+		validField := resource.Kind == "allocation" && slices.Contains([]string{"host", "port", "database", "username", "password"}, r.Field) || simple && r.Field == defaultField || (resource.Kind == "origin" && r.Field == "ca_cert_path")
 		if !ok || !validField || r.Port != "" {
 			return invalid(field, "reference must use the declared resource kind's field")
 		}

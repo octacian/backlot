@@ -120,6 +120,7 @@ migration. See the [private-state guide](containers.md) for compatibility.
 | Endpoint | Named request | Named response |
 | --- | --- | --- |
 | `GET /v1/status` | None | `DaemonStatusResponse` |
+| `POST /v1/shared/list`, `/v1/shared/inspect`, `/v1/shared/start`, `/v1/shared/stop`, `/v1/shared/restart`, `/v1/shared/destroy` | `SharedRequest` | `SharedResponse` (durable status; no credentials/ownership authority) |
 | `POST /v1/doctor` | `DoctorRequest` | `DoctorResponse` |
 | `POST /v1/instances` | `ListRequest` | `ListResponse` (at most 100 summaries) |
 | `POST /v1/stop` | `ControlRequest` | `DaemonStatusResponse` (`stopping`) |

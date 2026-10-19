@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -16,7 +17,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-var bucketNames = []string{"meta", "instances", "checkouts", "paths", "persistent", "snapshots", "secrets", "runtime", "resources"}
+var bucketNames = []string{"meta", "instances", "checkouts", "paths", "persistent", "snapshots", "secrets", "runtime", "resources", "shared_projects", "shared_paths", "shared_services", "shared_allocations"}
 
 type record struct {
 	Instance  v1.Instance `json:"instance"`
@@ -24,6 +25,7 @@ type record struct {
 }
 
 type store struct {
+	sharedMu  sync.Mutex
 	db        *bolt.DB
 	directory string
 }

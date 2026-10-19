@@ -15,6 +15,7 @@ import (
 	"github.com/octacian/backlot/internal/manifest"
 	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
+	bolt "go.etcd.io/bbolt"
 )
 
 type service struct {
@@ -76,6 +77,15 @@ func (s *service) prepare(ctx context.Context, request v1.PrepareRequest) (v1.In
 	if err := original.verify(); err != nil {
 		return v1.InstanceResponse{}, err
 	}
+	if len(snapshot.Plan.SharedServices) > 0 {
+		identity, err := identifyShared(source, snapshot.Plan.Project)
+		if err != nil {
+			return v1.InstanceResponse{}, err
+		}
+		if err := s.store.db.Update(func(tx *bolt.Tx) error { return registerSharedProject(tx, identity) }); err != nil {
+			return v1.InstanceResponse{}, err
+		}
+	}
 	response, created, err := s.store.begin(snapshot, original.checkout, s.lease)
 	if err != nil || !created {
 		return response, err
@@ -133,7 +143,11 @@ func (s *service) stop() error {
 		gatewayErr = s.store.stopManaged(&gatewayRecord, s.gatewayGroup)
 	}
 	s.mu.Unlock()
-	return errors.Join(result, expiryErr, gatewayErr, s.store.reconcile("daemon shutdown interrupted preparation", false), s.store.cleanupFailures())
+	var sharedErr error
+	if result == nil && s.ownersJoined() {
+		sharedErr = s.store.stopSharedServices()
+	}
+	return errors.Join(result, expiryErr, gatewayErr, sharedErr, s.store.reconcile("daemon shutdown interrupted preparation", false), s.store.cleanupFailures())
 }
 
 func (s *service) recoverUnownedExecutions() error {

@@ -391,11 +391,202 @@ func TestDockerRuntime(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, out)
 	}
+	t.Run("native-stale-foreign-bind-cleanup", func(t *testing.T) {
+		h := newDockerHarness(t, binary, endpoint)
+		// Cleanup authority is retained before creating a stopped foreign declaration.
+		foreign := ownedResource{Kind: "container", Token: newID()}
+		foreign.Name = "backlot-fixture-" + foreign.Token
+		t.Cleanup(func() {
+			if err := removeContainer(context.Background(), h.engine, foreign); err != nil {
+				h.cleanupUnverified = true
+				t.Error("stale fixture cleanup", err)
+				return
+			}
+			if _, err := h.engine.ContainerInspect(context.Background(), resourceHandle(foreign), client.ContainerInspectOptions{}); !errdefs.IsNotFound(err) {
+				h.cleanupUnverified = true
+				t.Error("stale fixture absence unverified", err)
+			}
+		})
+		source := filepath.Join(t.TempDir(), "source")
+		if err := os.Mkdir(source, 0700); err != nil {
+			t.Fatal(err)
+		}
+		created, err := h.engine.ContainerCreate(context.Background(), client.ContainerCreateOptions{Name: foreign.Name, Config: &container.Config{Image: "alpine:3.21", Cmd: []string{"true"}, Labels: resourceLabels(foreign)}, HostConfig: &container.HostConfig{Mounts: []mount.Mount{{Type: mount.TypeBind, Source: source, Target: "/used"}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		foreign.ID = created.ID
+		if err := os.Remove(source); err != nil {
+			t.Fatal(err)
+		}
+		inspected, err := h.engine.ContainerInspect(context.Background(), foreign.ID, client.ContainerInspectOptions{})
+		if err != nil || len(inspected.Container.Mounts) != 1 || inspected.Container.State.Running {
+			t.Fatal("stale declaration missing", err)
+		}
+		t.Log("owned stopped foreign bind has missing host source")
+		tool, err := exec.LookPath("true")
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.manifest.Tools = map[string]string{"true": tool}
+		failureTool, err := exec.LookPath("false")
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.manifest.Tools["false"] = failureTool
+		for _, tc := range []struct {
+			name, tool string
+			resources  []string
+			exit       int
+		}{
+			{"baseline", "true", nil, 0},
+			{"directory", "true", []string{"directory"}, 0},
+			{"failure", "false", []string{"directory"}, 1},
+		} {
+			h.manifest.Components[tc.name] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: tc.tool}, Resources: tc.resources}
+			h.manifest.Scenes[tc.name] = v1.Scene{Lifetime: v1.Disposable, Components: []string{tc.name}, Resources: tc.resources, TerminalJob: tc.name}
+			h.write()
+			command := exec.Command(binary, "run", tc.name, "--project", h.project, "--config", h.config, "--state-dir", h.dir, "--json")
+			var output, diagnostic bytes.Buffer
+			command.Stdout, command.Stderr = &output, &diagnostic
+			runErr := command.Run()
+			code := 0
+			if runErr != nil {
+				var exit *exec.ExitError
+				if !errors.As(runErr, &exit) {
+					t.Fatal(runErr)
+				}
+				code = exit.ExitCode()
+			}
+			var result v1.InstanceResponse
+			if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+				t.Fatal("CLI result", err, diagnostic.String())
+			}
+			state := result.Instance
+			wantStatus := v1.Succeeded
+			if tc.exit != 0 {
+				wantStatus = v1.Failed
+			}
+			if code != tc.exit || state.Status != wantStatus || state.Execution == nil || state.Execution.TerminalExitCode == nil || *state.Execution.TerminalExitCode != tc.exit || state.Execution.CleanupFailure != "" || state.Execution.CollectionFailure != "" || state.Execution.Failure != "" {
+				t.Fatalf("%s: CLI=%d status=%s result=%+v diagnostic=%s", tc.name, code, state.Status, state.Execution, diagnostic.String())
+			}
+			t.Logf("%s: CLI=%d status=%s cleanup_failure=%q", tc.name, code, state.Status, state.Execution.CleanupFailure)
+			for range 2 {
+				if _, err := h.cli.Destroy(context.Background(), state.ID); err != nil {
+					t.Fatal("exact-ID idempotent destroy", err)
+				}
+			}
+		}
+		h.manifest.Components["job"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "true"}, Resources: []string{"directory"}}
+		h.manifest.Scenes["dev"] = v1.Scene{Lifetime: v1.Persistent, Components: []string{"job"}, Resources: []string{"directory"}}
+		h.write()
+		id := h.state(h.run("dev").Instance.ID, v1.RuntimeReady).Instance.ID
+		paths, err := filepath.Glob(filepath.Join(h.dir, "data", "*"))
+		if err != nil || len(paths) != 1 {
+			t.Fatal("directory missing", err)
+		}
+		old := paths[0]
+		if err := os.WriteFile(filepath.Join(old, "witness"), []byte("old-generation"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		h.state(h.restart(id, true).Instance.ID, v1.RuntimeReady)
+		if _, err := os.Lstat(old); !os.IsNotExist(err) {
+			t.Fatal("reset retained old generation", err)
+		}
+		paths, err = filepath.Glob(filepath.Join(h.dir, "data", "*"))
+		if err != nil || len(paths) != 1 || paths[0] == old {
+			t.Fatal("replacement generation missing", err)
+		}
+		if _, err := os.Stat(filepath.Join(paths[0], "witness")); !os.IsNotExist(err) {
+			t.Fatal("reset retained witness", err)
+		}
+		// Foreign uncertainty cannot weaken directory ownership or path checks.
+		for _, fault := range []string{"marker", "replacement", "symlink"} {
+			t.Run(fault, func(t *testing.T) {
+				path := paths[0]
+				marker := filepath.Join(path, ".backlot-owner")
+				data, err := os.ReadFile(marker)
+				if err != nil {
+					t.Fatal(err)
+				}
+				backup := path + "-fixture-backup"
+				restored, moved, replacement := false, false, false
+				restore := func() {
+					if restored {
+						return
+					}
+					if fault == "marker" {
+						err = os.WriteFile(marker, data, 0600)
+					} else if moved {
+						if replacement {
+							if fault == "symlink" {
+								err = os.Remove(path)
+							} else {
+								err = os.RemoveAll(path)
+							}
+						} else if _, inspectErr := os.Lstat(path); !os.IsNotExist(inspectErr) {
+							err = errors.New("replacement creation uncertain; preserved")
+						} else {
+							err = nil
+						}
+						if err == nil {
+							err = os.Rename(backup, path)
+						}
+					} else {
+						err = nil
+					}
+					if err != nil {
+						h.cleanupUnverified = true
+						t.Error("restore fixture ownership", err)
+					} else {
+						restored = true
+					}
+				}
+				t.Cleanup(restore)
+				if fault == "marker" {
+					err = os.WriteFile(marker, []byte("foreign"), 0600)
+				} else {
+					err = os.Rename(path, backup)
+					if err == nil {
+						moved = true
+						if fault == "symlink" {
+							err = os.Symlink(backup, path)
+						} else {
+							err = os.Mkdir(path, 0700)
+						}
+						replacement = err == nil
+					}
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := h.cli.Destroy(context.Background(), id); err == nil {
+					t.Fatal("ownership/path fault accepted")
+				}
+				if _, err := os.Lstat(path); err != nil {
+					t.Fatal("uncertain path deleted", err)
+				}
+				restore()
+			})
+		}
+		for range 2 {
+			if _, err := h.cli.Destroy(context.Background(), id); err != nil {
+				t.Fatal("exact-ID destroy retry", err)
+			}
+		}
+		if _, err := os.Lstat(paths[0]); !os.IsNotExist(err) {
+			t.Fatal("destroy retained generation", err)
+		}
+
+		if _, err := h.engine.ContainerInspect(context.Background(), foreign.ID, client.ContainerInspectOptions{}); err != nil {
+			t.Fatal("unrelated fixture changed", err)
+		}
+	})
 	t.Run("native-directory-desktop-bind-preservation", func(t *testing.T) {
 		if runtime.GOOS != "darwin" {
 			t.Skip("requires the explicitly supported macOS Docker Desktop topology")
 		}
-		for _, relationship := range []string{"same", "parent", "child", "peer"} {
+		for _, relationship := range []string{"same", "parent", "child", "alias", "peer"} {
 			t.Run(relationship, func(t *testing.T) {
 				h := newDockerHarness(t, binary, endpoint)
 				tool, err := exec.LookPath("true")
@@ -433,6 +624,11 @@ func TestDockerRuntime(t *testing.T) {
 					witness = "/used/" + filepath.Base(directory) + "/witness"
 				case "child":
 					source = sub
+				case "alias":
+					source = filepath.Join(t.TempDir(), "alias")
+					if err := os.Symlink(sub, source); err != nil {
+						t.Fatal(err)
+					}
 				case "peer":
 					peerHarness = newDockerHarness(t, binary, endpoint)
 					peerHarness.manifest = h.manifest
@@ -590,6 +786,16 @@ func TestDockerRuntime(t *testing.T) {
 			if readErr != nil || string(data) != "keep-native-data" || !h.engineAlive(foreign) {
 				t.Fatal(action, "changed consumed native data/foreign container", readErr)
 			}
+		}
+		zero := 0
+		if _, err := h.engine.ContainerStop(context.Background(), foreign.ID, client.ContainerStopOptions{Timeout: &zero}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.cli.Destroy(context.Background(), id); err == nil {
+			t.Fatal("stopped bind declaration did not protect directory")
+		}
+		if data, err := os.ReadFile(witness); err != nil || string(data) != "keep-native-data" {
+			t.Fatal("stopped declaration lost data", err)
 		}
 		if err = removeContainer(context.Background(), h.engine, foreign); err != nil {
 			t.Fatal(err)

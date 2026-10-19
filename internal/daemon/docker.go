@@ -171,20 +171,19 @@ func (d *dockerEngine) noConsumers(ctx context.Context, g resourceGeneration) er
 						checkedDesktop = true
 						if runtime.GOOS == "darwin" {
 							info, err := d.Info(ctx, client.InfoOptions{})
-							if err != nil {
-								return problem("cleanup_failed", "cannot verify Docker bind-source namespace; storage preserved")
-							}
-							desktop = info.Info.OperatingSystem == "Docker Desktop" && info.Info.OSType == "linux"
+							// Unavailable provenance leaves translation unverified. The raw
+							// host identity can still positively identify a consumer.
+							desktop = err == nil && info.Info.OperatingSystem == "Docker Desktop" && info.Info.OSType == "linux"
 						}
 					}
-					overlap, err := engineBindSourceOverlap(r.Name, m.Source, desktop, filepath.EvalSymlinks)
-					if err != nil {
-						return err
-					}
+					// Ownership authorizes directory deletion. An uncertain foreign
+					// identity is not a veto, nor proof that the bind is unrelated.
+					// The classifier checks every viable candidate before returning.
+					overlap, _ := engineBindSourceOverlap(r.Name, m.Source, desktop, filepath.EvalSymlinks)
 					if !overlap {
 						continue
 					}
-					return problem("cleanup_failed", "storage still has a Docker consumer; preserved")
+					return problem("cleanup_failed", "directory has a positively identified Docker bind consumer; preserved; remove the consumer before retrying reset/destroy")
 				}
 			}
 			if r.Kind == "network" && c.NetworkSettings != nil {
@@ -203,50 +202,44 @@ func desktopBindSource(source string) bool {
 	return source == "/host_mnt" || strings.HasPrefix(source, "/host_mnt/")
 }
 
-// engineBindSourceOverlap interprets inspected provider metadata only. Generic
-// user/private bind inputs must keep their ordinary host filesystem semantics.
-// Desktop provenance is verified once per inspection on native macOS. Both
-// viable identities are compared so a real host /host_mnt tree cannot hide a
-// translated consumer; unknown/partially resolved namespaces preserve storage.
-// resolve is a narrow filesystem seam for the dual-identity regression, which
-// cannot create a global /host_mnt tree in an owned fixture.
+// engineBindSourceOverlap classifies inspected foreign metadata only. A false
+// result with an error means unknown, not proven unrelated. Cleanup deliberately
+// permits that uncertainty once resource ownership is authenticated; ordinary
+// project mount/private-state validation must retain its stricter semantics.
+// resolve is a filesystem seam for testing both Desktop identities without
+// creating a global /host_mnt tree. Candidate failures never mask a known overlap.
 func engineBindSourceOverlap(directory, source string, desktop bool, resolve func(string) (string, error)) (bool, error) {
-	uncertain := func() error {
-		return problem("cleanup_failed", "Docker bind source has no verifiable host filesystem identity; storage preserved until the consumer is removed or its source is verifiable")
-	}
-	if !filepath.IsAbs(source) || filepath.Clean(source) != source {
-		return false, uncertain()
-	}
 	candidates := []string{source}
-	vmSource := desktopBindSource(source)
-	if vmSource {
-		if !desktop {
-			return false, uncertain()
-		}
+	if desktop && desktopBindSource(source) && filepath.Clean(source) == source {
 		counterpart := strings.TrimPrefix(source, "/host_mnt")
 		if counterpart == "" {
 			counterpart = "/"
 		}
 		candidates = append(candidates, counterpart)
 	}
-	var identities []string
-	for i, candidate := range candidates {
+	var uncertainty error
+	if desktopBindSource(source) && !desktop {
+		uncertainty = errors.New("foreign Docker bind namespace is unverified; ownership-authorized cleanup permits unknown consumers")
+	}
+	for _, candidate := range candidates {
+		if !filepath.IsAbs(candidate) {
+			uncertainty = errors.New("foreign Docker bind identity is unresolved; ownership-authorized cleanup permits unknown consumers")
+			continue
+		}
 		identity, err := resolve(candidate)
 		if err != nil {
-			if vmSource && i == 0 && os.IsNotExist(err) {
-				continue
-			}
-			return false, uncertain()
+			uncertainty = errors.New("foreign Docker bind identity is unresolved; ownership-authorized cleanup permits unknown consumers")
+			continue
 		}
-		identities = append(identities, identity)
-	}
-	for _, identity := range identities {
 		overlap, err := bindSourcesOverlap(directory, identity)
-		if err != nil || overlap {
-			return overlap, err
+		if overlap {
+			return true, nil
+		}
+		if err != nil {
+			uncertainty = err
 		}
 	}
-	return false, nil
+	return false, uncertainty
 }
 
 // bindSourcesOverlap resolves aliases before comparing path components in both

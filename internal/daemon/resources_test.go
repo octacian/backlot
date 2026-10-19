@@ -138,8 +138,97 @@ func TestBindSourcesOverlap(t *testing.T) {
 	}
 }
 
-// D21-P1-001: Docker metadata can name a different filesystem namespace.
-// A missing VM path cannot establish that a live bind consumer is unrelated.
+func TestForeignBindUncertaintyAndAliases(t *testing.T) {
+	root := t.TempDir()
+	owned := filepath.Join(root, "data")
+	if err := os.Mkdir(owned, 0700); err != nil {
+		t.Fatal(err)
+	}
+	dangling := filepath.Join(root, "dangling")
+	if err := os.Symlink(filepath.Join(root, "absent"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []string{dangling, filepath.Join(root, "missing"), root + "/missing/../other", "relative"} {
+		if overlap, err := engineBindSourceOverlap(owned, source, false, filepath.EvalSymlinks); overlap || err == nil {
+			t.Fatal("unknown foreign source was classified unrelated", overlap, err)
+		}
+		if err := validatePrivateBindBoundary(source, owned); err == nil && source != filepath.Join(root, "missing") {
+			t.Fatal("foreign policy relaxed ordinary private mount validation")
+		}
+	}
+	// Existing noncanonical aliases retain actual filesystem semantics.
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(owned, alias); err != nil {
+		t.Fatal(err)
+	}
+	if overlap, err := engineBindSourceOverlap(owned, alias+"/..", false, filepath.EvalSymlinks); !overlap || err != nil {
+		t.Fatal("resolvable noncanonical parent hidden", overlap, err)
+	}
+
+	t.Run("case-alias", func(t *testing.T) {
+		alias := filepath.Join(root, "DATA")
+		if _, err := os.Stat(alias); os.IsNotExist(err) {
+			t.Skip("filesystem is case sensitive")
+		}
+		if overlap, err := engineBindSourceOverlap(owned, alias, false, filepath.EvalSymlinks); !overlap || err != nil {
+			t.Fatal("case alias hidden", overlap, err)
+		}
+	})
+}
+
+func TestDockerConsumerInventoryFailuresAndMixedIdentities(t *testing.T) {
+	owned := t.TempDir()
+	for _, mode := range []string{"list-error", "inspect-error", "unknown-then-known", "known-then-unknown", "unknown-only"} {
+		t.Run(mode, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/containers/json"):
+					if r.URL.Query().Get("all") != "1" {
+						t.Error("stopped declarations omitted")
+					}
+					if mode == "list-error" {
+						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					}
+					_ = json.NewEncoder(w).Encode([]map[string]any{{"Id": "foreign"}})
+				case strings.HasSuffix(r.URL.Path, "/containers/foreign/json"):
+					if mode == "inspect-error" {
+						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					}
+					sources := []string{filepath.Join(owned, "absent")}
+					if mode == "unknown-then-known" {
+						sources = append(sources, owned)
+					}
+					if mode == "known-then-unknown" {
+						sources = append([]string{owned}, sources...)
+					}
+					var mounts []map[string]any
+					for _, source := range sources {
+						mounts = append(mounts, map[string]any{"Type": "bind", "Source": source})
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"Id": "foreign", "Mounts": mounts})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			engine, err := client.New(client.WithHost(server.URL), client.WithAPIVersion("1.53"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = engine.Close() })
+			err = (&dockerEngine{engine}).noConsumers(context.Background(), resourceGeneration{Resources: map[string]ownedResource{"data": {Kind: "directory", Name: owned}}})
+			if (err == nil) != (mode == "unknown-only") {
+				t.Fatal("consumer classification", err)
+			}
+		})
+	}
+}
+
+// Foreign metadata only blocks cleanup when a viable identity positively overlaps.
+// Unknown identities remain unknown, but ownership authorizes directory deletion.
 func TestDockerBindConsumerIdentity(t *testing.T) {
 	root := t.TempDir()
 	owned, sibling := filepath.Join(root, "data"), filepath.Join(root, "data-other")
@@ -163,14 +252,14 @@ func TestDockerBindConsumerIdentity(t *testing.T) {
 	}{
 		{"same", owned, true}, {"parent", root, true}, {"child", child, true},
 		{"alias", alias, true}, {"sibling", sibling, false},
-		{"desktop-same", "/host_mnt" + canonical, true},
-		{"desktop-parent", "/host_mnt" + filepath.Dir(canonical), true},
-		{"desktop-child", "/host_mnt" + filepath.Join(canonical, "sub"), true},
-		{"desktop-sibling", "/host_mnt" + filepath.Join(filepath.Dir(canonical), "data-other"), runtime.GOOS != "darwin"},
-		{"desktop-sibling-unknown-provider", "/host_mnt" + filepath.Join(filepath.Dir(canonical), "data-other"), true},
-		{"desktop-sibling-nonlinux-provider", "/host_mnt" + filepath.Join(filepath.Dir(canonical), "data-other"), true},
-		{"desktop-sibling-info-unavailable", "/host_mnt" + filepath.Join(filepath.Dir(canonical), "data-other"), true},
-		{"unresolved-sibling", filepath.Join(root, "missing"), true},
+		{"desktop-same", "/host_mnt" + canonical, runtime.GOOS == "darwin"},
+		{"desktop-parent", "/host_mnt" + filepath.Dir(canonical), runtime.GOOS == "darwin"},
+		{"desktop-child", "/host_mnt" + filepath.Join(canonical, "sub"), runtime.GOOS == "darwin"},
+		{"desktop-sibling", "/host_mnt" + filepath.Join(filepath.Dir(canonical), "data-other"), false},
+		{"desktop-sibling-unknown-provider", "/host_mnt" + filepath.Join(filepath.Dir(canonical), "data-other"), false},
+		{"desktop-sibling-nonlinux-provider", "/host_mnt" + filepath.Join(filepath.Dir(canonical), "data-other"), false},
+		{"desktop-sibling-info-unavailable", "/host_mnt" + filepath.Join(filepath.Dir(canonical), "data-other"), false},
+		{"unresolved-sibling", filepath.Join(root, "missing"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -232,13 +321,29 @@ func TestEngineBindSourceAmbiguity(t *testing.T) {
 		{"raw-sibling-translated-owned", sibling, owned, true},
 		{"raw-owned-translated-sibling", owned, sibling, true},
 		{"both-sibling", sibling, sibling, false},
+		{"raw-unresolved-translated-owned", "", owned, true},
+		{"raw-owned-translated-unresolved", owned, "", true},
+		{"raw-denied-translated-owned", "denied", owned, true},
+		{"raw-owned-translated-denied", owned, "denied", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resolve := func(path string) (string, error) {
 				if path == source {
+					if tc.raw == "" {
+						return "", os.ErrNotExist
+					}
+					if tc.raw == "denied" {
+						return "", os.ErrPermission
+					}
 					return tc.raw, nil
 				}
 				if path == owned {
+					if tc.translated == "" {
+						return "", os.ErrNotExist
+					}
+					if tc.translated == "denied" {
+						return "", os.ErrPermission
+					}
 					return tc.translated, nil
 				}
 				t.Fatal("unexpected namespace candidate", path)
@@ -264,8 +369,11 @@ func TestEngineBindSourceAmbiguity(t *testing.T) {
 			}
 		})
 	}
-	if _, err := engineBindSourceOverlap(owned, source, false, func(string) (string, error) { return sibling, nil }); err == nil {
-		t.Fatal("resolvable raw host path bypassed unverified Desktop provenance")
+	if overlap, err := engineBindSourceOverlap(owned, source, false, func(string) (string, error) { return sibling, nil }); overlap || err == nil {
+		t.Fatal("unknown namespace must remain unknown even with unrelated raw identity", overlap, err)
+	}
+	if overlap, err := engineBindSourceOverlap(owned, source, false, func(string) (string, error) { return owned, nil }); !overlap || err != nil {
+		t.Fatal("unverified translation hid known raw overlap", overlap, err)
 	}
 }
 

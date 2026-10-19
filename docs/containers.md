@@ -126,19 +126,30 @@ including unrelated consumers; no broad prune or forced volume/network deletion
 is used. Image-declared anonymous volumes belong to the owned container and are
 removed with it.
 
-Bind-consumer inspection must establish a host filesystem identity before
-declaring a source unrelated to retained directories. Docker Desktop can report
-a VM-prefixed source such as `/host_mnt/private/...` which the host cannot resolve.
-On native macOS, the adapter verifies the configured local Engine's Info reports
-Docker Desktop and Linux before reconciling this exact clean prefix to a fully
-existing canonical host counterpart. It compares every viable raw and translated
-identity, so a real host `/host_mnt` path cannot hide a consumed directory. A valid
-unrelated peer can continue running while another instance resets or destroys.
-This applies only to inspected Engine metadata, never ordinary project mount
-inputs or their private-state fences. Unknown providers/namespaces, unresolved
-counterparts, unclean paths and uncertain identities preserve storage with an
-actionable diagnostic. Remove the consumer or make its source verifiable before
-retrying reset/destroy; the consumer is never stopped or removed implicitly.
+Authenticated directory ownership authorizes cleanup by default even when a
+foreign bind source is unresolved, dangling, noncanonical or otherwise uncertain.
+Inspection still blocks positively identified same/ancestor/descendant consumers,
+including resolved symlink and case aliases, in running and stopped declarations.
+Unknown identity is not proof that a bind is unrelated: an unidentifiable foreign
+alias may consume the directory and lose its backing data during cleanup. Do not
+rely on uncertain foreign binds to retain Backlot-owned data. This intentional
+tradeoff is recorded in the [cleanup policy decision](adr/20261019T023642577Z-authorize-owned-directory-cleanup-despite-unknown-foreign-binds.md).
+
+Docker Desktop can report a VM-prefixed source such as `/host_mnt/private/...`.
+On native macOS, the adapter verifies the configured local Engine reports Docker
+Desktop/Linux before reconciling this exact clean prefix to an existing resolved
+host counterpart. Every viable raw and verified translated identity is compared,
+so a real host `/host_mnt` path cannot hide a consumed directory and a failed
+candidate cannot hide a known overlap through another. Unavailable namespace
+verification leaves translation unknown; raw host overlaps still block deletion.
+A known consumer produces a preservation diagnostic; remove it before retrying
+reset/destroy. Backlot never stops or removes it implicitly. A verifiably unrelated
+peer can continue running while another instance resets or destroys.
+
+This policy applies only to inspected foreign metadata. Ordinary project mount
+inputs and their private-state fences retain strict host filesystem validation.
+Docker list/inspect errors still block cleanup, as do owned-consumer shutdown,
+directory ownership/privacy, replaced/symlinked path and volume/network safeguards.
 
 After a daemon crash, verifiably owned surviving containers are stopped, available
 logs are retained, and containers are removed. Data/credentials remain retained;

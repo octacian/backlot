@@ -23,6 +23,7 @@ type Identity struct {
 	Birth   string `json:"birth"`
 	Control string `json:"control"`
 	Token   string `json:"token"`
+	Boot    string `json:"boot,omitempty"`
 }
 
 // Spec is the private activation payload after ownership journaling.
@@ -63,6 +64,10 @@ type Group struct {
 
 // Start creates an inactive authority; no application starts before Activate.
 func Start(executable string, stdout, stderr *os.File) (*Group, error) {
+	boot, err := CurrentBoot()
+	if err != nil {
+		return nil, err
+	}
 	dir, err := os.MkdirTemp("/tmp", "blctl-")
 	if err != nil {
 		return nil, err
@@ -101,6 +106,7 @@ func Start(executable string, stdout, stderr *os.File) (*Group, error) {
 	}
 	id.Control = filepath.Join(dir, "control.sock")
 	id.Token = hex.EncodeToString(token)
+	id.Boot = boot
 	g := &Group{Identity: id, control: control, done: make(chan struct{}), statusDone: make(chan struct{}), ready: make(chan struct{}), anchorReady: make(chan struct{})}
 	go func() { _ = cmd.Wait(); close(g.done) }()
 	go func() {

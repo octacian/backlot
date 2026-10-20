@@ -3,11 +3,13 @@ package native
 import (
 	"fmt"
 	"golang.org/x/sys/unix"
+	"os"
 	"os/exec"
 	"syscall"
 )
 
 func supported() bool         { return true }
+func anchorOwnGroup() bool    { return syscall.Getpgrp() == os.Getpid() }
 func configure(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} }
 func identify(pid int) (Identity, error) {
 	all, err := unix.SysctlKinfoProcSlice("kern.proc.pid", pid)
@@ -23,6 +25,25 @@ func identify(pid int) (Identity, error) {
 	}
 	return Identity{PID: pid, Birth: fmt.Sprintf("%d:%d", p.Proc.P_starttime.Sec, p.Proc.P_starttime.Usec)}, nil
 }
+
+func processSnapshot() ([]Identity, error) {
+	all, err := unix.SysctlKinfoProcSlice("kern.proc.all")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Identity, 0, len(all))
+	for _, p := range all {
+		if p.Proc.P_pid <= 0 { // Kernel task has no user process session.
+			continue
+		}
+		out = append(out, Identity{PID: int(p.Proc.P_pid), Birth: fmt.Sprintf("%d:%d", p.Proc.P_starttime.Sec, p.Proc.P_starttime.Usec)})
+	}
+	return out, nil
+}
+
+func sessionID(pid int) (int, error) { return unix.Getsid(pid) }
+
+func bootIdentity() (string, error) { return unix.Sysctl("kern.bootsessionuuid") }
 func groupMembers(pgid int) ([]int, error) {
 	all, err := unix.SysctlKinfoProcSlice("kern.proc.all")
 	if err != nil {

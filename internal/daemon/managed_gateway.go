@@ -37,6 +37,7 @@ type managedRecord struct {
 	Config      v1.CaddyConfig   `json:"config"`
 	Identity    *native.Identity `json:"identity,omitempty"`
 	Pending     bool             `json:"pending,omitempty"`
+	PendingBoot string           `json:"pending_boot,omitempty"`
 	Initialized bool             `json:"initialized,omitempty"`
 	RootHash    string           `json:"root_hash,omitempty"`
 	Status      string           `json:"status"`
@@ -162,7 +163,12 @@ func (s *store) stopManaged(r *managedRecord, group *native.Group) error {
 		return nil
 	}
 	if r.Pending {
-		return problem("gateway_ownership", "managed guardian launch effect is missing; preserve uncertain resources")
+		previous, err := native.PreviousBoot(r.PendingBoot)
+		if err != nil || !previous {
+			return problem("gateway_ownership", "managed guardian launch effect is missing; preserve uncertain resources")
+		}
+		// The intent predates this boot; no inactive helper can have survived.
+		r.Pending, r.PendingBoot = false, ""
 	}
 	if r.Identity != nil {
 		var err error
@@ -172,7 +178,7 @@ func (s *store) stopManaged(r *managedRecord, group *native.Group) error {
 			err = native.Stop(*r.Identity, time.Second)
 		}
 		if err != nil {
-			return problem("gateway_ownership", "authenticated managed gateway cleanup failed: "+err.Error())
+			return problem("gateway_ownership", "managed gateway cleanup could not be verified: "+err.Error())
 		}
 		r.Identity = nil
 	}
@@ -232,7 +238,7 @@ func (s *service) gatewayControl(ctx context.Context, action string, request v1.
 		}
 	}
 	if r.Pending || r.Status == "uncertain" {
-		return v1.GatewayResponse{}, problem("gateway_ownership", "managed gateway ownership is uncertain; resolve authenticated cleanup before start")
+		return v1.GatewayResponse{}, problem("gateway_ownership", "managed gateway ownership is uncertain; use gateway stop to verify cleanup, then gateway start")
 	}
 	if r.Identity != nil {
 		if s.gatewayStatus(ctx, r).Status == "running" {
@@ -359,17 +365,21 @@ func (s *service) startManaged(ctx context.Context, r *managedRecord) (result er
 	if err != nil {
 		return err
 	}
-	r.Pending = true
+	boot, err := native.CurrentBoot()
+	if err != nil {
+		return err
+	}
+	r.Pending, r.PendingBoot = true, boot
 	if err := s.store.saveManaged(*r); err != nil {
 		return err
 	}
 	group, startErr := native.Start(executable, log, log)
 	if group == nil {
-		r.Pending = false
+		r.Pending, r.PendingBoot = false, ""
 		return errors.Join(startErr, s.store.saveManaged(*r))
 	}
 	r.Identity = &group.Identity
-	r.Pending = false
+	r.Pending, r.PendingBoot = false, ""
 	s.gatewayGroup = group
 	if err := s.store.saveManaged(*r); err != nil {
 		return err

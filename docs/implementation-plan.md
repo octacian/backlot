@@ -136,6 +136,12 @@ reviews, complete frozen regression suites and exact-HEAD CI remain gates. Trust
 browser/clean-machine macOS evidence is blocked pending a disposable environment;
 no browser-warning bypass or persistent trust mutation can replace it.
 
+Recovery follow-up records kernel boot identity for guardian effects and managed
+launch intents, verifies session absence when control/receipts are lost, and gives
+new anchors a guardian-liveness pipe for self-pinned cleanup after guardian death.
+Retained configuration/CA and collection-gap reporting remain intact; see the
+[recovery proposal](adr/20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md).
+
 The managed origin also exposes `ca_cert_path` for explicit native environment
 assignments, with symbolic offline planning and validated existing public-root
 resolution. See [application trust](https.md#explicit-application-trust). The

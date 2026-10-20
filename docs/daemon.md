@@ -247,15 +247,21 @@ reports its original result, and retains the separate anchor until group cleanup
 does not reap the anchor until no other member remains and the anchor has exited.
 No observed member PID is signaled. After anchor join, a kernel signal-0 group
 query must prove ESRCH; enumeration alone cannot acknowledge absence. Successful
-stop also requires joined log/status
+stop through the guardian also requires joined log/status
 collectors, a private authenticated cleanup receipt, and verified guardian exit.
 Control sockets and receipts live in random mode-0700 `/tmp/blctl-*` directories;
 their paths and random capabilities stay in the private runtime journal. Missing
 root PIDs, EOF and closed listeners do not establish cleanup. Graceful daemon
 shutdown stops owned work. Recovery requests cleanup through the same authority
 and marks interrupted with an explicit collection gap; it never resumes work.
-Missing or mismatched control authority is a cleanup failure that preserves
-uncertain survivors. Inspect the private ownership journal before manual action.
+New guardians retain an anonymous pipe to their anchor; guardian death makes the
+live anchor kill its own pinned group. Recovery may release missing control
+authority after proving a different kernel boot session or absence of the original
+guardian and all supervised session members. This proves resource absence, never
+complete output/status collection. Collection gaps stay visible, and explicit
+restart can proceed after cleanup is verified. Live/unknown session members,
+failed observations, missing launch effects and mismatched receipts still preserve
+uncertain ownership. See [gateway recovery](https.md) for the stop/start procedure.
 
 See [disposable results and evidence](evidence.md) for exact exit codes, kept
 failures, artifacts, fixture access and retention settings.

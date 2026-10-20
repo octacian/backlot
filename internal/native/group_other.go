@@ -9,8 +9,14 @@ import (
 	"syscall"
 )
 
-func supported() bool       { return false }
-func configure(_ *exec.Cmd) {}
+func supported() bool               { return false }
+func anchorOwnGroup() bool          { return false }
+func bootIdentity() (string, error) { return "", errors.New("native boot identity unsupported") }
+func processSnapshot() ([]Identity, error) {
+	return nil, errors.New("native session observation unsupported")
+}
+func sessionID(_ int) (int, error) { return 0, errors.New("native session observation unsupported") }
+func configure(_ *exec.Cmd)        {}
 func identify(_ int) (Identity, error) {
 	return Identity{}, errors.New("native execution unsupported on this platform")
 }

@@ -362,6 +362,18 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	if err := native.Stop(*managed.Identity, 0); err != nil {
 		t.Fatal(err)
 	}
+	// Model pre-boot-ID installations after tmp cleanup. Authenticated fixture
+	// cleanup above retains authority before losing the socket/receipt; recovery
+	// must independently prove session absence and resume the saved config/CA.
+	controlDir := filepath.Dir(managed.Identity.Control)
+	if err := os.RemoveAll(controlDir); err != nil {
+		t.Fatal(err)
+	}
+	managed.Identity.Boot = ""
+	managed.Status, managed.Failure = "uncertain", "native control authority unavailable"
+	if err := state.saveManaged(managed); err != nil {
+		t.Fatal(err)
+	}
 	if err := state.db.Close(); err != nil {
 		t.Fatal(err)
 	}

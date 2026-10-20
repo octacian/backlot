@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -960,7 +961,7 @@ func TestNativeRuntime(t *testing.T) {
 		}
 		h.absent()
 	})
-	t.Run("guardian-crash-preserves-uncertain-descendants", func(t *testing.T) {
+	t.Run("guardian-crash-terminates-descendants-and-allows-restart", func(t *testing.T) {
 		h := newNativeFaultHarness(t, binary)
 		r := h.run("dev")
 		h.state(r.Instance.ID, v1.RuntimeReady)
@@ -979,8 +980,8 @@ func TestNativeRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		final := h.state(r.Instance.ID, v1.Failed)
-		if final.Instance.Execution.CleanupFailure == "" || final.Instance.Execution.CollectionFailure == "" {
-			t.Fatal("guardian loss must retain independent cleanup and collection gaps")
+		if final.Instance.Execution.CollectionFailure == "" {
+			t.Fatal("guardian loss must retain collection gaps")
 		}
 		for _, component := range final.Instance.Execution.Components {
 			if component.ExitCode != nil {
@@ -995,14 +996,25 @@ func TestNativeRuntime(t *testing.T) {
 		if err != nil || following.Gap != logs.Gap {
 			t.Fatal("following collection gap omitted", err)
 		}
-		if syscall.Kill(root, 0) != nil {
-			t.Fatal("uncertain descendant killed")
+		h.absent()
+		if syscall.Kill(-pgid, 0) != syscall.ESRCH {
+			t.Fatal("anchor did not terminate its pinned group after guardian loss")
 		}
-		actual, err := syscall.Getpgid(root)
-		if err != nil || actual != pgid {
-			t.Fatal("fixture identity changed", err)
+		if _, err := h.cli.StopExecution(context.Background(), r.Instance.ID); err != nil {
+			var detail *v1.PlanError
+			if !errors.As(err, &detail) || detail.Code != "collection_failed" {
+				t.Fatal("proven absence did not release cleanup uncertainty", err)
+			}
 		}
-		// Cleanup is registered before the fault and uses retained fixture authority.
+		request := h.request("dev")
+		request.InstanceID = r.Instance.ID
+		if _, err := h.cli.Restart(context.Background(), request); err != nil {
+			t.Fatal("explicit restart after guardian loss failed", err)
+		}
+		h.state(r.Instance.ID, v1.RuntimeReady)
+		if _, err := h.cli.StopExecution(context.Background(), r.Instance.ID); err != nil {
+			t.Fatal(err)
+		}
 	})
 	t.Run("daemon-crash-during-startup", func(t *testing.T) {
 		h := newNativeHarness(t, binary)

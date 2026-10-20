@@ -8,9 +8,12 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 func supported() bool         { return true }
+func anchorOwnGroup() bool    { return syscall.Getpgrp() == os.Getpid() }
 func configure(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} }
 func process(pid int) ([]string, error) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
@@ -33,6 +36,54 @@ func identify(pid int) (Identity, error) {
 		return Identity{}, err
 	}
 	return Identity{PID: pid, Birth: f[19]}, nil
+}
+
+func processSnapshot() ([]Identity, error) {
+	// A filtered procfs cannot prove absence of another user's session members.
+	data, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return nil, err
+	}
+	visible := false
+	for line := range strings.SplitSeq(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 4 || fields[1] != "/proc" || fields[2] != "proc" {
+			continue
+		}
+		visible = true
+		for option := range strings.SplitSeq(fields[3], ",") {
+			if strings.HasPrefix(option, "hidepid=") && option != "hidepid=0" && option != "hidepid=off" {
+				return nil, errors.New("filtered procfs cannot verify native session absence")
+			}
+		}
+	}
+	if !visible {
+		return nil, errors.New("unfiltered procfs unavailable")
+	}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, err
+	}
+	var out []Identity
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		id, err := identify(pid)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+func sessionID(pid int) (int, error) { return unix.Getsid(pid) }
+
+func bootIdentity() (string, error) {
+	data, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	return strings.TrimSpace(string(data)), err
 }
 func groupMembers(pgid int) ([]int, error) {
 	entries, err := os.ReadDir("/proc")

@@ -31,13 +31,25 @@ type authorityRequest struct {
 	done    chan struct{}
 }
 
-// Stop uses only the private authority. Process observations never authorize signals.
+// Stop requests authenticated cleanup, or proves an exited guardian's session
+// absent when its receipt was lost. Absence does not attest output collection.
+// Process observations never authorize signals.
 func Stop(id Identity, grace time.Duration) error {
 	if id.PID <= 1 || id.Birth == "" || id.Control == "" || len(id.Token) != 64 {
 		return errors.New("native control authority missing; preserve uncertain processes")
 	}
 	if grace < 0 {
 		return errors.New("invalid cleanup grace")
+	}
+	if id.Boot != "" {
+		previous, err := PreviousBoot(id.Boot)
+		if err != nil {
+			return errors.New("native boot identity unavailable or invalid; preserve uncertain processes")
+		}
+		if previous {
+			// Reboot proves process absence, never successful output collection.
+			return nil
+		}
 	}
 	var proof cleanupProof
 	connection, err := net.DialTimeout("unix", id.Control, time.Second)
@@ -51,6 +63,13 @@ func Stop(id Identity, grace time.Duration) error {
 	}
 	if err != nil {
 		data, readErr := os.ReadFile(filepath.Join(filepath.Dir(id.Control), "receipt.json"))
+		if os.IsNotExist(readErr) {
+			if absenceErr := absentSession(id); absenceErr == nil {
+				return nil
+			} else {
+				return fmt.Errorf("native control authority unavailable; preserve uncertain processes: %w", absenceErr)
+			}
+		}
 		if readErr != nil || json.Unmarshal(data, &proof) != nil {
 			return errors.New("native control authority unavailable; preserve uncertain processes")
 		}
@@ -106,6 +125,12 @@ func Supervise() error {
 	}
 	if own.PID != id.PID || own.Birth != id.Birth || len(id.Token) != 64 {
 		return errors.New("guardian initialization identity mismatch")
+	}
+	if id.Boot != "" {
+		boot, err := bootIdentity()
+		if err != nil || !validBootIdentity(boot) || boot != id.Boot {
+			return errors.New("guardian initialization boot mismatch")
+		}
 	}
 	listener, err := net.Listen("unix", id.Control)
 	if err != nil {
@@ -267,6 +292,7 @@ func Supervise() error {
 
 type ownedWorkload struct {
 	anchor       *exec.Cmd
+	lease        *os.File
 	collected    chan error
 	statusDone   chan struct{}
 	reads        []*os.File
@@ -294,15 +320,27 @@ func startWorkload(spec Spec, publish func(Exit)) (*ownedWorkload, error) {
 		return nil, err
 	}
 	anchor := exec.Command(executable, "__native-anchor")
-	configureAnchor(anchor)
-	if err := anchor.Start(); err != nil {
+	leaseRead, leaseWrite, err := os.Pipe()
+	if err != nil {
 		_ = outRead.Close()
 		_ = outWrite.Close()
 		_ = errRead.Close()
 		_ = errWrite.Close()
 		return nil, err
 	}
-	w := &ownedWorkload{anchor: anchor, collected: make(chan error, 2), statusDone: make(chan struct{}), reads: []*os.File{outRead, errRead}, publish: publish, result: Exit{Code: -1, Error: "root command status unavailable", CollectionFailure: "root exit status unavailable"}}
+	anchor.Stdin = leaseRead
+	configureAnchor(anchor)
+	if err := anchor.Start(); err != nil {
+		_ = leaseRead.Close()
+		_ = leaseWrite.Close()
+		_ = outRead.Close()
+		_ = outWrite.Close()
+		_ = errRead.Close()
+		_ = errWrite.Close()
+		return nil, err
+	}
+	_ = leaseRead.Close()
+	w := &ownedWorkload{anchor: anchor, lease: leaseWrite, collected: make(chan error, 2), statusDone: make(chan struct{}), reads: []*os.File{outRead, errRead}, publish: publish, result: Exit{Code: -1, Error: "root command status unavailable", CollectionFailure: "root exit status unavailable"}}
 	var logMu sync.Mutex
 	for i, read := range w.reads {
 		stream := []string{"stdout", "stderr"}[i]
@@ -411,6 +449,9 @@ func (w *ownedWorkload) stop(grace time.Duration) error {
 	go func() { _ = w.anchor.Wait(); close(joined) }()
 	select {
 	case <-joined:
+		if w.lease != nil {
+			_ = w.lease.Close()
+		}
 	case <-time.After(time.Second):
 		return errors.New("anchor join unavailable")
 	}
@@ -451,13 +492,18 @@ func (w *ownedWorkload) stop(grace time.Duration) error {
 func onlyAnchor(members []int, pid int) bool { return len(members) == 1 && members[0] == pid }
 
 // Anchor pins a distinct process group in its parent's session until cleanup.
+// Its private stdin lease has a single writer held by the guardian. Guardian
+// death closes that lease, so the live anchor terminates its own pinned group;
+// neither the daemon nor a replacement process signals an observed PID/PGID.
 func Anchor() error {
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, syscall.SIGTERM, os.Interrupt)
 	defer signal.Stop(signals)
-	for range signals {
+	_, _ = io.Copy(io.Discard, os.Stdin)
+	if !anchorOwnGroup() {
+		return errors.New("anchor does not own its process group")
 	}
-	return nil
+	return signalGroup(os.Getpid(), syscall.SIGKILL)
 }
 
 // CrashForTest asks an explicitly fixture-enabled private guardian to crash itself.

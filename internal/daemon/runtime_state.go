@@ -19,6 +19,7 @@ type runtimeRecord struct {
 	ExportSource  *v1.ExportSource    `json:"export_source,omitempty"`
 	StartedAt     string              `json:"started_at,omitempty"`
 	Gateway       *gateway.Intent     `json:"gateway,omitempty"`
+	PendingBoot   string              `json:"pending_boot,omitempty"`
 	LaunchPending bool                `json:"launch_pending,omitempty"`
 	ConfigPath    string              `json:"config_path,omitempty"`
 	Attempt       string              `json:"attempt"`
@@ -50,10 +51,22 @@ func (s *store) runtime(id string) (runtimeRecord, error) {
 		if data == nil {
 			return nil
 		}
-		return json.Unmarshal(data, &r)
+		var decodeErr error
+		r, decodeErr = decodeRuntime(data)
+		return decodeErr
 	})
 	return r, err
 }
+func decodeRuntime(data []byte) (r runtimeRecord, err error) {
+	if !jsonObject(data) || json.Unmarshal(data, &r) != nil {
+		return r, problem("state_corrupt", "invalid runtime record shape; preserved")
+	}
+	if r.Attempt != "" && !validID(r.Attempt) {
+		return r, problem("state_corrupt", "invalid runtime attempt; preserved")
+	}
+	return r, nil
+}
+
 func (s *store) saveRuntime(id string, r runtimeRecord) error {
 	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, "runtime", id, r) })
 }
@@ -147,7 +160,17 @@ func (s *store) recoverExecution(id string) error {
 	if err != nil {
 		return err
 	}
-	proofMissing := r.Attempt != result.Attempt || (instance.Status == v1.RuntimeReady && len(r.Groups) == 0 && len(g.Containers) == 0)
+	pendingAbsent := false
+	if r.LaunchPending {
+		pendingAbsent, _ = native.PreviousBoot(r.PendingBoot)
+		if pendingAbsent {
+			r.LaunchPending, r.PendingBoot = false, ""
+			if err := s.saveRuntime(id, r); err != nil {
+				return err
+			}
+		}
+	}
+	proofMissing := r.Attempt != result.Attempt || (!pendingAbsent && instance.Status == v1.RuntimeReady && len(r.Groups) == 0 && len(g.Containers) == 0)
 	if proofMissing {
 		cleanup = errors.Join(cleanup, problem("cleanup_failed", "native guardian ownership effect is absent or mismatched; preserve uncertain processes and inspect private state"))
 	}

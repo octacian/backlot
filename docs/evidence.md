@@ -93,7 +93,12 @@ Explicit stop or daemon shutdown stops verified kept runtime while retaining dat
 Explicit destroy removes owned runtime/data after verified stop. Both preserve
 historical results and evidence. Daemon crash recovery stops only verifiably owned
 survivors, retains data/evidence, reports interruption/collection gaps and requires
-an explicit restart. Unknown ownership remains untouched with a cleanup failure.
+an explicit restart. Unknown ownership remains untouched with a cleanup failure unless a targeted
+`stop --force` explicitly relinquishes the native claim. That acknowledgement
+retains private history, known exits, a collection gap and safe public warnings;
+unknown survivors may still run/write. Replacement attempts retain the warning but
+do not inherit an old attempt's collection gap. Latest-attempt export can therefore
+be complete for a fully collected replacement while reporting prior waivers.
 
 ## Logs and retention
 

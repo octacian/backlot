@@ -486,7 +486,12 @@ func TestExportEvidenceFenceInterruption(t *testing.T) {
 			}
 			unlock()
 			// A later uncancelled caller can still acquire and publish a full snapshot.
-			if response, err := s.export(context.Background(), request); err != nil || !response.Complete {
+			// Its budget is independent of the interrupted request's short deadline.
+			retry := request
+			retry.WaitTimeout = ""
+			retryCtx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer retryCancel()
+			if response, err := s.export(retryCtx, retry); err != nil || !response.Complete {
 				t.Fatal(response, err)
 			}
 		})

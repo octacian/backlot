@@ -407,7 +407,7 @@ func TestStateVersionRejectedWithoutMutation(t *testing.T) {
 			}
 			_, err = openStore(dir)
 			code(t, err, "state_version")
-			if !strings.Contains(err.Error(), "requires version 5") || !strings.Contains(err.Error(), "--state-dir") {
+			if !strings.Contains(err.Error(), "requires version 6") || !strings.Contains(err.Error(), "--state-dir") {
 				t.Fatalf("missing actionable compatibility instructions: %v", err)
 			}
 			// Startup must stop before recovery can touch incompatible resources.
@@ -416,47 +416,31 @@ func TestStateVersionRejectedWithoutMutation(t *testing.T) {
 			if err != nil || !bytes.Equal(before, after) {
 				t.Fatal("rejected database bytes changed", err)
 			}
-			db, err := bolt.Open(filepath.Join(dir, "state.db"), 0600, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() {
-				if err := db.Close(); err != nil {
-					t.Error(err)
-				}
-			}()
-			if err := db.View(func(tx *bolt.Tx) error {
-				if string(tx.Bucket([]byte("meta")).Get([]byte("version"))) != version {
-					t.Fatal("unsupported version mutated")
-				}
-				return nil
-			}); err != nil {
-				t.Fatal(err)
-			}
+
 		})
 	}
 }
 
-func TestStateVersionFiveDaemonRestart(t *testing.T) {
+func TestStateVersionSixDaemonRestart(t *testing.T) {
 	root := shortTemp(t)
 	config := writeFixture(t, root)
 	dir := filepath.Join(shortTemp(t), "state")
 	cli, stop := startFixture(t, dir, time.Second)
 	status, err := cli.Status(context.Background())
-	if err != nil || status.StateVersion != 5 {
-		t.Fatal("fresh daemon did not advertise state v5", status, err)
+	if err != nil || status.StateVersion != 6 {
+		t.Fatal("fresh daemon did not advertise state v6", status, err)
 	}
 	prepared := prepareFixture(t, cli, request(root, config, "dev"))
 	stop()
 	cli, stop = startFixture(t, dir, time.Second)
 	defer stop()
 	status, err = cli.Status(context.Background())
-	if err != nil || status.StateVersion != 5 {
-		t.Fatal("restarted daemon did not advertise state v5", status, err)
+	if err != nil || status.StateVersion != 6 {
+		t.Fatal("restarted daemon did not advertise state v6", status, err)
 	}
 	result, err := cli.Inspect(context.Background(), prepared.Instance.ID)
 	if err != nil || result.Instance.Status != v1.Prepared || result.Instance.ID != prepared.Instance.ID {
-		t.Fatal("v5 restart lost persistent state", result, err)
+		t.Fatal("v6 restart lost persistent state", result, err)
 	}
 }
 

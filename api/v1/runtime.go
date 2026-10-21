@@ -11,6 +11,22 @@ const (
 	Failed       InstanceStatus = "failed"
 )
 
+// StopRequest targets one execution; Force acknowledges potentially live native survivors.
+type StopRequest struct {
+	ExpectedAttempt string `json:"expected_attempt,omitempty"`
+	APIVersion      string `json:"api_version"`
+	InstanceID      string `json:"instance_id"`
+	Force           bool   `json:"force,omitempty"`
+}
+
+// NativeOwnershipWarning reports an explicit waiver without exposing private authority.
+// It remains visible across replacement attempts and does not prove collection.
+type NativeOwnershipWarning struct {
+	Attempt    string `json:"attempt,omitempty"`
+	RecordedAt string `json:"recorded_at"`
+	Message    string `json:"message"`
+}
+
 // ExecutionOptions contains Go durations; omitted fields use documented defaults.
 // Zero execution deadlines are unlimited; zero stop grace escalates immediately.
 type ExecutionOptions struct {
@@ -81,11 +97,12 @@ type LogRecord struct {
 
 // LogsResponse returns a bounded page and the next unfiltered record offset.
 type LogsResponse struct {
-	APIVersion string      `json:"api_version"`
-	Records    []LogRecord `json:"records"`
-	NextOffset int         `json:"next_offset"`
-	Active     bool        `json:"active"`
-	Gap        string      `json:"gap,omitempty"`
+	NativeOwnershipWarnings []NativeOwnershipWarning `json:"native_ownership_warnings,omitempty"`
+	APIVersion              string                   `json:"api_version"`
+	Records                 []LogRecord              `json:"records"`
+	NextOffset              int                      `json:"next_offset"`
+	Active                  bool                     `json:"active"`
+	Gap                     string                   `json:"gap,omitempty"`
 }
 
 // ArtifactRecord locates collected evidence outside runtime and data resources.

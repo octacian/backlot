@@ -166,7 +166,7 @@ func TestStateSixRejectsMalformedLifecycleUnchanged(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			s, _, _ := exportFixture(t)
+			s, instance, _ := exportFixture(t)
 			dir := s.store.directory
 			sentinel := filepath.Join(dir, "retained-ca-config")
 			if err := os.WriteFile(sentinel, []byte("retained private state"), 0600); err != nil {
@@ -179,7 +179,11 @@ func TestStateSixRejectsMalformedLifecycleUnchanged(t *testing.T) {
 				if err := tx.Bucket([]byte("meta")).Put([]byte("unknown_metadata"), []byte("opaque preserved")); err != nil {
 					return err
 				}
-				return tx.Bucket([]byte(c.bucket)).Put([]byte(c.key), []byte(c.value))
+				key := c.key
+				if c.bucket == "runtime" || c.bucket == "resources" {
+					key = instance.ID // Exercise the typed decoder, not orphan-parent rejection.
+				}
+				return tx.Bucket([]byte(c.bucket)).Put([]byte(key), []byte(c.value))
 			}); err != nil {
 				t.Fatal(err)
 			}

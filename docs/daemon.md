@@ -31,8 +31,9 @@ bin/backlot daemon stop --state-dir /absolute/private/backlot --json
 `daemon start` backgrounds this executable's `daemon serve` and waits for a typed
 handshake. `daemon serve` runs in the foreground until SIGINT, SIGTERM or an API
 stop request. `daemon stop` joins owned runtime cleanup before acknowledging
-`stopping`; cleanup or collection failure returns nonzero. Socket removal marks
-completed shutdown. There is no service installer. Use the same `--state-dir` on each command;
+`stopping`; cleanup or collection failure returns nonzero. The acknowledgment is
+not proof of final process exit or lock release; shutdown still finishes through
+the daemon's existing lifecycle. There is no service installer. Use the same `--state-dir` on each command;
 without it, the directory is `backlot/daemon` below Go's `os.UserConfigDir()`.
 State storage in this milestone uses that explicit flag/default; the manifest's
 machine `storage` retention settings remain intent for later evidence storage.
@@ -52,10 +53,13 @@ an explicit mutating Doctor probe, the shared Go client checks current API/state
 compatibility with a fresh bounded status request. A running older or
 malformed daemon is rejected before scene mutation; no compatibility result is
 cached. Historical reads and snapshot cleanup calls do not perform this
-configuration preflight. Shut down an older daemon normally with its matching
-binary, then start this binary on the same `--state-dir` for the supported v6-to-v8
-upgrade. Preserve other unsupported formats for diagnosis and their matching
-binary's lifecycle; do not discard ownership records.
+configuration preflight. For the supported v6-to-v8 upgrade, this CLI's normal
+`daemon stop` accepts only an exact v6 `stopping` response to `POST /v1/stop`, with
+all ordinary response/error checks and its reported version preserved. Once
+shutdown finishes, start this binary on the same `--state-dir`. The acknowledgment
+does not prove process exit or released locks, and adds no polling/automatic
+restart. Status stays strict v8. Preserve other unsupported formats for diagnosis
+and their matching binary's lifecycle; do not discard ownership records.
 
 `prepare` discovers the project locally and sends an absolute path to the daemon.
 The daemon reuses strict manifest validation/environment resolution. Provider
@@ -242,7 +246,8 @@ format and rejection/cleanup rules.
 Empty lists contain an empty array. Historical/destroyed targets remain discoverable.
 `status` is a CLI alias for `inspect`. Every instance response removes snapshot
 ownership tokens while preserving the private durable recovery authority. Stop
-an old daemon before upgrading the binary; use a matching CLI/daemon contract.
+the old daemon before starting the new binary; only the supported predecessor's
+normal shutdown acknowledgment has the [bounded exception](#configuration-state-compatibility).
 Fixture discovery and explicit sensitive access use `FixturesRequest` through
 `POST /v1/fixtures` and `/v1/fixtures/secret`; see [evidence](evidence.md).
 
@@ -498,6 +503,9 @@ ownership is preserved. Existing images and global settings remain untouched.
 Registered private project composition uses daemon state version 8, with a direct
 one-way in-place upgrade from the previous merged main state version 6 only. Validation and
 the format fence share a transaction; rejected predecessor state stays unchanged.
+The new CLI may normally stop v6 through its exact `stopping` acknowledgment on
+`POST /v1/stop`, without relaxing Status or consuming operations. This acknowledgment
+is not final process-exit/lock-release proof; it does not trigger automatic startup.
 Versions 5 and 7 and other unsupported formats do not migrate. Existing snapshots
 remain authoritative for recorded cleanup; missing historical private/effective
 provenance stays unrecorded. Eligible historical prepared/stopped starts capture

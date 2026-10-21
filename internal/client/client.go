@@ -62,7 +62,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 			if errors.As(err, &detail) {
 				code = detail.Code
 			}
-			return &v1.PlanError{Code: code, Message: "cannot verify running daemon configuration compatibility; shut down its daemon normally with the matching binary, then restart this binary on the same --state-dir for the supported version 6 to 8 upgrade; preserve other unsupported state for diagnosis with its matching binary"}
+			return &v1.PlanError{Code: code, Message: "cannot verify running daemon configuration compatibility; for the supported version 6 to 8 upgrade, request normal daemon stop with this binary, then start it on the same --state-dir after shutdown finishes; a stopping acknowledgment does not prove process exit or lock release; preserve other unsupported state for diagnosis with its matching binary"}
 		}
 	}
 	var body io.Reader
@@ -183,7 +183,11 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 			}
 		}
 	case *v1.DaemonStatusResponse:
-		if value.APIVersion != v1.Version || value.StateVersion != v1.StateVersion {
+		// The predecessor's normal Stop already performed cleanup before replying.
+		// Accept only that exact acknowledgment, without relaxing Status/preflight
+		// or claiming the daemon process exited or released its lock.
+		predecessorStop := method == http.MethodPost && path == "/v1/stop" && value.StateVersion == 6 && value.Status == "stopping"
+		if value.APIVersion != v1.Version || (value.StateVersion != v1.StateVersion && !predecessorStop) {
 			return &v1.PlanError{Code: "api_version", Message: "incompatible daemon API or state format"}
 		}
 		lease, err := time.ParseDuration(value.LeaseDuration)
@@ -213,7 +217,8 @@ func (c *Client) Status(ctx context.Context) (v1.DaemonStatusResponse, error) {
 	return r, err
 }
 
-// Stop requests graceful daemon shutdown.
+// Stop requests graceful daemon shutdown and accepts the supported predecessor
+// acknowledgment. A stopping result does not prove process exit or lock release.
 func (c *Client) Stop(ctx context.Context) (v1.DaemonStatusResponse, error) {
 	var r v1.DaemonStatusResponse
 	err := c.call(ctx, http.MethodPost, "/v1/stop", v1.ControlRequest{APIVersion: v1.Version}, &r)

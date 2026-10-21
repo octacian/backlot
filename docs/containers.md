@@ -58,9 +58,14 @@ history, saved gateway configuration and CA identity remain intact. Versions 5,
 unchanged. Version 8 fences tested intermediate binaries and preserves the combined
 private configuration/native recovery contract; there is no migration chain.
 
-Shut down the old daemon normally with its matching binary, then start the new
-binary with the same `--state-dir`. No wipe, data destruction or fresh directory
-is required for the supported upgrade; this does not promise live process handover.
+Use the new CLI's `daemon stop --state-dir PATH` for normal shutdown of the
+supported v6 daemon, then `daemon start --state-dir PATH` after shutdown finishes.
+Only the exact v6 `stopping` acknowledgment is accepted at this shutdown boundary;
+Status and configuration-consuming operations still require v8. The acknowledgment
+does not prove process exit or lock release; normal startup locking remains in
+force, without automatic retry/start. Cleanup and transport failures remain errors.
+No wipe, data destruction or fresh directory is required for the supported upgrade;
+this does not promise live process handover.
 Run explicit project setup for current input values and remove `inputs` from current
 machine configuration. Historical snapshots remain readable for recorded cleanup,
 without becoming a current input source or acquiring invented provenance. A new

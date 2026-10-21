@@ -32,6 +32,12 @@ func validateStateSix(tx *bolt.Tx) error {
 		if json.Unmarshal(checkouts.Get([]byte(r.Instance.Checkout.ID)), &checkout) != nil || checkout.ID != r.Instance.Checkout.ID || checkout.Path != r.Instance.Checkout.Path || checkout.GitDirectory != r.Instance.Checkout.GitDirectory {
 			return corrupt()
 		}
+		// beginSelected records every live persistent slot atomically. Only destroy
+		// removes it; destroyed history may be slotless or retain its crash-gap slot.
+		i := r.Instance
+		if i.Plan.Lifetime == v1.Persistent && i.Status != v1.Destroyed && string(tx.Bucket([]byte("persistent")).Get([]byte(sceneSlot(i)))) != i.ID {
+			return corrupt()
+		}
 		if r.Instance.Operation.Allocations[0].Phase == "effect" && (snapshots.Get(key) == nil || secrets.Get(key) == nil) {
 			return corrupt()
 		}

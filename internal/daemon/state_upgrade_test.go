@@ -412,3 +412,59 @@ func TestStateSixDestroyedBeforeSlotRemovalRemainsSupported(t *testing.T) {
 		t.Fatal("destroy gap history or slot changed")
 	}
 }
+
+func TestStateSixRequiresNonDestroyedPersistentSlot(t *testing.T) {
+	for _, status := range []v1.InstanceStatus{v1.Prepared, v1.Stopped, v1.Interrupted, v1.Destroyed} {
+		t.Run(string(status), func(t *testing.T) {
+			project := shortTemp(t)
+			config := writeFixture(t, project)
+			state, err := openStore(shortTemp(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := state.db.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			svc := &service{store: state, lease: time.Minute}
+			prepared, err := svc.prepare(context.Background(), request(project, config, "dev"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := state.execution(prepared.Instance.ID, status, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := state.db.Update(func(tx *bolt.Tx) error {
+				if err := tx.Bucket([]byte("meta")).Put([]byte("version"), []byte("6")); err != nil {
+					return err
+				}
+				return tx.Bucket([]byte("persistent")).Delete([]byte(sceneSlot(prepared.Instance)))
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before := stateContents(t, state)
+			path := filepath.Join(state.directory, "state.db")
+			physical, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = state.db.Update(openStateTransaction)
+			if status == v1.Destroyed {
+				if err != nil {
+					t.Fatal("slotless destroyed persistent history rejected", err)
+				}
+				before["meta"]["version"] = "8"
+			} else {
+				code(t, err, "state_corrupt")
+				after, err := os.ReadFile(path)
+				if err != nil || !bytes.Equal(physical, after) {
+					t.Fatal("rejected predecessor database changed", err)
+				}
+			}
+			if !reflect.DeepEqual(before, stateContents(t, state)) {
+				t.Fatal("predecessor records changed")
+			}
+		})
+	}
+}

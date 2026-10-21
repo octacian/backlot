@@ -281,10 +281,17 @@ remain invalid; explicit project setup supplies current values, without automati
 import, enrollment or fallback. Input-free scenes retain their ordinary setup rules.
 
 Check running-daemon compatibility afresh before each configuration-sensitive
-mutation, including named start and gateway start/restart. An already-running v6
-daemon requires normal shutdown/restart with the new binary in the same state
-directory, not a wipe or fresh directory. No live process handover or automatic
-application restart is promised. Recorded reads/cleanup retain their supported
+mutation, including named start and gateway start/restart. The new CLI may request
+normal shutdown of the supported v6 daemon: accept an exact state6 `stopping`
+acknowledgment only for `POST /v1/stop`, retaining its truthful version and all
+normal typed/API/header/content/body/PID/lease/error validation. Status and
+configuration-consuming preflights remain strict state8; v5/v7/newer acknowledgments
+are unsupported. Preserve cleanup, transport and cancellation failures. No generic
+older-version mode, normalization, retry/polling, auto-restart, signaling or new
+endpoint is introduced. A stopping acknowledgment is not proof of final process
+exit or lock release. Once normal shutdown finishes, start the new binary on the
+same state directory, without a wipe or fresh directory. No live process handover
+or automatic application restart is promised. Recorded reads/cleanup retain their supported
 behavior. Gateway recovery/start preserves validated saved effective configuration
 and CA identity under existing fences, without rereading historical machine inputs.
 

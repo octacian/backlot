@@ -364,7 +364,7 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	}
 	// Model pre-boot-ID installations after tmp cleanup. Authenticated fixture
 	// cleanup above retains authority before losing the socket/receipt; recovery
-	// must independently prove session absence and resume the saved config/CA.
+	// must preserve uncertainty until an explicit waiver resumes saved config/CA.
 	controlDir := filepath.Dir(managed.Identity.Control)
 	if err := os.RemoveAll(controlDir); err != nil {
 		t.Fatal(err)
@@ -381,6 +381,11 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	unavailable := h.state(id, v1.Interrupted)
 	if unavailable.Instance.Execution.CleanupFailure == "" {
 		t.Fatal("unavailable gateway cleanup uncertainty discarded")
+	}
+	command(false, "gateway", "start")
+	forced := command(true, "gateway", "stop", "--force")
+	if !strings.Contains(string(forced), "native_ownership_warnings") {
+		t.Fatal("gateway waiver warning omitted")
 	}
 	command(true, "gateway", "start")
 	// No scene stop/restart intervenes: shutdown must discover the recovered

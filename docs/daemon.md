@@ -114,8 +114,9 @@ never a TCP/LAN listener. Send `X-Backlot-API-Version: v1` on every request, and
 `Content-Type: application/json` for POST bodies. POST contracts also require
 `api_version: v1`. Unknown/missing versions are rejected, independently of binary
 version. The binary's declared state format is checked before state mutation;
-unsupported/missing formats in existing populated databases are rejected without
-migration. See the [private-state guide](containers.md) for compatibility.
+format 6 accepts a narrow additive transition from the complete supported v5
+layout, preserving records and retained files. Other unsupported/missing formats
+are rejected unchanged. Older binaries reject v6 before interpreting waived claims. See the [private-state guide](containers.md) for compatibility.
 
 | Endpoint | Named request | Named response |
 | --- | --- | --- |
@@ -254,14 +255,17 @@ their paths and random capabilities stay in the private runtime journal. Missing
 root PIDs, EOF and closed listeners do not establish cleanup. Graceful daemon
 shutdown stops owned work. Recovery requests cleanup through the same authority
 and marks interrupted with an explicit collection gap; it never resumes work.
-New guardians retain an anonymous pipe to their anchor; guardian death makes the
-live anchor kill its own pinned group. Recovery may release missing control
-authority after proving a different kernel boot session or absence of the original
-guardian and all supervised session members. This proves resource absence, never
-complete output/status collection. Collection gaps stay visible, and explicit
-restart can proceed after cleanup is verified. Live/unknown session members,
-failed observations, missing launch effects and mismatched receipts still preserve
-uncertain ownership. See [gateway recovery](https.md) for the stop/start procedure.
+All native launch intents/effects, including command probes, record kernel boot
+identity before allocation. A different boot can release only obsolete process
+claims; resource absence never attests complete collection. The guardian-only
+anchor pipe helps self-pinned cleanup after guardian death without providing that
+proof. Unknown effects or unavailable authority remain fenced by ordinary stop.
+`stop --force INSTANCE` explicitly relinquishes selected native claims after normal
+cleanup is attempted; unknown survivors may still run/write. Durable private history,
+known original exits and safe public warnings survive replacement attempts. The
+waived attempt retains a collection gap, while a fully collected replacement can
+have complete evidence with the prior warning. No force applies to reset/destroy,
+and later data removal needs independent absence proof. See [gateway recovery](https.md).
 
 See [disposable results and evidence](evidence.md) for exact exit codes, kept
 failures, artifacts, fixture access and retention settings.

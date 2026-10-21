@@ -51,10 +51,20 @@ func output(c *urfave.Command, value any, err error) error {
 	}
 	switch result := value.(type) {
 	case v1.GatewayResponse:
+		for _, warning := range result.NativeOwnershipWarnings {
+			if _, e := fmt.Fprintln(c.ErrWriter, "Warning:", warning.Message); e != nil {
+				return e
+			}
+		}
 		_, err = fmt.Fprintf(c.Writer, "Gateway %s (%s, HTTPS port %d)\n%s\n", result.Status, result.Mode, result.HTTPSPort, result.Message)
 	case v1.DaemonStatusResponse:
 		_, err = fmt.Fprintf(c.Writer, "Daemon %s (API %s, state %d, PID %d)\n", result.Status, result.APIVersion, result.StateVersion, result.PID)
 	case v1.InstanceResponse:
+		for _, warning := range result.Instance.NativeOwnershipWarnings {
+			if _, e := fmt.Fprintln(c.ErrWriter, "Warning:", warning.Message); e != nil {
+				return e
+			}
+		}
 		_, err = fmt.Fprintf(c.Writer, "Instance %s: %s\nOperation: %s\n", result.Instance.ID, result.Instance.Status, result.Instance.Operation.ID)
 		if err == nil && result.Instance.Execution != nil && result.Instance.Execution.Origin != "" {
 			_, err = fmt.Fprintf(c.Writer, "URL: %s\n", result.Instance.Execution.Origin)

@@ -103,30 +103,30 @@ original private state under a maintenance window; deleting it while journaled
 process/route ownership remains is unsafe.
 
 Shutdown and crash recovery first attempt exact scene-route cleanup, then stop
-the managed gateway through authenticated guardian authority or verified process
-absence. New ownership records include the kernel boot-session identity, so a
-reboot releases obsolete process claims even if temporary control files are lost.
-Recovery preserves
-CA and retained data, marks interrupted and requires explicit gateway start and
-scene restart. If Caddy is unavailable, exact route intents and cleanup uncertainty
-remain; the daemon stays accessible. Explicit gateway start resumes saved state
-so scene stop/restart can retry exact cleanup. It never resumes application work.
-If status is `uncertain` after losing temporary control files, use `gateway stop`
-followed by `gateway start` with the same state directory. Stop can release the
-claim only after proving the old boot ended or the original guardian and its
-whole supervised session are absent. It does not generate a cleanup receipt or
-claim that lost output was collected. A surviving session or failed observation
-still blocks replacement; restore authenticated authority and retry, or retry
-after process churn settles. Do not delete the state directory or CA.
+the gateway through authenticated guardian authority. Every new native launch
+intent/effect records kernel boot identity: a different boot proves only obsolete
+process obligations, never successful output collection. Recovery preserves CA,
+configuration and retained data, marks interrupted and requires explicit startup.
+Unavailable Caddy retains exact route intents for retry through validated saved
+configuration; stale bootstrap is never replayed.
 
-New anchors monitor a private pipe from their guardian. Killing the guardian
-closes that pipe and makes the live anchor terminate its own pinned group.
-Explicit scene stop/restart can then verify absence; collection gaps remain in
-history. Killing an application leaves its guardian available for normal cleanup,
-and killing the daemon leaves guardians available to the replacement daemon.
-Already-running older anchors lack this safeguard. Unknown launch effects and
-independently killed guardian/anchor pairs with surviving descendants remain
-uncertain. Never signal by PID/name or overwrite saved state to hide uncertainty.
+For uncertain ownership, first try `gateway stop`. If authority cannot be restored,
+`gateway stop --force` explicitly relinquishes only its native claim, then ordinary
+`gateway start` can resume retained state. **Unknown survivors may still run/write**;
+force does not prove cleanup, signal observed IDs or bypass active/kept published
+scenes, ports, configuration, CA, route or trust checks. A durable private history
+and safe status warning survive later starts. Scene recovery uses `stop --force
+INSTANCE` followed by ordinary restart under the same risk acknowledgement. There
+is no force start/restart/reset/destroy. Later data removal still requires independent
+absence proof; keep state rather than deleting a CA or hiding uncertainty.
+
+A new anchor's guardian-only pipe helps it terminate its own pinned group after
+guardian death. This is best-effort cleanup, not absence/collection proof; ordinary
+stop can remain fenced until explicit force. Root death leaves the guardian able
+to clean up, and daemon death leaves guardians for authenticated recovery. Legacy
+bootless or missing-effect records remain unknown unless explicitly waived; global
+process scans and closed listeners do not resolve them. Restoring authority or a
+controlled reboot remains an operational alternative to accepting survivor risk.
 
 ## Explicit application trust
 

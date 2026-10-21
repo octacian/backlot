@@ -52,6 +52,7 @@ type Exit struct {
 type Group struct {
 	Identity          Identity
 	control           *os.File
+	events            *os.File
 	done              chan struct{}
 	statusDone        chan struct{}
 	ready             chan struct{}
@@ -107,7 +108,7 @@ func Start(executable string, stdout, stderr *os.File) (*Group, error) {
 	id.Control = filepath.Join(dir, "control.sock")
 	id.Token = hex.EncodeToString(token)
 	id.Boot = boot
-	g := &Group{Identity: id, control: control, done: make(chan struct{}), statusDone: make(chan struct{}), ready: make(chan struct{}), anchorReady: make(chan struct{})}
+	g := &Group{Identity: id, control: control, events: events, done: make(chan struct{}), statusDone: make(chan struct{}), ready: make(chan struct{}), anchorReady: make(chan struct{})}
 	go func() { _ = cmd.Wait(); close(g.done) }()
 	go func() {
 		defer close(g.statusDone)
@@ -215,9 +216,10 @@ func (g *Group) Alive() bool {
 
 // Stop obtains verified cleanup and joins this daemon's guardian descriptors.
 func (g *Group) Stop(grace time.Duration) (err error) {
+	collected := false
 	defer func() {
-		if err != nil {
-			// A failed authority/collector join cannot attest complete evidence.
+		if err != nil || !collected {
+			// Resource absence alone and a failed join cannot attest complete evidence.
 			// Keep this sticky even if a late root status later becomes available.
 			g.mu.Lock()
 			g.collectionFailure = "native output/status collection could not be verified"
@@ -225,7 +227,10 @@ func (g *Group) Stop(grace time.Duration) (err error) {
 		}
 	}()
 	_ = g.control.Close()
-	if err := Stop(g.Identity, grace); err != nil {
+	var stopErr error
+	collected, stopErr = stop(g.Identity, grace)
+	if stopErr != nil {
+		err = stopErr
 		return err
 	}
 	_ = g.control.Close()
@@ -240,6 +245,20 @@ func (g *Group) Stop(grace time.Duration) (err error) {
 		return errors.New("status collection did not join")
 	}
 	return nil
+}
+
+// Relinquish closes and joins this daemon's local status reader after a durable
+// force waiver. It never signals or waits for the potentially live guardian.
+// The existing direct-child Wait owner continues reaping it when it exits.
+func (g *Group) Relinquish() {
+	_ = g.control.Close()
+	g.mu.Lock()
+	g.collectionFailure = "native output/status collection could not be verified"
+	g.mu.Unlock()
+	if g.events != nil {
+		_ = g.events.Close()
+	}
+	<-g.statusDone
 }
 
 // Wait observes root completion under the caller's execution deadline.

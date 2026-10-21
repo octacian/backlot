@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -1000,20 +999,160 @@ func TestNativeRuntime(t *testing.T) {
 		if syscall.Kill(-pgid, 0) != syscall.ESRCH {
 			t.Fatal("anchor did not terminate its pinned group after guardian loss")
 		}
-		if _, err := h.cli.StopExecution(context.Background(), r.Instance.ID); err != nil {
-			var detail *v1.PlanError
-			if !errors.As(err, &detail) || detail.Code != "collection_failed" {
-				t.Fatal("proven absence did not release cleanup uncertainty", err)
-			}
+		if _, err := h.cli.StopExecution(context.Background(), r.Instance.ID); err == nil {
+			t.Fatal("unknown authority silently released")
 		}
+		command := exec.Command(binary, "stop", "--force", "--state-dir", h.dir, "--json", r.Instance.ID)
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatal("explicit force stop failed", err, string(output))
+		}
+		var forced v1.InstanceResponse
+		if err := json.Unmarshal(output, &forced); err != nil || len(forced.Instance.NativeOwnershipWarnings) != 1 || forced.Instance.Execution.CollectionFailure == "" {
+			t.Fatal("waiver warning/gap missing", err, string(output))
+		}
+		if _, err := h.cli.Destroy(context.Background(), r.Instance.ID); err == nil {
+			t.Fatal("waiver authorized later data destruction")
+		}
+
 		request := h.request("dev")
 		request.InstanceID = r.Instance.ID
 		if _, err := h.cli.Restart(context.Background(), request); err != nil {
 			t.Fatal("explicit restart after guardian loss failed", err)
 		}
-		h.state(r.Instance.ID, v1.RuntimeReady)
+		replacement := h.state(r.Instance.ID, v1.RuntimeReady)
+		if len(replacement.Instance.NativeOwnershipWarnings) != 1 || replacement.Instance.Execution.CollectionFailure != "" {
+			t.Fatal("replacement lost warning or inherited old gap", replacement.Instance.Execution)
+		}
+
 		if _, err := h.cli.StopExecution(context.Background(), r.Instance.ID); err != nil {
 			t.Fatal(err)
+		}
+	})
+
+	t.Run("anchor-only-and-combined-loss", func(t *testing.T) {
+		for _, combined := range []bool{false, true} {
+			t.Run(strconv.FormatBool(combined), func(t *testing.T) {
+				h := newNativeFaultHarness(t, binary)
+				r := h.run("dev")
+				h.state(r.Instance.ID, v1.RuntimeReady)
+				h.retainFixtureCleanup()
+				identity := h.guardianCapability(r.Instance.ID)
+				if err := native.CrashAnchorForTest(identity); err != nil {
+					t.Fatal(err)
+				}
+				if !combined {
+					if _, err := h.cli.StopExecution(context.Background(), r.Instance.ID); err != nil {
+						t.Fatal("guardian could not clean anchor-only fault", err)
+					}
+					h.absent()
+					return
+				}
+				if err := native.CrashForTest(identity); err != nil {
+					t.Fatal(err)
+				}
+				h.state(r.Instance.ID, v1.Failed)
+				if _, err := h.cli.StopExecutionWithRequest(context.Background(), v1.StopRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID, Force: true}); err != nil {
+					t.Fatal(err)
+				}
+				// A living authenticated fixture proves force did not kill the unknown survivor.
+				h.fixtureAction("inspect")
+				h.fixtureAction("kill") // fixture self-kill with retained full capability
+				h.absent()
+			})
+		}
+	})
+
+	t.Run("force-live-guardian-detaches-local-reader", func(t *testing.T) {
+		h := newNativeFaultHarness(t, binary)
+		r := h.run("dev")
+		h.state(r.Instance.ID, v1.RuntimeReady)
+		h.retainFixtureCleanup()
+		identity := h.guardianCapability(r.Instance.ID)
+		moved := identity.Control + ".retained"
+		t.Cleanup(func() {
+			if _, err := os.Lstat(moved); err == nil {
+				if err := os.Rename(moved, identity.Control); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+			if err := native.Stop(identity, 0); err != nil {
+				h.cleanupUnverified = true
+				t.Error("restored authority cleanup", err)
+			}
+		})
+		if err := os.Rename(identity.Control, moved); err != nil {
+			t.Fatal(err)
+		}
+		forced, err := h.cli.StopExecutionWithRequest(context.Background(), v1.StopRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID, Force: true})
+		if err != nil || len(forced.Instance.NativeOwnershipWarnings) != 1 {
+			t.Fatal("live guardian waiver failed", err)
+		}
+		h.fixtureAction("inspect")
+		if err := os.Rename(moved, identity.Control); err != nil {
+			t.Fatal(err)
+		}
+		if err := native.Stop(identity, 0); err != nil {
+			t.Fatal("restored authenticated cleanup failed", err)
+		}
+		h.absent()
+		// Independent receipt proof, unlike waiver, now permits destructive cleanup.
+		if _, err := h.cli.Destroy(context.Background(), r.Instance.ID); err != nil {
+			t.Fatal("restored proof failed deletion guard", err)
+		}
+	})
+	t.Run("known-root-exit-before-guardian-loss", func(t *testing.T) {
+		t.Setenv("BACKLOT_NATIVE_TEST_FAULTS", "1")
+		output, err := os.Create(filepath.Join(t.TempDir(), "output"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = output.Close() }()
+		group, err := native.Start(binary, output, output)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_ = group.Stop(0)
+			group.Relinquish()
+			deadline := time.Now().Add(3 * time.Second)
+			for (group.Alive() || group.PGID() > 0 && syscall.Kill(-group.PGID(), 0) != syscall.ESRCH) && time.Now().Before(deadline) {
+				time.Sleep(20 * time.Millisecond)
+			}
+			if group.Alive() || group.PGID() > 0 && syscall.Kill(-group.PGID(), 0) != syscall.ESRCH {
+				t.Error("fixture absence unverified; control preserved")
+				return
+			}
+			if err := os.RemoveAll(filepath.Dir(group.Identity.Control)); err != nil {
+				t.Error(err)
+			}
+		})
+		if err := group.Activate(native.Spec{Executable: "/bin/sh", Args: []string{"-c", "sleep 30 & exit 17"}, Environment: os.Environ(), Directory: t.TempDir()}); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		result, err := group.Wait(ctx)
+		if err != nil || !result.Known || result.Code != 17 {
+			t.Fatal("original exit unavailable", result, err)
+		}
+		if err := native.CrashForTest(group.Identity); err != nil {
+			t.Fatal(err)
+		}
+		if err := group.Stop(0); err == nil {
+			t.Fatal("missing receipt invented cleanup proof")
+		}
+		group.Relinquish()
+		for range 2 {
+			result = group.Result()
+			if result == nil || !result.Known || result.Code != 17 || result.CollectionFailure == "" {
+				t.Fatal("known exit/gap lost", result)
+			}
+			_ = group.Stop(0)
+		}
+		if _, err := os.Stat(filepath.Join(filepath.Dir(group.Identity.Control), "receipt.json")); !os.IsNotExist(err) {
+			t.Fatal("receipt fabricated", err)
 		}
 	})
 	t.Run("daemon-crash-during-startup", func(t *testing.T) {
@@ -1438,6 +1577,9 @@ func (h *nativeHarness) fixtureAction(action string) int {
 	}
 	var group int
 	if err := json.NewDecoder(conn).Decode(&group); err != nil || group <= 1 {
+		if action == "kill" && err == io.EOF {
+			return 0
+		} // Self-kill may precede its reply; caller must prove absence.
 		h.t.Fatal("fixture action rejected", action, err)
 	}
 	return group

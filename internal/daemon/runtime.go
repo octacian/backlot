@@ -835,15 +835,23 @@ func (s *service) launch(ctx context.Context, id, name, executable string, args 
 		_ = file.Close()
 		return nil, err
 	}
-	journal.LaunchPending = true
+	boot, err := native.CurrentBoot()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	journal.LaunchPending, journal.PendingBoot = true, boot
 	if err := s.store.saveRuntime(id, *journal); err != nil {
 		_ = file.Close()
 		return nil, err
 	}
 	group, startErr := native.Start(self, file, file)
-	journal.LaunchPending = false
+	journal.LaunchPending, journal.PendingBoot = false, ""
 	closeErr := file.Close()
 	if group != nil {
+		if group.Identity.Boot != boot {
+			return nil, errors.New("native launch boot provenance mismatch; preserve intent")
+		}
 		entry.groups = append(entry.groups, group)
 		journal.Groups = append(journal.Groups, group.Identity)
 		if err := s.store.saveRuntime(id, *journal); err != nil {
@@ -924,12 +932,6 @@ func (s *service) lockMutation(id string) func() {
 	lock.Lock()
 	return lock.Unlock
 }
-func (s *service) stopRuntime(id string) (v1.Instance, error) {
-	unlock := s.lockMutation(id)
-	defer unlock()
-	return s.stopExecution(id)
-}
-
 func mustGrace(options v1.ExecutionOptions) time.Duration {
 	d, _ := executionDeadlines(options)
 	return d.grace

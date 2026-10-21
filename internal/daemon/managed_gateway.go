@@ -33,15 +33,16 @@ import (
 // Pending is committed before creating an inactive guardian; absence of its
 // authenticated effect is uncertainty, not authority to signal a PID.
 type managedRecord struct {
-	Scope       string           `json:"scope"`
-	Config      v1.CaddyConfig   `json:"config"`
-	Identity    *native.Identity `json:"identity,omitempty"`
-	Pending     bool             `json:"pending,omitempty"`
-	PendingBoot string           `json:"pending_boot,omitempty"`
-	Initialized bool             `json:"initialized,omitempty"`
-	RootHash    string           `json:"root_hash,omitempty"`
-	Status      string           `json:"status"`
-	Failure     string           `json:"failure,omitempty"`
+	Scope              string              `json:"scope"`
+	Config             v1.CaddyConfig      `json:"config"`
+	Identity           *native.Identity    `json:"identity,omitempty"`
+	Pending            bool                `json:"pending,omitempty"`
+	PendingBoot        string              `json:"pending_boot,omitempty"`
+	Initialized        bool                `json:"initialized,omitempty"`
+	RootHash           string              `json:"root_hash,omitempty"`
+	Status             string              `json:"status"`
+	Failure            string              `json:"failure,omitempty"`
+	NativeAbandonments []nativeAbandonment `json:"native_abandonments,omitempty"`
 }
 
 func (s *store) managed() (r managedRecord, err error) {
@@ -187,6 +188,9 @@ func (s *store) stopManaged(r *managedRecord, group *native.Group) error {
 }
 
 func (s *service) gatewayControl(ctx context.Context, action string, request v1.GatewayRequest) (v1.GatewayResponse, error) {
+	if request.Force && action != "stop" {
+		return v1.GatewayResponse{}, problem("invalid_request", "force is supported only by gateway stop")
+	}
 	s.mu.Lock() // Serializes gateway lifecycle with scene launch acceptance.
 	defer s.mu.Unlock()
 	r, err := s.store.managed()
@@ -229,8 +233,21 @@ func (s *service) gatewayControl(ctx context.Context, action string, request v1.
 		if err := s.store.publishedActive(); err != nil {
 			return v1.GatewayResponse{}, err
 		}
+		expected := r
 		if err := s.store.stopManaged(&r, s.gatewayGroup); err != nil {
-			return v1.GatewayResponse{}, err
+			if !request.Force {
+				return v1.GatewayResponse{}, err
+			}
+			nativeResult := (*native.Exit)(nil)
+			if s.gatewayGroup != nil {
+				nativeResult = s.gatewayGroup.Result()
+			}
+			if err := s.store.abandonManaged(ctx, &r, expected, nativeResult, err); err != nil {
+				return v1.GatewayResponse{}, err
+			}
+			if s.gatewayGroup != nil {
+				s.gatewayGroup.Relinquish()
+			}
 		}
 		s.gatewayGroup = nil
 		if action == "stop" {
@@ -269,7 +286,7 @@ func (s *store) publishedActive() error {
 }
 
 func (s *service) gatewayStatus(ctx context.Context, r managedRecord) v1.GatewayResponse {
-	response := v1.GatewayResponse{APIVersion: v1.Version, Mode: "managed", Status: r.Status, Endpoint: r.Config.Endpoint, Message: r.Failure}
+	response := v1.GatewayResponse{NativeOwnershipWarnings: abandonmentWarnings(r.NativeAbandonments), APIVersion: v1.Version, Mode: "managed", Status: r.Status, Endpoint: r.Config.Endpoint, Message: r.Failure}
 	if r.Config.HTTPSPort != nil {
 		response.HTTPSPort = *r.Config.HTTPSPort
 	}
@@ -377,6 +394,9 @@ func (s *service) startManaged(ctx context.Context, r *managedRecord) (result er
 	if group == nil {
 		r.Pending, r.PendingBoot = false, ""
 		return errors.Join(startErr, s.store.saveManaged(*r))
+	}
+	if group.Identity.Boot != boot {
+		return errors.New("native launch boot provenance mismatch; preserve intent")
 	}
 	r.Identity = &group.Identity
 	r.Pending, r.PendingBoot = false, ""

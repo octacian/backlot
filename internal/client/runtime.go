@@ -23,8 +23,13 @@ func (c *Client) Restart(ctx context.Context, request v1.RunRequest) (v1.Instanc
 
 // StopExecution cancels and joins owned native work before returning success.
 func (c *Client) StopExecution(ctx context.Context, id string) (v1.InstanceResponse, error) {
+	return c.StopExecutionWithRequest(ctx, v1.StopRequest{APIVersion: v1.Version, InstanceID: id})
+}
+
+// StopExecutionWithRequest explicitly permits selected native-claim waiver when Force is true.
+func (c *Client) StopExecutionWithRequest(ctx context.Context, request v1.StopRequest) (v1.InstanceResponse, error) {
 	var response v1.InstanceResponse
-	err := c.call(ctx, http.MethodPost, "/v1/runtime/stop", v1.InstanceRequest{APIVersion: v1.Version, InstanceID: id}, &response)
+	err := c.call(ctx, http.MethodPost, "/v1/runtime/stop", request, &response)
 	return response, err
 }
 

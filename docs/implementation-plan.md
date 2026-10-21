@@ -136,11 +136,12 @@ reviews, complete frozen regression suites and exact-HEAD CI remain gates. Trust
 browser/clean-machine macOS evidence is blocked pending a disposable environment;
 no browser-warning bypass or persistent trust mutation can replace it.
 
-Recovery follow-up records kernel boot identity for guardian effects and managed
-launch intents, verifies session absence when control/receipts are lost, and gives
+Recovery follow-up records kernel boot identity for every scene/probe/managed
+launch intent and effect, adds explicit force-stop native waivers when proof is
+unavailable, and gives
 new anchors a guardian-liveness pipe for self-pinned cleanup after guardian death.
 Retained configuration/CA and collection-gap reporting remain intact; see the
-[recovery proposal](adr/20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md).
+[recovery decision](adr/20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md).
 
 The managed origin also exposes `ca_cert_path` for explicit native environment
 assignments, with symbolic offline planning and validated existing public-root
@@ -276,8 +277,9 @@ See [contracts and image requirements](daemon.md#scoped-provider-diagnostics).
 Early real CLI/API/daemon/native/Docker/Caddy/data success, missing container trust
 failure/recovery and preserved-data cleanup were exercised before broad regressions;
 revision-bound private delivery evidence records fixture/tool/image dependencies.
-Private state advances to version 5 without migration: v4 and older are rejected
-without modification so incompatible binaries cannot ignore probe ownership.
+Private state now uses version 6 with a narrow additive transition from complete
+v5 state; v4 and older are rejected unchanged. Older binaries reject v6 before
+interpreting explicit native-claim waivers.
 See the [state compatibility guidance](containers.md). Independent
 reviews, frozen provider/browser/macOS suites and published-HEAD CI remain required
 before delivery readiness; no browser/application trust adoption is claimed.

@@ -396,8 +396,15 @@ func TestKeptGuardianLossReportsEvidenceGap(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.absent()
-	if _, err := h.cli.Destroy(context.Background(), r.Instance.ID); err != nil {
-		t.Fatal("absent native session blocked destroy", err)
+	if _, err := h.cli.Destroy(context.Background(), r.Instance.ID); err == nil {
+		t.Fatal("unknown native authority authorized destroy")
+	}
+	forced, err := h.cli.StopExecutionWithRequest(context.Background(), v1.StopRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID, Force: true})
+	if err != nil || len(forced.Instance.NativeOwnershipWarnings) != 1 {
+		t.Fatal("kept force waiver failed", err)
+	}
+	if _, err := h.cli.Destroy(context.Background(), r.Instance.ID); err == nil {
+		t.Fatal("kept waiver authorized later destruction")
 	}
 	got, err := h.cli.Inspect(context.Background(), r.Instance.ID)
 	if err != nil {

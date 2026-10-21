@@ -343,6 +343,9 @@ func verifyResource(ctx context.Context, d *dockerEngine, r ownedResource) error
 	}
 }
 func (s *store) removeResources(ctx context.Context, id string) error {
+	if err := s.guardAbandonedData(id); err != nil {
+		return err
+	}
 	g, err := s.resources(id)
 	if err != nil || g.ID == "" {
 		return err

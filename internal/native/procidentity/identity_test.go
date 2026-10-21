@@ -4,6 +4,7 @@ package procidentity
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -41,6 +42,7 @@ type ownedChild struct {
 	cmd    *exec.Cmd
 	input  io.WriteCloser
 	reaped bool
+	done   chan struct{}
 }
 
 func startChild(t *testing.T) *ownedChild {
@@ -67,10 +69,9 @@ func startChild(t *testing.T) *ownedChild {
 	t.Cleanup(func() {
 		_ = input.Close()
 		if !child.reaped {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-			child.reaped = true
+			child.killAndJoin(t)
 		}
+		_ = output.Close()
 	})
 	ready := make(chan string, 1)
 	go func() { scanner := bufio.NewScanner(output); scanner.Scan(); ready <- scanner.Text() }()
@@ -90,19 +91,43 @@ func (c *ownedChild) command(t *testing.T, s string) {
 		t.Fatal(err)
 	}
 }
+
+// join starts the sole Wait owner lazily, preserving zombie observations until
+// the test explicitly requests reaping. Only the test goroutine reads reaped.
+func (c *ownedChild) join(budget time.Duration) bool {
+	if c.done == nil {
+		c.done = make(chan struct{})
+		go func() {
+			_ = c.cmd.Wait()
+			close(c.done)
+		}()
+	}
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	select {
+	case <-c.done:
+		c.reaped = true
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
+func (c *ownedChild) killAndJoin(t *testing.T) {
+	t.Helper()
+	// Only the retained direct-child handle authorizes cleanup.
+	killErr := c.cmd.Process.Kill()
+	if !c.join(2 * time.Second) {
+		t.Errorf("unjoined owned child PID %d after Kill: %v; retained child handle and Wait owner remain, cleanup incomplete", c.cmd.Process.Pid, killErr)
+	}
+}
+
 func (c *ownedChild) wait(t *testing.T, signal syscall.Signal) {
 	t.Helper()
-	done := make(chan error, 1)
-	go func() { done <- c.cmd.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		_ = c.cmd.Process.Kill()
-		<-done
-		c.reaped = true
+	if !c.join(5 * time.Second) {
+		c.killAndJoin(t)
 		t.Fatal("owned child exit expired")
 	}
-	c.reaped = true
 	status, ok := c.cmd.ProcessState.Sys().(syscall.WaitStatus)
 	if !ok || (signal != 0 && (!status.Signaled() || status.Signal() != signal)) || (signal == 0 && status.ExitStatus() != 0) {
 		t.Fatalf("unexpected child exit: %v", c.cmd.ProcessState)
@@ -122,11 +147,12 @@ func mustAcquire(t *testing.T, pid int) *Handle {
 	})
 	return h
 }
-func eventually(t *testing.T, check func() bool) {
+func eventually(t *testing.T, check func(context.Context) bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if check() {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for ctx.Err() == nil {
+		if check(ctx) {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -188,9 +214,9 @@ func TestIdentityExecAndChurn(t *testing.T) {
 		h := mustAcquire(t, child.cmd.Process.Pid)
 		child.command(t, "exec")
 		if runtime.GOOS == "darwin" {
-			eventually(t, func() bool { return errors.Is(h.Validate(), ErrChanged) })
+			eventually(t, func(context.Context) bool { return errors.Is(h.Validate(), ErrChanged) })
 		} else {
-			eventually(t, func() bool {
+			eventually(t, func(context.Context) bool {
 				b, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", child.cmd.Process.Pid))
 				return err == nil && strings.TrimSpace(string(b)) == "sleep"
 			})
@@ -225,8 +251,10 @@ func TestIdentityZombie(t *testing.T) {
 	h := mustAcquire(t, child.cmd.Process.Pid)
 	child.command(t, "exit")
 	// ps is observation only; no PID obtained from it authorizes actuation.
-	eventually(t, func() bool {
-		b, err := exec.Command("ps", "-o", "stat=", "-p", fmt.Sprint(child.cmd.Process.Pid)).Output()
+	eventually(t, func(ctx context.Context) bool {
+		cmd := exec.CommandContext(ctx, "ps", "-o", "stat=", "-p", fmt.Sprint(child.cmd.Process.Pid))
+		cmd.WaitDelay = 100 * time.Millisecond
+		b, err := cmd.Output()
 		return err == nil && strings.HasPrefix(strings.TrimSpace(string(b)), "Z")
 	})
 	err := h.Validate()
@@ -264,4 +292,15 @@ func TestIdentityInvalidAndResources(t *testing.T) {
 	if err := h.Validate(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Exercise cleanup while the helper is still alive, rather than relying only on
+// successful identity signals or the helper's natural expiration.
+func TestOwnedChildCleanup(t *testing.T) {
+	child := startChild(t)
+	child.killAndJoin(t)
+	if !child.reaped {
+		t.Fatal("cleanup did not join retained child")
+	}
+	child.wait(t, syscall.SIGKILL)
 }

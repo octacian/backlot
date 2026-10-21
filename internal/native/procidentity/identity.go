@@ -36,8 +36,9 @@ func Acquire(pid int) (*Handle, error) {
 	return &Handle{pid: pid, identity: identity}, nil
 }
 
-// Session reads membership then validates the acquired identity. Exec or exit
-// races return an error; callers may reacquire under their own finite budget.
+// Session reads membership then validates the acquired process identity before
+// returning it. Linux pidfds normally remain valid across exec; Darwin audit-token
+// changes across exec require reacquisition under the caller's finite budget.
 // Membership can change after return under the cooperative process contract.
 func (h *Handle) Session() (int, error) {
 	h.mu.Lock()

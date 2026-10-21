@@ -96,7 +96,7 @@ func TestRecordedSceneLocationsAndAmbiguity(t *testing.T) {
 		if _, _, err := s.store.begin(plan.Snapshot{Plan: p}, outer.Instance.Checkout, time.Minute); err != nil {
 			t.Fatal(err)
 		}
-		p.Project = newID()
+		p.Project = "p" + newID()[:32]
 		if _, _, err := s.store.begin(plan.Snapshot{Plan: p}, outer.Instance.Checkout, time.Minute); err != nil {
 			t.Fatal(err)
 		}

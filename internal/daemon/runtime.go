@@ -142,6 +142,11 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	if response.Instance.Status == v1.Destroyed {
 		return empty, problem("destroyed", "instance was destroyed during start acceptance; run the scene again for a fresh identity")
 	}
+	if persistentOnly {
+		if err := requireSceneLocation(response.Instance, identity.source.ProjectPath); err != nil {
+			return empty, err
+		}
+	}
 
 	if request.InstanceID == "" {
 		snapshot, err = s.store.snapshot(id)

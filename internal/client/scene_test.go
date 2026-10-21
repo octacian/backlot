@@ -18,7 +18,7 @@ func sceneResponse() v1.SceneResponse {
 }
 
 func sceneInstance(id string) *v1.InstanceResponse {
-	return &v1.InstanceResponse{APIVersion: v1.Version, Instance: v1.Instance{ID: strings.Repeat(id, 64), Checkout: *sceneResponse().Checkout, Status: v1.Prepared, CreatedAt: "2026-10-07T12:00:00Z", Operation: v1.Operation{ID: strings.Repeat("c", 64), Status: v1.Prepared, Allocations: []v1.AllocationRecord{{ID: strings.Repeat("d", 64), Kind: "private_snapshot", Phase: "effect"}}}, Plan: v1.PlanResponse{APIVersion: v1.Version, Project: "fixture", Scene: "dev", Lifetime: v1.Persistent, Components: []v1.PlannedComponent{}}}}
+	return &v1.InstanceResponse{APIVersion: v1.Version, Instance: v1.Instance{ID: strings.Repeat(id, 64), Checkout: *sceneResponse().Checkout, Status: v1.Prepared, CreatedAt: "2026-10-07T12:00:00Z", Operation: v1.Operation{ID: strings.Repeat("c", 64), Status: v1.Prepared, Allocations: []v1.AllocationRecord{{ID: strings.Repeat("d", 64), Kind: "private_snapshot", Phase: "effect"}}}, Plan: v1.PlanResponse{APIVersion: v1.Version, Project: "fixture", Scene: "dev", Checkout: "/tmp/scene", ManifestPath: "/tmp/scene/backlot.json", Lifetime: v1.Persistent, Components: []v1.PlannedComponent{}}}}
 }
 
 func sceneWire(t *testing.T, r *http.Request, response v1.SceneResponse) *http.Response {
@@ -178,13 +178,27 @@ func TestSceneFollowExpiryCancellationAndFailurePrecedence(t *testing.T) {
 }
 
 func TestSceneResponseValidationRejectsMissingBaselineLeaksAndMismatches(t *testing.T) {
-	for _, mode := range []string{"baseline", "generation", "found-empty", "missing-with-instance", "secret", "wrong-scene", "wrong-id", "wrong-checkout", "disposable", "wrong-version", "canonical-missing", "canonical-mode", "canonical-instance"} {
+	for _, mode := range []string{"baseline", "generation", "found-empty", "missing-with-instance", "secret", "wrong-scene", "wrong-id", "wrong-checkout", "disposable", "wrong-version", "canonical-missing", "canonical-mode", "canonical-instance", "manifest-missing", "manifest-relative", "plan-checkout", "outside-target", "outside-checkout", "explicit-project-mismatch"} {
 		t.Run(mode, func(t *testing.T) {
 			response := sceneResponse()
 			response.Outcome = v1.SceneFound
 			response.Result = sceneInstance("e")
 			target := sceneRequest().Target
 			switch mode {
+			case "manifest-missing":
+				response.Result.Instance.Plan.ManifestPath = ""
+			case "manifest-relative":
+				response.Result.Instance.Plan.ManifestPath = "backlot.json"
+			case "plan-checkout":
+				response.Result.Instance.Plan.Checkout = "/other"
+			case "outside-target":
+				response.Result.Instance.Plan.ManifestPath = "/tmp/scene/other/backlot.json"
+			case "outside-checkout":
+				response.CanonicalTarget.CWD = "/tmp/other"
+			case "explicit-project-mismatch":
+				target.ProjectPath = "/tmp/scene/other"
+				response.CanonicalTarget.ProjectPath = "/tmp/scene/other"
+				response.CanonicalTarget.CWD = "/tmp/scene/other"
 			case "canonical-missing":
 				response.CanonicalTarget = nil
 			case "canonical-mode":

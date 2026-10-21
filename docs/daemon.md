@@ -104,7 +104,10 @@ Use the same `--state-dir` as the daemon where needed. Start accepts the existin
 disposable scenes before recording preparation intent; use `run` for disposable
 work. Repeated/concurrent starts converge through the existing coordinator and
 report manifest/config drift without reconciling retained data. An unhealthy
-execution requires explicit restart. Cancelling startup follows existing run
+execution requires explicit restart. If the same logical project/checkout/scene
+key is already recorded at a different canonical project directory, named start
+returns a conflict before starting or joining that location; use its explicit
+recorded ID. The existing logical key and legacy `run` behavior are unchanged. Cancelling startup follows existing run
 cleanup behavior; cancelling a status observer never does.
 
 The daemon selects the nearest **recorded** project-directory ancestor within the
@@ -116,7 +119,10 @@ while its directory exists. A changed project ID does not hide old instances. Mo
 than one non-destroyed persistent record at the selected location/scene is an
 `ambiguous_target` error requiring `--instance ID`. Destroyed history is excluded
 from named matches and remains explicitly inspectable. Failed and metadata-only
-records participate in selection and ambiguity.
+records participate in selection and ambiguity. Malformed essential recorded
+location/selector fields return `state_corrupt` before any record can be included
+or excluded from project discovery; corrupt inner history cannot silently select
+an outer scene. Structural checks do not require the manifest file to exist.
 
 Moved/replaced checkout roots or unavailable project/Git identity fail selection;
 use explicit recorded IDs for cleanup. No branch/name/path-only ownership adoption

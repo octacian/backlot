@@ -22,6 +22,45 @@ func TestSceneNativeCLI(t *testing.T) {
 		t.Fatal(err, string(out))
 	}
 
+	t.Run("location-collision-before-restart", func(t *testing.T) {
+		h := newNativeHarness(t, binary)
+		git(t, filepath.Dir(h.project), "init", "-q")
+		other := filepath.Join(filepath.Dir(h.project), "other-project")
+		if err := os.Mkdir(other, 0700); err != nil {
+			t.Fatal(err)
+		}
+		data, err := json.Marshal(h.manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(other, "backlot.json"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		running := h.run("dev")
+		h.state(running.Instance.ID, v1.RuntimeReady)
+		if _, err := h.cli.StopExecution(context.Background(), running.Instance.ID); err != nil {
+			t.Fatal(err)
+		}
+		stopped := h.state(running.Instance.ID, v1.Stopped)
+		h.absent()
+		command := exec.Command(binary, "scene", "start", "--state-dir", h.dir, "--project", other, "--json", "dev")
+		command.Dir = other
+		var stdout, stderr bytes.Buffer
+		command.Stdout = &stdout
+		command.Stderr = &stderr
+		if err := command.Run(); err == nil {
+			t.Fatal("named start reused another location", stdout.String())
+		}
+		var failure v1.ErrorResponse
+		if err := json.Unmarshal(stdout.Bytes(), &failure); err != nil || failure.Error.Code != "conflict" {
+			t.Fatal(err, stdout.String(), stderr.String())
+		}
+		current := h.state(running.Instance.ID, v1.Stopped)
+		if current.Instance.Execution.Attempt != stopped.Instance.Execution.Attempt {
+			t.Fatal("conflicting start restarted another location")
+		}
+		h.absent()
+	})
 	t.Run("cancel-start", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
 		server := h.manifest.Components["server"]

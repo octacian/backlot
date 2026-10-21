@@ -83,6 +83,9 @@ func (s *service) resolveScene(target v1.SceneTarget) (v1.SceneResponse, error) 
 		if err != nil {
 			return response, err
 		}
+		if err := validateSceneRecord(instance); err != nil {
+			return response, err
+		}
 		if instance.Plan.Lifetime != v1.Persistent {
 			return response, problem("invalid_lifetime", "scene operations require persistent instances; use recorded-ID commands for disposable work")
 		}
@@ -122,6 +125,9 @@ func (s *service) resolveScene(target v1.SceneTarget) (v1.SceneResponse, error) 
 				return err
 			}
 			i := r.Instance
+			if err := validateStoredSceneLocation(tx, i); err != nil {
+				return err
+			}
 			instances = append(instances, i)
 			project := filepath.Dir(i.Plan.ManifestPath)
 			if within(i.Checkout.Path, anchor) && within(i.Checkout.Path, project) && within(project, anchor) && (!gitBoundary || i.Checkout.Path == root) && (target.ProjectPath == "" || project == anchor) && len(project) > len(nearest) {
@@ -228,4 +234,39 @@ func (s *service) scene(target v1.SceneTarget, stop bool) (v1.SceneResponse, err
 		current.Outcome = v1.SceneStopped
 	}
 	return current, nil
+}
+
+// validateSceneRecord fences selection metadata before records can contribute to
+// or disappear from nearest-project discovery. Legacy record/recovery decoding
+// remains independent of the new location-based selection contract.
+func validateSceneRecord(instance v1.Instance) error {
+	if err := instance.ValidateSceneLocation(); err != nil {
+		return problem("state_corrupt", "invalid recorded scene location or selector; preserve state for diagnosis")
+	}
+	return nil
+}
+
+func requireSceneLocation(instance v1.Instance, project string) error {
+	if err := validateSceneRecord(instance); err != nil {
+		return err
+	}
+	if filepath.Dir(instance.Plan.ManifestPath) != project {
+		return problem("conflict", "persistent scene belongs to a different recorded project directory; use its explicit recorded instance ID")
+	}
+	return nil
+}
+
+// validateStoredSceneLocation also checks existing checkout/path relationships
+// before a record can be excluded by the current-checkout filter. A coherent-looking
+// edited path cannot hide a record whose checkout ID still names another location.
+func validateStoredSceneLocation(tx *bolt.Tx, instance v1.Instance) error {
+	if err := validateSceneRecord(instance); err != nil {
+		return err
+	}
+	var checkout v1.CheckoutIdentity
+	data := tx.Bucket([]byte("checkouts")).Get([]byte(instance.Checkout.ID))
+	if data == nil || json.Unmarshal(data, &checkout) != nil || !sameCheckout(&checkout, &instance.Checkout) || string(tx.Bucket([]byte("paths")).Get([]byte(instance.Checkout.Path))) != instance.Checkout.ID {
+		return problem("state_corrupt", "recorded scene and checkout location indexes disagree")
+	}
+	return nil
 }

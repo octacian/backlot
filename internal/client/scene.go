@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -70,8 +71,18 @@ func validateScene(response v1.SceneResponse, target v1.SceneTarget) error {
 		if canonical == nil || canonical.Validate() != nil || canonical.InstanceID != "" || canonical.Scene != target.Scene || (canonical.ProjectPath == "") != (target.ProjectPath == "") || canonical.ProjectPath != "" && canonical.CWD != canonical.ProjectPath {
 			return responseError()
 		}
+		if filepath.Clean(canonical.CWD) != canonical.CWD || canonical.ProjectPath != "" && filepath.Clean(canonical.ProjectPath) != canonical.ProjectPath {
+			return responseError()
+		}
 		checkout := response.Checkout
 		if checkout == nil || !validID(checkout.ID) || !filepath.IsAbs(checkout.Path) || checkout.GitDirectory != "" && !filepath.IsAbs(checkout.GitDirectory) {
+			return responseError()
+		}
+		if filepath.Clean(checkout.Path) != checkout.Path || strings.ContainsRune(checkout.Path, 0) || checkout.GitDirectory != "" && (filepath.Clean(checkout.GitDirectory) != checkout.GitDirectory || strings.ContainsRune(checkout.GitDirectory, 0)) {
+			return responseError()
+		}
+		relative, err := filepath.Rel(checkout.Path, canonical.CWD)
+		if err != nil || !filepath.IsLocal(relative) {
 			return responseError()
 		}
 	} else if response.Checkout != nil || response.CanonicalTarget != nil {
@@ -85,6 +96,16 @@ func validateScene(response v1.SceneResponse, target v1.SceneTarget) error {
 			return err
 		}
 		i := response.Result.Instance
+		if err := i.ValidateSceneLocation(); err != nil {
+			return responseError()
+		}
+		if canonical := response.CanonicalTarget; canonical != nil {
+			project := filepath.Dir(i.Plan.ManifestPath)
+			relative, err := filepath.Rel(project, canonical.CWD)
+			if err != nil || !filepath.IsLocal(relative) || canonical.ProjectPath != "" && canonical.ProjectPath != project {
+				return responseError()
+			}
+		}
 		if i.Plan.Lifetime != v1.Persistent || response.Result.LeaseToken != "" || target.InstanceID != "" && i.ID != target.InstanceID || target.Scene != "" && i.Plan.Scene != target.Scene {
 			return responseError()
 		}

@@ -70,6 +70,9 @@ func (s *service) prepareSelected(ctx context.Context, request v1.PrepareRequest
 	if persistentOnly && snapshot.Plan.Lifetime != v1.Persistent {
 		return v1.InstanceResponse{}, problem("invalid_lifetime", "scene start requires a persistent scene; use run for disposable work")
 	}
+	if persistentOnly && (snapshot.Plan.ManifestPath != source.ManifestPath || snapshot.Plan.Checkout != original.checkout.Path || snapshot.Plan.Scene != request.Plan.Scene) {
+		return v1.InstanceResponse{}, problem("invalid_request", "resolved scene location disagrees with captured source")
+	}
 	public, err := json.Marshal(snapshot.Plan)
 	if err != nil || len(public) > manifest.MaxBytes-8192 {
 		return v1.InstanceResponse{}, problem("plan_too_large", "resolved public plan exceeds bounded API response size")
@@ -86,7 +89,7 @@ func (s *service) prepareSelected(ctx context.Context, request v1.PrepareRequest
 	if err := original.verify(); err != nil {
 		return v1.InstanceResponse{}, err
 	}
-	response, created, err := s.store.begin(snapshot, original.checkout, s.lease)
+	response, created, err := s.store.beginSelected(snapshot, original.checkout, s.lease, persistentOnly)
 	if err != nil || !created {
 		return response, err
 	}

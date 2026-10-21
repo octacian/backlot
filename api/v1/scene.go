@@ -3,6 +3,8 @@ package v1
 import (
 	"encoding/hex"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
 
 // SceneOutcome describes selection or verified lifecycle action, independently of runtime status.
@@ -39,7 +41,7 @@ func (t SceneTarget) Validate() error {
 		}
 		return nil
 	}
-	if t.Scene == "" || len(t.Scene) > 63 || !filepath.IsAbs(t.CWD) || (t.ProjectPath != "" && !filepath.IsAbs(t.ProjectPath)) {
+	if !sceneIdentifier.MatchString(t.Scene) || strings.ContainsRune(t.CWD, 0) || strings.ContainsRune(t.ProjectPath, 0) || !filepath.IsAbs(t.CWD) || (t.ProjectPath != "" && !filepath.IsAbs(t.ProjectPath)) {
 		return invalid()
 	}
 	return nil
@@ -80,4 +82,31 @@ type SceneFollowRecord struct {
 	Snapshot   *SceneResponse `json:"snapshot,omitempty"`
 	Reason     string         `json:"reason,omitempty"`
 	Error      *PlanError     `json:"error,omitempty"`
+}
+
+// ValidateSceneLocation checks the structural recorded-location contract used by
+// scene selection. It reads no current files: deleted manifests remain targetable.
+func (i Instance) ValidateSceneLocation() error {
+	invalid := func() error {
+		return &PlanError{Code: "invalid_scene_location", Message: "recorded scene location or selector is incoherent"}
+	}
+	if !sceneIdentifier.MatchString(i.Plan.Project) || !sceneIdentifier.MatchString(i.Plan.Scene) || !scenePath(i.Checkout.Path) || !scenePath(i.Plan.Checkout) || i.Plan.Checkout != i.Checkout.Path || !scenePath(i.Plan.ManifestPath) || i.Checkout.GitDirectory != "" && !scenePath(i.Checkout.GitDirectory) {
+		return invalid()
+	}
+	switch filepath.Base(i.Plan.ManifestPath) {
+	case "backlot.yaml", "backlot.yml", "backlot.json":
+	default:
+		return invalid()
+	}
+	relative, err := filepath.Rel(i.Checkout.Path, filepath.Dir(i.Plan.ManifestPath))
+	if err != nil || !filepath.IsLocal(relative) {
+		return invalid()
+	}
+	return nil
+}
+
+var sceneIdentifier = regexp.MustCompile(schemaIdentifier)
+
+func scenePath(value string) bool {
+	return filepath.IsAbs(value) && filepath.Clean(value) == value && !strings.ContainsRune(value, 0)
 }

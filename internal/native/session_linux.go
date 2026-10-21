@@ -8,7 +8,7 @@ import (
 )
 
 func sessionCandidates(ctx context.Context) ([]int, error) {
-	entries, err := os.ReadDir("/proc")
+	entries, err := processEntries(ctx)
 	if err != nil {
 		return nil, err
 	}

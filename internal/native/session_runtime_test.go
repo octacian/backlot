@@ -86,6 +86,32 @@ func TestSessionFixture(t *testing.T) {
 		return
 	}
 
+	if os.Getenv("BACKLOT_SESSION_LATE_SCAN") == "1" {
+		anchor := exec.Command("/bin/sleep", "15")
+		configureAnchor(anchor)
+		if err := anchor.Start(); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		defer fixtureJoin(t, anchor, done)
+		go func() { _ = anchor.Wait(); close(done) }()
+		calls := 0
+		w := &ownedWorkload{anchor: anchor, scanSession: func(ctx context.Context) ([]int, error) {
+			calls++
+			if calls == 2 {
+				<-ctx.Done()
+			}
+			return nil, nil
+		}}
+		err := w.stopSession(0)
+		if err == nil {
+			t.Fatal("late empty second observation released anchor")
+		}
+		if err := anchor.Process.Signal(syscall.Signal(0)); err != nil {
+			t.Fatal("late observation killed retained anchor", err)
+		}
+		return
+	}
 	if os.Getenv("BACKLOT_SESSION_SCAN_FAILURE") == "1" {
 		anchor := exec.Command("/bin/sleep", "15")
 		configureAnchor(anchor)
@@ -327,5 +353,20 @@ func TestApplicationAuthorityErrorKeepsPrivateKernelCause(t *testing.T) {
 	err := &authorityError{message: sessionResult(id, v1.CleanupAuthorityLost).Detail, cause: cause}
 	if strings.Contains(err.Error(), "4182") || strings.Contains(err.Error(), "capability-value") || !errors.Is(err, cause) {
 		t.Fatal("private kernel identity leaked or cause lost", err)
+	}
+}
+
+func TestSessionLateEmptyObservationRetainsAnchor(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, self, "-test.run=^TestSessionFixture$")
+	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	command.Env = append(os.Environ(), "BACKLOT_SESSION_FIXTURE=1", "BACKLOT_SESSION_LATE_SCAN=1")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatal("late empty observation", err, string(output))
 	}
 }

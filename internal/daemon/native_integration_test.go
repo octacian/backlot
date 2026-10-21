@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -178,6 +179,9 @@ type nativeHarness struct {
 	cli                        *client.Client
 	process                    *exec.Cmd
 	waited                     bool
+	ownerDone                  chan error
+	shutdownFailureProof       func() error
+	shutdownFailureCode        string
 	cleanupUnverified          bool
 	control, controlToken      string
 	extraPIDFiles              []string
@@ -189,6 +193,10 @@ type nativeHarness struct {
 
 func (h *nativeHarness) start() {
 	h.t.Helper()
+	if h.process != nil && !h.waited {
+		h.cleanupUnverified = true
+		h.t.Fatal("previous daemon owner not joined; preserve handle and state", h.dir)
+	}
 	h.process = exec.Command(h.binary, "daemon", "serve", "--state-dir", h.dir, "--lease-duration", h.lease)
 	h.process.Env = append(os.Environ(), "BACKLOT_NATIVE_TEST_FAULTS=0")
 	if h.faultMode {
@@ -204,6 +212,7 @@ func (h *nativeHarness) start() {
 		h.t.Fatal(err)
 	}
 	h.waited = false
+	h.ownerDone = nil
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := h.cli.Status(context.Background()); err == nil {
@@ -343,29 +352,96 @@ func (h *nativeHarness) absent() {
 	}
 }
 
+// A shutdown error is never an absence witness. Intentional fault tests may
+// supply a separate authenticated cleanup proof for their exact original owners.
 func (h *nativeHarness) close() {
 	h.t.Helper()
-	_, stopErr := h.cli.Stop(context.Background())
-	if !h.waited {
-		done := make(chan error, 1)
-		go func() { done <- h.process.Wait() }()
-		select {
-		case err := <-done:
-			if err != nil && stopErr == nil {
-				h.t.Error("daemon failed after successful shutdown request", err)
-			}
-		case <-time.After(40 * time.Second):
-			_ = h.process.Process.Kill()
-			<-done
-			h.t.Error("daemon shutdown exceeded budget")
+	if !h.waited && h.process != nil && h.process.Process != nil {
+		if h.ownerDone == nil {
+			h.ownerDone = make(chan error, 1)
+			go func() { h.ownerDone <- h.process.Wait() }()
 		}
-		h.waited = true
+		result := finishNativeHarnessOwner(func(ctx context.Context) error { _, err := h.cli.Stop(ctx); return err }, h.ownerDone, h.process.Process.Kill, 40*time.Second, 40*time.Second, 2*time.Second)
+		h.waited = result.joined
+		if result.stopErr != nil || result.ownerErr != nil || !result.joined {
+			var detail *v1.PlanError
+			expected := errors.As(result.stopErr, &detail) && detail.Code == h.shutdownFailureCode && result.joined && !result.killed
+			if exit, ok := result.ownerErr.(*exec.ExitError); result.ownerErr != nil && (!ok || exit.ExitCode() != 1) {
+				expected = false
+			}
+			if expected && h.shutdownFailureProof != nil {
+				if err := h.shutdownFailureProof(); err != nil {
+					h.cleanupUnverified = true
+					h.t.Error("independent fixture cleanup proof failed", err)
+				} else {
+					h.t.Log("expected injected shutdown failure; exact fixture cleanup independently proved", result.stopErr, result.ownerErr)
+				}
+			} else {
+				h.cleanupUnverified = true
+				h.t.Error("unverified daemon shutdown; preserving", h.dir, result.stopErr, result.ownerErr)
+			}
+		}
+		if result.joined {
+			h.shutdownFailureProof = nil
+			h.shutdownFailureCode = ""
+		}
 	}
-	if strings.Contains(h.daemonLog.String(), "DATA RACE") {
+	if h.waited && strings.Contains(h.daemonLog.String(), "DATA RACE") {
+		h.cleanupUnverified = true
 		h.t.Error("race-instrumented daemon reported a data race", h.daemonLog.String())
 	}
-	h.cli.Close()
+	if h.cli != nil {
+		h.cli.Close()
+	}
 	h.absent()
+}
+
+type nativeHarnessShutdown struct {
+	stopErr, ownerErr error
+	joined, killed    bool
+}
+
+// The retained Wait owner is reused on a later close after timeout. No second
+// Wait, unbounded receive, or observed-PID actuation is permitted here.
+func finishNativeHarnessOwner(stop func(context.Context) error, done <-chan error, kill func() error, stopBudget, joinBudget, killBudget time.Duration) nativeHarnessShutdown {
+	ctx, cancel := context.WithTimeout(context.Background(), stopBudget)
+	result := nativeHarnessShutdown{stopErr: stop(ctx)}
+	cancel()
+	timer := time.NewTimer(joinBudget)
+	defer timer.Stop()
+	select {
+	case result.ownerErr = <-done:
+		result.joined = true
+	case <-timer.C:
+		result.killed = true
+		result.ownerErr = errors.Join(errors.New("daemon shutdown join exceeded budget"), kill())
+		timer.Reset(killBudget)
+		select {
+		case err := <-done:
+			result.ownerErr = errors.Join(result.ownerErr, err)
+			result.joined = true
+		case <-timer.C:
+			result.ownerErr = errors.Join(result.ownerErr, errors.New("retained daemon did not join after kill; preserve owner and state"))
+		}
+	}
+	return result
+}
+
+// This exception is selected only by intentional authority-corruption fixtures,
+// after their policy assertions. Every retained original authority must prove
+// authenticated cleanup again; absence of a PID file cannot satisfy it.
+func (h *nativeHarness) expectShutdownFailureAfterCleanup(code string, identities []native.Identity) {
+	if len(identities) == 0 {
+		h.t.Fatal("independent cleanup requires retained exact authorities")
+	}
+	h.shutdownFailureCode = code
+	h.shutdownFailureProof = func() error {
+		var failure error
+		for _, id := range identities {
+			failure = errors.Join(failure, native.Stop(id, 0))
+		}
+		return failure
+	}
 }
 func newNativeHarness(t *testing.T, binary string, lease ...string) *nativeHarness {
 	t.Helper()
@@ -924,6 +1000,7 @@ func TestNativeRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		h.absent()
+		h.expectShutdownFailureAfterCleanup("cleanup_failed", []native.Identity{original})
 	})
 	t.Run("allocation-race-preserves-unrelated-listener", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
@@ -1117,7 +1194,7 @@ func TestNativeRuntime(t *testing.T) {
 				h := newNativeFaultHarness(t, binary)
 				r := h.run("dev")
 				h.state(r.Instance.ID, v1.RuntimeReady)
-				h.retainFixtureCleanup()
+				pgid := h.retainFixtureCleanup()
 				identity := h.guardianCapability(r.Instance.ID)
 				if err := native.CrashAnchorForTest(identity); err != nil {
 					t.Fatal(err)
@@ -1139,6 +1216,7 @@ func TestNativeRuntime(t *testing.T) {
 				// A living authenticated fixture proves force did not kill the unknown survivor.
 				h.fixtureAction("inspect")
 				h.fixtureAction("kill") // fixture self-kill with retained full capability
+				h.expectShutdownFailureAfterFixtureExit("collection_failed", pgid, identity)
 				h.absent()
 			})
 		}
@@ -1149,6 +1227,7 @@ func TestNativeRuntime(t *testing.T) {
 		r := h.run("dev")
 		h.state(r.Instance.ID, v1.RuntimeReady)
 		h.retainFixtureCleanup()
+		h.expectShutdownFailureAfterCleanup("collection_failed", []native.Identity{h.guardianCapability(r.Instance.ID)})
 		identity := h.guardianCapability(r.Instance.ID)
 		moved := identity.Control + ".retained"
 		t.Cleanup(func() {
@@ -1457,6 +1536,7 @@ func TestNativeRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		original := append([]native.Identity(nil), journal.Groups...)
+		h.expectShutdownFailureAfterCleanup("cleanup_failed", original)
 		t.Cleanup(func() {
 			for _, id := range original {
 				if err := native.Stop(id, 0); err != nil {
@@ -1621,6 +1701,7 @@ func TestNativeUncertaintyCleanupFailurePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	identity := h.guardianCapability(r.Instance.ID)
+	h.expectShutdownFailureAfterFixtureExit("cleanup_failed", pgid, identity)
 	guardian := identity.PID // absence witness only, never a signal target
 	record := fmt.Sprintf("%s\n%d %d %s", filepath.Dir(h.dir), pgid, guardian, data)
 	if err := os.WriteFile(os.Getenv("BACKLOT_FAILURE_RECORD"), []byte(record), 0600); err != nil {
@@ -1696,4 +1777,31 @@ func (h *nativeHarness) retainGuardianCleanup(id string) {
 		}
 		h.absent()
 	})
+}
+
+// The generic fault fixture has one authenticated group containing its root and
+// direct child, with no group-changing work. This exception also requires the
+// original guardian to be gone and keeps the existing per-process absence checks.
+func (h *nativeHarness) expectShutdownFailureAfterFixtureExit(code string, pgid int, guardian native.Identity, others ...native.Identity) {
+	h.shutdownFailureCode = code
+	h.shutdownFailureProof = func() error {
+		if syscall.Kill(-pgid, 0) != syscall.ESRCH || syscall.Kill(guardian.PID, 0) != syscall.ESRCH {
+			return errors.New("original fixture group or guardian remains")
+		}
+		if _, err := os.Stat(h.pids); err != nil {
+			return fmt.Errorf("fixture PID witnesses unavailable: %w", err)
+		}
+		for _, id := range others {
+			if id != guardian {
+				if err := native.Stop(id, 0); err != nil {
+					return err
+				}
+			}
+		}
+		h.absent()
+		if h.cleanupUnverified {
+			return errors.New("fixture absence proof incomplete")
+		}
+		return nil
+	}
 }

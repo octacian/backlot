@@ -177,6 +177,7 @@ func TestNativeRecoveryRetainsObservations(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			h.expectShutdownFailureAfterCleanup("cleanup_failed", original)
 			h.close()
 			state, err = openStore(h.dir)
 			if err != nil {

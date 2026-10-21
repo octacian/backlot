@@ -541,9 +541,23 @@ func (w *ownedWorkload) stop(grace time.Duration) error {
 		grace = 0
 	}
 	pgid := w.anchor.Process.Pid
-	scan := w.scan
-	if scan == nil {
-		scan = groupMembers
+	ctx, cancel := context.WithTimeout(context.Background(), grace+2*time.Second)
+	defer cancel()
+	scan := func(pgid int) ([]int, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var members []int
+		var err error
+		if w.scan != nil {
+			members, err = w.scan(pgid)
+		} else {
+			members, err = groupMembersContext(ctx, pgid)
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return members, err
 	}
 	signal := func(sig syscall.Signal) error {
 		if w.beforeSignal != nil {
@@ -578,6 +592,9 @@ func (w *ownedWorkload) stop(grace time.Duration) error {
 		}
 		dead, err := anchorExited(pgid)
 		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if onlyAnchor(members, pgid) && dead {

@@ -163,6 +163,8 @@ func TestLeaseCollectionFailureIsInstanceLocal(t *testing.T) {
 			t.Fatal("daemon or unrelated owner lost", err)
 		}
 	}
+	authorities := append(h.guardianCapabilities(r.Instance.ID), h.guardianCapabilities(unrelated.Instance.ID)...)
+	h.expectShutdownFailureAfterCleanup("collection_failed", authorities)
 	for _, id := range []string{r.Instance.ID, unrelated.Instance.ID} {
 		got, err := h.cli.Inspect(context.Background(), id)
 		if err != nil {
@@ -390,8 +392,10 @@ func TestKeptGuardianLossReportsEvidenceGap(t *testing.T) {
 	if !final.Kept || final.TerminalExitCode == nil || *final.TerminalExitCode != 17 {
 		t.Fatal("kept job result missing")
 	}
-	identity := h.guardianCapability(r.Instance.ID)
-	h.retainFixtureCleanup()
+	authorities := h.guardianCapabilities(r.Instance.ID)
+	identity := authorities[0]
+	pgid := h.retainFixtureCleanup()
+	h.expectShutdownFailureAfterFixtureExit("collection_failed", pgid, identity, authorities...)
 	if err := native.CrashForTest(identity); err != nil {
 		t.Fatal(err)
 	}

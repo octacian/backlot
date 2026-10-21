@@ -188,8 +188,14 @@ func (w *ownedWorkload) stopSession(grace time.Duration) error {
 	budget := sessionAcquisitionLimit
 	empty := false
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		pids, err := scan(ctx)
 		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		seen := map[int]bool{}
@@ -267,6 +273,9 @@ func (w *ownedWorkload) stopSession(grace time.Duration) error {
 			if err := h.Signal(sig); err != nil && !vanished(err) && !errors.Is(err, procidentity.ErrChanged) {
 				return err
 			}
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		if !live && empty {
 			break

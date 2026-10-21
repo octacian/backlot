@@ -3,6 +3,7 @@
 package native
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -29,3 +30,7 @@ func configureAnchor(_ *exec.Cmd)      {}
 func configureRoot(_ *exec.Cmd, _ int) {}
 
 func controlInput() (*os.File, error) { return nil, errors.New("native execution unsupported") }
+
+func groupMembersContext(_ context.Context, _ int) ([]int, error) {
+	return nil, errors.New("native execution unsupported")
+}

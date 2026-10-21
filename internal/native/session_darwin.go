@@ -2,18 +2,13 @@ package native
 
 import (
 	"context"
-	"errors"
-	"golang.org/x/sys/unix"
 	"os"
 )
 
 func sessionCandidates(ctx context.Context) ([]int, error) {
-	all, err := unix.SysctlKinfoProcSlice("kern.proc.all")
+	all, err := darwinProcesses(ctx, 0, 0)
 	if err != nil {
 		return nil, err
-	}
-	if len(all) > sessionCandidateLimit {
-		return nil, errors.New("session candidate budget exhausted")
 	}
 	var out []int
 	for _, p := range all {

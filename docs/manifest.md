@@ -351,8 +351,7 @@ memory. Keep private storage on a local filesystem supporting atomic rename/lock
 Environment sets and literal seed files remain useful when external project
 association and executable overrides are unnecessary. They keep their existing
 ordering and do not change application files. See the
-[project-only input decision](adr/20261021T035107160Z-use-project-only-input-values-and-private-ci-project-setup.md)
-and [registry selection correction](adr/20261021T040930738Z-select-a-private-project-registry-without-redirecting-application-configuration.md).
+[private project configuration decision](adr/20261021T001732173Z-register-private-project-configuration.md).
 
 
 `BACKLOT_PROJECT_CONFIG_DIR`, when present, selects the direct private registry

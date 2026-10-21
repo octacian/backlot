@@ -306,7 +306,7 @@ private-only input values and strict tools composition, atomic edits/removal rep
 local explicit reveal, private launch/current provenance and effective drift.
 Daemon state advances to v8 without migration; old private generations require
 explicit operator retention/erasure decisions. See the [setup guide](manifest.md#registered-private-project-configuration)
-and [current decision](adr/20261021T040930738Z-select-a-private-project-registry-without-redirecting-application-configuration.md).
+and [current decision](adr/20261021T001732173Z-register-private-project-configuration.md).
 Independent implementation reviews, frozen full validation and published-HEAD CI
 remain gates; this section does not claim final feature readiness.
 

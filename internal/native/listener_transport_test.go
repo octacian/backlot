@@ -38,12 +38,21 @@ func TestSessionListenerTransportPrivacy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			id := Identity{Purpose: "application", Control: socket, Token: strings.Repeat("a", 64), Birth: "private-birth", Component: "api", Attempt: strings.Repeat("b", 64)}
+			if mode == "write-reset" {
+				// Exceed the socket buffers, but prepare the payload before the
+				// request budget starts so setup cannot masquerade as a reset.
+				id.Birth = strings.Repeat("private-birth", 1<<16)
+			}
+			group := &Group{Identity: id}
+			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			done := make(chan error, 1)
 			received := make(chan struct{})
+			serverReady := make(chan struct{})
 			joined = false
 			go func() {
+				close(serverReady)
 				conn, err := listener.AcceptUnix()
 				if err != nil {
 					done <- err
@@ -52,8 +61,11 @@ func TestSessionListenerTransportPrivacy(t *testing.T) {
 				defer func() { _ = conn.Close(); done <- err }()
 				_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
 				if mode == "write-reset" {
-					var b [1]byte
-					_, err = conn.Read(b[:])
+					err = conn.SetReadBuffer(1024)
+					if err == nil {
+						var b [1]byte
+						_, err = conn.Read(b[:])
+					}
 				} else {
 					var request cleanupRequest
 					err = json.NewDecoder(conn).Decode(&request)
@@ -83,12 +95,18 @@ func TestSessionListenerTransportPrivacy(t *testing.T) {
 					t.Error("socket fixture not joined")
 				}
 			})
-			id := Identity{Purpose: "application", Control: socket, Token: strings.Repeat("a", 64), Birth: "private-birth", Component: "api", Attempt: strings.Repeat("b", 64)}
-			if mode == "write-reset" {
-				id.Birth = strings.Repeat("private-birth", 1<<18)
+			select {
+			case <-serverReady:
+			case <-time.After(time.Second):
+				t.Fatal("socket fixture not ready")
 			}
-			group := &Group{Identity: id}
-			owned, conflict, err := group.ListenerEndpoint(ctx, "127.0.0.1:12345")
+			budget := time.Second
+			if mode == "deadline" {
+				budget = 100 * time.Millisecond
+			}
+			requestCtx, requestCancel := context.WithTimeout(ctx, budget)
+			defer requestCancel()
+			owned, conflict, err := group.ListenerEndpoint(requestCtx, "127.0.0.1:12345")
 			if err == nil || owned || conflict {
 				t.Fatal("transport failure accepted", owned, conflict, err)
 			}

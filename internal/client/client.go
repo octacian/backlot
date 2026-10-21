@@ -39,6 +39,21 @@ func New(socket string) *Client {
 func (c *Client) Close() { c.transport.CloseIdleConnections() }
 
 func (c *Client) call(ctx context.Context, method, path string, request, response any) error {
+	// Resolve compatibility afresh at every configuration-consuming boundary.
+	// Historical reads and snapshot-based cleanup remain available; incompatible
+	// state must be cleaned up with its matching binary (see docs/containers.md).
+	switch path {
+	case "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset":
+		status, err := c.Status(ctx)
+		if err != nil || status.Status != "running" {
+			code := "api_version"
+			var detail *v1.PlanError
+			if errors.As(err, &detail) {
+				code = detail.Code
+			}
+			return &v1.PlanError{Code: code, Message: "cannot verify running daemon configuration compatibility; use the matching older binary to inspect, clean up and shut down its daemon, then select a fresh --state-dir with this binary; preserve old state until cleanup is verified"}
+		}
+	}
 	var body io.Reader
 	if request != nil {
 		data, err := json.Marshal(request)

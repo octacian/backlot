@@ -50,7 +50,7 @@ use a declared native command probe when connectivity is insufficient.
 
 The durable state format is version 6. Older formats, including version 5, are
 rejected without modification or migration because older binaries cannot
-interpret the owned diagnostic probe recovery journal. Use the matching older
+interpret composed private-source and effective-configuration drift provenance. Use the matching older
 binary to clean up owned instances and stop its gateway/daemon before selecting
 a fresh `--state-dir` with the new binary. Preserve old state until cleanup is
 verified; a new directory does not clean up resources from the old one. Backlot

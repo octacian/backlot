@@ -198,3 +198,32 @@ func TestCancelledPublicationLeavesAssociationUnchanged(t *testing.T) {
 		t.Fatal("cancelled enrollment published")
 	}
 }
+
+func TestCapturedSelectionReadDoesNotReselectRegistry(t *testing.T) {
+	project, file, m := fixture(t)
+	initial := load(t, project, file, m)
+	first, err := initial.Commit(context.Background(), candidate("captured-first"), func() error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := Select(project, project, file, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publisher := load(t, project, file, m)
+	second, err := publisher.Commit(context.Background(), candidate("published-second"), func() error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	captured, err := selected.Read(m, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if captured.State != "present" || captured.Provenance.Path != first.Path || captured.Config.Inputs["token"] != "captured-first" {
+		t.Fatal("captured source was replaced by a second lookup")
+	}
+	current := load(t, project, file, m)
+	if current.Provenance.Path != second.Path || current.Config.Inputs["token"] != "published-second" || current.Provenance.Digest == captured.Provenance.Digest {
+		t.Fatal("fixture did not cross complete generations")
+	}
+}

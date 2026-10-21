@@ -48,6 +48,10 @@ func projectSetup(ctx context.Context, c *urfave.Command) error {
 	if from != "" {
 		var data []byte
 		var err error
+		sourcePath := from
+		if from == "-" {
+			sourcePath = "stdin"
+		}
 		format := filepath.Ext(from)
 		if from == "-" {
 			data, err = io.ReadAll(io.LimitReader(os.Stdin, manifest.MaxBytes+1))
@@ -56,11 +60,14 @@ func projectSetup(ctx context.Context, c *urfave.Command) error {
 			data, err = projectconfig.Read(from)
 		}
 		if err != nil {
-			return output(c, nil, err)
+			return output(c, nil, manifest.SourceError(err, "import", sourcePath))
 		}
 		update = v1.PrivateConfig{}
 		if err := manifest.Decode(data, format, &update); err != nil {
-			return output(c, nil, err)
+			return output(c, nil, manifest.SourceError(err, "import", sourcePath))
+		}
+		if err := manifest.ValidatePrivate(update, v1.Manifest{}, false); err != nil {
+			return output(c, nil, manifest.SourceError(err, "import", sourcePath))
 		}
 		request.Update = &update
 	}
@@ -87,6 +94,13 @@ func projectSetup(ctx context.Context, c *urfave.Command) error {
 	}
 	result, err = setup.Save(ctx, update, request.Generate, request.RemoveInputs, request.RemoveTools)
 	if err != nil {
+		if from != "" {
+			sourcePath := from
+			if from == "-" {
+				sourcePath = "stdin"
+			}
+			err = manifest.SourceError(err, "import", sourcePath)
+		}
 		return output(c, nil, err)
 	}
 	if err := setupOutput(c, result); err != nil {

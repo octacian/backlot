@@ -119,7 +119,7 @@ func (s *Setup) Save(ctx context.Context, update v1.PrivateConfig, generate, rem
 		candidate.Inputs[name] = hex.EncodeToString(b)
 	}
 	if err := manifest.ValidatePrivate(candidate, m, true); err != nil {
-		return v1.ProjectSetupResponse{}, err
+		return v1.ProjectSetupResponse{}, manifest.SourceError(err, "private", s.layers.private.Provenance.Path)
 	}
 	effective := compose(s.layers.machine, candidate)
 	for _, name := range slices.Sorted(maps.Keys(m.Inputs)) {

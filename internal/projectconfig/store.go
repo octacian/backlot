@@ -41,13 +41,15 @@ type Provenance struct {
 // Selection is a captured registry generation and immutable private document.
 // Keep it private: Config contains raw input values.
 type Selection struct {
-	Provenance     Provenance
-	Config         v1.PrivateConfig
-	root           string
-	registry       registry
-	registryDigest string
-	checkpoint     func(string) error
-	stale          []string
+	State                           string // Safe selection/read status, including partial failures.
+	project, checkout, manifestPath string
+	Provenance                      Provenance
+	Config                          v1.PrivateConfig
+	root                            string
+	registry                        registry
+	registryDigest                  string
+	checkpoint                      func(string) error
+	stale                           []string
 }
 
 // Read bounds regular document reads, including transient setup imports.
@@ -112,7 +114,8 @@ func rootPath(checkout string) (string, error) {
 	return filepath.Clean(root), nil
 }
 
-func readRegistry(root string) (registry, string, error) {
+func readRegistry(root string) (result registry, revision string, readErr error) {
+	defer func() { readErr = manifest.SourceError(readErr, "registry", filepath.Join(root, "projects.json")) }()
 	empty := registry{Version: 1, Projects: map[string]entry{}}
 	if _, err := os.Lstat(root); os.IsNotExist(err) {
 		return empty, "", nil
@@ -146,10 +149,15 @@ func readRegistry(root string) (registry, string, error) {
 	return r, digest(data), nil
 }
 
-// Load selects a registration without writing. Reassociate is explicit setup-only recovery.
-// Staged loads defer only declaration membership; all safety and structure checks remain strict.
-func Load(project, checkout, file string, m v1.Manifest, staged, reassociate bool) (Selection, error) {
-	var s Selection
+// Select captures one registry generation without reading private values.
+// Partial selection provenance remains useful on a selection error.
+func Select(project, checkout, file string, reassociate bool) (s Selection, loadErr error) {
+	s.State = "unavailable"
+	layer, path := "registry", ""
+	if dir, err := os.UserConfigDir(); err == nil {
+		path = filepath.Join(dir, "backlot", "projects.json")
+	}
+	defer func() { loadErr = manifest.SourceError(loadErr, layer, path) }()
 	id, err := Identify(project, checkout, file)
 	if err != nil {
 		return s, err
@@ -159,16 +167,20 @@ func Load(project, checkout, file string, m v1.Manifest, staged, reassociate boo
 		return s, err
 	}
 	s.root = root
+	s.project, s.checkout, s.manifestPath = project, checkout, file
+	path = filepath.Join(root, "projects.json")
 	s.registry, s.registryDigest, err = readRegistry(root)
 	if err != nil {
 		return s, err
 	}
 	s.Provenance.Identity = id
+	s.State = "absent"
 	s.Config = v1.PrivateConfig{Version: v1.ManifestVersion, Inputs: map[string]string{}, Tools: map[string]string{}}
 	for key, e := range s.registry.Projects {
 		if e.Identity == id {
 			s.Provenance.Association = key
 			s.Provenance.Present = true
+			s.State = "unavailable"
 			s.Provenance.Path = filepath.Join(root, "projects", e.File)
 			break
 		}
@@ -177,14 +189,40 @@ func Load(project, checkout, file string, m v1.Manifest, staged, reassociate boo
 		}
 	}
 	if !s.Provenance.Present && len(s.stale) > 0 && !reassociate {
+		s.State = "rebound"
+		e := s.registry.Projects[s.stale[0]]
+		s.Provenance.Association = s.stale[0]
+		s.Provenance.Path = filepath.Join(root, "projects", e.File)
+		layer, path = "private", s.Provenance.Path
 		return s, problem("project association moved or was replaced; run project setup --reassociate with explicit new values")
 	}
+	current, err := Identify(project, checkout, file)
+	if err != nil {
+		return s, err
+	}
+	if current != id {
+		s.State = "rebound"
+		return s, problem("project identity changed while reading; retry setup or scene operation")
+	}
+	return s, nil
+}
+
+// Read validates the private document from this captured selection without a
+// second registry lookup. Staged edits defer only declaration membership.
+func (s Selection) Read(m v1.Manifest, staged bool) (result Selection, readErr error) {
+	defer func() { readErr = manifest.SourceError(readErr, "private", s.Provenance.Path) }()
+
 	if s.Provenance.Present {
-		if err := localipc.Directory(filepath.Join(root, "projects"), false); err != nil {
+		s.State = "invalid"
+		if err := localipc.Directory(filepath.Join(s.root, "projects"), false); err != nil {
 			return s, err
 		}
 		if err := localipc.File(s.Provenance.Path, false); err != nil {
-			return s, problem("registered private file missing or unsafe; inspect project setup and restore the private file")
+			if os.IsNotExist(err) {
+				s.State = "missing"
+				return s, problem("registered private file missing; inspect project setup and restore the private file")
+			}
+			return s, err
 		}
 		data, err := Read(s.Provenance.Path)
 		if err != nil {
@@ -198,18 +236,35 @@ func Load(project, checkout, file string, m v1.Manifest, staged, reassociate boo
 			return s, err
 		}
 		s.Provenance.Digest = digest(data)
+		s.State = "present"
 	}
-	current, err := Identify(project, checkout, file)
-	if err != nil || current != id {
+	current, err := Identify(s.project, s.checkout, s.manifestPath)
+	if err != nil {
+		s.State = "rebound"
+		return s, err
+	}
+	if current != s.Provenance.Identity {
+		s.State = "rebound"
 		return s, problem("project identity changed while reading; retry setup or scene operation")
 	}
 	return s, nil
 }
 
+// Load selects and validates one registered private generation without writing.
+func Load(project, checkout, file string, m v1.Manifest, staged, reassociate bool) (Selection, error) {
+	s, err := Select(project, checkout, file, reassociate)
+	if err != nil {
+		return s, err
+	}
+	return s.Read(m, staged)
+}
+
 // Commit atomically publishes one complete candidate, failing on any captured-source conflict.
 // verify rechecks manifest/machine bytes and identity under the publication lock.
-func (s Selection) Commit(ctx context.Context, c v1.PrivateConfig, verify func() error) (Provenance, error) {
-	result := s.Provenance
+func (s Selection) Commit(ctx context.Context, c v1.PrivateConfig, verify func() error) (result Provenance, commitErr error) {
+	result = s.Provenance
+	layer, sourcePath := "registry", filepath.Join(s.root, "projects.json")
+	defer func() { commitErr = manifest.SourceError(commitErr, layer, sourcePath) }()
 	if ctx.Err() != nil {
 		return result, problem("setup cancelled before publication; active configuration unchanged")
 	}
@@ -240,6 +295,7 @@ func (s Selection) Commit(ctx context.Context, c v1.PrivateConfig, verify func()
 		return result, err
 	}
 	if s.Provenance.Present {
+		layer, sourcePath = "private", s.Provenance.Path
 		data, err := Read(s.Provenance.Path)
 		if err != nil || digest(data) != s.Provenance.Digest {
 			return result, problem("private source changed during setup; retry")
@@ -248,6 +304,7 @@ func (s Selection) Commit(ctx context.Context, c v1.PrivateConfig, verify func()
 			return result, err
 		}
 	}
+	layer, sourcePath = "registry", filepath.Join(s.root, "projects.json")
 	dir := filepath.Join(s.root, "projects")
 	if err := localipc.Directory(dir, true); err != nil {
 		return result, err

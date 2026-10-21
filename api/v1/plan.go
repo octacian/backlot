@@ -65,17 +65,23 @@ type ErrorResponse struct {
 
 // PlanError identifies a failure category and field/component context.
 type PlanError struct {
-	Code    string `json:"code"`
-	Field   string `json:"field,omitempty"`
-	Message string `json:"message"`
+	Code        string `json:"code"`
+	SourceLayer string `json:"source_layer,omitempty"`
+	SourcePath  string `json:"source_path,omitempty"`
+	Field       string `json:"field,omitempty"`
+	Message     string `json:"message"`
 }
 
 // Error implements the error interface without including untrusted input values.
 func (e *PlanError) Error() string {
-	if e.Field == "" {
-		return e.Message
+	message := e.Message
+	if e.Field != "" {
+		message = e.Field + ": " + message
 	}
-	return e.Field + ": " + e.Message
+	if e.SourceLayer != "" {
+		message = e.SourceLayer + " source " + e.SourcePath + ": " + message
+	}
+	return message
 }
 
 // PlannedProbe preserves readiness intent with a redacted or symbolic target.

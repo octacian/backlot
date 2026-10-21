@@ -47,6 +47,14 @@ covers startup through database closure. Only a private owned socket with a prov
 connection-refused result is removed as stale; live or uncertain listeners remain
 untouched. The lock file remains after shutdown and is not a PID ownership claim.
 
+Before `prepare`, `run`, `restart` or `reset`, the shared Go client checks current
+API/state compatibility with a fresh bounded status request. A running older or
+malformed daemon is rejected before scene mutation; no compatibility result is
+cached. Historical reads and snapshot cleanup calls do not perform this
+configuration preflight. For incompatible state, use the matching older binary
+to inspect, clean up and shut down its daemon, then use a fresh `--state-dir` with
+the new binary; preserve old state until cleanup is verified.
+
 `prepare` discovers the project locally and sends an absolute path to the daemon.
 The daemon reuses strict manifest validation/environment resolution. Provider
 configuration and health are not required for metadata preparation, including

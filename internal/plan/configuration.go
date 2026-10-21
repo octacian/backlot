@@ -2,7 +2,6 @@ package plan
 
 import (
 	"encoding/json"
-	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -22,8 +21,16 @@ type layers struct {
 	machinePresent                             bool
 }
 
-func loadLayers(source Source, configPath string, staged, reassociate bool) (layers, error) {
-	var l layers
+func loadLayers(source Source, configPath string, staged, reassociate bool) (l layers, loadErr error) {
+	layer, path := "manifest", source.ManifestPath
+	defer func() { loadErr = manifest.SourceError(loadErr, layer, path) }()
+	// Capture source association independently of successful manifest/scene validation.
+	var err error
+	l.private, err = projectconfig.Select(source.ProjectPath, source.CheckoutPath, source.ManifestPath, reassociate)
+	if err != nil {
+		return l, err
+	}
+
 	data, err := readFile(source.ManifestPath)
 	if err != nil {
 		return l, err
@@ -35,10 +42,12 @@ func loadLayers(source Source, configPath string, staged, reassociate bool) (lay
 		return l, err
 	}
 	l.manifestDigest = digest(data)
+	layer, path = "machine", configPath
 	l.machine.Version = v1.ManifestVersion
 	if configPath == "" {
 		if root, err := os.UserConfigDir(); err == nil {
 			l.machinePath = filepath.Join(root, "backlot", "config.yaml")
+			path = l.machinePath
 			if _, err := os.Stat(l.machinePath); err == nil {
 				configPath = l.machinePath
 			} else if !os.IsNotExist(err) {
@@ -64,17 +73,14 @@ func loadLayers(source Source, configPath string, staged, reassociate bool) (lay
 		return l, err
 	}
 	if err := manifest.ValidateMembership(l.manifest, l.machine.Inputs, l.machine.Tools); err != nil {
-		var detail *v1.PlanError
-		if errors.As(err, &detail) {
-			return l, problem(detail.Code, detail.Field, detail.Message+"; edit selected machine file "+l.machinePath+" to remove or correct this key")
-		}
 		return l, err
 	}
 	if l.machine.Caddy != nil {
 		value := manifest.CaddyDefaults(*l.machine.Caddy)
 		l.machine.Caddy = &value
 	}
-	l.private, err = projectconfig.Load(source.ProjectPath, source.CheckoutPath, source.ManifestPath, l.manifest, staged, reassociate)
+	layer, path = "registry", ""
+	l.private, err = l.private.Read(l.manifest, staged)
 	if err != nil {
 		return l, err
 	}

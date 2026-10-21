@@ -10,6 +10,7 @@ import (
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/localipc"
+	"github.com/octacian/backlot/internal/manifest"
 )
 
 // Identity binds a manifest location to a canonical local repository object.
@@ -32,7 +33,7 @@ func Identify(project, checkout, file string) (Identity, error) {
 	var result Identity
 	canonical, err := filepath.EvalSymlinks(file)
 	if err != nil || !within(checkout, canonical) {
-		return result, problem("manifest is unavailable or escapes checkout")
+		return result, manifest.SourceError(problem("manifest is unavailable or escapes checkout"), "manifest", file)
 	}
 	git := filepath.Join(checkout, ".git")
 	info, err := os.Lstat(git)

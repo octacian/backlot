@@ -423,22 +423,25 @@ func probeExecutable(c v1.PlannedComponent) string {
 }
 
 func addPrivatePath(r *v1.DoctorResponse, name string, snap plan.Snapshot) {
-	state, path, digest := "unrecorded", "", ""
+	state, path, digest, association := "unrecorded", "", "", ""
 	if p := snap.PrivateProvenance; p != nil {
 		state = "absent"
+		association = p.Association
 		path = p.Path
 		digest = p.Digest
 		if p.Present {
 			state = "present"
 		}
 	}
-	r.Paths = append(r.Paths, v1.DoctorPath{Name: name, Path: path, State: state, Digest: digest})
+	r.Paths = append(r.Paths, v1.DoctorPath{Name: name, Path: path, State: state, Digest: digest, Association: association})
 }
 
 func checkCurrentComposition(r *v1.DoctorResponse, launch plan.Snapshot) {
+	r.Paths = append(r.Paths, v1.DoctorPath{Name: "launch_effective_configuration", State: "present", Digest: launch.Plan.EffectiveConfigDigest})
 	source, err := plan.Locate(launch.Plan.ManifestPath)
 	if err != nil {
 		diagnosticAdd(r, "current_configuration", "daemon/host", v1.DoctorFailed, "current project unavailable; launch snapshot remains authoritative for cleanup")
+		r.Paths = append(r.Paths, v1.DoctorPath{Name: "current_private_config", State: "unavailable"}, v1.DoctorPath{Name: "current_effective_configuration", State: "uncomputable"})
 		return
 	}
 	config := ""
@@ -450,11 +453,16 @@ func checkCurrentComposition(r *v1.DoctorResponse, launch plan.Snapshot) {
 		config = ""
 	}
 	current, err := plan.Prepare(source, v1.PlanRequest{Scene: launch.Plan.Scene, ConfigPath: config})
+	addPrivatePath(r, "current_private_config", current)
+	if current.PrivateSourceState != "" {
+		r.Paths[len(r.Paths)-1].State = current.PrivateSourceState
+	}
+
 	if err != nil {
-		diagnosticAdd(r, "current_configuration", "daemon/host", v1.DoctorFailed, "current configuration invalid, missing, unsafe or rebound; run project setup and plan; launch snapshot remains unchanged")
+		diagnosticAdd(r, "current_configuration", "daemon/host", v1.DoctorFailed, "current configuration cannot be computed; run project setup and plan; launch snapshot remains unchanged")
+		r.Paths = append(r.Paths, v1.DoctorPath{Name: "current_effective_configuration", State: "uncomputable"})
 		return
 	}
-	addPrivatePath(r, "current_private_config", current)
 	if launch.PrivateProvenance != nil && current.PrivateProvenance != nil && *launch.PrivateProvenance != *current.PrivateProvenance {
 		r.Paths[len(r.Paths)-1].State = "changed"
 	}
@@ -462,6 +470,6 @@ func checkCurrentComposition(r *v1.DoctorResponse, launch plan.Snapshot) {
 	if plan.ConfigurationDrift(launch.Plan, current.Plan) {
 		state = "changed"
 	}
-	r.Paths = append(r.Paths, v1.DoctorPath{Name: "launch_effective_configuration", State: "present", Digest: launch.Plan.EffectiveConfigDigest}, v1.DoctorPath{Name: "current_effective_configuration", State: state, Digest: current.Plan.EffectiveConfigDigest})
+	r.Paths = append(r.Paths, v1.DoctorPath{Name: "current_effective_configuration", State: state, Digest: current.Plan.EffectiveConfigDigest})
 	diagnosticAdd(r, "current_configuration", "daemon/host", v1.DoctorOK, "current configuration observed independently; launch snapshot and cleanup remain unchanged")
 }

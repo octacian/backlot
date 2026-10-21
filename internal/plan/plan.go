@@ -29,15 +29,17 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 	file, project := source.ManifestPath, source.ProjectPath
 
 	layers, err := loadLayers(source, request.ConfigPath, false, false)
-	if err != nil {
-		return result, err
-	}
-	m, config := layers.manifest, layers.effective
 	if snapshot != nil {
 		snapshot.ConfigProvenance = &ConfigProvenance{Path: layers.machinePath, Present: layers.machinePresent}
 		provenance := layers.private.Provenance
 		snapshot.PrivateProvenance = &provenance
+		snapshot.PrivateSourceState = layers.private.State
 	}
+	if err != nil {
+		return result, err
+	}
+	m, config := layers.manifest, layers.effective
+
 	scene, ok := m.Scenes[request.Scene]
 	if !ok {
 		return result, problem("unknown_scene", "scene", "scene is not declared; choose a name from scenes")

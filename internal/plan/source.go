@@ -24,5 +24,5 @@ func Locate(projectPath string) (Source, error) {
 	if err != nil {
 		return Source{}, err
 	}
-	return Source{ManifestPath: file, ProjectPath: project, CheckoutPath: checkoutRoot(project)}, nil
+	return Source{ManifestPath: file, ProjectPath: project, CheckoutPath: CheckoutRoot(project)}, nil
 }

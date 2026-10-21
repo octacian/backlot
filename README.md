@@ -55,21 +55,21 @@ Install your project's declared application dependencies using its own setup
 instructions. From that project's checkout, daily use is:
 
 ```sh
-backlot run dev --state-dir "$HOME/.backlot" --config "$HOME/.config/backlot/machine.yaml" --json
+backlot scene start dev --state-dir "$HOME/.backlot" --config "$HOME/.config/backlot/machine.yaml" --json
 ```
 
-Open `instance.execution.origin` from the result:
-`https://bl-<instance-label>.backlot.localhost:8443`. Record `instance.id`.
+Open `result.instance.execution.origin` from the result:
+`https://bl-<instance-label>.backlot.localhost:8443`. Record `result.instance.id`.
 The command returns when ready; closing your terminal leaves the persistent scene
 running. Scene names are project-defined; use the project's development scene if
 it is not named `dev`. Application trust must already be configured in its manifest.
 No public domain, Certbot, router DNS or resolver file is needed.
 
 ```sh
-backlot stop --state-dir "$HOME/.backlot" --json INSTANCE_ID
+backlot scene stop --state-dir "$HOME/.backlot" --json dev
 ```
 
-Repeat `run dev` to resume with the same logical origin. After a daemon stop or
+Repeat `scene start dev` to resume with the same logical origin. After a daemon stop or
 machine restart, repeat daemon start and gateway start before running scenes;
 retained state preserves the CA. Native-only unpublished scenes need no gateway;
 Docker is needed only for container scenes.
@@ -87,15 +87,14 @@ For more: [manifest reference](docs/manifest.md), [HTTPS and application trust](
 and the advanced [four-workflow/container fixture](examples/release-acceptance/README.md).
 Use `backlot list --state-dir "$HOME/.backlot" --json` to discover recorded IDs,
 and `backlot status --state-dir "$HOME/.backlot" --json INSTANCE_ID` to inspect one.
+Add `--follow` to observe it, or use `scene status dev --follow` to watch the named
+scene through recreation. See [targeting and follow](docs/daemon.md#named-persistent-scenes).
 
 Native commands and descendants must stay in their supervised process group;
-detachment and delegation to another supervisor are unsupported. The support
-boundary includes the bounded Linux rootful bridge topology in the
-[platform guide](docs/platforms.md). WSL has configuration guidance only, without
-WSL QA or a guarantee. Native Windows is planned under independent epic #34;
-[the Windows design and acceptance plan](docs/windows-design.md) establishes no
-Windows runtime support yet. This is not a V1 release declaration; the
-[release verification guide](docs/release-acceptance/README.md) records broader gates.
+detachment and delegation to another supervisor are unsupported. See the
+[platform guide](docs/platforms.md) for supported topologies, WSL configuration and
+planned Windows work, and [release verification](docs/release-acceptance/README.md)
+for broader gates. This is not a V1 release declaration.
 
 For GitHub Actions, follow the [CI quickstart](docs/ci.md) and minimal two-shard
 [adopter workflow](examples/ci-scenes/adopter.yml).

@@ -144,7 +144,7 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	if err := os.Chmod(path, 0600); err != nil {
 		return problem("permissions", "cannot protect daemon socket")
 	}
-	svc := &service{diagnosticRecoveryErr: diagnosticRecoveryErr, store: state, lease: options.LeaseDuration, directory: options.Directory, evidence: evidencePolicy{age: options.RetentionAge, bytes: options.RetentionBytes}}
+	svc := &service{generation: newID(), diagnosticRecoveryErr: diagnosticRecoveryErr, store: state, lease: options.LeaseDuration, directory: options.Directory, evidence: evidencePolicy{age: options.RetentionAge, bytes: options.RetentionBytes}}
 	stopping := make(chan struct{})
 	var once sync.Once
 	status := v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, Status: "running", PID: os.Getpid(), LeaseDuration: options.LeaseDuration.String()}
@@ -219,6 +219,29 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/scenes/start":
+			var request v1.SceneStartRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.startScene(r.Context(), request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+		case "/v1/scenes/status", "/v1/scenes/stop":
+			var request v1.SceneRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.scene(request.Target, r.URL.Path == "/v1/scenes/stop")
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+
 		case "/v1/gateway/start", "/v1/gateway/stop", "/v1/gateway/restart", "/v1/gateway/status":
 			var request v1.GatewayRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
@@ -444,6 +467,13 @@ func writeJSON(w http.ResponseWriter, value any) {
 	// this single response boundary, including prepare/run/cancel/recovery views.
 	if response, ok := value.(v1.InstanceResponse); ok {
 		response.Instance = publicInstance(response.Instance)
+		value = response
+	}
+	if response, ok := value.(v1.SceneResponse); ok && response.Result != nil {
+		result := *response.Result
+		result.Instance = publicInstance(result.Instance)
+		result.LeaseToken = ""
+		response.Result = &result
 		value = response
 	}
 	if err := json.NewEncoder(w).Encode(value); err != nil {

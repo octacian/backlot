@@ -234,23 +234,108 @@ func TestDoctorCleanupCausePrivacy(t *testing.T) {
 	}
 }
 
-func TestDoctorUnresolvedCopyDaemonAvailability(t *testing.T) {
-	root := shortTemp(t)
-	if retained := os.Getenv("BACKLOT_DOCTOR_RECOVERY_TEST_ROOT"); retained != "" {
-		var err error
-		root, err = os.MkdirTemp(retained, "daemon-")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Log("retained owned daemon fixture", root)
+// doctorDaemonJoin retains the sole Wait owner and its terminal observation.
+// A timed-out owner is never waited again by registered cleanup. killErr stays
+// private to the fixture; it is not included in the bounded failure message.
+type doctorDaemonJoin struct {
+	done                      <-chan error
+	attempted, joined         bool
+	waitErr, killErr, failure error
+}
+
+func (j *doctorDaemonJoin) join(budget, killBudget time.Duration, kill func() error) error {
+	if j.attempted {
+		return j.failure
 	}
+	j.attempted = true
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	select {
+	case j.waitErr = <-j.done:
+		j.joined = true
+		return nil
+	case <-timer.C:
+	}
+	j.killErr = kill() // Only the retained, unreaped direct child authorizes this.
+	timer.Reset(killBudget)
+	select {
+	case j.waitErr = <-j.done:
+		j.joined = true
+		j.failure = errors.New("daemon shutdown exceeded finite join budget; direct-child Wait owner joined after kill")
+	case <-timer.C:
+		j.failure = errors.New("daemon shutdown exceeded finite join budget; direct-child Wait owner unfinished; preserving owned fixture state")
+	}
+	return j.failure
+}
+
+func TestDoctorDaemonJoinTimeout(t *testing.T) {
+	for _, joined := range []bool{false, true} {
+		t.Run(fmt.Sprint("post-kill-joined-", joined), func(t *testing.T) {
+			done := make(chan error, 1)
+			j := &doctorDaemonJoin{done: done}
+			private := errors.New("private kill cause")
+			kills := 0
+			kill := func() error {
+				kills++
+				if joined {
+					done <- errors.New("killed child")
+				}
+				return private
+			}
+			result := make(chan error, 1)
+			go func() { result <- j.join(5*time.Millisecond, 5*time.Millisecond, kill) }()
+			var failure error
+			select {
+			case failure = <-result:
+			case <-time.After(time.Second):
+				t.Fatal("timeout fallback did not report within its bounded budgets")
+			}
+			if failure == nil || !strings.Contains(failure.Error(), "exceeded finite join budget") || strings.Contains(failure.Error(), private.Error()) || j.killErr != private || j.joined != joined {
+				t.Fatal("timeout outcome or private cause lost", failure)
+			}
+			if !joined && !strings.Contains(failure.Error(), "Wait owner unfinished; preserving owned fixture state") {
+				t.Fatal("unfinished owner not reported", failure)
+			}
+			// Simulate registered cleanup after failure: it must neither kill again nor
+			// consume a late result and relabel the earlier uncertainty as success.
+			if !joined {
+				done <- nil
+			}
+			if again := j.join(time.Hour, time.Hour, kill); again != failure || kills != 1 || j.joined != joined {
+				t.Fatal("cleanup reentered the owner or discarded its failure", again, kills)
+			}
+			t.Log(failure)
+		})
+	}
+}
+
+func TestDoctorUnresolvedCopyDaemonAvailability(t *testing.T) {
+	retained := os.Getenv("BACKLOT_DOCTOR_RECOVERY_TEST_ROOT")
+	rootParent := retained
+	if rootParent == "" {
+		rootParent = "/tmp"
+	}
+	root, err := os.MkdirTemp(rootParent, "bl-doctor-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var h *nativeHarness
+	t.Cleanup(func() {
+		if retained != "" || (h != nil && h.cleanupUnverified) {
+			t.Log("preserved owned daemon fixture", root)
+			return
+		}
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
+		}
+	})
 	binary := filepath.Join(root, "backlot")
 	build := exec.Command("go", "build", "-race", "-o", binary, "../../cmd/backlot")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build daemon: %v %s", err, output)
 	}
 	endpoint, _, inspections, _ := doctorRecoveryEngine(t)
-	h := &nativeHarness{t: t, binary: binary, lease: "2s", dir: filepath.Join(root, "state"), project: filepath.Join(root, "project"), pids: filepath.Join(root, "pids")}
+	h = &nativeHarness{t: t, binary: binary, lease: "2s", dir: filepath.Join(root, "state"), project: filepath.Join(root, "project"), pids: filepath.Join(root, "pids")}
 	for _, dir := range []string{h.dir, h.project} {
 		if err := os.Mkdir(dir, 0700); err != nil {
 			t.Fatal(err)
@@ -268,7 +353,50 @@ func TestDoctorUnresolvedCopyDaemonAvailability(t *testing.T) {
 	// Cleanup is retained before allocating the unresolved artifact or starting
 	// the daemon child. The configured evidence root is deliberately not removed.
 	h.waited = true
-	t.Cleanup(h.close)
+	var owner *doctorDaemonJoin
+	join := func() error {
+		if owner == nil {
+			done := make(chan error, 1)
+			command := h.process
+			owner = &doctorDaemonJoin{done: done}
+			go func() { done <- command.Wait() }()
+		}
+		err := owner.join(40*time.Second, 5*time.Second, h.process.Process.Kill)
+		h.waited = owner.joined
+		if err != nil {
+			h.cleanupUnverified = true
+			// Keep the raw kill cause only in private fixture evidence.
+			if writeErr := os.WriteFile(filepath.Join(root, "daemon-join-private.log"), []byte(fmt.Sprintf("kill: %v; wait: %v\n", owner.killErr, owner.waitErr)), 0600); writeErr != nil {
+				t.Error(writeErr)
+			}
+		}
+		return err
+	}
+	closeDaemon := func() {
+		if h.process != nil && h.process.Process != nil && !h.waited {
+			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+			_, stopErr := h.cli.Stop(ctx)
+			cancel()
+			if err := join(); err != nil {
+				t.Error(err)
+			}
+			if owner.joined && owner.waitErr != nil && stopErr == nil {
+				t.Error("daemon failed after successful shutdown request", owner.waitErr)
+			}
+		}
+		// Wait owns stderr copying; reading its buffer before join would race.
+		if owner != nil && !owner.joined {
+			t.Error("daemon Wait owner unfinished; preserving", root)
+			h.cli.Close()
+			return
+		}
+		if strings.Contains(h.daemonLog.String(), "DATA RACE") {
+			t.Error("daemon race", h.daemonLog.String())
+		}
+		h.cli.Close()
+		h.absent()
+	}
+	t.Cleanup(closeDaemon)
 	state, err := openStore(h.dir)
 	if err != nil {
 		t.Fatal(err)
@@ -322,20 +450,12 @@ func TestDoctorUnresolvedCopyDaemonAvailability(t *testing.T) {
 	h.absent()
 	_, stopErr := h.cli.Stop(context.Background())
 	code(t, stopErr, "cleanup_failed")
-	done := make(chan error, 1)
-	go func() { done <- h.process.Wait() }()
-	select {
-	case err := <-done:
-		h.waited = true
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) || exit.ExitCode() == 0 {
-			t.Fatal("unresolved copy shutdown must be nonzero", err)
-		}
-	case <-time.After(40 * time.Second):
-		_ = h.process.Process.Kill() // Only this retained, unreaped direct child.
-		<-done
-		h.waited = true
-		t.Fatal("daemon shutdown exceeded finite join budget")
+	if err := join(); err != nil {
+		t.Fatal(err)
+	}
+	var exit *exec.ExitError
+	if !errors.As(owner.waitErr, &exit) || exit.ExitCode() == 0 {
+		t.Fatal("unresolved copy shutdown must be nonzero", owner.waitErr)
 	}
 	if strings.Contains(h.daemonLog.String(), "DATA RACE") {
 		t.Fatal("daemon race", h.daemonLog.String())
@@ -366,11 +486,12 @@ func TestDoctorUnresolvedCopyDaemonAvailability(t *testing.T) {
 	if err := state.db.Close(); err != nil {
 		t.Fatal(err)
 	}
+	owner = nil // The prior daemon is joined; the next child gets its own owner.
 	h.start()
 	response, err = h.cli.Doctor(context.Background(), v1.DoctorRequest{APIVersion: v1.Version})
 	if err != nil || !response.Healthy {
 		t.Fatal("reconciled daemon unhealthy", response, err)
 	}
-	h.close()
+	closeDaemon()
 	t.Log("actual daemon served unresolved copy, admitted new native service/TCP diagnostic, reported unhealthy/nonzero shutdown, joined owners and recovered only after quarantine plus Engine absence")
 }

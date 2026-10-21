@@ -1,11 +1,11 @@
 ---
 title: 'Fence combined configuration and native recovery state at version seven'
 date: '2026-10-21'
-status: accepted
+status: superseded
 summary: 'Use state version 7 without migration to distinguish combined private configuration and native ownership recovery from either version-6 implementation.'
 tags: [configuration, native, recovery, persistence, compatibility]
 supersedes: [20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md, 20261021T001732173Z-compose-machine-configuration-with-registered-private-project-inputs.md]
-superseded_by: []
+superseded_by: [20261021T035107160Z-use-project-only-input-values-and-private-ci-project-setup.md]
 ---
 
 # Fence combined configuration and native recovery state at version seven

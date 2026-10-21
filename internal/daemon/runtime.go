@@ -99,7 +99,11 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 	if err != nil {
 		return empty, err
 	}
-	snapshot, err := plan.Prepare(source, request.Plan)
+	resolve := plan.Prepare
+	if s.resolve != nil {
+		resolve = s.resolve
+	}
+	snapshot, err := resolve(source, request.Plan)
 	if err != nil {
 		return empty, err
 	}
@@ -118,7 +122,7 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 			return empty, problem("conflict", "restart must address the same persistent project, checkout and scene")
 		}
 	}
-	response, err := s.prepare(ctx, v1.PrepareRequest{APIVersion: v1.Version, Plan: request.Plan})
+	response, err := s.prepareCaptured(ctx, snapshot, identity)
 	if err != nil {
 		return empty, err
 	}
@@ -231,7 +235,7 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 			result.Origin += ":" + strconv.Itoa(*snapshot.Caddy.HTTPSPort)
 		}
 	}
-	r := runtimeRecord{ExportSource: &v1.ExportSource{Project: snapshot.Plan.Project, Scene: snapshot.Plan.Scene, Lifetime: snapshot.Plan.Lifetime, CheckoutID: identity.checkout.ID, GitHead: launchGitCommit(ctx, identity.checkout), ManifestDigest: snapshot.Plan.ManifestDigest, ConfigDigest: snapshot.Plan.ConfigDigest}, StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Attempt: attempt, Groups: []native.Identity{}, Options: request.Options, ConfigPath: request.Plan.ConfigPath}
+	r := runtimeRecord{ExportSource: &v1.ExportSource{Project: snapshot.Plan.Project, Scene: snapshot.Plan.Scene, Lifetime: snapshot.Plan.Lifetime, CheckoutID: identity.checkout.ID, GitHead: launchGitCommit(ctx, identity.checkout), ManifestDigest: snapshot.Plan.ManifestDigest, ConfigDigest: snapshot.Plan.ConfigDigest, EffectiveConfigDigest: snapshot.Plan.EffectiveConfigDigest}, StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Attempt: attempt, Groups: []native.Identity{}, Options: request.Options, ConfigPath: request.Plan.ConfigPath}
 	response.Instance, err = s.store.acceptExecution(id, r, result, request.InstanceID != "" || response.Instance.Status == v1.Stopped)
 	if err != nil {
 		return empty, err

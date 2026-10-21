@@ -270,7 +270,8 @@ See [contracts and image requirements](daemon.md#scoped-provider-diagnostics).
 Early real CLI/API/daemon/native/Docker/Caddy/data success, missing container trust
 failure/recovery and preserved-data cleanup were exercised before broad regressions;
 revision-bound private delivery evidence records fixture/tool/image dependencies.
-Private state advances to version 5 without migration: v4 and older are rejected
+Export provenance originally advanced state to version 5; project composition
+now advances it to version 6 without migration: v5 and older are rejected
 without modification so incompatible binaries cannot ignore probe ownership.
 See the [state compatibility guidance](containers.md). Independent
 reviews, frozen provider/browser/macOS suites and published-HEAD CI remain required
@@ -294,3 +295,15 @@ browser preview precede broader feature regression development. Independent Low
 and fresh High reviews, final frozen complete provider/browser/action gates and
 published-revision CI remain required; this paragraph does not claim readiness.
 Binary distribution/version tags remain #25, with no legacy storage migration.
+
+## Registered project configuration (#48)
+
+Implemented for independent review: explicit local project setup, external private
+registry/generations shared by Git common-directory identity and manifest path,
+strict inputs/tools composition, atomic edits/removal repair, hidden terminal input,
+local explicit reveal, private launch/current provenance and effective drift.
+Daemon state advances to v6 without migration; old private generations require
+explicit operator retention/erasure decisions. See the [setup guide](manifest.md#registered-private-project-configuration)
+and [accepted decision](adr/20261021T001732173Z-compose-machine-configuration-with-registered-private-project-inputs.md).
+Independent implementation reviews, frozen full validation and published-HEAD CI
+remain gates; this section does not claim final feature readiness.

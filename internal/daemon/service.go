@@ -60,6 +60,11 @@ func (s *service) prepare(ctx context.Context, request v1.PrepareRequest) (v1.In
 	if err != nil {
 		return v1.InstanceResponse{}, err
 	}
+	return s.prepareCaptured(ctx, snapshot, original)
+}
+
+// prepareCaptured accepts the exact generation resolved by preparation or launch.
+func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, original capturedSource) (v1.InstanceResponse, error) {
 	public, err := json.Marshal(snapshot.Plan)
 	if err != nil || len(public) > manifest.MaxBytes-8192 {
 		return v1.InstanceResponse{}, problem("plan_too_large", "resolved public plan exceeds bounded API response size")

@@ -39,10 +39,11 @@ type ExportResult struct {
 
 // ExportSource records bounded launch provenance; absent historical facts remain unknown.
 type ExportSource struct {
-	Project    string   `json:"project"`
-	Scene      string   `json:"scene"`
-	Lifetime   Lifetime `json:"lifetime"`
-	CheckoutID string   `json:"checkout_id"`
+	EffectiveConfigDigest string   `json:"effective_config_digest,omitempty"`
+	Project               string   `json:"project"`
+	Scene                 string   `json:"scene"`
+	Lifetime              Lifetime `json:"lifetime"`
+	CheckoutID            string   `json:"checkout_id"`
 	// GitHead is the immutable launch commit, or absent when unavailable.
 	GitHead        string `json:"git_head,omitempty"`
 	ManifestDigest string `json:"manifest_digest"`

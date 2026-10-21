@@ -107,3 +107,8 @@ See [Developer documentation](docs/README.md) for contributor setup and checks.
 ## License
 
 Backlot is [BSD 3-Clause licensed](LICENSE).
+
+For project-specific credentials with shared machine providers, run
+`backlot project setup --project /path/to/project` once; ordinary scene commands
+automatically reuse the private layer across linked worktrees. See
+[private project setup](docs/manifest.md#registered-private-project-configuration).

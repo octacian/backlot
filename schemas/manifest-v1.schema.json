@@ -540,7 +540,41 @@
       "description": "HostMapping explicitly maps a published origin hostname to Docker's host gateway."
     },
     "Input": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "generate": {
+                "const": "random-hex-32"
+              }
+            },
+            "required": [
+              "generate"
+            ]
+          },
+          "then": {
+            "properties": {
+              "secret": {
+                "const": true
+              }
+            },
+            "required": [
+              "secret"
+            ]
+          }
+        }
+      ],
       "properties": {
+        "description": {
+          "type": "string"
+        },
+        "generate": {
+          "type": "string",
+          "enum": [
+            "",
+            "random-hex-32"
+          ]
+        },
         "secret": {
           "type": "boolean",
           "description": "Treat the value as sensitive in ordinary plan output."

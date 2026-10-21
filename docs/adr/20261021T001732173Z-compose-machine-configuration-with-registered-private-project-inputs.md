@@ -1,7 +1,7 @@
 ---
 title: 'Compose machine configuration with registered private project inputs'
 date: '2026-10-21'
-status: proposed
+status: accepted
 summary: 'Register private project inputs and tool overrides outside checkouts so linked worktrees reuse explicit setup while machine provider settings remain shared.'
 tags: [configuration, planning, security, identity, cli, persistence]
 supersedes: []

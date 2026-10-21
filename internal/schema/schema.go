@@ -30,7 +30,7 @@ func Generate(root string) (map[string][]byte, error) {
 	}
 	r.CommentMap = comments
 	artifacts := map[string][]byte{}
-	for name, contract := range map[string]any{"manifest-v1.schema.json": v1.Manifest{}, "machine-config-v1.schema.json": v1.MachineConfig{}} {
+	for name, contract := range map[string]any{"manifest-v1.schema.json": v1.Manifest{}, "machine-config-v1.schema.json": v1.MachineConfig{}, "private-config-v1.schema.json": v1.PrivateConfig{}} {
 		s := r.Reflect(contract)
 		s.ID = jsonschema.ID("https://raw.githubusercontent.com/octacian/backlot/main/schemas/" + name)
 		s.Comments = "Generated from api/v1; run make schema-generate. Editor assistance only; backlot plan remains authoritative."

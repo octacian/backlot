@@ -371,3 +371,11 @@ Cleanup failure is nonzero and retains private journals/uncertain resources;
 restore the recorded
 provider access and restart the daemon to retry recovery. Foreign/mismatched
 ownership is preserved. Existing images and global settings remain untouched.
+
+## Configuration state compatibility
+
+Registered private project composition uses daemon state version 6. State v5 is
+rejected without migration or mutation: use its matching binary to clean up and
+shut down owned resources, then select a fresh state directory. The independent
+project registry survives daemon reset and state-directory replacement. See
+[private setup, provenance and retention](manifest.md#registered-private-project-configuration).

@@ -66,6 +66,7 @@ func TestEditorExamples(t *testing.T) {
 		{"../../examples/macos-quickstart/machine.example.yaml", "machine-config-v1.schema.json", &v1.MachineConfig{}},
 		{"../../examples/fullstack/backlot.yaml", "manifest-v1.schema.json", &v1.Manifest{}},
 		{"../../examples/fullstack/machine.example.yaml", "machine-config-v1.schema.json", &v1.MachineConfig{}},
+		{"../../examples/fullstack/private.example.yaml", "private-config-v1.schema.json", &v1.PrivateConfig{}},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			data, err := os.ReadFile(tc.path)

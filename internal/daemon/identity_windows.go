@@ -1,7 +1,8 @@
 package daemon
 
-import "os"
+import (
+	"github.com/octacian/backlot/internal/localipc"
+	"os"
+)
 
-func fileIdentity(_ os.FileInfo) (string, error) {
-	return "", problem("unsupported_platform", "daemon filesystem identity is not supported on Windows")
-}
+func fileIdentity(info os.FileInfo) (string, error) { return localipc.Identity(info) }

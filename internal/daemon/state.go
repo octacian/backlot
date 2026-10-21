@@ -137,7 +137,7 @@ func (s *store) begin(snapshot plan.Snapshot, checkout v1.CheckoutIdentity, leas
 				}
 				response.Instance = r.Instance
 				response.ManifestDrift = r.Instance.Plan.ManifestDigest != p.ManifestDigest
-				response.ConfigDrift = r.Instance.Plan.ConfigDigest != p.ConfigDigest
+				response.ConfigDrift = plan.ConfigurationDrift(r.Instance.Plan, p)
 				return nil
 			}
 		}

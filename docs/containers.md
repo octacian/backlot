@@ -48,7 +48,7 @@ logic. Applications own those operations and any application-level readiness
 probe. A TCP probe observes connectivity, which may precede application setup;
 use a declared native command probe when connectivity is insufficient.
 
-The durable state format is version 5. Older formats, including version 4, are
+The durable state format is version 6. Older formats, including version 5, are
 rejected without modification or migration because older binaries cannot
 interpret the owned diagnostic probe recovery journal. Use the matching older
 binary to clean up owned instances and stop its gateway/daemon before selecting

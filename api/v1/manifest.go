@@ -63,7 +63,9 @@ type Manifest struct {
 
 // Input declares a required externally supplied value and its sensitivity.
 type Input struct {
-	Secret bool `json:"secret,omitempty" yaml:"secret,omitempty" jsonschema_description:"Treat the value as sensitive in ordinary plan output."`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	Generate    string `json:"generate,omitempty" yaml:"generate,omitempty"`
+	Secret      bool   `json:"secret,omitempty" yaml:"secret,omitempty" jsonschema_description:"Treat the value as sensitive in ordinary plan output."`
 }
 
 // Environment explicitly layers selected inherited values, literal seeds and assignments.

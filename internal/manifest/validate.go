@@ -60,6 +60,11 @@ func Validate(m v1.Manifest) error {
 			return err
 		}
 	}
+	for name, input := range m.Inputs {
+		if strings.ContainsRune(input.Description, 0) || (input.Generate != "" && (input.Generate != "random-hex-32" || !input.Secret)) {
+			return invalid("inputs."+name, "generation requires a secret input and random-hex-32; descriptions must not contain NUL")
+		}
+	}
 	for name, tool := range m.Tools {
 		if tool == "" || strings.ContainsRune(tool, 0) {
 			return invalid("tools."+name, "provide an executable name or path")
@@ -765,3 +770,32 @@ func validURLPort(u *url.URL) bool {
 func caCertPath(v v1.Value) bool {
 	return v.Ref != nil && v.Ref.Kind == "resource" && v.Ref.Field == "ca_cert_path"
 }
+
+// ValidatePrivate validates structure and optionally membership for staged retirement repair.
+func ValidatePrivate(c v1.PrivateConfig, m v1.Manifest, membership bool) error {
+	if err := ValidateMachine(v1.MachineConfig{Version: c.Version, Inputs: c.Inputs, Tools: c.Tools}); err != nil {
+		return err
+	}
+	if !membership {
+		return nil
+	}
+	return ValidateMembership(m, c.Inputs, c.Tools)
+}
+
+// ValidateMembership rejects all undeclared values, including unused or overridden entries.
+func ValidateMembership(m v1.Manifest, inputs, tools map[string]string) error {
+	for name := range inputs {
+		if _, ok := m.Inputs[name]; !ok {
+			return invalid("inputs."+name, "undeclared input; use project setup --remove-input NAME with an explicit edit to repair private declarations")
+		}
+	}
+	for name := range tools {
+		if _, ok := m.Tools[name]; !ok {
+			return invalid("tools."+name, "undeclared tool; use project setup --remove-tool NAME with an explicit edit to repair private declarations")
+		}
+	}
+	return nil
+}
+
+// ValidIdentifier checks names accepted by declaration and explicit removal contracts.
+func ValidIdentifier(name string) bool { return identifier.MatchString(name) }

@@ -18,6 +18,7 @@ import (
 )
 
 type service struct {
+	generation            string
 	diagnosticRecoveryErr error
 	diagnosticOwners      map[string]*diagnosticOwner
 	gatewayGroup          *native.Group
@@ -38,9 +39,15 @@ type service struct {
 	resolve func(plan.Source, v1.PlanRequest) (plan.Snapshot, error)
 	// beforeExecution gates tests between prepare and serialized acceptance.
 	beforeExecution func(string)
+	// beforeSceneMutation is a test seam between recorded resolution and its mutation lock.
+	beforeSceneMutation func(string)
 }
 
 func (s *service) prepare(ctx context.Context, request v1.PrepareRequest) (v1.InstanceResponse, error) {
+	return s.prepareSelected(ctx, request, false)
+}
+
+func (s *service) prepareSelected(ctx context.Context, request v1.PrepareRequest, persistentOnly bool) (v1.InstanceResponse, error) {
 	if request.Plan.Scene == "" || len(request.Plan.Scene) > 63 || !filepath.IsAbs(request.Plan.ProjectPath) || (request.Plan.ConfigPath != "" && !filepath.IsAbs(request.Plan.ConfigPath)) {
 		return v1.InstanceResponse{}, problem("invalid_request", "scene and absolute project/config paths are required")
 	}
@@ -59,6 +66,9 @@ func (s *service) prepare(ctx context.Context, request v1.PrepareRequest) (v1.In
 	snapshot, err := resolve(source, request.Plan)
 	if err != nil {
 		return v1.InstanceResponse{}, err
+	}
+	if persistentOnly && snapshot.Plan.Lifetime != v1.Persistent {
+		return v1.InstanceResponse{}, problem("invalid_lifetime", "scene start requires a persistent scene; use run for disposable work")
 	}
 	public, err := json.Marshal(snapshot.Plan)
 	if err != nil || len(public) > manifest.MaxBytes-8192 {

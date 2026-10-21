@@ -23,6 +23,9 @@ Run these from the repository root:
 | `make notices`, `make notices-check` | Generate/verify linked dependency license notices |
 | `bin/backlot daemon start --state-dir /absolute/private/path --json` | Start an explicit local metadata daemon after building |
 | `bin/backlot doctor --state-dir /absolute/private/path --json` | Check local daemon access and paths; select scene/instance for providers |
+| `bin/backlot scene start --json dev` | Start a persistent scene in the current checkout and wait for readiness |
+| `bin/backlot scene status --follow --duration 30m --json dev` | Observe bounded sampled persistent-scene snapshots without lifecycle ownership |
+| `bin/backlot scene stop --json dev` | Stop a recorded scene even with a broken or deleted manifest |
 | `go run ./cmd/backlot version --json` | Inspect the typed version result |
 | `go run ./cmd/backlot plan test --project examples/adoption --json -- -run TestExample` | Validate an offline fixture plan and forward terminal arguments |
 | `make fmt` | Format Go source |

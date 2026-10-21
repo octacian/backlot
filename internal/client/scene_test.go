@@ -14,7 +14,7 @@ import (
 )
 
 func sceneResponse() v1.SceneResponse {
-	return v1.SceneResponse{APIVersion: v1.Version, DaemonGeneration: strings.Repeat("a", 64), Outcome: v1.SceneNotFound, Checkout: &v1.CheckoutIdentity{ID: strings.Repeat("b", 64), Path: "/tmp/scene", GitDirectory: "/tmp/scene/.git"}}
+	return v1.SceneResponse{APIVersion: v1.Version, DaemonGeneration: strings.Repeat("a", 64), Outcome: v1.SceneNotFound, CanonicalTarget: &v1.SceneTarget{Scene: "dev", CWD: "/tmp/scene"}, Checkout: &v1.CheckoutIdentity{ID: strings.Repeat("b", 64), Path: "/tmp/scene", GitDirectory: "/tmp/scene/.git"}}
 }
 
 func sceneInstance(id string) *v1.InstanceResponse {
@@ -178,13 +178,19 @@ func TestSceneFollowExpiryCancellationAndFailurePrecedence(t *testing.T) {
 }
 
 func TestSceneResponseValidationRejectsMissingBaselineLeaksAndMismatches(t *testing.T) {
-	for _, mode := range []string{"baseline", "generation", "found-empty", "missing-with-instance", "secret", "wrong-scene", "wrong-id", "wrong-checkout", "disposable", "wrong-version"} {
+	for _, mode := range []string{"baseline", "generation", "found-empty", "missing-with-instance", "secret", "wrong-scene", "wrong-id", "wrong-checkout", "disposable", "wrong-version", "canonical-missing", "canonical-mode", "canonical-instance"} {
 		t.Run(mode, func(t *testing.T) {
 			response := sceneResponse()
 			response.Outcome = v1.SceneFound
 			response.Result = sceneInstance("e")
 			target := sceneRequest().Target
 			switch mode {
+			case "canonical-missing":
+				response.CanonicalTarget = nil
+			case "canonical-mode":
+				response.CanonicalTarget.ProjectPath = "/tmp/scene"
+			case "canonical-instance":
+				response.CanonicalTarget.InstanceID = strings.Repeat("a", 64)
 			case "baseline":
 				response.Checkout = nil
 			case "generation":
@@ -224,5 +230,24 @@ func TestSceneFollowBounds(t *testing.T) {
 		if err := options.Validate(); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestSceneFollowRejectsCanonicalSelectorChange(t *testing.T) {
+	c := New("unused")
+	defer c.Close()
+	calls := 0
+	c.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		response := sceneResponse()
+		if calls > 0 {
+			response.CanonicalTarget.CWD = "/tmp/scene/other"
+		}
+		calls++
+		return sceneWire(t, r, response), nil
+	})
+	var terminal v1.SceneFollowRecord
+	err := c.FollowScene(context.Background(), sceneRequest(), SceneFollowOptions{Interval: 100 * time.Millisecond, Duration: time.Second}, func(record v1.SceneFollowRecord) error { terminal = record; return nil })
+	if err == nil || calls != 2 || terminal.Type != "error" || terminal.Error.Code != "target_changed" {
+		t.Fatal(err, calls, terminal)
 	}
 }

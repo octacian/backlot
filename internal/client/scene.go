@@ -66,11 +66,15 @@ func validateScene(response v1.SceneResponse, target v1.SceneTarget) error {
 		return responseError()
 	}
 	if target.InstanceID == "" {
+		canonical := response.CanonicalTarget
+		if canonical == nil || canonical.Validate() != nil || canonical.InstanceID != "" || canonical.Scene != target.Scene || (canonical.ProjectPath == "") != (target.ProjectPath == "") || canonical.ProjectPath != "" && canonical.CWD != canonical.ProjectPath {
+			return responseError()
+		}
 		checkout := response.Checkout
 		if checkout == nil || !validID(checkout.ID) || !filepath.IsAbs(checkout.Path) || checkout.GitDirectory != "" && !filepath.IsAbs(checkout.GitDirectory) {
 			return responseError()
 		}
-	} else if response.Checkout != nil {
+	} else if response.Checkout != nil || response.CanonicalTarget != nil {
 		return responseError()
 	}
 	if response.Result != nil {
@@ -160,12 +164,20 @@ func (c *Client) FollowScene(ctx context.Context, request v1.SceneRequest, optio
 			return terminal(err)
 		}
 		if previous != nil {
+			if response.CanonicalTarget != nil && *response.CanonicalTarget != request.Target {
+				return terminal(&v1.PlanError{Code: "target_changed", Message: "canonical scene selector changed during observation"})
+			}
 			if response.DaemonGeneration != previous.DaemonGeneration {
 				return terminal(&v1.PlanError{Code: "daemon_changed", Message: "daemon generation changed; start a new observation"})
 			}
 			if request.Target.InstanceID == "" && !checkoutEqual(*previous.Checkout, *response.Checkout) {
 				return terminal(&v1.PlanError{Code: "checkout_changed", Message: "checkout changed during observation; use recorded instance ID"})
 			}
+		}
+		// Freeze the initial daemon-normalized selector before giving snapshots
+		// to the consumer. Future requests never reuse a mutable caller alias.
+		if previous == nil && response.CanonicalTarget != nil {
+			request.Target = *response.CanonicalTarget
 		}
 		if previous == nil || !reflect.DeepEqual(*previous, response) {
 			if err := emit(v1.SceneFollowRecord{APIVersion: v1.Version, Type: "snapshot", Time: time.Now().UTC().Format(time.RFC3339Nano), Snapshot: &response}); err != nil {

@@ -338,3 +338,126 @@ func TestSceneUnknownNonGitRootAndUnavailableRecordedGit(t *testing.T) {
 	_, err = s.scene(v1.SceneTarget{CWD: nested, Scene: "absent"}, false)
 	code(t, err, "checkout_changed")
 }
+
+func TestSceneFollowFreezesCanonicalAliases(t *testing.T) {
+	for _, mode := range []string{"cwd", "project", "missing-manifest"} {
+		t.Run(mode, func(t *testing.T) {
+			root := shortTemp(t)
+			git(t, root, "init", "-q")
+			a, b := filepath.Join(root, "a"), filepath.Join(root, "b")
+			for _, project := range []string{a, b} {
+				if err := os.Mkdir(project, 0700); err != nil {
+					t.Fatal(err)
+				}
+				writeFixture(t, project)
+				text := strings.Replace(fixtureManifest, `"project":"fixture"`, `"project":"`+filepath.Base(project)+`"`, 1)
+				if err := os.WriteFile(filepath.Join(project, "backlot.json"), []byte(text), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Configuration is external to the mutable selector and remains read-only.
+			config := writeFixture(t, shortTemp(t))
+			cli, _ := startFixture(t, filepath.Join(shortTemp(t), "state"), time.Minute)
+			first := prepareFixture(t, cli, request(a, config, "dev"))
+			peer := prepareFixture(t, cli, request(b, config, "dev"))
+			alias := filepath.Join(root, "alias")
+			if err := os.Symlink(a, alias); err != nil {
+				t.Fatal(err)
+			}
+			target := v1.SceneTarget{Scene: "dev", CWD: alias}
+			if mode != "cwd" {
+				target.CWD = root
+				target.ProjectPath = alias
+			}
+			original, err := os.ReadFile(filepath.Join(a, "backlot.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "missing-manifest" {
+				target.ProjectPath = filepath.Join(alias, "backlot.json")
+				if err := os.Remove(filepath.Join(a, "backlot.json")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			canonicalA, err := filepath.EvalSymlinks(a)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			snapshots := 0
+			recreated := ""
+			err = cli.FollowScene(ctx, v1.SceneRequest{APIVersion: v1.Version, Target: target}, client.SceneFollowOptions{Interval: 100 * time.Millisecond, Duration: 3 * time.Second}, func(record v1.SceneFollowRecord) error {
+				if record.Snapshot == nil {
+					return nil
+				}
+				snapshots++
+				snapshot := record.Snapshot
+				if snapshot.CanonicalTarget == nil || snapshot.CanonicalTarget.CWD != canonicalA {
+					t.Fatal("canonical selector not frozen", snapshot.CanonicalTarget)
+				}
+				if mode != "cwd" && snapshot.CanonicalTarget.ProjectPath != canonicalA {
+					t.Fatal("manifest selector not normalized", snapshot.CanonicalTarget)
+				}
+				if snapshot.Result != nil && snapshot.Result.Instance.ID == peer.Instance.ID {
+					t.Fatal("observer silently retargeted peer project")
+				}
+				switch snapshots {
+				case 1:
+					if snapshot.Result == nil || snapshot.Result.Instance.ID != first.Instance.ID {
+						t.Fatal("wrong initial target", snapshot)
+					}
+					if err := os.Remove(alias); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Symlink(b, alias); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := cli.Destroy(context.Background(), first.Instance.ID); err != nil {
+						t.Fatal(err)
+					}
+				case 2:
+					if snapshot.Outcome != v1.SceneNotFound {
+						t.Fatal("original project gap not observed", snapshot)
+					}
+					if err := os.WriteFile(filepath.Join(a, "backlot.json"), original, 0600); err != nil {
+						t.Fatal(err)
+					}
+					recreated = prepareFixture(t, cli, request(a, config, "dev")).Instance.ID
+				case 3:
+					if snapshot.Result == nil || snapshot.Result.Instance.ID != recreated || recreated == first.Instance.ID {
+						t.Fatal("same-project recreation not observed", snapshot)
+					}
+					cancel()
+				default:
+					t.Fatal("unexpected extra snapshot", snapshot)
+				}
+				return nil
+			})
+			if !errors.Is(err, context.Canceled) || snapshots != 3 {
+				t.Fatal(err, snapshots)
+			}
+		})
+	}
+}
+
+func TestSceneNestedGitBoundaryRootChildAndExplicitParity(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	scenePrepare(t, s, root, config)
+	nested := filepath.Join(root, "nested-git")
+	child := filepath.Join(nested, "child")
+	if err := os.MkdirAll(child, 0700); err != nil {
+		t.Fatal(err)
+	}
+	git(t, nested, "init", "-q")
+	nestedIdentity, err := identify(nested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []v1.SceneTarget{{CWD: nested, Scene: "dev"}, {CWD: child, Scene: "dev"}, {CWD: root, ProjectPath: nested, Scene: "dev"}, {CWD: child, ProjectPath: filepath.Join(nested, "backlot.json"), Scene: "dev"}} {
+		response, err := s.scene(target, false)
+		if err != nil || response.Outcome != v1.SceneNotFound || response.Checkout == nil || response.Checkout.ID != nestedIdentity.ID {
+			t.Fatal(target, response, err)
+		}
+	}
+}

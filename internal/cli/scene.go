@@ -187,6 +187,7 @@ func startScene(ctx context.Context, c *urfave.Command, cli *client.Client, targ
 	}
 	id := response.Result.Instance.ID
 	checkout := response.Checkout
+	canonicalTarget := response.CanonicalTarget
 	driftManifest, driftConfig := response.Result.ManifestDrift, response.Result.ConfigDrift
 	cancelStart := func(code int) error {
 		grace, _ := time.ParseDuration(request.Options.StopGrace)
@@ -249,6 +250,7 @@ func startScene(ctx context.Context, c *urfave.Command, cli *client.Client, targ
 			return output(c, nil, &v1.PlanError{Code: "not_found", Message: "accepted startup instance is unavailable"})
 		}
 		response.Checkout = checkout
+		response.CanonicalTarget = canonicalTarget
 		response.Result.ManifestDrift, response.Result.ConfigDrift = driftManifest, driftConfig
 	}
 }

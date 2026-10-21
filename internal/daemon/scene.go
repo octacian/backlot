@@ -25,6 +25,16 @@ func (s *service) startScene(ctx context.Context, request v1.SceneStartRequest) 
 	if err != nil {
 		return result, err
 	}
+	canonicalTarget := v1.SceneTarget{Scene: target.Scene, CWD: project}
+	if target.ProjectPath != "" {
+		canonicalTarget.ProjectPath = project
+	} else {
+		canonicalTarget.CWD, err = sceneDirectory(request.CWD)
+		if err != nil {
+			return result, err
+		}
+	}
+	result.CanonicalTarget = &canonicalTarget
 	request.Plan.ProjectPath = project
 	response, err := s.runSelected(ctx, v1.RunRequest{APIVersion: v1.Version, Plan: request.Plan, Options: request.Options}, false, true)
 	if err != nil {
@@ -88,7 +98,19 @@ func (s *service) resolveScene(target v1.SceneTarget) (v1.SceneResponse, error) 
 	if err != nil {
 		return response, err
 	}
+	canonicalTarget := v1.SceneTarget{Scene: target.Scene, CWD: anchor}
+	if target.ProjectPath != "" {
+		canonicalTarget.ProjectPath = anchor
+	}
+	response.CanonicalTarget = &canonicalTarget
 	root := plan.CheckoutRoot(anchor)
+	// CheckoutRoot returns anchor both at a Git root and when no Git boundary
+	// exists. Only the latter permits recorded non-Git ancestor discovery.
+	_, boundaryErr := os.Lstat(filepath.Join(root, ".git"))
+	gitBoundary := boundaryErr == nil
+	if boundaryErr != nil && !os.IsNotExist(boundaryErr) {
+		return response, problem("checkout_identity", "cannot inspect Git checkout boundary")
+	}
 	err = s.store.db.View(func(tx *bolt.Tx) error {
 		// Collect recorded locations before filtering by scene/status. This also makes
 		// destroyed history available for nearest-project discovery and non-Git roots.
@@ -102,7 +124,7 @@ func (s *service) resolveScene(target v1.SceneTarget) (v1.SceneResponse, error) 
 			i := r.Instance
 			instances = append(instances, i)
 			project := filepath.Dir(i.Plan.ManifestPath)
-			if within(i.Checkout.Path, anchor) && within(i.Checkout.Path, project) && within(project, anchor) && (root == anchor || i.Checkout.Path == root) && (target.ProjectPath == "" || project == anchor) && len(project) > len(nearest) {
+			if within(i.Checkout.Path, anchor) && within(i.Checkout.Path, project) && within(project, anchor) && (!gitBoundary || i.Checkout.Path == root) && (target.ProjectPath == "" || project == anchor) && len(project) > len(nearest) {
 				nearest = project
 			}
 			return nil
@@ -112,15 +134,11 @@ func (s *service) resolveScene(target v1.SceneTarget) (v1.SceneResponse, error) 
 		}
 		// With no Git boundary, a recorded ancestor project is the checkout root.
 		// An unrecorded explicit non-Git directory identifies itself; no manifest read.
-		if root == anchor {
-			if _, err := os.Lstat(filepath.Join(root, ".git")); os.IsNotExist(err) {
-				if nearest != "" {
-					root = plan.CheckoutRoot(nearest)
-				} else if target.ProjectPath == "" {
-					return problem("checkout_identity", "unrecorded non-Git project root is unknown; select --project directory or a recorded instance ID")
-				}
-			} else if err != nil {
-				return problem("checkout_identity", "cannot inspect Git checkout boundary")
+		if !gitBoundary {
+			if nearest != "" {
+				root = plan.CheckoutRoot(nearest)
+			} else if target.ProjectPath == "" {
+				return problem("checkout_identity", "unrecorded non-Git project root is unknown; select --project directory or a recorded instance ID")
 			}
 		}
 		checkout, err := identify(root)

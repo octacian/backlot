@@ -128,7 +128,9 @@ selection requires an explicit `--project` directory to establish that root.
 
 Finite JSON results share `SceneResponse`: `api_version`, `daemon_generation`,
 `outcome`, optional `result` (`InstanceResponse` with status, instance ID, execution
-origin/failure and drift fields), and daemon-resolved `checkout` for named results.
+origin/failure and drift fields), and daemon-resolved `checkout` and
+`canonical_target` for named results. `canonical_target` contains normalized
+directory selectors, not an ownership capability.
 Successful `not_found` omits `result` and still includes checkout identity, even
 before the first instance has been recorded. Explicit-ID results do not require
 checkout discovery. Status returns zero for a failed runtime because failure is
@@ -167,7 +169,11 @@ next sample waits the interval, without catch-up bursts. The budget starts befor
 initial acquisition and bounds in-flight status requests as well as idle waiting.
 Consumers must continue reading stdout; write errors terminate observation.
 
-The observer pins the initial daemon generation and daemon-resolved checkout
+The observer freezes the daemon-returned original canonical cwd/project directory
+selector before sampling again, so changing a caller symlink cannot switch the
+watched project. It still resolves current recorded instances within that original
+selector, including same-checkout recreation. The observer also pins the initial
+daemon generation and daemon-resolved checkout
 ID/canonical path/Git-directory path, including initial absence; HEAD/branch text
 is provenance and is excluded from checkout continuity comparisons. Replacement,
 ambiguity, unavailable identity, malformed/incompatible responses and daemon loss

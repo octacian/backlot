@@ -66,7 +66,9 @@ type SceneResponse struct {
 	DaemonGeneration string            `json:"daemon_generation"`
 	Outcome          SceneOutcome      `json:"outcome"`
 	Checkout         *CheckoutIdentity `json:"checkout,omitempty"`
-	Result           *InstanceResponse `json:"result,omitempty"`
+	// CanonicalTarget freezes daemon-resolved directory locations, not ownership authority.
+	CanonicalTarget *SceneTarget      `json:"canonical_target,omitempty"`
+	Result          *InstanceResponse `json:"result,omitempty"`
 }
 
 // SceneFollowRecord frames sampled observations and their terminal completion or error.

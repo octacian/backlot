@@ -345,9 +345,9 @@ func TestSceneUnknownNonGitRootAndUnavailableRecordedGit(t *testing.T) {
 }
 
 func TestSceneFollowFreezesCanonicalAliases(t *testing.T) {
-	t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", filepath.Join(shortTemp(t), "registry"))
 	for _, mode := range []string{"cwd", "project", "missing-manifest"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", filepath.Join(shortTemp(t), "registry"))
 			root := shortTemp(t)
 			git(t, root, "init", "-q")
 			a, b := filepath.Join(root, "a"), filepath.Join(root, "b")

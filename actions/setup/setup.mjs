@@ -3,11 +3,13 @@ import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, isAbsolute, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { command, createOwner, prepare, cleanup } from './runtime.mjs';
+import { captureProjectInputs, setupProject, requireProjectRuntime } from './project.mjs';
 
 export async function setup() {
  const started = performance.now();
  let owner;
  try {
+  const project = captureProjectInputs();
   assert.equal(process.platform, 'linux', 'supported runner: Ubuntu 24.04 amd64');
   assert.equal(process.arch, 'x64');
   assert.match(await readFile('/etc/os-release', 'utf8'), /^VERSION_ID="24\.04"$/m);
@@ -66,8 +68,9 @@ export async function setup() {
     try { await saveCache(paths, cacheKey); } catch (error) { console.warn(`Go cache save unavailable: ${error.message}`); }
   }
   const binary = join(tools, 'backlot');
-  await writeFile(join(owner.root, 'daemon-attempted'), '', { mode: 0o600 });
-  const { state, config } = await prepare({ root: owner.root, binary, caddy: join(tools, 'caddy'), node });
+  await requireProjectRuntime(owner, binary);
+  const { state, config } = await prepare({ root: owner.root, binary, caddy: join(tools, 'caddy'), node, owner,
+    beforeStart: config => setupProject(owner, binary, config, project) });
   const helper = fileURLToPath(new URL('job.mjs', import.meta.url));
   const values = { BACKLOT_BINARY: binary, BACKLOT_STATE_DIR: state, BACKLOT_CONFIG: config,
     BACKLOT_SETUP_OWNER: JSON.stringify(owner), BACKLOT_SETUP_HELPER: helper };

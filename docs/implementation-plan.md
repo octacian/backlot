@@ -274,7 +274,7 @@ See [contracts and image requirements](daemon.md#scoped-provider-diagnostics).
 Early real CLI/API/daemon/native/Docker/Caddy/data success, missing container trust
 failure/recovery and preserved-data cleanup were exercised before broad regressions;
 revision-bound private delivery evidence records fixture/tool/image dependencies.
-See [state compatibility](containers.md#state-compatibility) for v7: v5/v6 and
+See [state compatibility](containers.md#state-compatibility) for v8: v5/v6/v7 and
 older state are rejected unchanged, without migration. Independent reviews,
 frozen provider/browser/macOS suites and published-HEAD CI remain required
 before delivery readiness; no browser/application trust adoption is claimed.
@@ -302,10 +302,10 @@ Binary distribution/version tags remain #25, with no legacy storage migration.
 
 Implemented for independent review: explicit local project setup, external private
 registry/generations shared by Git common-directory identity and manifest path,
-strict inputs/tools composition, atomic edits/removal repair, hidden terminal input,
+private-only input values and strict tools composition, atomic edits/removal repair, hidden terminal input,
 local explicit reveal, private launch/current provenance and effective drift.
-Daemon state advances to v7 without migration; old private generations require
+Daemon state advances to v8 without migration; old private generations require
 explicit operator retention/erasure decisions. See the [setup guide](manifest.md#registered-private-project-configuration)
-and [accepted decision](adr/20261021T001732173Z-compose-machine-configuration-with-registered-private-project-inputs.md).
+and [current decision](adr/20261021T040930738Z-select-a-private-project-registry-without-redirecting-application-configuration.md).
 Independent implementation reviews, frozen full validation and published-HEAD CI
 remain gates; this section does not claim final feature readiness.

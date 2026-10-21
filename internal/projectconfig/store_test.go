@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -225,5 +226,60 @@ func TestCapturedSelectionReadDoesNotReselectRegistry(t *testing.T) {
 	current := load(t, project, file, m)
 	if current.Provenance.Path != second.Path || current.Config.Inputs["token"] != "published-second" || current.Provenance.Digest == captured.Provenance.Digest {
 		t.Fatal("fixture did not cross complete generations")
+	}
+}
+
+func TestExplicitRegistrySelectionNeverFallsBack(t *testing.T) {
+	project, file, m := fixture(t)
+	original := load(t, project, file, m)
+	if _, err := original.Commit(context.Background(), candidate("default-only"), func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(original.root, "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicit := filepath.Join(t.TempDir(), "registry")
+	t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", explicit)
+	selected := load(t, project, file, m)
+	if selected.root != explicit || selected.Provenance.Present {
+		t.Fatal("selected default registry")
+	}
+	p, err := selected.Commit(context.Background(), candidate("isolated"), func() error { return nil })
+	if err != nil || !strings.HasPrefix(p.Path, explicit+string(filepath.Separator)) {
+		t.Fatal("explicit publication", err)
+	}
+	after, err := os.ReadFile(filepath.Join(original.root, "projects.json"))
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("default registry changed", err)
+	}
+	for _, root := range []string{"", "relative", project, filepath.Join(project, "nested")} {
+		t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", root)
+		if _, err := Select(project, project, file, false); err == nil {
+			t.Fatal("unsafe explicit root accepted")
+		}
+	}
+	// Safety checks apply even when an existing root contains no registry file.
+	for _, kind := range []string{"mode", "symlink", "file"} {
+		t.Run(kind, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "unsafe")
+			switch kind {
+			case "mode":
+				err = os.Mkdir(root, 0755)
+			case "symlink":
+				err = os.Symlink(explicit, root)
+			case "file":
+				err = os.WriteFile(root, nil, 0600)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", root)
+			_, err := Select(project, project, file, false)
+			var detail *v1.PlanError
+			if !errors.As(err, &detail) || detail.SourcePath != filepath.Join(root, "projects.json") {
+				t.Fatal("unsafe selected root/provenance", err)
+			}
+		})
 	}
 }

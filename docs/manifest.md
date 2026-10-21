@@ -80,7 +80,7 @@ sensitive environment mappings instead.
 
 `inputs` maps names to `{secret: true}` or `{}`, optionally with descriptions
 and secret generation hints. Referenced inputs must have nonempty effective
-values in machine or registered private `inputs`. Secret inputs remain redacted in results.
+values in registered private project `inputs`. Secret inputs remain redacted in results.
 An unreferenced input does not block another scene. Images can be nonempty
 literal values or declared input references; there is no image-building engine.
 Build jobs may invoke the project's existing tools.
@@ -231,7 +231,6 @@ Components may also declare named `artifacts` and `fixtures`; see the
 Machine configuration uses the same version and may declare:
 
 - `tools`: declared tool executable overrides.
-- `inputs`: declared input values, including machine-held credentials.
 - `docker`: `endpoint` as a local Unix socket URL (canonical `unix:///...`;
   `unix:/...` is also accepted), optional container-to-native `host_address` and
   numeric mapped-port `publish_address` (default `127.0.0.1`).
@@ -256,7 +255,7 @@ project. The [fullstack fixture](../examples/fullstack/backlot.yaml) shows share
 MariaDB/native/frontend definitions across development, production preview,
 backend tests and UI tests. They exercise planning only: application commands
 are illustrative adoption inputs, and providers are not provisioned. Their
-machine example contains illustrative endpoints and an image name, no credentials.
+machine example contains illustrative endpoints; its private example supplies the image name.
 
 ## Registered private project configuration
 
@@ -318,10 +317,13 @@ Non-Git projects bind canonical directory identity and manifest filename.
 
 Ordinary plan/prepare/run/restart/reset and scene diagnostics automatically read
 the registered layer. Validate manifest, machine, and private sources independently,
-then override machine inputs/tools by private key. Invalid overridden/unused
+then compose tools by key with private overrides winning. Private project
+configuration is the sole input-value source; machine `inputs` rejects even empty,
+null or unused. Remove old fields and supply project values explicitly; no shim,
+import or migration occurs. Invalid overridden/unused
 entries still fail. Registered missing/unsafe/invalid files fail explicitly,
-including for scenes that use no inputs. Unregistered projects retain existing
-machine-only behavior. Ordinary operations create no registry, locks, or secrets.
+including for scenes that use no inputs. Unregistered projects can select work
+that needs no inputs; selected missing values direct you to project setup. Ordinary operations create no registry, locks, or secrets.
 Relative private tools resolve from the project directory; bare PATH names and
 absolute paths remain supported. Only selected scene inputs/tools are required.
 Provider settings stay in the shared machine document; there is no per-command
@@ -329,7 +331,7 @@ private-file override, recursive include, or deep merge.
 
 `config_digest` retains the machine-file byte digest. The additive
 `effective_config_digest` records composed validated inputs/tools/providers;
-source-only formatting or masked-value changes do not become effective drift.
+source-only formatting or overridden tool changes do not become effective drift.
 Running attempts retain private launch values and provenance. Repeated run reports
 drift; explicit restart/reset resolves current layers subject to existing retained
 resource safety checks. Stop, destroy and recovery use recorded snapshots.
@@ -348,4 +350,15 @@ memory. Keep private storage on a local filesystem supporting atomic rename/lock
 Environment sets and literal seed files remain useful when external project
 association and executable overrides are unnecessary. They keep their existing
 ordering and do not change application files. See the
-[configuration decision](adr/20261021T001732173Z-compose-machine-configuration-with-registered-private-project-inputs.md).
+[project-only input decision](adr/20261021T035107160Z-use-project-only-input-values-and-private-ci-project-setup.md)
+and [registry selection correction](adr/20261021T040930738Z-select-a-private-project-registry-without-redirecting-application-configuration.md).
+
+
+`BACKLOT_PROJECT_CONFIG_DIR`, when present, selects the direct private registry
+folder containing `projects.json` and `projects/`. Use an absolute external path;
+empty, relative or unsafe selections fail without default fallback. When absent,
+selection remains `os.UserConfigDir()/backlot`. Existing explicitly selected roots must be private
+owned directories even before enrollment; default machine-only folders without
+a registry retain their existing behavior. This does not select machine configuration
+or change HOME/XDG or application pass-through. `version --json` reports
+`state_version` so adapters can check support without resolving configuration.

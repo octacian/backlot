@@ -110,7 +110,7 @@ func TestEnvironmentLayeringAndLiteralSeeds(t *testing.T) {
 	explicit := "explicit"
 	m := v1.Manifest{Environments: map[string]v1.Environment{"shared": {PassThrough: []string{"MODE"}, Seeds: []string{"first.env"}, Assign: map[string]v1.Value{"MODE": {Literal: &explicit}}}}}
 	c := v1.Component{EnvironmentSets: []string{"shared"}, Environment: v1.Environment{Seeds: []string{"last.env"}, Required: []string{"MODE", "FROM_FIRST"}}}
-	values, err := resolveEnvironmentValues(m, v1.MachineConfig{}, c, root, v1.PlanResponse{})
+	values, err := resolveEnvironmentValues(m, resolvedConfig{}, c, root, v1.PlanResponse{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestEnvironmentLayeringAndLiteralSeeds(t *testing.T) {
 		t.Fatal("copied full process environment")
 	}
 	delete(m.Environments["shared"].Assign, "MODE")
-	values, err = resolveEnvironmentValues(m, v1.MachineConfig{}, c, root, v1.PlanResponse{})
+	values, err = resolveEnvironmentValues(m, resolvedConfig{}, c, root, v1.PlanResponse{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestEnvironmentLayeringAndLiteralSeeds(t *testing.T) {
 	shared.Seeds = nil
 	m.Environments["shared"] = shared
 	c.Environment.Required = []string{"MODE"}
-	values, err = resolveEnvironmentValues(m, v1.MachineConfig{}, c, root, v1.PlanResponse{})
+	values, err = resolveEnvironmentValues(m, resolvedConfig{}, c, root, v1.PlanResponse{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,6 @@ func TestSecretSafetyAndProviderSelection(t *testing.T) {
 	if _, err := Resolve(request); err == nil || !strings.Contains(err.Error(), "inputs.app_image") {
 		t.Fatalf("missing input: %v", err)
 	}
-	c.Inputs = map[string]string{"app_image": "secret-canary"}
 	var m v1.Manifest
 	if err := manifest.Decode(data, ".yaml", &m); err != nil {
 		t.Fatal(err)
@@ -268,6 +267,11 @@ func TestSecretSafetyAndProviderSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(t, configFile, encoded)
+	setup, err := OpenSetup(v1.ProjectSetupRequest{ProjectPath: root, ConfigPath: configFile, Edit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveSetup(t, setup, map[string]string{"app_image": "secret-canary"}, nil)
 	p, err = Resolve(request)
 	if err != nil {
 		t.Fatal(err)
@@ -518,7 +522,7 @@ func TestContainerKeepsImageEnvironmentBaseline(t *testing.T) {
 	t.Setenv("TMPDIR", "/host-only/temp")
 	manifest := v1.Manifest{}
 	c := v1.Component{Runtime: v1.Container}
-	values, err := resolveEnvironmentValues(manifest, v1.MachineConfig{}, c, root, v1.PlanResponse{})
+	values, err := resolveEnvironmentValues(manifest, resolvedConfig{}, c, root, v1.PlanResponse{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,7 +530,7 @@ func TestContainerKeepsImageEnvironmentBaseline(t *testing.T) {
 		t.Fatal("host temporary directory leaked into image")
 	}
 	c.Environment.PassThrough = []string{"TMPDIR"}
-	values, err = resolveEnvironmentValues(manifest, v1.MachineConfig{}, c, root, v1.PlanResponse{})
+	values, err = resolveEnvironmentValues(manifest, resolvedConfig{}, c, root, v1.PlanResponse{})
 	if err != nil || values["TMPDIR"].literal == nil || *values["TMPDIR"].literal != "/host-only/temp" {
 		t.Fatal("explicit pass-through was lost", err)
 	}

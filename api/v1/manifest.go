@@ -196,12 +196,11 @@ type Scene struct {
 	Publish     *Publication `json:"publish,omitempty" yaml:"publish,omitempty" jsonschema_description:"Optional owned HTTPS origin, routes and aggregate readiness."`
 }
 
-// MachineConfig contains local provider settings and executable/input overrides.
+// MachineConfig contains local provider settings and executable overrides.
 // It is never included in ordinary plan output.
 type MachineConfig struct {
 	Version string            `json:"version" yaml:"version" jsonschema_description:"Contract version; use backlot/v1."`
 	Tools   map[string]string `json:"tools,omitempty" yaml:"tools,omitempty" jsonschema_description:"Named executables; planning checks availability without running them."`
-	Inputs  map[string]string `json:"inputs,omitempty" yaml:"inputs,omitempty" jsonschema_description:"Explicit external inputs; keep machine credentials out of projects."`
 	Docker  *DockerConfig     `json:"docker,omitempty" yaml:"docker,omitempty" jsonschema_description:"Local engine configuration; planning does not contact Docker."`
 	Caddy   *CaddyConfig      `json:"caddy,omitempty" yaml:"caddy,omitempty" jsonschema_description:"Explicit managed or external gateway settings; no health check during planning."`
 	Storage *StorageConfig    `json:"storage,omitempty" yaml:"storage,omitempty" jsonschema_description:"Future daemon storage and evidence retention settings."`

@@ -33,7 +33,7 @@ func TestSourceIdentitySurvivesHumanAndJSONErrors(t *testing.T) {
 		}
 	}
 	put(file, document)
-	put(machine, `{"version":"backlot/v1","inputs":{"token":"machine-canary-48"}}`)
+	put(machine, `{"version":"backlot/v1"}`)
 	s, err := plan.OpenSetup(v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine, Edit: true})
 	if err != nil {
 		t.Fatal(err)
@@ -96,8 +96,8 @@ func TestSourceIdentitySurvivesHumanAndJSONErrors(t *testing.T) {
 	// Identical scalar errors must preserve field/code but distinguish source.
 	invalid := `{"version":"backlot/v1","inputs":{"token":23},"tools":{"shell":"invalid-value-canary-48"}}`
 	put(machine, invalid)
-	check("machine", machine, "invalid_document", "$.inputs.token", planArgs...)
-	put(machine, `{"version":"backlot/v1","inputs":{"token":"machine-canary-48"}}`)
+	check("machine", machine, "invalid_document", "$", planArgs...)
+	put(machine, `{"version":"backlot/v1"}`)
 	put(enrolled.PrivatePath, invalid)
 	check("private", enrolled.PrivatePath, "invalid_document", "$.inputs.token", planArgs...)
 	put(enrolled.PrivatePath, `{"version":"backlot/v1","inputs":{"token":"invalid-value-canary-48\u0000"}}`)

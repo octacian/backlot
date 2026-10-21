@@ -88,7 +88,7 @@ func TestCurrentCompositionRetainsPartialSourceProvenance(t *testing.T) {
 				put(filepath.Join(project, ".git"), "gitdir: "+gitDir+"-moved\n")
 				expectedState = "rebound"
 			case "tool":
-				put(config, `{"version":"backlot/v1","inputs":{"password":"current-value-canary-48"},"tools":{"go":"/unavailable/current-tool"}}`)
+				put(config, `{"version":"backlot/v1","tools":{"go":"/unavailable/current-tool"}}`)
 			case "machine":
 				put(config, `{"version":"backlot/v1","inputs":{"password":23}}`)
 				expectedState = "unavailable"

@@ -3,16 +3,17 @@ import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { command, verifyOwner, cleanup, listInstances } from './runtime.mjs';
+import { command, verifyOwner, cleanup, listInstances, backlotEnvironment } from './runtime.mjs';
 
 export async function collect(owner, destination, ids, onResult = async () => {}) {
   await verifyOwner(owner);
+  const env = await backlotEnvironment(owner);
   const output = resolve(destination);
   const binary = join(owner.root, 'tools/backlot');
   const state = join(owner.root, 'd');
   const deadline = Date.now() + 45_000;
   const instances = ids ? ids.map(id => ({ id })) : await listInstances((after, timeout) => command(binary,
-    ['list', ...(after ? ['--after', after] : []), '--state-dir', state, '--json'], { timeout }), deadline);
+    ['list', ...(after ? ['--after', after] : []), '--state-dir', state, '--json'], { env, timeout }), deadline);
   // A one-run action exports exactly one public bundle. Job-wide collection is
   // retained only for explicit helper callers; each child is independently atomic.
   if (!ids) await mkdir(output);
@@ -22,7 +23,7 @@ export async function collect(owner, destination, ids, onResult = async () => {}
     let exported;
     try {
       exported = JSON.parse(await command(binary, ['export', item.id, '--output', target,
-        '--wait=45s', '--state-dir', state, '--json'], { timeout: 50_000 }));
+        '--wait=45s', '--state-dir', state, '--json'], { env, timeout: 50_000 }));
     } catch (error) {
       // Failed publication can still return an observed original result through
       // the public export response. No private runtime record is interpreted.

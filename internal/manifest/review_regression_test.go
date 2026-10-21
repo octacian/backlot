@@ -49,13 +49,13 @@ func TestMapKeyDiagnostics(t *testing.T) {
 		m := adoption(t)
 		m.Tools[key] = "go"
 		assertSafeDiagnostic(t, Validate(m), "tools")
-		c := v1.MachineConfig{Version: v1.ManifestVersion, Inputs: map[string]string{key: "secret-value"}}
-		assertSafeDiagnostic(t, ValidateMachine(c), "config.inputs")
+		c := v1.PrivateConfig{Version: v1.ManifestVersion, Inputs: map[string]string{key: "secret-value"}}
+		assertSafeDiagnostic(t, ValidatePrivate(c, v1.Manifest{}, false), "inputs")
 	}
 	m := adoption(t)
 	m.Environments = map[string]v1.Environment{"valid": {Assign: map[string]v1.Value{strings.Repeat("A", 10000): {}}}}
 	assertSafeDiagnostic(t, Validate(m), "environments.valid.assign")
-	var config v1.MachineConfig
+	var config v1.PrivateConfig
 	err := Decode([]byte(`{"inputs":{"valid":23}}`), ".json", &config)
 	if err == nil || !strings.Contains(err.Error(), "$.inputs.valid") {
 		t.Fatalf("valid key context lost: %v", err)

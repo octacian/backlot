@@ -214,7 +214,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 
 func digest(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
 
-func tool(m v1.Manifest, c v1.MachineConfig, name, project string) (string, error) {
+func tool(m v1.Manifest, c resolvedConfig, name, project string) (string, error) {
 	executable := m.Tools[name]
 	if override, ok := c.Tools[name]; ok {
 		executable = override
@@ -253,7 +253,7 @@ func (v resolvedValue) wire() v1.PlannedValue {
 	return v1.PlannedValue{Literal: v.literal, Symbolic: v.symbolic}
 }
 
-func resolveValue(m v1.Manifest, c v1.MachineConfig, v v1.Value, project string, p v1.PlanResponse) (resolvedValue, error) {
+func resolveValue(m v1.Manifest, c resolvedConfig, v v1.Value, project string, p v1.PlanResponse) (resolvedValue, error) {
 	result := resolvedValue{literal: v.Literal, secret: v.Secret}
 	if v.Ref == nil {
 		return result, nil
@@ -263,7 +263,7 @@ func resolveValue(m v1.Manifest, c v1.MachineConfig, v v1.Value, project string,
 	case "input":
 		literal, ok := c.Inputs[r.Name]
 		if !ok || literal == "" {
-			return result, problem("missing_input", "inputs."+r.Name, "required value is missing; run backlot project setup --edit or supply machine config.inputs")
+			return result, problem("missing_input", "inputs."+r.Name, "required value is missing; run backlot project setup --edit")
 		}
 		result.literal = &literal
 		result.secret = result.secret || m.Inputs[r.Name].Secret

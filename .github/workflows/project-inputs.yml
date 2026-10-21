@@ -1,0 +1,94 @@
+name: Current-head project inputs
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  project-inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.8.1
+      - name: Record original application config environment
+        run: |
+          echo "EXPECTED_HOME=$HOME" >> "$GITHUB_ENV"
+          echo "EXPECTED_XDG=${XDG_CONFIG_HOME-}" >> "$GITHUB_ENV"
+      - uses: ./actions/setup
+        id: setup
+        with:
+          backlot-ref: ${{ github.sha }}
+          project: examples/ci-inputs
+          project-inputs: '{"credential":"ci-supplied\n%credential","region":"west"}'
+          project-generate-inputs: '["token"]'
+      - name: Strict transport, generation, isolation, failures and post tests
+        run: node --test actions/setup/check.mjs actions/setup/project.test.mjs
+      - uses: ./actions/run
+        id: run
+        with:
+          project: examples/ci-inputs
+          scene: test
+          upload-artifacts: false
+      - name: Capture setup identity before quickrun replaces it
+        run: |
+          node "$BACKLOT_SETUP_HELPER" cleanup
+          node -e 'if(require("fs").existsSync(JSON.parse(process.env.BACKLOT_SETUP_OWNER).root))throw Error("private root remains")'
+      - uses: ./actions/quickrun
+        id: quickrun
+        with:
+          backlot-ref: ${{ github.sha }}
+          project: examples/ci-inputs
+          project-inputs: '{"credential":"second-ci\n%credential","region":"east"}'
+          project-generate-inputs: '["token"]'
+          scene: test
+          upload-artifacts: false
+      - uses: ./actions/quickrun
+        id: failure
+        continue-on-error: true
+        with:
+          backlot-ref: ${{ github.sha }}
+          project: examples/ci-inputs
+          project-inputs: '{"credential":"failure-ci\n%credential","region":"west"}'
+          project-generate-inputs: '["token"]'
+          scene: failure
+          upload-artifacts: false
+      - name: Verify failure, cleanup and retained public evidence
+        if: always() && steps.failure.outputs.evidence-available == 'true'
+        env:
+          FIRST: ${{ steps.run.outputs.evidence-path }}
+          SECOND: ${{ steps.quickrun.outputs.evidence-path }}
+          FAILED: ${{ steps.failure.outputs.evidence-path }}
+          EXIT: ${{ steps.failure.outputs.terminal-exit-code }}
+        run: |
+          test "$EXIT" = 17
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          if(fs.existsSync(JSON.parse(process.env.BACKLOT_SETUP_OWNER).root))throw Error('private root remains');
+          for(const name of ['FIRST','SECOND','FAILED']) {
+            const root=process.env[name];
+            const report=JSON.parse(fs.readFileSync(path.join(root,'report.json')));
+            if(!report.complete)throw Error('incomplete evidence');
+            for(const file of report.evidence) {
+              if(/projects.json|project-config|snapshot/.test(file.path))throw Error('private file published');
+              const bytes=fs.readFileSync(path.join(root,file.path),'utf8');
+              if(/ci-supplied|second-ci|failure-ci/.test(bytes))throw Error('private fixture content published');
+            }
+          }
+          NODE
+      - name: Require expected failure and all evidence gates
+        if: always()
+        env:
+          FAILURE: ${{ steps.failure.outcome }}
+          AVAILABLE: ${{ steps.failure.outputs.evidence-available }}
+          FIRST: ${{ steps.run.outputs.evidence-available }}
+          SECOND: ${{ steps.quickrun.outputs.evidence-available }}
+        run: test "$FAILURE" = failure && test "$AVAILABLE" = true && test "$FIRST" = true && test "$SECOND" = true

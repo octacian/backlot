@@ -14,6 +14,7 @@ import (
 // NewCommand builds the CLI with explicit output writers and build metadata.
 // Runtime commands are added as their implementations become available.
 func NewCommand(version apiv1.VersionResponse, stdout, stderr io.Writer) *urfave.Command {
+	version.StateVersion = apiv1.StateVersion
 	return &urfave.Command{
 		Name: "backlot", Usage: "Manage isolated local development and testing scenes",
 		Writer: stdout, ErrWriter: stderr, HideVersion: true,

@@ -15,7 +15,7 @@ import (
 type layers struct {
 	manifest                                   v1.Manifest
 	machine                                    v1.MachineConfig
-	effective                                  v1.MachineConfig
+	effective                                  resolvedConfig
 	private                                    projectconfig.Selection
 	manifestDigest, machineDigest, machinePath string
 	machinePresent                             bool
@@ -72,7 +72,7 @@ func loadLayers(source Source, configPath string, staged, reassociate bool) (l l
 	if err := manifest.ValidateMachine(l.machine); err != nil {
 		return l, err
 	}
-	if err := manifest.ValidateMembership(l.manifest, l.machine.Inputs, l.machine.Tools); err != nil {
+	if err := manifest.ValidateMembership(l.manifest, nil, l.machine.Tools); err != nil {
 		return l, err
 	}
 	if l.machine.Caddy != nil {
@@ -88,18 +88,27 @@ func loadLayers(source Source, configPath string, staged, reassociate bool) (l l
 	return l, nil
 }
 
-func compose(machine v1.MachineConfig, private v1.PrivateConfig) v1.MachineConfig {
-	result := machine
-	result.Inputs = map[string]string{}
-	result.Tools = map[string]string{}
-	maps.Copy(result.Inputs, machine.Inputs)
-	maps.Copy(result.Inputs, private.Inputs)
-	maps.Copy(result.Tools, machine.Tools)
+// resolvedConfig is a private captured composition, never a machine document.
+// Explicit fields keep input ownership independent of the public machine contract.
+type resolvedConfig struct {
+	Version string            `json:"version"`
+	Inputs  map[string]string `json:"inputs,omitempty"`
+	Tools   map[string]string `json:"tools,omitempty"`
+	Docker  *v1.DockerConfig  `json:"docker,omitempty"`
+	Caddy   *v1.CaddyConfig   `json:"caddy,omitempty"`
+	Storage *v1.StorageConfig `json:"storage,omitempty"`
+}
+
+func compose(machine v1.MachineConfig, private v1.PrivateConfig) resolvedConfig {
+	result := resolvedConfig{Version: machine.Version, Inputs: maps.Clone(private.Inputs), Tools: maps.Clone(machine.Tools), Docker: machine.Docker, Caddy: machine.Caddy, Storage: machine.Storage}
+	if result.Tools == nil {
+		result.Tools = map[string]string{}
+	}
 	maps.Copy(result.Tools, private.Tools)
 	return result
 }
 
-func effectiveDigest(m v1.Manifest, c v1.MachineConfig, project string) string {
+func effectiveDigest(m v1.Manifest, c resolvedConfig, project string) string {
 	tools := maps.Clone(m.Tools)
 	maps.Copy(tools, c.Tools)
 	for name, path := range tools {

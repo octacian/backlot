@@ -52,6 +52,7 @@ func TestConfigurationMutationsRequireFreshCompatibleStatus(t *testing.T) {
 			for _, test := range []struct{ name, body, header string }{
 				{"v5", strings.Replace(valid, fmt.Sprintf(`"state_version":%d`, v1.StateVersion), `"state_version":5`, 1), "v1"},
 				{"v6", strings.Replace(valid, fmt.Sprintf(`"state_version":%d`, v1.StateVersion), `"state_version":6`, 1), "v1"},
+				{"v7", strings.Replace(valid, fmt.Sprintf(`"state_version":%d`, v1.StateVersion), `"state_version":7`, 1), "v1"},
 				{"future", strings.Replace(valid, fmt.Sprintf(`"state_version":%d`, v1.StateVersion), `"state_version":99`, 1), "v1"},
 				{"malformed", `{"api_version":"v1"}`, "v1"},
 				{"invalid", `not json`, "v1"},

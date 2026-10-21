@@ -78,13 +78,28 @@ func Read(path string) (result []byte, readErr error) {
 	return data, nil
 }
 
-func rootPath(checkout string) (string, error) {
+// selectedRoot is shared by selection and diagnostic provenance. Explicit selection
+// never falls back to an operator registry, even when it is invalid or absent.
+func selectedRoot() (string, error) {
+	if root, present := os.LookupEnv("BACKLOT_PROJECT_CONFIG_DIR"); present {
+		if root == "" || !filepath.IsAbs(root) || strings.ContainsRune(root, 0) {
+			return "", problem("BACKLOT_PROJECT_CONFIG_DIR must be a nonempty absolute private project registry directory")
+		}
+		return filepath.Clean(root), nil
+	}
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", problem("cannot select user config directory")
 	}
+	return filepath.Join(dir, "backlot"), nil
+}
+
+func rootPath(checkout string) (string, error) {
+	root, err := selectedRoot()
+	if err != nil {
+		return "", err
+	}
 	// Canonicalize existing ancestors, preserving a missing suffix without creating it.
-	root := filepath.Join(dir, "backlot")
 	ancestor := root
 	suffix := ""
 	for {
@@ -120,6 +135,14 @@ func readRegistry(root string) (result registry, revision string, readErr error)
 	if _, err := os.Lstat(root); os.IsNotExist(err) {
 		return empty, "", nil
 	}
+	// An explicitly selected existing root must itself be safe, including when
+	// empty. Preserve default machine-only directories without a registry: those
+	// were never managed project storage. Actual registries always validate below.
+	if _, explicit := os.LookupEnv("BACKLOT_PROJECT_CONFIG_DIR"); explicit {
+		if err := localipc.Directory(root, false); err != nil {
+			return empty, "", err
+		}
+	}
 	path := filepath.Join(root, "projects.json")
 	if _, err := os.Lstat(path); os.IsNotExist(err) {
 		return empty, "", nil
@@ -154,8 +177,8 @@ func readRegistry(root string) (result registry, revision string, readErr error)
 func Select(project, checkout, file string, reassociate bool) (s Selection, loadErr error) {
 	s.State = "unavailable"
 	layer, path := "registry", ""
-	if dir, err := os.UserConfigDir(); err == nil {
-		path = filepath.Join(dir, "backlot", "projects.json")
+	if root, err := selectedRoot(); err == nil {
+		path = filepath.Join(root, "projects.json")
 	}
 	defer func() { loadErr = manifest.SourceError(loadErr, layer, path) }()
 	id, err := Identify(project, checkout, file)

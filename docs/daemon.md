@@ -122,7 +122,7 @@ never a TCP/LAN listener. Send `X-Backlot-API-Version: v1` on every request, and
 `Content-Type: application/json` for POST bodies. POST contracts also require
 `api_version: v1`. Unknown/missing versions are rejected, independently of binary
 version. State compatibility is checked before mutation; see the
-[private-state guide](containers.md#state-compatibility) for the v7
+[private-state guide](containers.md#state-compatibility) for the v8
 format and rejection/cleanup rules.
 
 | Endpoint | Named request | Named response |
@@ -398,7 +398,7 @@ ownership is preserved. Existing images and global settings remain untouched.
 
 ## Configuration state compatibility
 
-Registered private project composition uses daemon state version 7. State v5/v6 is
+Registered private project composition uses daemon state version 8. State v5/v6/v7 is
 rejected without migration or mutation: use its matching binary to clean up and
 shut down owned resources, then select a fresh state directory. The independent
 project registry survives daemon reset and state-directory replacement. See

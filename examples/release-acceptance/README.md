@@ -35,9 +35,11 @@ Copy `machine.example.yaml` to a private file outside the checkout, set the loca
 Docker socket (`docker context inspect --format '{{.Endpoints.docker.Host}}'`),
 and configure an **existing approved** wildcard DNS/TLS Caddy scope as described
 in [HTTPS setup](../../docs/https.md). Do not overwrite the operator's gateway
-configuration. Start an explicit daemon with a short private state path:
+configuration. Copy `private.example.yaml` outside the checkout and set the
+explicitly built image tags there. Enroll the project, then start an explicit daemon with a short private state path:
 
 ```sh
+bin/backlot project setup --project examples/release-acceptance --config /private/machine.yaml --from /private/inputs.yaml --json
 bin/backlot daemon start --state-dir /tmp/my-backlot --json
 bin/backlot plan dev --project examples/release-acceptance --config /private/machine.yaml --json
 bin/backlot run dev --project examples/release-acceptance --config /private/machine.yaml --state-dir /tmp/my-backlot --json
@@ -95,6 +97,7 @@ normal daemon state or mutate whole gateway configuration:
 
 ```sh
 BACKLOT_ACCEPTANCE_CONFIG=/private/machine.yaml \
+BACKLOT_ACCEPTANCE_PROJECT_INPUTS=/private/inputs.yaml \
   go test -race ./internal/acceptance -run '^TestReleaseWorkflows$' -count=1 -v
 ```
 

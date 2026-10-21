@@ -25,6 +25,9 @@ import (
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/manifest"
+	"github.com/octacian/backlot/internal/plan"
+	"github.com/octacian/backlot/internal/projectconfig"
 )
 
 type harness struct {
@@ -516,12 +519,34 @@ func TestReleaseWorkflows(t *testing.T) {
 	h.project = one
 	h.fixtureRepo = repo
 	h.worktrees = []string{one, two}
+	t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", filepath.Join(root, "project-config"))
 	h.daemonLog, err = os.OpenFile(filepath.Join(root, "daemon.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(h.cleanup)
 	h.start()
+	// Each copied fixture repository explicitly enrolls in owned external storage;
+	// never import inputs from machine configuration or use the operator registry.
+	inputPath := os.Getenv("BACKLOT_ACCEPTANCE_PROJECT_INPUTS")
+	if inputPath == "" {
+		t.Fatal("BACKLOT_ACCEPTANCE_PROJECT_INPUTS must select a private inputs document")
+	}
+	inputData, err := projectconfig.Read(inputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var private v1.PrivateConfig
+	if err := manifest.Decode(inputData, filepath.Ext(inputPath), &private); err != nil {
+		t.Fatal(err)
+	}
+	setup, err := plan.OpenSetup(v1.ProjectSetupRequest{ProjectPath: one, ConfigPath: config, Edit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := setup.Save(context.Background(), private, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
 	sentinels := h.sentinels()
 	defer sentinels.cleanup()
 	// All clients start before any initial ready response is available.

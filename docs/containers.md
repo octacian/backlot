@@ -50,10 +50,10 @@ use a declared native command probe when connectivity is insufficient.
 
 ## State compatibility
 
-The durable state format is version 7. Older formats, including versions 5 and 6,
-are rejected without modification or migration. Version 7 fences binaries that
-cannot interpret both native ownership waivers and composed private-source and
-effective-configuration drift provenance. Use the matching older
+The durable state format is version 8. Older formats, including versions 5, 6 and 7,
+are rejected without modification or migration. Version 8 additionally fences binaries with machine-input fallback semantics;
+combined native ownership waivers, private-source provenance and effective drift
+remain protected. Use the matching older
 binary to clean up owned instances and stop its gateway/daemon before selecting
 a fresh `--state-dir` with the new binary. Preserve old state until cleanup is
 verified; a new directory does not clean up resources from the old one. Backlot

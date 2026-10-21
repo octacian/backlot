@@ -190,8 +190,10 @@ scenes:
 		valid     bool
 	}{
 		{"minimal", "version: backlot/v1", true},
-		{"complete", "version: backlot/v1\ntools: {go: /usr/bin/go}\ninputs: {token: ''}\ndocker: {endpoint: 'unix:///var/run/docker.sock'}\ncaddy: {endpoint: 'https://localhost:2019', scope: backlot, domain_suffix: example.test, host_address: '::1'}\nstorage: {directory: state, retention_age: 168h, retention_bytes: 1024}", true},
+		{"complete", "version: backlot/v1\ntools: {go: /usr/bin/go}\ndocker: {endpoint: 'unix:///var/run/docker.sock'}\ncaddy: {endpoint: 'https://localhost:2019', scope: backlot, domain_suffix: example.test, host_address: '::1'}\nstorage: {directory: state, retention_age: 168h, retention_bytes: 1024}", true},
 		{"unknown", "version: backlot/v1\nunknown: yes", false},
+		{"old empty inputs", "version: backlot/v1\ninputs: {}", false},
+		{"old null inputs", "version: backlot/v1\ninputs: null", false},
 		{"missing version", "tools: {}", false},
 		{"empty executable", "version: backlot/v1\ntools: {go: ''}", false},
 		{"bad override name", "version: backlot/v1\ninputs: {BAD: x}", false},

@@ -41,7 +41,7 @@ func setupFixture(t *testing.T) (string, string) {
 	}
 	writeSetup(t, filepath.Join(project, "backlot.yaml"), setupManifest)
 	machine := filepath.Join(t.TempDir(), "machine.json")
-	writeSetup(t, machine, `{"version":"backlot/v1","inputs":{"token":"machine"}}`)
+	writeSetup(t, machine, `{"version":"backlot/v1"}`)
 	return project, machine
 }
 func writeSetup(t *testing.T, path, data string) {
@@ -70,9 +70,9 @@ func saveSetup(t *testing.T, s *Setup, inputs, tools map[string]string) v1.Proje
 func TestPrivateCompositionSelectionAndStrictLayers(t *testing.T) {
 	project, machine := setupFixture(t)
 	request := v1.PlanRequest{Scene: "test", ProjectPath: project, ConfigPath: machine}
-	// Unused missing input/tool does not block selected work before enrollment.
-	if _, err := Resolve(request); err != nil {
-		t.Fatal(err)
+	// Selected required input fails without enrollment; unused inputs/tools do not drive runtime checks.
+	if _, err := Resolve(request); err == nil {
+		t.Fatal("missing project input accepted")
 	}
 	setup := openSetup(t, v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine, Edit: true})
 	result := saveSetup(t, setup, map[string]string{"token": "test-sensitive-marker-48", "unused": "kept"}, nil)
@@ -128,7 +128,7 @@ func TestPrivateDriftAndProjectRelativeTools(t *testing.T) {
 	if first.Components[0].Executable != tool {
 		t.Fatal("private relative executable resolved beside private file")
 	}
-	writeSetup(t, machine, "{\n\"version\":\"backlot/v1\",\"inputs\":{\"token\":\"masked-change\"}}")
+	writeSetup(t, machine, "{\n\"version\":\"backlot/v1\"}")
 	next, err := Resolve(req)
 	if err != nil {
 		t.Fatal(err)
@@ -221,9 +221,9 @@ func TestSetupRemovalGenerationConflictsAndCompleteness(t *testing.T) {
 		}
 	}
 	edit := openSetup(t, v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine, Edit: true})
-	exposed, err := edit.Save(context.Background(), v1.PrivateConfig{Version: v1.ManifestVersion}, nil, []string{"token"}, nil)
-	if err != nil || !exposed.Inputs[0].Configured {
-		t.Fatal("removal did not expose lower machine value", err)
+	_, err := edit.Save(context.Background(), v1.PrivateConfig{Version: v1.ManifestVersion}, nil, []string{"token"}, nil)
+	if err == nil {
+		t.Fatal("removal exposed a fallback")
 	}
 	edit = openSetup(t, v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine, Edit: true})
 	generated, err := edit.Save(context.Background(), v1.PrivateConfig{Version: v1.ManifestVersion}, []string{"token"}, nil, nil)
@@ -244,7 +244,7 @@ func TestSetupRemovalGenerationConflictsAndCompleteness(t *testing.T) {
 	}
 	// Source drift after collecting answers must not overwrite active setup.
 	stale := openSetup(t, v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine, Edit: true})
-	writeSetup(t, machine, `{"version":"backlot/v1"}`)
+	writeSetup(t, machine, "{\n\"version\":\"backlot/v1\"}")
 	if _, err := stale.Save(context.Background(), v1.PrivateConfig{Version: v1.ManifestVersion}, nil, nil, nil); err == nil {
 		t.Fatal("source conflict ignored")
 	}
@@ -289,7 +289,7 @@ func TestDeclarationRemediationIdentifiesLayer(t *testing.T) {
 			planRequest := v1.PlanRequest{ProjectPath: project, ConfigPath: machine, Scene: "test"}
 			// Retire a previously valid declaration in an enrolled private generation.
 			setup := openSetup(t, v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine, Edit: true})
-			inputs, tools := map[string]string{"unused": "private"}, map[string]string{}
+			inputs, tools := map[string]string{"token": "private-token", "unused": "private"}, map[string]string{}
 			if kind == "tool" {
 				tools["unused"] = "sh"
 			}
@@ -318,12 +318,12 @@ func TestDeclarationRemediationIdentifiesLayer(t *testing.T) {
 			writeSetup(t, saved.PrivatePath, `{"version":"backlot/v1"}`)
 			machineData := `{"version":"backlot/v1","inputs":{"token":"machine","unused":"machine"}}`
 			if kind == "tool" {
-				machineData = `{"version":"backlot/v1","inputs":{"token":"machine"},"tools":{"unused":"sh"}}`
+				machineData = `{"version":"backlot/v1","tools":{"unused":"sh"}}`
 			}
 			writeSetup(t, machine, machineData)
 			assertMachine := func(err error) {
 				t.Helper()
-				if err == nil || !strings.Contains(err.Error(), "edit selected machine file "+machine) || !strings.Contains(err.Error(), "undeclared "+kind) || strings.Contains(err.Error(), "--remove-") {
+				if err == nil || !strings.Contains(err.Error(), "edit selected machine file "+machine) || (kind == "tool" && !strings.Contains(err.Error(), "undeclared tool")) || strings.Contains(err.Error(), "--remove-") {
 					t.Fatalf("machine guidance: %v", err)
 				}
 			}

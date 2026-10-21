@@ -13,12 +13,21 @@ func TestFailedJoinKeepsCollectionGapAndExitProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = read.Close(); _ = write.Close() })
-	g := &Group{control: write, exit: &Exit{Known: true, Code: 17}}
-	// Missing authority cannot verify cleanup or overwrite a known original exit.
+	g := &Group{control: write}
+	// Stop can fail before any asynchronous root status arrives.
 	if err := g.Stop(0); err == nil {
 		t.Fatal("unknown cleanup authority succeeded")
 	}
 	result := g.Result()
+	if result == nil || result.Known || result.CollectionFailure == "" {
+		t.Fatal("missing status hid collection loss or invented an exit", result)
+	}
+	g.exit = &Exit{Known: true, Code: 17}
+	// Missing authority cannot verify cleanup or overwrite a known original exit.
+	if err := g.Stop(0); err == nil {
+		t.Fatal("unknown cleanup authority succeeded")
+	}
+	result = g.Result()
 	if result == nil || !result.Known || result.Code != 17 || result.CollectionFailure == "" {
 		t.Fatal("collection loss/provenance omitted", result)
 	}

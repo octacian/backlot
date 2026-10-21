@@ -1,11 +1,11 @@
 ---
 title: 'Use project-only input values and private CI project setup'
 date: '2026-10-21'
-status: accepted
+status: superseded
 summary: 'Supply input values exclusively through registered private project configuration and reuse atomic CLI setup inside an isolated CI job registry.'
 tags: [configuration, security, ci, cli, persistence, compatibility]
 supersedes: [20261021T033508474Z-fence-combined-configuration-and-native-recovery-state-at-version-seven.md]
-superseded_by: []
+superseded_by: [20261021T040930738Z-select-a-private-project-registry-without-redirecting-application-configuration.md]
 ---
 
 # Use project-only input values and private CI project setup

@@ -62,12 +62,14 @@ type DoctorCheck struct {
 }
 
 // DoctorPath locates an input or retained state without exposing its contents.
-// State is present, absent, unrecorded, changed, or unavailable; Digest is launch provenance.
+// State is present, absent, unrecorded, changed, unavailable, missing, invalid,
+// rebound, or uncomputable. An uncomputable effective source has no digest.
 type DoctorPath struct {
-	Name   string `json:"name"`
-	Path   string `json:"path,omitempty"`
-	State  string `json:"state"`
-	Digest string `json:"digest,omitempty"`
+	Association string `json:"association,omitempty"`
+	Name        string `json:"name"`
+	Path        string `json:"path,omitempty"`
+	State       string `json:"state"`
+	Digest      string `json:"digest,omitempty"`
 }
 
 // DoctorResponse reports observations only, never application/browser trust or aggregate readiness.
@@ -109,11 +111,11 @@ func (r DoctorResponse) Validate() error {
 		}
 	}
 	for _, p := range r.Paths {
-		if p.Name == "" || (p.Path != "" && !filepath.IsAbs(p.Path)) {
+		if p.Name == "" || (p.Path != "" && !filepath.IsAbs(p.Path)) || p.State == "uncomputable" && p.Digest != "" {
 			return bad()
 		}
 		switch p.State {
-		case "present", "absent", "unrecorded", "changed", "unavailable":
+		case "present", "absent", "unrecorded", "changed", "unavailable", "missing", "invalid", "rebound", "uncomputable":
 		default:
 			return bad()
 		}

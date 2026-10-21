@@ -39,6 +39,13 @@ func (s *store) saveDiagnosticProbe(key string, r diagnosticProbeRecord) error {
 func (s *store) forgetDiagnosticProbe(key string) error {
 	return s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket([]byte("meta")).Delete([]byte("doctor_probe/" + key)) })
 }
+func decodeDiagnosticProbe(id string, data []byte) (r diagnosticProbeRecord, err error) {
+	if !jsonObject(data) || json.Unmarshal(data, &r) != nil || !validDiagnosticCACopy(r) || !validID(id) || !validID(r.Resource.Token) || r.Resource.Kind != "container" || r.Resource.Name != "backlot-doctor-"+id || (r.Network.Kind != "" && (r.Network.Kind != "network" || !validID(r.Network.Token) || r.Network.Name != "backlot-doctor-network-"+id)) {
+		return r, problem("state_corrupt", "invalid diagnostic ownership journal; preserved")
+	}
+	return r, nil
+}
+
 func (s *store) recoverDiagnosticProbes() error {
 	records := map[string]diagnosticProbeRecord{}
 	err := s.db.View(func(tx *bolt.Tx) error {
@@ -47,13 +54,10 @@ func (s *store) recoverDiagnosticProbes() error {
 			if !strings.HasPrefix(key, "doctor_probe/") {
 				return nil
 			}
-			var r diagnosticProbeRecord
 			id := strings.TrimPrefix(key, "doctor_probe/")
-			if json.Unmarshal(data, &r) != nil || !validID(id) || !validID(r.Resource.Token) || r.Resource.Kind != "container" || r.Resource.Name != "backlot-doctor-"+id || (r.Network.Kind != "" && (r.Network.Kind != "network" || !validID(r.Network.Token) || r.Network.Name != "backlot-doctor-network-"+id)) {
-				return problem("state_corrupt", "invalid diagnostic ownership journal; preserved")
-			}
-			if !validDiagnosticCACopy(r) {
-				return problem("state_corrupt", "invalid diagnostic public CA copy journal; preserved")
+			r, err := decodeDiagnosticProbe(id, data)
+			if err != nil {
+				return err
 			}
 			records[id] = r
 			return nil

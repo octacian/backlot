@@ -48,13 +48,34 @@ logic. Applications own those operations and any application-level readiness
 probe. A TCP probe observes connectivity, which may precede application setup;
 use a declared native command probe when connectivity is insufficient.
 
-The durable state format is version 6. Older formats, including version 5, are
-rejected without modification or migration because older binaries cannot
-interpret application-session purpose, guardian protocol and cleanup confidence in the private journal. Use the matching older
-binary to clean up owned instances and stop its gateway/daemon before selecting
-a fresh `--state-dir` with the new binary. Preserve old state until cleanup is
-verified; a new directory does not clean up resources from the old one. Backlot
-never automatically deletes incompatible state.
+## State compatibility
+
+The durable state format is version 9. The supported merged main formats 6 and 8 upgrade
+in place, one way, after typed record/addressing validation in the same transaction
+as the version fence. Only that fence changes; records, retained data, ownership
+history, saved gateway configuration and CA identity remain intact. Versions 5,
+7 and other unsupported formats, and invalid predecessor records, are rejected
+unchanged. Version 9 fences older readers and preserves the combined
+private configuration/native recovery contract; experimental branch6 session/cleanup/copy extensions are incompatible and rejected unchanged. There is no migration chain.
+
+Use the new CLI's `daemon stop --state-dir PATH` for normal shutdown of the
+supported v6/v8 daemon, then `daemon start --state-dir PATH` after shutdown finishes.
+Only the exact v6/v8 `stopping` acknowledgment is accepted at this shutdown boundary;
+Status and configuration-consuming operations still require v9. The acknowledgment
+does not prove process exit or lock release; normal startup locking remains in
+force, without automatic retry/start. Cleanup and transport failures remain errors.
+No wipe, data destruction or fresh directory is required for the supported upgrade;
+this does not promise live process handover.
+Run explicit project setup for current input values and remove `inputs` from current
+machine configuration. Historical snapshots remain readable for recorded cleanup,
+without becoming a current input source or acquiring invented provenance. A new
+attempt from an eligible historical prepared/stopped instance uses current captured
+configuration after retained-resource/sensitive-value checks; unsafe drift fails
+before effects. Failed/interrupted instances still need explicit restart.
+
+Preserve unsupported state for diagnosis and its matching binary's lifecycle.
+A different directory does not clean its resources. Backlot never automatically
+deletes incompatible state. See the [current native and compatibility decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md).
 
 ## Generations, jobs and drift
 
@@ -171,7 +192,9 @@ secret-access endpoints and age/size retention.
 
 The existing named `RunRequest`/`InstanceResponse` contracts serve `/v1/run`,
 `/v1/restart` and `/v1/reset`; restart/reset require `instance_id`. Named
-`InstanceRequest`/`InstanceResponse` serve `/v1/runtime/stop` and `/v1/destroy`.
+`StopRequest`/`InstanceResponse` serve `/v1/runtime/stop`; force requires the
+selected `expected_attempt`. `InstanceRequest`/`InstanceResponse` remain the
+contracts for `/v1/destroy`.
 The CLI/client and server share these Go types. Logs use the existing typed
 paged/NDJSON contracts. Resource capabilities and credential values stay private.
 

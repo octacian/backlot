@@ -17,6 +17,22 @@ const (
 	Failed       InstanceStatus = "failed"
 )
 
+// StopRequest targets one execution; Force acknowledges potentially live native survivors.
+type StopRequest struct {
+	ExpectedAttempt string `json:"expected_attempt,omitempty"`
+	APIVersion      string `json:"api_version"`
+	InstanceID      string `json:"instance_id"`
+	Force           bool   `json:"force,omitempty"`
+}
+
+// NativeOwnershipWarning reports an explicit waiver without exposing private authority.
+// It remains visible across replacement attempts and does not prove collection.
+type NativeOwnershipWarning struct {
+	Attempt    string `json:"attempt,omitempty"`
+	RecordedAt string `json:"recorded_at"`
+	Message    string `json:"message"`
+}
+
 // ExecutionOptions contains Go durations; omitted fields use documented defaults.
 // Zero execution deadlines are unlimited; zero stop grace escalates immediately.
 type ExecutionOptions struct {
@@ -44,11 +60,13 @@ type ComponentResult struct {
 // NativeCleanupResult records bounded application-session observation, not universal absence.
 // Strict system helpers retain their stronger pinned-group proof and omit this result.
 type NativeCleanupResult struct {
-	Component  string                  `json:"component"`
-	Attempt    string                  `json:"attempt"`
-	Confidence NativeCleanupConfidence `json:"confidence"`
-	Reason     string                  `json:"reason"`
-	Detail     string                  `json:"detail"`
+	// ResourceRelease explains current native eligibility without changing historical observation.
+	ResourceRelease string                  `json:"resource_release,omitempty"`
+	Component       string                  `json:"component"`
+	Attempt         string                  `json:"attempt"`
+	Confidence      NativeCleanupConfidence `json:"confidence"`
+	Reason          string                  `json:"reason"`
+	Detail          string                  `json:"detail"`
 }
 
 // NativeCleanupConfidence distinguishes successful observation from unresolved cleanup.
@@ -110,11 +128,12 @@ type LogRecord struct {
 
 // LogsResponse returns a bounded page and the next unfiltered record offset.
 type LogsResponse struct {
-	APIVersion string      `json:"api_version"`
-	Records    []LogRecord `json:"records"`
-	NextOffset int         `json:"next_offset"`
-	Active     bool        `json:"active"`
-	Gap        string      `json:"gap,omitempty"`
+	NativeOwnershipWarnings []NativeOwnershipWarning `json:"native_ownership_warnings,omitempty"`
+	APIVersion              string                   `json:"api_version"`
+	Records                 []LogRecord              `json:"records"`
+	NextOffset              int                      `json:"next_offset"`
+	Active                  bool                     `json:"active"`
+	Gap                     string                   `json:"gap,omitempty"`
 }
 
 // ArtifactRecord locates collected evidence outside runtime and data resources.
@@ -166,8 +185,26 @@ func (r NativeCleanupResult) Validate() error {
 	default:
 		return bad()
 	}
+	if r.ResourceRelease != "" && (r.ResourceRelease != "previous_boot" || r.Confidence == ObservedEmpty) {
+		return bad()
+	}
 	if r.Reason != reason {
 		return bad()
 	}
 	return nil
+}
+
+// FencesResources reports the active native obligation, separately from historical
+// confidence and collection. Only an exact-attempt committed waiver or persisted
+// previous-boot release can explain an incomplete observation without that fence.
+func (r NativeCleanupResult) FencesResources(warnings []NativeOwnershipWarning) bool {
+	if r.Confidence == ObservedEmpty || r.ResourceRelease == "previous_boot" {
+		return false
+	}
+	for _, w := range warnings {
+		if w.Attempt == r.Attempt && w.RecordedAt != "" {
+			return false
+		}
+	}
+	return true
 }

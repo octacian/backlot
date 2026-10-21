@@ -20,6 +20,7 @@ type runtimeRecord struct {
 	StartedAt     string              `json:"started_at,omitempty"`
 	Gateway       *gateway.Intent     `json:"gateway,omitempty"`
 	LaunchPurpose string              `json:"launch_purpose,omitempty"`
+	PendingBoot   string              `json:"pending_boot,omitempty"`
 	LaunchPending bool                `json:"launch_pending,omitempty"`
 	ConfigPath    string              `json:"config_path,omitempty"`
 	Attempt       string              `json:"attempt"`
@@ -51,10 +52,22 @@ func (s *store) runtime(id string) (runtimeRecord, error) {
 		if data == nil {
 			return nil
 		}
-		return json.Unmarshal(data, &r)
+		var decodeErr error
+		r, decodeErr = decodeRuntime(data)
+		return decodeErr
 	})
 	return r, err
 }
+func decodeRuntime(data []byte) (r runtimeRecord, err error) {
+	if !jsonObject(data) || json.Unmarshal(data, &r) != nil {
+		return r, problem("state_corrupt", "invalid runtime record shape; preserved")
+	}
+	if r.Attempt != "" && !validID(r.Attempt) {
+		return r, problem("state_corrupt", "invalid runtime attempt; preserved")
+	}
+	return r, nil
+}
+
 func (s *store) saveRuntime(id string, r runtimeRecord) error {
 	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, "runtime", id, r) })
 }
@@ -140,6 +153,7 @@ func (s *store) recoverExecution(id string) error {
 		return nil
 	}
 	result := *instance.Execution
+	result.NativeCleanup = append([]v1.NativeCleanupResult(nil), result.NativeCleanup...)
 	var cleanup error
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	cleanup = s.removeGateway(cleanupCtx, id, &r)
@@ -148,7 +162,18 @@ func (s *store) recoverExecution(id string) error {
 	if err != nil {
 		return err
 	}
-	proofMissing := r.Attempt != result.Attempt || (instance.Status == v1.RuntimeReady && len(r.Groups) == 0 && len(g.Containers) == 0)
+	previousBoot := allNativePreviousBoot(r, result.Attempt)
+	pendingAbsent := false
+	if r.LaunchPending {
+		pendingAbsent, _ = native.PreviousBoot(r.PendingBoot)
+		if pendingAbsent {
+			r.LaunchPending, r.PendingBoot = false, ""
+			if err := s.saveRuntime(id, r); err != nil {
+				return err
+			}
+		}
+	}
+	proofMissing := r.Attempt != result.Attempt || (!pendingAbsent && instance.Status == v1.RuntimeReady && len(r.Groups) == 0 && len(g.Containers) == 0)
 	if proofMissing {
 		cleanup = errors.Join(cleanup, problem("cleanup_failed", "native guardian ownership effect is absent or mismatched; preserve uncertain processes and inspect private state"))
 	}
@@ -160,7 +185,7 @@ func (s *store) recoverExecution(id string) error {
 	var mu sync.Mutex
 	var joined sync.WaitGroup
 	for _, group := range r.Groups {
-		if group.Purpose != "application" || group.Attempt != r.Attempt || !hasComponent(result.Components, group.Component) {
+		if group.Protocol != 0 && (group.Purpose != "application" || group.Attempt != r.Attempt || !hasComponent(result.Components, group.Component)) {
 			mu.Lock()
 			cleanup = errors.Join(cleanup, problem("cleanup_failed", "native application authority purpose/attempt/component mismatch; preserve uncertain processes"))
 			mu.Unlock()
@@ -179,8 +204,15 @@ func (s *store) recoverExecution(id string) error {
 	}
 	joined.Wait()
 	cleanup = errors.Join(cleanup, s.recoverContainers(id, &g))
+	if previousBoot {
+		for i := range result.NativeCleanup {
+			if result.NativeCleanup[i].Confidence != v1.ObservedEmpty {
+				result.NativeCleanup[i].ResourceRelease = "previous_boot"
+			}
+		}
+	}
 	for _, observed := range result.NativeCleanup {
-		if observed.Confidence != v1.ObservedEmpty {
+		if observed.FencesResources(instance.NativeOwnershipWarnings) {
 			cleanup = errors.Join(cleanup, problem("cleanup_failed", observed.Detail))
 		}
 	}
@@ -285,6 +317,12 @@ func (s *store) cleanupFailures() error {
 // acceptExecution rechecks eligibility and lease in the same transaction as launch
 // acceptance. Cached preparation responses never authorize resurrection.
 func (s *store) acceptExecution(id string, journal runtimeRecord, result *v1.ExecutionResult, restart bool) (v1.Instance, error) {
+	return s.acceptExecutionSnapshot(id, journal, result, restart, nil)
+}
+
+// acceptExecutionSnapshot adopts current configuration for a predecessor attempt
+// in the same transaction as execution acceptance. Rejection retains launch facts.
+func (s *store) acceptExecutionSnapshot(id string, journal runtimeRecord, result *v1.ExecutionResult, restart bool, snapshot *plan.Snapshot) (v1.Instance, error) {
 	var instance v1.Instance
 	err := s.db.Update(func(tx *bolt.Tx) error {
 		r, err := load(tx, id)
@@ -303,6 +341,16 @@ func (s *store) acceptExecution(id string, journal runtimeRecord, result *v1.Exe
 				return problem("lease_expired", "disposable lease is not valid for execution acceptance")
 			}
 		}
+		if snapshot != nil {
+			r.Instance.Plan = snapshot.Plan
+			if err := put(tx, "snapshots", id, snapshot); err != nil {
+				return err
+			}
+			if err := put(tx, "secrets", id, snapshot.Secrets); err != nil {
+				return err
+			}
+		}
+
 		r.Instance.Status = v1.Starting
 		r.Instance.Operation.Status = v1.Starting
 		r.Instance.Execution = result
@@ -342,4 +390,23 @@ func hasComponent(components []v1.ComponentResult, name string) bool {
 		}
 	}
 	return false
+}
+
+// allNativePreviousBoot requires every recorded launch obligation, including an
+// uncommitted effect, to prove older boot before releasing aggregated observations.
+func allNativePreviousBoot(r runtimeRecord, attempt string) bool {
+	if r.Attempt != attempt || len(r.Groups) == 0 && !r.LaunchPending {
+		return false
+	}
+	if r.LaunchPending {
+		if old, err := native.PreviousBoot(r.PendingBoot); err != nil || !old {
+			return false
+		}
+	}
+	for _, id := range r.Groups {
+		if old, err := native.PreviousBoot(id.Boot); err != nil || !old {
+			return false
+		}
+	}
+	return true
 }

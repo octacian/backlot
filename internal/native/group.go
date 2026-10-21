@@ -19,14 +19,17 @@ import (
 
 // Identity identifies a private guardian authority, never a signal target.
 type Identity struct {
-	Protocol  int    `json:"protocol"`
-	Purpose   string `json:"purpose"`
-	Component string `json:"component,omitempty"`
-	Attempt   string `json:"attempt,omitempty"`
+	// Preserve the merged-main tuple order and omit absent new discriminators, so
+	// legacy managed-claim serialization remains exact without a second JSON pass.
 	PID       int    `json:"pid"`
 	Birth     string `json:"birth"`
 	Control   string `json:"control"`
 	Token     string `json:"token"`
+	Boot      string `json:"boot,omitempty"`
+	Protocol  int    `json:"protocol,omitempty"`
+	Purpose   string `json:"purpose,omitempty"`
+	Component string `json:"component,omitempty"`
+	Attempt   string `json:"attempt,omitempty"`
 }
 
 // Spec is the private activation payload after ownership journaling.
@@ -55,6 +58,7 @@ type Exit struct {
 type Group struct {
 	Identity          Identity
 	control           *os.File
+	events            *os.File
 	done              chan struct{}
 	statusDone        chan struct{}
 	ready             chan struct{}
@@ -84,6 +88,10 @@ func StartApplication(executable string, stdout, stderr *os.File, component, att
 }
 
 func start(executable string, stdout, stderr *os.File, purpose, component, attempt string) (*Group, error) {
+	boot, err := CurrentBoot()
+	if err != nil {
+		return nil, err
+	}
 	dir, err := os.MkdirTemp("/tmp", "blctl-")
 	if err != nil {
 		return nil, err
@@ -123,7 +131,8 @@ func start(executable string, stdout, stderr *os.File, purpose, component, attem
 	id.Protocol, id.Purpose, id.Component, id.Attempt = 1, purpose, component, attempt
 	id.Control = filepath.Join(dir, "control.sock")
 	id.Token = hex.EncodeToString(token)
-	g := &Group{Identity: id, control: control, done: make(chan struct{}), statusDone: make(chan struct{}), ready: make(chan struct{}), anchorReady: make(chan struct{})}
+	id.Boot = boot
+	g := &Group{Identity: id, control: control, events: events, done: make(chan struct{}), statusDone: make(chan struct{}), ready: make(chan struct{}), anchorReady: make(chan struct{})}
 	go func() { _ = cmd.Wait(); close(g.done) }()
 	go func() {
 		defer close(g.statusDone)
@@ -231,8 +240,9 @@ func (g *Group) Alive() bool {
 
 // Stop obtains verified cleanup and joins this daemon's guardian descriptors.
 func (g *Group) Stop(grace time.Duration) (err error) {
+	collected := false
 	defer func() {
-		if err != nil {
+		if err != nil || !collected {
 			if g.Identity.Purpose == "application" {
 				g.mu.Lock()
 				if g.cleanup == nil || g.cleanup.Confidence == v1.ObservedEmpty {
@@ -248,7 +258,8 @@ func (g *Group) Stop(grace time.Duration) (err error) {
 		}
 	}()
 	_ = g.control.Close()
-	result, stopErr := StopResult(g.Identity, grace)
+	result, proved, stopErr := stopResultCollected(g.Identity, grace)
+	collected = proved
 	g.mu.Lock()
 	if g.cleanup == nil || g.cleanup.Confidence == v1.ObservedEmpty {
 		g.cleanup = result
@@ -280,6 +291,20 @@ func (g *Group) CleanupResult() *v1.NativeCleanupResult {
 	}
 	r := *g.cleanup
 	return &r
+}
+
+// Relinquish closes and joins this daemon's local status reader after a durable
+// force waiver. It never signals or waits for the potentially live guardian.
+// The existing direct-child Wait owner continues reaping it when it exits.
+func (g *Group) Relinquish() {
+	_ = g.control.Close()
+	g.mu.Lock()
+	g.collectionFailure = "native output/status collection could not be verified"
+	g.mu.Unlock()
+	if g.events != nil {
+		_ = g.events.Close()
+	}
+	<-g.statusDone
 }
 
 // Wait observes root completion under the caller's execution deadline.

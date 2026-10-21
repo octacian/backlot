@@ -29,7 +29,7 @@ jobs:
       - name: Verify repository
         run: make check
       - name: Verify native identity adapter without cgo
-        run: CGO_ENABLED=0 go test ./internal/native/procidentity -count=1 -v
+        run: CGO_ENABLED=0 go test ./internal/native ./internal/native/procidentity -count=1 -v
       - name: Verify module metadata
         run: |
           go mod tidy
@@ -77,4 +77,4 @@ jobs:
         run: |
           export BACKLOT_CADDY_TEST_BINARY="$RUNNER_TEMP/backlot-tools/caddy"
           go test -race ./internal/gateway -count=1 -v -timeout=15m
-          go test -race ./internal/daemon -run '^(TestDockerRuntime|TestDisposableEvidenceDocker|TestHTTPSRuntime|TestManagedHTTPSRuntime|TestContainerManagedHTTPSRuntime)$' -count=1 -v -timeout=40m
+          go test -race ./internal/daemon -run '^(TestDockerRuntime|TestDisposableEvidenceDocker|TestHTTPSRuntime|TestManagedHTTPSRuntime|TestManagedForceRestart|TestContainerManagedHTTPSRuntime)$' -count=1 -v -timeout=40m

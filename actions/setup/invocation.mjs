@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { appendFile, mkdtemp, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { command, verifyOwner } from './runtime.mjs';
+import { command, verifyOwner, backlotEnvironment } from './runtime.mjs';
 import { collect } from './job.mjs';
 
 export function argumentsInput(value = '[]') {
@@ -39,18 +39,19 @@ export async function invoke() {
   try {
     owner = JSON.parse(process.env.BACKLOT_SETUP_OWNER);
     await verifyOwner(owner);
+    const env = await backlotEnvironment(owner);
     const project = resolve(process.env.INPUT_PROJECT || '.');
     const scene = process.env.INPUT_SCENE;
     assert.ok(scene && !scene.startsWith('-'), 'scene is required');
     const args = argumentsInput(process.env.INPUT_ARGS);
     const binary = join(owner.root, 'tools/backlot');
     const base = ['--project', project, '--config', join(owner.root, 'machine.json'), '--json'];
-    const plan = JSON.parse(await command(binary, ['plan', scene, ...base, '--', ...args]));
+    const plan = JSON.parse(await command(binary, ['plan', scene, ...base, '--', ...args], { env }));
     assert.equal(plan.lifetime, 'disposable', 'actions/run requires a disposable scene');
     if (interrupted) throw Error('cancelled before scene launch');
     assert.ok(['true', 'false', undefined].includes(process.env['INPUT_UPLOAD-ARTIFACTS']), 'upload-artifacts must be true or false');
     let stdout = '';
-    child = spawn(binary, ['run', scene, ...base, '--state-dir', join(owner.root, 'd'), '--', ...args], { cwd: project, stdio: ['ignore', 'pipe', 'inherit'] });
+    child = spawn(binary, ['run', scene, ...base, '--state-dir', join(owner.root, 'd'), '--', ...args], { env, cwd: project, stdio: ['ignore', 'pipe', 'inherit'] });
     child.stdout.on('data', chunk => { stdout += chunk; });
     // Forward to the retained actual CLI and JOIN; never leave a lease-renewing
     // child behind. Runner hard termination remains bounded by the daemon lease.
@@ -76,7 +77,7 @@ export async function invoke() {
       await output('evidence-available', true);
     } catch (error) { evidence = undefined; await fail('collection', error); }
     // Only this invocation's authenticated record; no gateway/daemon shutdown.
-    try { await command(binary, ['destroy', instance.id, '--state-dir', join(owner.root, 'd'), '--json']); }
+    try { await command(binary, ['destroy', instance.id, '--state-dir', join(owner.root, 'd'), '--json'], { env }); }
     catch (error) { await fail('cleanup', error); }
     if (evidence && process.env['INPUT_UPLOAD-ARTIFACTS'] !== 'false') {
       try {

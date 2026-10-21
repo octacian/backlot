@@ -31,8 +31,9 @@ bin/backlot daemon stop --state-dir /absolute/private/backlot --json
 `daemon start` backgrounds this executable's `daemon serve` and waits for a typed
 handshake. `daemon serve` runs in the foreground until SIGINT, SIGTERM or an API
 stop request. `daemon stop` joins owned runtime cleanup before acknowledging
-`stopping`; cleanup or collection failure returns nonzero. Socket removal marks
-completed shutdown. There is no service installer. Use the same `--state-dir` on each command;
+`stopping`; cleanup or collection failure returns nonzero. The acknowledgment is
+not proof of final process exit or lock release; shutdown still finishes through
+the daemon's existing lifecycle. There is no service installer. Use the same `--state-dir` on each command;
 without it, the directory is `backlot/daemon` below Go's `os.UserConfigDir()`.
 State storage in this milestone uses that explicit flag/default; the manifest's
 machine `storage` retention settings remain intent for later evidence storage.
@@ -46,6 +47,19 @@ Clients check the permission boundary before dialing. A single-daemon advisory l
 covers startup through database closure. Only a private owned socket with a proven
 connection-refused result is removed as stale; live or uncertain listeners remain
 untouched. The lock file remains after shutdown and is not a PID ownership claim.
+
+Before `prepare`, `run`, `restart`, `reset`, `scene start`, gateway start/restart or
+an explicit mutating Doctor probe, the shared Go client checks current API/state
+compatibility with a fresh bounded status request. A running older or
+malformed daemon is rejected before scene mutation; no compatibility result is
+cached. Historical reads and snapshot cleanup calls do not perform this
+configuration preflight. For the supported main v6/v8-to-v9 upgrade, this CLI's normal
+`daemon stop` accepts only an exact v6/v8 `stopping` response to `POST /v1/stop`, with
+all ordinary response/error checks and its reported version preserved. Once
+shutdown finishes, start this binary on the same `--state-dir`. The acknowledgment
+does not prove process exit or released locks, and adds no polling/automatic
+restart. Status stays strict v9. Preserve other unsupported formats for diagnosis
+and their matching binary's lifecycle; do not discard ownership records.
 
 `prepare` discovers the project locally and sends an absolute path to the daemon.
 The daemon reuses strict manifest validation/environment resolution. Provider
@@ -81,6 +95,101 @@ Allocation-dependent values stay symbolic; preparation does not generate resourc
 or secrets for future providers. Do not put credentials in command arguments,
 identifiers or paths; use sensitive environment declarations.
 
+## Named persistent scenes
+
+Use `scene` to target a persistent scene by name in the current checkout. Start
+validates current inputs and waits for readiness; status and stop use recorded
+identity without parsing the current manifest or machine configuration.
+
+```sh
+bin/backlot scene start --json dev
+bin/backlot scene start --project /absolute/project --config /absolute/machine.yaml dev
+bin/backlot scene status --json dev
+bin/backlot scene stop --json dev
+bin/backlot scene status --follow --interval 1s --duration 30m --json dev
+bin/backlot status --follow --json INSTANCE_ID
+bin/backlot stop --json INSTANCE_ID
+```
+
+Use the daemon's `--state-dir` where needed. Scene commands accept names only;
+recorded-ID commands work outside a checkout. Finite `status ID` keeps its existing
+`InstanceResponse` output. ID observation includes persistent, disposable and
+historical instances; use `run` to execute disposable scenes.
+
+Start accepts `--startup-timeout`, `--job-timeout` and `--stop-grace`. Repeated or
+concurrent starts converge on the existing instance and report manifest/config
+drift without reconciling retained data. Unhealthy execution needs explicit
+restart. A logical project/checkout/scene key recorded at a different canonical
+project directory conflicts before start/join. Cancelling startup uses existing
+run cleanup; cancelling observation leaves execution alone.
+
+### Recorded selection and stop
+
+The daemon selects the nearest **recorded** project-directory ancestor in the
+canonical checkout, using history to discover project locations. If it lacks the
+scene, return successful `not_found`; never fall back to an outer project.
+`--project` selects an exact directory or recognized manifest path (`backlot.yaml`,
+`backlot.yml`, `backlot.json`). A broken/deleted manifest or changed project ID does
+not hide recorded instances while the directory and checkout identity remain usable.
+
+Multiple non-destroyed persistent records at that location/scene produce
+`ambiguous_target`; use `backlot status ID` or `backlot stop ID`. Failed and
+metadata-only records participate; destroyed history is available by ID only.
+Malformed recorded selectors or disagreement with existing persistent slots produce
+`state_corrupt` before discovery filtering. Preserve state for diagnosis; existing
+ID inspection/cleanup remains independent of named selection.
+
+Moved/replaced checkouts or unavailable project/Git identity fail selection; use
+recorded IDs. No force or path-only adoption exists. Project subdirectories within
+an unchanged Git checkout have no separately persisted inode identity; selection
+uses their recorded canonical location. Non-Git projects use the recorded project
+root as checkout identity; before any record exists, supply `--project` explicitly.
+See the [selection rationale and stored-state boundaries](adr/20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md).
+
+Finite named results are `SceneResponse`: API/daemon generation, outcome, optional
+`result: InstanceResponse`, and canonical checkout/selector metadata. `not_found`
+omits `result` but includes checkout identity. Runtime failures are snapshot data
+and status exits zero; selection, validation and transport errors are nonzero.
+Human status prints recorded runtime failures.
+
+Stop locks and rechecks the selected ID before verified cleanup; selection changes
+conflict rather than redirecting cleanup. Successful outcomes are `stopped`,
+`already_stopped` and `not_found`. Data and credentials remain. Metadata-only and
+failed records retain truthful status; cleanup/collection uncertainty stays
+nonzero. Stop shares mutation serialization with restart/reset/destroy and has no
+attempt-specific attachment authority.
+
+### Sampled status follow
+
+Both `scene status NAME --follow` and `status ID --follow` emit initial and changed
+snapshots, including instance/attempt, components, origin and failure details.
+Named follow watches the original canonical selector through absence and recreation;
+ID follow stays pinned across destroy/recreation and never switches to a replacement.
+Stopped, failed, destroyed and missing states do not end observation. Intermediate
+transitions may be missed; unchanged polling emits no duplicate snapshots.
+
+| Option | Default | Inclusive bounds |
+| --- | --- | --- |
+| `--interval` | `1s` | `100ms`–`1m` |
+| `--duration` | `30m` | `1s`–`24h` |
+
+Both options require `--follow`; zero, negative, malformed or out-of-range values
+fail. The total budget includes initial acquisition and in-flight requests. One
+cancellable request runs at a time, with the interval after completion.
+
+JSON output is NDJSON `SceneFollowRecord`: `api_version`, observation `time` and
+`type`. A `snapshot` carries `SceneResponse`; `complete` carries reason `expired`
+or `cancelled`; `error` carries a typed error. Expiry exits zero, independently of
+runtime health. SIGINT/SIGTERM cancel observation and exit 130/143. Output errors
+are nonzero; a closed pipe cannot guarantee a terminal record.
+
+Both modes pin daemon generation. Named follow also fences the initial checkout
+ID/path/Git-directory and canonical selector, including initial absence; branch
+and HEAD are provenance only. Daemon loss/replacement, ambiguity, identity loss or
+invalid responses terminate nonzero without retry, reconnect or autostart. ID
+follow reads recorded state without checkout discovery or manifest access.
+Observation never stops execution, renews leases or acquires attachment ownership.
+
 ## Cancellation and recovery
 
 A disposable preparation returns a lease capability once. `inspect` never returns
@@ -113,9 +222,9 @@ through `internal/client`. Administrative HTTP is available only on `daemon.sock
 never a TCP/LAN listener. Send `X-Backlot-API-Version: v1` on every request, and
 `Content-Type: application/json` for POST bodies. POST contracts also require
 `api_version: v1`. Unknown/missing versions are rejected, independently of binary
-version. The binary's declared state format is checked before state mutation;
-unsupported/missing formats in existing populated databases are rejected without
-migration. See the [private-state guide](containers.md) for compatibility.
+version. State compatibility is checked before mutation; see the
+[private-state guide](containers.md#state-compatibility) for the v9
+format and rejection/cleanup rules.
 
 | Endpoint | Named request | Named response |
 | --- | --- | --- |
@@ -128,7 +237,8 @@ migration. See the [private-state guide](containers.md) for compatibility.
 | `POST /v1/cancel` | `InstanceRequest` | `InstanceResponse` |
 | `POST /v1/renew` | `LeaseRequest` | `InstanceResponse` |
 | `POST /v1/run`, `/v1/restart`, `/v1/reset` | `RunRequest` | `InstanceResponse` |
-| `POST /v1/runtime/stop`, `/v1/destroy` | `InstanceRequest` | `InstanceResponse` |
+| `POST /v1/runtime/stop` | `StopRequest` (force requires selected `expected_attempt`) | `InstanceResponse` |
+| `POST /v1/destroy` | `InstanceRequest` | `InstanceResponse` |
 | `POST /v1/logs` | `LogsRequest` | `LogsResponse` |
 
 `list` uses `ListRequest` (`after_id`, `limit`; zero means default 100, maximum
@@ -136,7 +246,8 @@ migration. See the [private-state guide](containers.md) for compatibility.
 Empty lists contain an empty array. Historical/destroyed targets remain discoverable.
 `status` is a CLI alias for `inspect`. Every instance response removes snapshot
 ownership tokens while preserving the private durable recovery authority. Stop
-an old daemon before upgrading the binary; use a matching CLI/daemon contract.
+the old daemon before starting the new binary; only the supported predecessor's
+normal shutdown acknowledgment has the [bounded exception](#configuration-state-compatibility).
 Fixture discovery and explicit sensitive access use `FixturesRequest` through
 `POST /v1/fixtures` and `/v1/fixtures/secret`; see [evidence](evidence.md).
 
@@ -262,18 +373,34 @@ expose the same observation. `observed_empty` is success under the accepted risk
 an unseen same-session fork or unsupported escape can still race restart or data
 cleanup, and ordinary lifecycle/output/data fences may be released. Known live
 members, denied observations, exhausted budgets, missing joins or authority loss
-remain nonzero and retain fences. Root exit, EOF or closed listeners alone never
+remain nonzero and retain fences. An optional `resource_release: previous_boot` records that all relevant launch
+obligations, including pending intent, proved an older boot. It preserves historical
+confidence/reason/detail and collection gaps. Exact-attempt force warnings can also
+explain released native claims; warnings from older attempts cannot release a new
+failure. These dispositions never synthesize `observed_empty` or bypass non-native
+or abandoned-data deletion guards. Doctor keeps an incomplete historical-observation
+check failed and explains the recorded resource release independently from launch eligibility. Root exit, EOF or closed listeners alone never
 establish cleanup. No raw process/session identities are public results.
 
-Capabilities, protocol/purpose, attempt and guardian birth identity stay in the
-private journal; control sockets/receipts remain in random mode-0700 `/tmp/blctl-*`
-directories. Ordinary daemon crash with a surviving guardian uses the same bounded
-authenticated cleanup and marks interruption/collection gaps, without resuming
-work. Guardian loss preserves existing per-instance uncertainty and data/output
-fences; there is no new witnessed recovery, force-delete or automatic retry.
-Read [state compatibility](containers.md) before moving v5 work to fresh v6 state.
-The [normal Air and Vite example](../examples/native-watchers/README.md) demonstrates
-existing application commands and documents build-failure/readiness limitations.
+All native launch intents/effects, including command probes, record kernel boot
+identity before allocation. A different boot releases obsolete process claims,
+never collection gaps. The guardian-only pipe lets a live anchor terminate its own
+group after guardian death; it provides neither collection proof nor restart
+eligibility. Root or anchor-only death remains cleanable by the guardian; daemon
+loss leaves that authority available. Combined authority loss may leave survivors.
+
+When ordinary stop cannot resolve ownership, restore authority, perform a controlled
+reboot, or explicitly accept survivor risk with `stop --force INSTANCE` before
+ordinary restart. Force attempts normal cleanup, then relinquishes only the selected
+native claims: **unknown survivors may still run/write**. The CLI selects the current
+attempt; API callers retain its `expected_attempt` through retries. Stale requests
+fail before cleanup. Force is limited to stop; non-native fences and independent
+absence proof before later data removal still apply. Private history and safe warnings survive replacement; see
+[evidence semantics](evidence.md#investigation-and-destruction),
+[gateway recovery](https.md#managed-gateway-recovery) and the
+[decision rationale](adr/20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md).
+
+Capabilities, protocol/purpose and boot identity remain private. See [state compatibility](containers.md#state-compatibility).
 
 See [disposable results and evidence](evidence.md) for exact exit codes, kept
 failures, artifacts, fixture access and retention settings.
@@ -431,6 +558,22 @@ recovery authenticates consumer absence again, and an absent copy can then clear
 that journal. If the recorded original parent cannot be established (including a parent
 mismatch), consumer ownership or artifact identity cannot be established,
 retain the uncertainty and obtain operator help. No automatic foreign-file
-cleanup or operator management subsystem is provided. Older v6 journals without
-copy metadata remain supported. Older binaries can ignore the optional metadata
-and leave a public-only copy behind; downgrade artifact cleanup is not promised.
+cleanup or operator management subsystem is provided. Supported legacy journals without
+copy metadata remain supported. Version9 fences older readers; downgrade is unsupported.
+
+## Configuration state compatibility
+
+Registered private project composition uses daemon state version 9, with a direct
+one-way in-place upgrade from the previous merged main state versions 6 and 8. Validation and
+the format fence share a transaction; rejected predecessor state stays unchanged.
+The new CLI may normally stop v6/v8 through its exact `stopping` acknowledgment on
+`POST /v1/stop`, without relaxing Status or consuming operations. This acknowledgment
+is not final process-exit/lock-release proof; it does not trigger automatic startup.
+Versions 5 and 7 and other unsupported formats do not migrate. Existing snapshots
+remain authoritative for recorded cleanup; missing historical private/effective
+provenance stays unrecorded. Eligible historical prepared/stopped starts capture
+current project-only values with existing retained-resource/sensitive-drift fences
+and adopt them atomically with execution acceptance. Ordinary version 9 stop/start
+retains its immutable snapshot. The independent project registry remains format 1.
+See [state upgrade and operation](containers.md#state-compatibility) and
+[private setup, provenance and retention](manifest.md#registered-private-project-configuration).

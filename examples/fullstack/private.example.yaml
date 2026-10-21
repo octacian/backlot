@@ -1,0 +1,5 @@
+# yaml-language-server: $schema=../../schemas/private-config-v1.schema.json
+# Illustrative setup import; contains no credentials or provider overrides.
+# backlot project setup --project examples/fullstack --config examples/fullstack/machine.example.yaml --from examples/fullstack/private.example.yaml
+version: backlot/v1
+inputs: {app_image: example/app:local}

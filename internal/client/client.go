@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -39,6 +40,31 @@ func New(socket string) *Client {
 func (c *Client) Close() { c.transport.CloseIdleConnections() }
 
 func (c *Client) call(ctx context.Context, method, path string, request, response any) error {
+	// Resolve compatibility afresh at every configuration-consuming boundary.
+	// Historical reads and snapshot-based cleanup remain available; incompatible
+	// state must retain its ownership records (see docs/containers.md).
+	checkCompatibility := false
+	switch path {
+	case "/v1/scenes/start", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/gateway/start", "/v1/gateway/restart":
+		checkCompatibility = true
+	case "/v1/doctor":
+		// An explicit diagnostic image authorizes container creation/start, unlike
+		// ordinary doctor reads of current or recorded configuration and evidence.
+		if probe, ok := request.(v1.DoctorRequest); ok {
+			checkCompatibility = probe.ContainerProbeImage != ""
+		}
+	}
+	if checkCompatibility {
+		status, err := c.Status(ctx)
+		if err != nil || status.Status != "running" {
+			code := "api_version"
+			var detail *v1.PlanError
+			if errors.As(err, &detail) {
+				code = detail.Code
+			}
+			return &v1.PlanError{Code: code, Message: "cannot verify running daemon configuration compatibility; for the supported merged-main version 6 or 8 to 9 upgrade, request normal daemon stop with this binary, then start it on the same --state-dir after shutdown finishes; a stopping acknowledgment does not prove process exit or lock release; preserve other unsupported state for diagnosis with its matching binary"}
+		}
+	}
 	var body io.Reader
 	if request != nil {
 		data, err := json.Marshal(request)
@@ -61,11 +87,14 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 	httpClient := *c.http
 	// Cleanup/restart can use a configured grace exceeding the transport default.
 	// The daemon bounds cleanup; callers retain context cancellation authority.
-	if path == "/v1/export" || path == "/v1/doctor" || path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
+	if path == "/v1/scenes/stop" || path == "/v1/export" || path == "/v1/doctor" || path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
 		httpClient.Timeout = 0
 	}
 	res, err := httpClient.Do(req)
 	if err != nil {
+		if strings.HasPrefix(path, "/v1/scenes/") && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			return context.Cause(ctx)
+		}
 		var detail *v1.PlanError
 		if errors.As(err, &detail) {
 			return detail
@@ -80,6 +109,9 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 		return &v1.PlanError{Code: "invalid_response", Message: "daemon response must have application/json content type"}
 	}
 	data, err := io.ReadAll(io.LimitReader(res.Body, manifest.MaxBytes+1))
+	if strings.HasPrefix(path, "/v1/scenes/") && err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+		return context.Cause(ctx)
+	}
 	if err != nil || len(data) > manifest.MaxBytes {
 		return &v1.PlanError{Code: "invalid_response", Message: "daemon response unavailable or exceeds 1 MiB limit"}
 	}
@@ -151,7 +183,11 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 			}
 		}
 	case *v1.DaemonStatusResponse:
-		if value.APIVersion != v1.Version || value.StateVersion != v1.StateVersion {
+		// The predecessor's normal Stop already performed cleanup before replying.
+		// Accept only that exact acknowledgment, without relaxing Status/preflight
+		// or claiming the daemon process exited or released its lock.
+		predecessorStop := method == http.MethodPost && path == "/v1/stop" && (value.StateVersion == 6 || value.StateVersion == 8) && value.Status == "stopping"
+		if value.APIVersion != v1.Version || (value.StateVersion != v1.StateVersion && !predecessorStop) {
 			return &v1.PlanError{Code: "api_version", Message: "incompatible daemon API or state format"}
 		}
 		lease, err := time.ParseDuration(value.LeaseDuration)
@@ -181,7 +217,8 @@ func (c *Client) Status(ctx context.Context) (v1.DaemonStatusResponse, error) {
 	return r, err
 }
 
-// Stop requests graceful daemon shutdown.
+// Stop requests graceful daemon shutdown and accepts the supported predecessor
+// acknowledgment. A stopping result does not prove process exit or lock release.
 func (c *Client) Stop(ctx context.Context) (v1.DaemonStatusResponse, error) {
 	var r v1.DaemonStatusResponse
 	err := c.call(ctx, http.MethodPost, "/v1/stop", v1.ControlRequest{APIVersion: v1.Version}, &r)

@@ -1041,7 +1041,7 @@ func TestNativeRuntime(t *testing.T) {
 		}
 		h.absent()
 	})
-	t.Run("guardian-crash-preserves-uncertain-descendants", func(t *testing.T) {
+	t.Run("guardian-crash-terminates-descendants-and-allows-restart", func(t *testing.T) {
 		h := newNativeFaultHarness(t, binary)
 		r := h.run("dev")
 		h.state(r.Instance.ID, v1.RuntimeReady)
@@ -1060,8 +1060,8 @@ func TestNativeRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		final := h.state(r.Instance.ID, v1.Failed)
-		if final.Instance.Execution.CleanupFailure == "" || final.Instance.Execution.CollectionFailure == "" {
-			t.Fatal("guardian loss must retain independent cleanup and collection gaps")
+		if final.Instance.Execution.CollectionFailure == "" {
+			t.Fatal("guardian loss must retain collection gaps")
 		}
 		for _, component := range final.Instance.Execution.Components {
 			if component.ExitCode != nil {
@@ -1076,14 +1076,167 @@ func TestNativeRuntime(t *testing.T) {
 		if err != nil || following.Gap != logs.Gap {
 			t.Fatal("following collection gap omitted", err)
 		}
-		if syscall.Kill(root, 0) != nil {
-			t.Fatal("uncertain descendant killed")
+		h.absent()
+		if syscall.Kill(-pgid, 0) != syscall.ESRCH {
+			t.Fatal("anchor did not terminate its pinned group after guardian loss")
 		}
-		actual, err := syscall.Getpgid(root)
-		if err != nil || actual != pgid {
-			t.Fatal("fixture identity changed", err)
+		if _, err := h.cli.StopExecution(context.Background(), r.Instance.ID); err == nil {
+			t.Fatal("unknown authority silently released")
 		}
-		// Cleanup is registered before the fault and uses retained fixture authority.
+		command := exec.Command(binary, "stop", "--force", "--state-dir", h.dir, "--json", r.Instance.ID)
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatal("explicit force stop failed", err, string(output))
+		}
+		var forced v1.InstanceResponse
+		if err := json.Unmarshal(output, &forced); err != nil || len(forced.Instance.NativeOwnershipWarnings) != 1 || forced.Instance.Execution.CollectionFailure == "" {
+			t.Fatal("waiver warning/gap missing", err, string(output))
+		}
+		if _, err := h.cli.Destroy(context.Background(), r.Instance.ID); err == nil {
+			t.Fatal("waiver authorized later data destruction")
+		}
+
+		request := h.request("dev")
+		request.InstanceID = r.Instance.ID
+		if _, err := h.cli.Restart(context.Background(), request); err != nil {
+			t.Fatal("explicit restart after guardian loss failed", err)
+		}
+		replacement := h.state(r.Instance.ID, v1.RuntimeReady)
+		if len(replacement.Instance.NativeOwnershipWarnings) != 1 || replacement.Instance.Execution.CollectionFailure != "" {
+			t.Fatal("replacement lost warning or inherited old gap", replacement.Instance.Execution)
+		}
+
+		if _, err := h.cli.StopExecution(context.Background(), r.Instance.ID); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("anchor-only-and-combined-loss", func(t *testing.T) {
+		for _, combined := range []bool{false, true} {
+			t.Run(strconv.FormatBool(combined), func(t *testing.T) {
+				h := newNativeFaultHarness(t, binary)
+				r := h.run("dev")
+				h.state(r.Instance.ID, v1.RuntimeReady)
+				h.retainFixtureCleanup()
+				identity := h.guardianCapability(r.Instance.ID)
+				if err := native.CrashAnchorForTest(identity); err != nil {
+					t.Fatal(err)
+				}
+				if !combined {
+					if _, err := h.cli.StopExecution(context.Background(), r.Instance.ID); err != nil {
+						t.Fatal("guardian could not clean anchor-only fault", err)
+					}
+					h.absent()
+					return
+				}
+				if err := native.CrashForTest(identity); err != nil {
+					t.Fatal(err)
+				}
+				h.state(r.Instance.ID, v1.Failed)
+				if _, err := h.cli.StopExecutionWithRequest(context.Background(), v1.StopRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID, Force: true, ExpectedAttempt: r.Instance.Execution.Attempt}); err != nil {
+					t.Fatal(err)
+				}
+				// A living authenticated fixture proves force did not kill the unknown survivor.
+				h.fixtureAction("inspect")
+				h.fixtureAction("kill") // fixture self-kill with retained full capability
+				h.absent()
+			})
+		}
+	})
+
+	t.Run("force-live-guardian-detaches-local-reader", func(t *testing.T) {
+		h := newNativeFaultHarness(t, binary)
+		r := h.run("dev")
+		h.state(r.Instance.ID, v1.RuntimeReady)
+		h.retainFixtureCleanup()
+		identity := h.guardianCapability(r.Instance.ID)
+		moved := identity.Control + ".retained"
+		t.Cleanup(func() {
+			if _, err := os.Lstat(moved); err == nil {
+				if err := os.Rename(moved, identity.Control); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+			if err := native.Stop(identity, 0); err != nil {
+				h.cleanupUnverified = true
+				t.Error("restored authority cleanup", err)
+			}
+		})
+		if err := os.Rename(identity.Control, moved); err != nil {
+			t.Fatal(err)
+		}
+		forced, err := h.cli.StopExecutionWithRequest(context.Background(), v1.StopRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID, Force: true, ExpectedAttempt: r.Instance.Execution.Attempt})
+		if err != nil || len(forced.Instance.NativeOwnershipWarnings) != 1 {
+			t.Fatal("live guardian waiver failed", err)
+		}
+		h.fixtureAction("inspect")
+		if err := os.Rename(moved, identity.Control); err != nil {
+			t.Fatal(err)
+		}
+		if err := native.Stop(identity, 0); err != nil {
+			t.Fatal("restored authenticated cleanup failed", err)
+		}
+		h.absent()
+		// Independent receipt proof, unlike waiver, now permits destructive cleanup.
+		if _, err := h.cli.Destroy(context.Background(), r.Instance.ID); err != nil {
+			t.Fatal("restored proof failed deletion guard", err)
+		}
+	})
+	t.Run("known-root-exit-before-guardian-loss", func(t *testing.T) {
+		t.Setenv("BACKLOT_NATIVE_TEST_FAULTS", "1")
+		output, err := os.Create(filepath.Join(t.TempDir(), "output"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = output.Close() })
+		group, err := native.Start(binary, output, output)
+		if group != nil {
+			t.Cleanup(func() {
+				_ = group.Stop(0)
+				group.Relinquish()
+				deadline := time.Now().Add(3 * time.Second)
+				for (group.Alive() || group.PGID() > 0 && syscall.Kill(-group.PGID(), 0) != syscall.ESRCH) && time.Now().Before(deadline) {
+					time.Sleep(20 * time.Millisecond)
+				}
+				if group.Alive() || group.PGID() > 0 && syscall.Kill(-group.PGID(), 0) != syscall.ESRCH {
+					t.Error("fixture absence unverified; control preserved")
+					return
+				}
+				if err := os.RemoveAll(filepath.Dir(group.Identity.Control)); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := group.Activate(native.Spec{Executable: "/bin/sh", Args: []string{"-c", "sleep 30 & exit 17"}, Environment: os.Environ(), Directory: t.TempDir()}); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		result, err := group.Wait(ctx)
+		if err != nil || !result.Known || result.Code != 17 {
+			t.Fatal("original exit unavailable", result, err)
+		}
+		if err := native.CrashForTest(group.Identity); err != nil {
+			t.Fatal(err)
+		}
+		if err := group.Stop(0); err == nil {
+			t.Fatal("missing receipt invented cleanup proof")
+		}
+		group.Relinquish()
+		for range 2 {
+			result = group.Result()
+			if result == nil || !result.Known || result.Code != 17 || result.CollectionFailure == "" {
+				t.Fatal("known exit/gap lost", result)
+			}
+			_ = group.Stop(0)
+		}
+		if _, err := os.Stat(filepath.Join(filepath.Dir(group.Identity.Control), "receipt.json")); !os.IsNotExist(err) {
+			t.Fatal("receipt fabricated", err)
+		}
 	})
 	t.Run("daemon-crash-during-startup", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
@@ -1130,31 +1283,6 @@ func TestNativeRuntime(t *testing.T) {
 		}
 		h.state(r.Instance.ID, v1.Failed)
 		h.absent()
-	})
-	t.Run("inactive-guardian-stop-status", func(t *testing.T) {
-		output, err := os.CreateTemp(t.TempDir(), "guardian-output")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = output.Close() })
-		group, err := native.Start(binary, output, output)
-		if group != nil {
-			t.Cleanup(func() {
-				if err := group.Stop(0); err != nil {
-					t.Error("inactive guardian cleanup", err)
-				}
-			})
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := group.Stop(0); err != nil {
-			t.Fatal(err)
-		}
-		result := group.Result()
-		if result == nil || result.CollectionFailure != "" || result.Code != -1 || group.PGID() != 0 || group.Alive() {
-			t.Fatal("inactive cancellation lost status or launched work", result)
-		}
 	})
 	t.Run("cli-sigint-sigterm-cancel-unlimited-terminal", func(t *testing.T) {
 		for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
@@ -1383,32 +1511,42 @@ func TestNativeRuntime(t *testing.T) {
 		h.absent()
 	})
 
-	t.Run("inactive-guardian-verified-stop", func(t *testing.T) {
-		file, err := os.OpenFile(filepath.Join(t.TempDir(), "inactive.ndjson"), os.O_CREATE|os.O_WRONLY, 0600)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = file.Close() }()
-		for _, direct := range []bool{false, true} {
-			group, err := native.Start(binary, file, file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			start := time.Now()
-			if direct {
-				err = native.Stop(group.Identity, 0)
-			} else {
-				err = group.Stop(0)
-			}
-			if err != nil {
-				t.Fatal("never-activated stop failed", direct, err)
-			}
-			if time.Since(start) > 4*time.Second {
-				t.Fatal("inactive cancellation did not join promptly")
-			}
-			if group.Alive() {
-				t.Fatal("inactive guardian remained alive")
-			}
+	t.Run("inactive-guardian-stop", func(t *testing.T) {
+		for _, mode := range []string{"local", "recovered"} {
+			t.Run(mode, func(t *testing.T) {
+				file, err := os.CreateTemp(t.TempDir(), "guardian-output")
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = file.Close() })
+				group, err := native.Start(binary, file, file)
+				if group != nil {
+					t.Cleanup(func() {
+						if err := group.Stop(0); err != nil {
+							t.Error("inactive guardian cleanup", err)
+						}
+					})
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				start := time.Now()
+				if mode == "recovered" {
+					err = native.Stop(group.Identity, 0)
+				} else {
+					err = group.Stop(0)
+					result := group.Result()
+					if result == nil || result.CollectionFailure != "" || result.Code != -1 {
+						t.Fatal("inactive cancellation lost status", result)
+					}
+				}
+				if err != nil || group.PGID() != 0 || group.Alive() {
+					t.Fatal("never-activated stop failed or launched work", err)
+				}
+				if time.Since(start) > 4*time.Second {
+					t.Fatal("inactive cancellation did not join promptly")
+				}
+			})
 		}
 	})
 
@@ -1507,6 +1645,9 @@ func (h *nativeHarness) fixtureAction(action string) int {
 	}
 	var group int
 	if err := json.NewDecoder(conn).Decode(&group); err != nil || group <= 1 {
+		if action == "kill" && err == io.EOF {
+			return 0
+		} // Self-kill may precede its reply; caller must prove absence.
 		h.t.Fatal("fixture action rejected", action, err)
 	}
 	return group

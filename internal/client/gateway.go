@@ -7,7 +7,8 @@ import (
 	v1 "github.com/octacian/backlot/api/v1"
 )
 
-// Gateway controls the explicitly managed gateway through the daemon.
+// Gateway controls the explicitly managed gateway through the daemon. Force stop
+// requires ExpectedClaimRevision selected from status; retries retain that value.
 func (c *Client) Gateway(ctx context.Context, action string, request v1.GatewayRequest) (v1.GatewayResponse, error) {
 	var response v1.GatewayResponse
 	switch action {

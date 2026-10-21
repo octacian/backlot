@@ -50,7 +50,7 @@ func (s *service) stopKept(id string, entry *execution) (v1.Instance, error) {
 	defer cancel()
 	cleanup = errors.Join(cleanup, s.store.removeGateway(ctx, id, &journal))
 	for _, observed := range instance.Execution.NativeCleanup {
-		if observed.Confidence != v1.ObservedEmpty {
+		if observed.FencesResources(instance.NativeOwnershipWarnings) {
 			cleanup = errors.Join(cleanup, errors.New("native cleanup observation remains incomplete"))
 			break
 		}

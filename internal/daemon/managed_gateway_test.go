@@ -16,6 +16,7 @@ import (
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/gateway"
 	"github.com/octacian/backlot/internal/manifest"
+	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 )
 
@@ -185,5 +186,47 @@ func TestLegacyCaddyRestartCompatibility(t *testing.T) {
 	next.Caddy = &value
 	if err := safeRestart(old, next); err != nil {
 		t.Fatal("explicit external default broke retained scene", err)
+	}
+}
+
+func TestManagedPendingBootRecovery(t *testing.T) {
+	boot, err := native.CurrentBoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, boot string
+		recover    bool
+	}{
+		{name: "same-boot", boot: boot},
+		{name: "legacy-missing"},
+		{name: "invalid", boot: "invalid"},
+		{name: "previous-boot", boot: "00000000-0000-0000-0000-000000000001", recover: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state, err := openStore(shortTemp(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = state.db.Close() }()
+			r := managedRecord{Scope: newID(), Config: manifest.CaddyDefaults(v1.CaddyConfig{Mode: "managed", Executable: "/explicit/caddy"}), Pending: true, PendingBoot: tc.boot, Status: "uncertain"}
+			if err := state.saveManaged(r); err != nil {
+				t.Fatal(err)
+			}
+			err = state.stopManaged(&r, nil)
+			if (err == nil) != tc.recover {
+				t.Fatal("incorrect pending recovery decision", err)
+			}
+			got, err := state.managed()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.recover && (got.Pending || got.PendingBoot != "" || got.Status != "stopped") {
+				t.Fatal("prior-boot launch intent remained uncertain")
+			}
+			if !tc.recover && (!got.Pending || got.PendingBoot != tc.boot) {
+				t.Fatal("uncertain intent changed")
+			}
+		})
 	}
 }

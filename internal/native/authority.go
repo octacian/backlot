@@ -23,6 +23,7 @@ type cleanupRequest struct {
 	Identity        Identity
 	Grace           time.Duration
 	Crash           bool
+	AnchorCrash     bool
 }
 type cleanupProof struct {
 	Inactive bool                    `json:",omitempty"`
@@ -38,7 +39,9 @@ type authorityRequest struct {
 	done    chan struct{}
 }
 
-// Stop uses only the private authority. Process observations never authorize signals.
+// Stop requests authenticated cleanup or proves an earlier boot ended.
+// A nil error establishes resource release, never necessarily output collection.
+// Process observations never authorize signals.
 func Stop(id Identity, grace time.Duration) error {
 	_, err := StopResult(id, grace)
 	return err
@@ -65,19 +68,7 @@ func sessionResult(id Identity, confidence v1.NativeCleanupConfidence) *v1.Nativ
 // StopResult returns session observation confidence independently of the original root exit.
 // Strict helpers return no session result and retain their pinned-group absence proof.
 func StopResult(id Identity, grace time.Duration) (*v1.NativeCleanupResult, error) {
-	result, err := stopResult(id, grace)
-	if err != nil && result == nil {
-		result = sessionResult(id, v1.CleanupAuthorityLost)
-	}
-	if err != nil && result != nil && result.Confidence == v1.ObservedEmpty {
-		result = sessionResult(id, v1.CleanupIncomplete)
-	}
-	if err != nil && result != nil {
-		// Keep kernel paths/IDs in the wrapped private cause, never in public
-		// cleanup strings. The shared reason/detail is intentionally bounded.
-		result = sessionResult(id, result.Confidence)
-		err = &authorityError{message: result.Detail, cause: err}
-	}
+	result, _, err := stopResultCollected(id, grace)
 	return result, err
 }
 
@@ -92,12 +83,40 @@ func (e *authorityError) Error() string { return e.message }
 // Unwrap preserves the private operating-system cause for classification.
 func (e *authorityError) Unwrap() error { return e.cause }
 
-func stopResult(id Identity, grace time.Duration) (*v1.NativeCleanupResult, error) {
+func stopResultCollected(id Identity, grace time.Duration) (*v1.NativeCleanupResult, bool, error) {
+	result, collected, err := stopAuthorityResult(id, grace)
+	if err != nil && result == nil {
+		result = sessionResult(id, v1.CleanupAuthorityLost)
+	}
+	if err != nil && result != nil {
+		if result.Confidence == v1.ObservedEmpty {
+			result = sessionResult(id, v1.CleanupIncomplete)
+		}
+		err = &authorityError{message: result.Detail, cause: err}
+	}
+	return result, collected, err
+}
+
+func stopAuthorityResult(id Identity, grace time.Duration) (*v1.NativeCleanupResult, bool, error) {
+	if id.Protocol == 0 && id.Purpose == "" && id.Component == "" && id.Attempt == "" {
+		collected, err := stopLegacy(id, grace)
+		return nil, collected, err
+	}
+
 	if !validIdentity(id) || id.PID <= 1 || id.Birth == "" || id.Control == "" || len(id.Token) != 64 {
-		return nil, errors.New("native control authority missing; preserve uncertain processes")
+		return nil, false, errors.New("native control authority missing; preserve uncertain processes")
 	}
 	if grace < 0 {
-		return nil, errors.New("invalid cleanup grace")
+		return nil, false, errors.New("invalid cleanup grace")
+	}
+	if id.Boot != "" {
+		previous, err := PreviousBoot(id.Boot)
+		if err != nil {
+			return nil, false, err
+		}
+		if previous {
+			return nil, false, nil
+		}
 	}
 	var proof cleanupProof
 	connection, err := net.DialTimeout("unix", id.Control, time.Second)
@@ -111,28 +130,31 @@ func stopResult(id Identity, grace time.Duration) (*v1.NativeCleanupResult, erro
 	}
 	if err != nil {
 		data, readErr := os.ReadFile(filepath.Join(filepath.Dir(id.Control), "receipt.json"))
+		if os.IsNotExist(readErr) {
+			return nil, false, errors.New("native control authority and receipt unavailable; preserve uncertain processes or explicitly stop --force")
+		}
 		if readErr != nil || json.Unmarshal(data, &proof) != nil {
-			return nil, errors.New("native control authority unavailable; preserve uncertain processes")
+			return nil, false, errors.New("native control authority unavailable; preserve uncertain processes")
 		}
 	}
 	if proof.Identity != id {
-		return nil, errors.New("native cleanup response identity mismatch; preserve uncertain processes")
+		return nil, false, errors.New("native cleanup response identity mismatch; preserve uncertain processes")
 	}
 	if id.Purpose == "application" {
 		if proof.Inactive {
 			if proof.Result != nil {
-				return nil, errors.New("inactive cleanup receipt carries session observation")
+				return nil, false, errors.New("inactive cleanup receipt carries session observation")
 			}
 		} else if proof.Result == nil || proof.Result.Component != id.Component || proof.Result.Attempt != id.Attempt || proof.Result.Validate() != nil || proof.Error == "" && proof.Result.Confidence != v1.ObservedEmpty {
-			return nil, errors.New("session cleanup receipt binding missing")
+			return nil, false, errors.New("session cleanup receipt binding missing")
 		}
 	}
 
 	if id.Purpose == "strict" && proof.Result != nil {
-		return nil, errors.New("strict cleanup receipt policy mismatch")
+		return nil, false, errors.New("strict cleanup receipt policy mismatch")
 	}
 	if proof.Error != "" {
-		return proof.Result, errors.New(proof.Error)
+		return proof.Result, false, errors.New(proof.Error)
 	}
 	// A receipt is emitted after anchor and collectors join, but success also requires
 	// the outside authority's original process to have exited. Never signal this PID.
@@ -140,17 +162,17 @@ func stopResult(id Identity, grace time.Duration) (*v1.NativeCleanupResult, erro
 	for time.Now().Before(deadline) {
 		actual, err := identify(id.PID)
 		if errors.Is(err, syscall.ESRCH) || os.IsNotExist(err) {
-			return proof.Result, nil
+			return proof.Result, true, nil
 		}
 		if err != nil {
-			return nil, fmt.Errorf("guardian exit verification unavailable: %w", err)
+			return nil, false, fmt.Errorf("guardian exit verification unavailable: %w", err)
 		}
 		if actual.Birth != id.Birth {
-			return proof.Result, nil
+			return proof.Result, true, nil
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	return nil, errors.New("guardian exit not verified after cleanup proof")
+	return nil, false, errors.New("guardian exit not verified after cleanup proof")
 }
 
 // Supervise owns an unreaped anchor child throughout every workload-group signal.
@@ -179,6 +201,12 @@ func Supervise() error {
 	}
 	if !validIdentity(id) || own.PID != id.PID || own.Birth != id.Birth || len(id.Token) != 64 {
 		return errors.New("guardian initialization identity mismatch")
+	}
+	if id.Boot != "" {
+		boot, err := bootIdentity()
+		if err != nil || !validBootIdentity(boot) || boot != id.Boot {
+			return errors.New("guardian initialization boot mismatch")
+		}
 	}
 	listener, err := net.Listen("unix", id.Control)
 	if err != nil {
@@ -309,6 +337,16 @@ func Supervise() error {
 				request.reply <- proof
 				continue
 			}
+			if request.request.AnchorCrash {
+				proof := cleanupProof{Identity: id}
+				if os.Getenv("BACKLOT_NATIVE_TEST_FAULTS") != "1" || workload == nil || workload.released {
+					proof.Error = "fixture anchor fault disabled or unavailable"
+				} else if err := workload.anchor.Process.Kill(); err != nil {
+					proof.Error = "fixture anchor child fault failed"
+				}
+				request.reply <- proof
+				continue
+			}
 
 			cleanupErr := error(nil)
 			if workload != nil {
@@ -398,6 +436,7 @@ type ownedWorkload struct {
 	scanSession  func(context.Context) ([]int, error)
 	session      bool
 	anchor       *exec.Cmd
+	lease        *os.File
 	collected    chan error
 	statusDone   chan struct{}
 	reads        []*os.File
@@ -425,15 +464,27 @@ func startWorkload(spec Spec, publish func(Exit)) (*ownedWorkload, error) {
 		return nil, err
 	}
 	anchor := exec.Command(executable, "__native-anchor")
-	configureAnchor(anchor)
-	if err := anchor.Start(); err != nil {
+	leaseRead, leaseWrite, err := os.Pipe()
+	if err != nil {
 		_ = outRead.Close()
 		_ = outWrite.Close()
 		_ = errRead.Close()
 		_ = errWrite.Close()
 		return nil, err
 	}
-	w := &ownedWorkload{anchor: anchor, collected: make(chan error, 2), statusDone: make(chan struct{}), reads: []*os.File{outRead, errRead}, publish: publish, result: Exit{Code: -1, Error: "root command status unavailable", CollectionFailure: "root exit status unavailable"}}
+	anchor.Stdin = leaseRead
+	configureAnchor(anchor)
+	if err := anchor.Start(); err != nil {
+		_ = leaseRead.Close()
+		_ = leaseWrite.Close()
+		_ = outRead.Close()
+		_ = outWrite.Close()
+		_ = errRead.Close()
+		_ = errWrite.Close()
+		return nil, err
+	}
+	_ = leaseRead.Close()
+	w := &ownedWorkload{anchor: anchor, lease: leaseWrite, collected: make(chan error, 2), statusDone: make(chan struct{}), reads: []*os.File{outRead, errRead}, publish: publish, result: Exit{Code: -1, Error: "root command status unavailable", CollectionFailure: "root exit status unavailable"}}
 	var logMu sync.Mutex
 	for i, read := range w.reads {
 		stream := []string{"stdout", "stderr"}[i]
@@ -551,6 +602,9 @@ func (w *ownedWorkload) stop(grace time.Duration) error {
 	go func() { _ = w.anchor.Wait(); close(joined) }()
 	select {
 	case <-joined:
+		if w.lease != nil {
+			_ = w.lease.Close()
+		}
 	case <-time.After(time.Second):
 		return errors.New("anchor join unavailable")
 	}
@@ -591,20 +645,31 @@ func (w *ownedWorkload) stop(grace time.Duration) error {
 func onlyAnchor(members []int, pid int) bool { return len(members) == 1 && members[0] == pid }
 
 // Anchor pins a distinct process group in its parent's session until cleanup.
+// Its private stdin lease has a single writer held by the guardian. Guardian
+// death closes that lease, so the live anchor terminates its own pinned group;
+// neither the daemon nor a replacement process signals an observed PID/PGID.
 func Anchor() error {
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, syscall.SIGTERM, os.Interrupt)
 	defer signal.Stop(signals)
-	for range signals {
+	_, _ = io.Copy(io.Discard, os.Stdin)
+	if !anchorOwnGroup() {
+		return errors.New("anchor does not own its process group")
 	}
-	return nil
+	return signalGroup(os.Getpid(), syscall.SIGKILL)
 }
 
 // CrashForTest asks an explicitly fixture-enabled private guardian to crash itself.
 // It verifies full receiver authority and original exit, never signals an observed
 // process, and never claims workload cleanup. Callers retain separate fixture
 // cleanup authority before invoking this diagnostic-only internal operation.
-func CrashForTest(id Identity) error {
+func CrashForTest(id Identity) error { return faultForTest(id, false) }
+
+// CrashAnchorForTest asks an enabled guardian to kill its retained direct anchor
+// child without releasing its PID. It never signals an observed process.
+func CrashAnchorForTest(id Identity) error { return faultForTest(id, true) }
+
+func faultForTest(id Identity, anchor bool) error {
 	if !supported() {
 		return errors.New("native fixture self-fault unsupported")
 	}
@@ -617,7 +682,7 @@ func CrashForTest(id Identity) error {
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(time.Second))
-	if err := json.NewEncoder(conn).Encode(cleanupRequest{Identity: id, Crash: true}); err != nil {
+	if err := json.NewEncoder(conn).Encode(cleanupRequest{Identity: id, Crash: !anchor, AnchorCrash: anchor}); err != nil {
 		return err
 	}
 	var proof cleanupProof
@@ -626,6 +691,9 @@ func CrashForTest(id Identity) error {
 	}
 	if proof.Identity != id || proof.Error != "" {
 		return errors.New("fixture self-fault rejected: " + proof.Error)
+	}
+	if anchor {
+		return nil
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

@@ -5,7 +5,7 @@ status: superseded
 summary: 'Require native descendants to stay in a dedicated supervised group and retain a durable guardian identity so cleanup can fail safely on uncertain ownership.'
 tags: [native, lifecycle, ownership, deadlines]
 supersedes: []
-superseded_by: [20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md]
+superseded_by: [20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md]
 ---
 
 # Supervise cooperative native process groups with durable guardian identity

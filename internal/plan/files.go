@@ -126,7 +126,9 @@ func findManifest(directory string) (string, error) {
 	return found, nil
 }
 
-func checkoutRoot(project string) string {
+// CheckoutRoot finds the nearest Git boundary, or uses the project for non-Git sources.
+// It reads metadata only and does not require a manifest.
+func CheckoutRoot(project string) string {
 	for directory := project; ; directory = filepath.Dir(directory) {
 		if _, err := os.Lstat(filepath.Join(directory, ".git")); err == nil {
 			return directory

@@ -1,7 +1,7 @@
 package v1
 
 // StateVersion identifies the supported durable database format.
-const StateVersion = 6
+const StateVersion = 9
 
 // InstanceStatus distinguishes metadata preparation from observed execution.
 type InstanceStatus string
@@ -66,14 +66,15 @@ type Operation struct {
 
 // Instance is the redacted durable public view of preparation and optional execution.
 type Instance struct {
-	ID             string           `json:"id"`
-	Execution      *ExecutionResult `json:"execution,omitempty"`
-	Checkout       CheckoutIdentity `json:"checkout"`
-	Status         InstanceStatus   `json:"status"`
-	Operation      Operation        `json:"operation"`
-	Plan           PlanResponse     `json:"plan"`
-	CreatedAt      string           `json:"created_at"`
-	LeaseExpiresAt string           `json:"lease_expires_at,omitempty"`
+	NativeOwnershipWarnings []NativeOwnershipWarning `json:"native_ownership_warnings,omitempty"`
+	ID                      string                   `json:"id"`
+	Execution               *ExecutionResult         `json:"execution,omitempty"`
+	Checkout                CheckoutIdentity         `json:"checkout"`
+	Status                  InstanceStatus           `json:"status"`
+	Operation               Operation                `json:"operation"`
+	Plan                    PlanResponse             `json:"plan"`
+	CreatedAt               string                   `json:"created_at"`
+	LeaseExpiresAt          string                   `json:"lease_expires_at,omitempty"`
 }
 
 // InstanceResponse returns redacted metadata and explicit snapshot drift.

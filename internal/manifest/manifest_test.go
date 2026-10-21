@@ -282,3 +282,17 @@ func TestUnlimitedReadinessDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Legacy machine input presence is rejected regardless of value or selected work.
+func TestMachineInputsRejected(t *testing.T) {
+	for _, format := range []string{".json", ".yaml"} {
+		for _, value := range []string{`{}`, `null`, `{"unused":"sensitive-canary"}`} {
+			data := []byte(`{"version":"backlot/v1","inputs":` + value + `}`)
+			var machine v1.MachineConfig
+			err := Decode(data, format, &machine)
+			if err == nil || strings.Contains(err.Error(), "sensitive-canary") {
+				t.Fatal("legacy machine inputs accepted or disclosed", err)
+			}
+		}
+	}
+}

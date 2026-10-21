@@ -3,15 +3,8 @@
 package daemon
 
 import (
-	"fmt"
+	"github.com/octacian/backlot/internal/localipc"
 	"os"
-	"syscall"
 )
 
-func fileIdentity(info os.FileInfo) (string, error) {
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return "", problem("checkout_identity", "cannot read filesystem identity")
-	}
-	return fmt.Sprintf("%d:%d", stat.Dev, stat.Ino), nil
-}
+func fileIdentity(info os.FileInfo) (string, error) { return localipc.Identity(info) }

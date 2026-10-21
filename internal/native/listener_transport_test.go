@@ -38,7 +38,7 @@ func TestSessionListenerTransportPrivacy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			id := Identity{Purpose: "application", Control: socket, Token: strings.Repeat("a", 64), Birth: "private-birth", Component: "api", Attempt: strings.Repeat("b", 64)}
+			id := Identity{Protocol: 1, PID: 42, Purpose: "application", Control: socket, Token: strings.Repeat("a", 64), Birth: "private-birth", Component: "api", Attempt: strings.Repeat("b", 64)}
 			if mode == "write-reset" {
 				// Exceed the socket buffers, but prepare the payload before the
 				// request budget starts so setup cannot masquerade as a reset.

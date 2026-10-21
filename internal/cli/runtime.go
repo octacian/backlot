@@ -24,7 +24,7 @@ func runtimeCommands() []*urfave.Command {
 	for _, name := range []string{"run", "restart", "reset"} {
 		commands = append(commands, &urfave.Command{Name: name, SkipFlagParsing: true, Usage: "Execute an isolated scene; restart retains data, reset replaces it", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "keep-on-failure"}, &urfave.StringFlag{Name: "project"}, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s"}), Action: runNative})
 	}
-	commands = append(commands, &urfave.Command{Name: "stop", Usage: "Stop runtime with verified group cleanup", Flags: daemonFlags(false), Action: func(ctx context.Context, c *urfave.Command) error {
+	commands = append(commands, &urfave.Command{Name: "stop", Usage: "Stop runtime; --force acknowledges potentially live native survivors", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force", Usage: "Relinquish unresolved native claims; survivors may still run/write"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
 			return fmt.Errorf("stop requires one recorded instance ID")
 		}
@@ -33,7 +33,17 @@ func runtimeCommands() []*urfave.Command {
 			return output(c, nil, err)
 		}
 		defer cli.Close()
-		response, err := cli.StopExecution(ctx, c.Args().First())
+		request := v1.StopRequest{APIVersion: v1.Version, InstanceID: c.Args().First(), Force: c.Bool("force")}
+		if request.Force {
+			selected, err := cli.Inspect(ctx, request.InstanceID)
+			if err != nil {
+				return output(c, nil, err)
+			}
+			if selected.Instance.Execution != nil {
+				request.ExpectedAttempt = selected.Instance.Execution.Attempt
+			}
+		}
+		response, err := cli.StopExecutionWithRequest(ctx, request)
 		return output(c, response, err)
 	}})
 	commands = append(commands, &urfave.Command{Name: "destroy", Usage: "Remove owned runtime and data; retain logs", Flags: daemonFlags(false), Action: func(ctx context.Context, c *urfave.Command) error {
@@ -82,6 +92,11 @@ func runtimeCommands() []*urfave.Command {
 					}
 				}
 				if err != nil {
+					return err
+				}
+			}
+			for _, warning := range response.NativeOwnershipWarnings {
+				if _, err := fmt.Fprintln(c.ErrWriter, "Warning:", warning.Message); err != nil {
 					return err
 				}
 			}

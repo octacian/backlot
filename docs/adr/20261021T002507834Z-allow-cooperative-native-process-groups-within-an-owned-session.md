@@ -4,7 +4,7 @@ date: '2026-10-21'
 status: accepted
 summary: 'Allow ordinary native watchers to create process groups inside a live guardian-owned session, with bounded identity-safe cleanup and explicit residual-process risk.'
 tags: [native, lifecycle, ownership, watchers, macos, linux]
-supersedes: [20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md]
+supersedes: [20261021T001732173Z-register-private-project-configuration.md]
 superseded_by: []
 ---
 
@@ -20,13 +20,11 @@ application restart loop. A live authenticated guardian authorizes session
 membership; guardian-loss witnessed recovery is a deferred alternative. Signal
 individually acquired kernel process identities, with bounded cleanup scans and an explicitly weaker, observed-empty cleanup result.
 
-This decision supersedes the [former native supervision
-ADR](20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md).
+This decision supersedes the [private configuration decision](20261021T001732173Z-register-private-project-configuration.md) only for native supervision and the state transition. Its project-only inputs, registry identity/storage/publication, captured configuration, sensitive-drift, privacy and CI contracts remain required, as do inherited boot, force-waiver, collection, original-exit, data-deletion and saved gateway/CA guarantees. The merged guardian → boot recovery → configuration history and independent scene-targeting decision remain intact.
 Following independent review and supported-platform adapter evidence, acceptance
 explicitly permits observed-empty cleanup to release stop/restart/output/data-deletion
 fences despite unseen compliant-fork risk, while retaining guardian-loss uncertainty.
-Witness recovery, a public risk acknowledgement and a second keeper remain outside
-this minimum scope. Acceptance establishes the contract, not completed integration.
+Witness recovery and a second keeper remain outside this scope; existing exact-target force-stop acknowledgement remains supported. Acceptance establishes the contract, not completed integration.
 
 ## Context
 
@@ -223,21 +221,6 @@ by this proposal's minimum scope:
   lose authority. For those residual cases retain the existing nonzero diagnostic
   and per-instance/data/output fences. Do not add a public acknowledgement API in
   the initial scope, nor make host reboot a routine prerequisite.
-- **Deferred alternative: explicit per-instance risk acknowledgement.** After operator
-  inspection, a named typed operation bound to instance, attempt and current
-  diagnostic revision may retire the unresolved native obligation for *launch
-  eligibility* only. Record the acknowledged risk and original failure durably;
-  never erase them or return a successful stop for that attempt. Refuse if a
-  retained/authenticated identity positively proves a live consumer; unknown is
-  explicitly still unknown. Permit a later explicit restart and release declared
-  checkout-output fences only through this separate acknowledgement. Preserve
-  owned data by default; acknowledgement alone never authorizes reset/destroy
-  deletion, container cleanup, or gateway ownership override. Such deletion still
-  needs cleanup evidence or independent proof old processes cannot survive.
-  This alternative requires a further owner decision before implementation.
-  Diagnostics must explain that an unknown stale process can race the restarted
-  workload or write its retained data. This adds a public operation, durable
-  operator-decision record and eligibility changes; it is not a free flag.
 - **Larger alternative: surviving session keeper.** Move session leadership and
   root launch into the existing anchor helper, keeping the outside guardian as
   its authenticated client, with independently recoverable control and receipts.
@@ -246,16 +229,12 @@ by this proposal's minimum scope:
   obligations. It can survive loss of the outer guardian but not all keeper
   failures. Do not implement it without a separately reviewed scope checkpoint.
 
-A future verified host boot-generation change could provide secondary process-
-non-survival proof for native obligations. It is not required or implemented by
-this minimum proposal; persisting it would need its own proportionality check.
-No mandatory reboot-only workflow, auto-forget TTL, arbitrary-PID kill instruction
-or general force-delete mode is introduced. Retained uncertainty is an existing
-rare-failure boundary, not a claimed repair guarantee. Do not expand the minimum
-implementation into witness recovery, acknowledgement
-or a tracking framework. If retained guardian-loss uncertainty is unacceptable in
-review, decide explicitly between those options and the narrower cooperative
-watcher fallback before dependent changes. Operational recurrence of stranded instances reopens this tradeoff.
+Preserve merged-main boot provenance and exact-target explicit force stop as the
+bounded recovery alternatives described below. They release native claims without
+inventing collection or process observation, and preserve independent data-deletion
+and non-native fences. No mandatory reboot, auto-forget TTL, arbitrary-PID kill,
+witness recovery or tracking framework is added. Operational recurrence can reopen
+whether a stronger mechanism is justified.
 
 ### Implementation scope and compatibility checkpoint
 
@@ -264,14 +243,14 @@ The concrete implementation boundary is:
 | Area | Required work and limit |
 | --- | --- |
 | `internal/native` | Thin Darwin/Linux identity/session adapters; guardian membership request; bounded cleanup; versioned identities/receipts and confidence; finite handles/rights; keep current root exit/collection behavior. No new permanent tracker. |
-| Durable state | Advance private state from v5 to v6, rejecting older populated state without mutation or migration. Record supervision/protocol kind, attempt and confidence in application identities/results and receipts. Keep capabilities private. No witness identity journal, extra pre-root barrier, boot generation or acknowledgement record in minimum scope. |
+| Durable state | Use private state9, validating supported merged-main versions 6 and 8 in place before advancing only their version fence atomically. Record supervision/protocol kind, attempt and confidence in application identities/results and receipts. Keep capabilities private. No witness identity journal or extra pre-root barrier is added. Preserve kernel boot provenance and existing exact-target force acknowledgement histories. |
 | Writers | Application launch intent/effect and result writers, readiness-command launches, runtime cleanup/recovery and diagnostic/export writers must agree. Managed Caddy launch/recovery explicitly selects strict-group mode and keeps existing absence semantics; test that the shared supervisor does not change its policy. |
-| APIs and CLI | Named shared cleanup result, strict decoding/validation in `api/v1`, daemon/client/CLI/status/doctor/export rendering and contract tests. Existing cleanup string/details remain truthful. No new endpoint in initial scope; acknowledgement is a separate future API decision. No endpoint accepts PID, SID, token or a generic force flag. |
+| APIs and CLI | Named shared cleanup result, strict decoding/validation in `api/v1`, daemon/client/CLI/status/doctor/export rendering and contract tests. Existing cleanup string/details remain truthful. No new endpoint; preserve existing exact-target force acknowledgements. No endpoint accepts PID, SID or token. Preserve existing targeted stop force requests and their exact-attempt/claim preconditions. |
 | Concurrency | Existing instance lifecycle lock serializes stop/restart/recovery; guardian serializes scans/activation/stop. Export fences and evidence pruning retain unresolved diagnostics. Known live consumers continue blocking destructive lifecycle actions. |
 | Background ownership | Existing guardian owns scans only during readiness/stop; existing daemon execution owns control/status collection and cancellation/join. No polling when native work is idle, container-only, offline or disabled. Recovery is finite per recorded authority; no new scheduler. |
 | Dependencies | Candidate purego v0.11.2 only on Darwin; existing x/sys pidfd APIs on Linux. Add dependency/notices only with implementation. No cgo requirement, helper installation, privileged service, cgroups or process tracking framework. |
 | Defaults and failure | Session behavior becomes the default for application native launches, including readiness; internal system-helper launches retain strict group mode; no watcher-name switch or user feature flag. Check required platform capabilities before application activation; unavailable session identity APIs fail native activation explicitly. Container-only/offline work must not load Darwin FFI or probe host processes. Do not silently downgrade to group-only behavior. |
-| Operations/docs | Old binary cleans/stops v5 resources before upgrade to a fresh v6 state directory, following current no-migration policy. Update PRD, architecture/native/platform guides, implementation tracking and acceptance wording after acceptance; retain original ADR rationale. Explain observed-empty cleanup and bounded guardian-loss uncertainty; no new operator action, trust/DNS/system-service changes. |
+| Operations/docs | Normal shutdown and owner join precede starting version9 on the same supported main6/8 state. Unsupported state remains unchanged for its matching binary. Update PRD, architecture/native/platform guides, implementation tracking and acceptance wording after acceptance; retain original ADR rationale. Explain observed-empty cleanup and bounded guardian-loss uncertainty; no new operator action, trust/DNS/system-service changes. |
 
 Purego preserves CGO_ENABLED=0 builds and lists Darwin ARM64 as tier 1, but labels
 itself beta. It introduces dynamic symbol loading, unsafe ABI bindings, Mach
@@ -291,6 +270,42 @@ existing target. Linux pidfd APIs are feasible by documented interface and exist
 x/sys, not yet runtime-proved here; require Ubuntu 24.04 and Debian 13.4 evidence,
 including denied/syscall-unavailable behavior. Seccomp/proc restrictions may fail
 native activation/cleanup explicitly. Windows job supervision remains unchanged.
+
+### Preserved recovery and bounded state transition
+
+Fresh state uses version9. Under exclusive daemon/database ownership, validate
+supported merged-main6 and8 shapes, nested authority and addressing needed for
+safe recovery, then change only the version fence in one bbolt transaction.
+Preserve record bytes, unknown passive metadata, secrets, histories, registry,
+saved gateway configuration, CA/key, data and evidence; never enroll or reconstruct
+provenance. Reject unsupported/corrupt state and incompatible experimental6 session,
+cleanup or copy extensions unchanged with matching-binary guidance before recovery
+effects. Current9 checks cover recovery safety, not historical plan/config compliance
+or current file/provider availability. Missing historical boot/purpose/effect facts
+remain uncertainty. Precommit failure rolls back; postcommit startup failure stays9
+and is forward-recoverable. No migration framework, live handover, autostart or reset.
+
+A private exact old strict wire tuple/receipt adapter classifies before contacting
+control paths or reading receipts. Keep optional historical Boot and old managed
+claim serialization; never reinterpret old identities as protocol1 or launch old
+helpers. New writers bind boot before intent and protocol/purpose/component/attempt
+before activation. Earlier boot releases native resources only after all relevant
+obligations, including pending intent, prove older boot. Preserve sticky historical
+NativeCleanup confidence/reason/detail; an optional `previous_boot` resource-release
+reason explains current eligibility, never observed-empty or collection success.
+Existing exact-attempt force warnings can explain a committed waiver. Copy mutable
+results before updates so audits retain originals. Neither reboot nor force bypasses
+non-native cleanup, abandoned-data guards, collection gaps or original exit facts.
+Centralize effective eligibility in existing lifecycle readers.
+
+Only exact normal old6/8 `POST /v1/stop` stopping acknowledgements remain accepted;
+Status and configuration-consuming operations require9. Acknowledgement does not
+prove child exit or lock release. New attempts use captured current project-only
+configuration and commit its snapshot with acceptance after sensitive-drift checks.
+The independent registry remains format1 and Action metadata requires exactly9.
+Doctor shares one nil/copy journal decoder before migration and recovery effects,
+retaining public-only0444 copies under0700 parents, strict identity/hash binding,
+consumer-before-file cleanup and bounded sanitized diagnostics/joins.
 
 ### Bounded acceptance
 
@@ -363,10 +378,7 @@ implementation rather than weakening diagnostics later.
   grow this request into a privileged service, cgroups, Endpoint Security or a
   generic tracking system to preserve an inherited stronger promise.
 - Keep all guardian-loss fences until reboot: simple and safe for deletion but an
-  excessive sole recovery workflow under the owner's stated preference. Boot
-  proof remains a possible secondary mechanism. Retain current per-instance
-  uncertainty in minimum scope; consider witness recovery or acknowledgement if
-  recurring failures make that boundary unsuitable.
+  excessive sole recovery workflow under the owner's stated preference. Keep accepted earlier-boot resource release and explicit exact-target force waiver as secondary mechanisms; neither proves collection or permits unfenced data deletion.
 - Require cgo for libproc: conventional bindings, but changes the shipped static-Go
   build/cross-build contract. Compare again if purego fails actual ABI/support gates.
 - Retain strict-group supervision for Backlot-owned system helpers: chosen because

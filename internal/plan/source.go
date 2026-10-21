@@ -1,6 +1,11 @@
 package plan
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+
+	"github.com/octacian/backlot/internal/manifest"
+)
 
 // Source binds a discovered manifest to canonical project and checkout paths.
 // Discovery reads filesystem metadata only, before any manifest/config/seed bytes.
@@ -22,7 +27,14 @@ func Locate(projectPath string) (Source, error) {
 	}
 	file, project, err := Discover(start, projectPath)
 	if err != nil {
-		return Source{}, err
+		path := projectPath
+		if path == "" {
+			path = start
+		}
+		if abs, e := filepath.Abs(path); e == nil {
+			path = abs
+		}
+		return Source{}, manifest.SourceError(err, "manifest", path)
 	}
-	return Source{ManifestPath: file, ProjectPath: project, CheckoutPath: checkoutRoot(project)}, nil
+	return Source{ManifestPath: file, ProjectPath: project, CheckoutPath: CheckoutRoot(project)}, nil
 }

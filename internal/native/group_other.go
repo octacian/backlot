@@ -9,8 +9,10 @@ import (
 	"syscall"
 )
 
-func supported() bool       { return false }
-func configure(_ *exec.Cmd) {}
+func supported() bool               { return false }
+func anchorOwnGroup() bool          { return false }
+func bootIdentity() (string, error) { return "", errors.New("native boot identity unsupported") }
+func configure(_ *exec.Cmd)         {}
 func identify(_ int) (Identity, error) {
 	return Identity{}, errors.New("native execution unsupported on this platform")
 }

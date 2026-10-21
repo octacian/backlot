@@ -88,7 +88,7 @@ func validateExecution(instance v1.Instance) error {
 			}
 		}
 	}
-	if err := validateNativeCleanup(result.NativeCleanup, result.Attempt, result.Components, result.CleanupFailure); err != nil {
+	if err := validateNativeCleanup(result.NativeCleanup, result.Attempt, result.Components, result.CleanupFailure, instance.NativeOwnershipWarnings); err != nil {
 		return err
 	}
 	if !validID(result.Attempt) {
@@ -168,20 +168,20 @@ func validateExportResult(result v1.ExportResult) error {
 	default:
 		return responseError()
 	}
-	if err := validateNativeCleanup(result.NativeCleanup, result.Attempt, result.Components, result.CleanupFailure); err != nil {
+	if err := validateNativeCleanup(result.NativeCleanup, result.Attempt, result.Components, result.CleanupFailure, result.NativeOwnershipWarnings); err != nil {
 		return err
 	}
 	return validateOutcome(result.Status, result.TerminalExitCode, result.Cancelled, result.Failure, result.CollectionFailure, result.CleanupFailure, result.Components)
 }
 
-func validateNativeCleanup(results []v1.NativeCleanupResult, attempt string, components []v1.ComponentResult, failure string) error {
+func validateNativeCleanup(results []v1.NativeCleanupResult, attempt string, components []v1.ComponentResult, failure string, warnings []v1.NativeOwnershipWarning) error {
 	seen := map[string]bool{}
 	names := map[string]bool{}
 	for _, c := range components {
 		names[c.Name] = true
 	}
 	for _, r := range results {
-		if r.Validate() != nil || r.Attempt != attempt || !names[r.Component] || seen[r.Component] || r.Confidence != v1.ObservedEmpty && failure == "" {
+		if r.Validate() != nil || r.Attempt != attempt || !names[r.Component] || seen[r.Component] || r.FencesResources(warnings) && failure == "" {
 			return responseError()
 		}
 		seen[r.Component] = true

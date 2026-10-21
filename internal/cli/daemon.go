@@ -51,10 +51,20 @@ func output(c *urfave.Command, value any, err error) error {
 	}
 	switch result := value.(type) {
 	case v1.GatewayResponse:
+		for _, warning := range result.NativeOwnershipWarnings {
+			if _, e := fmt.Fprintln(c.ErrWriter, "Warning:", warning.Message); e != nil {
+				return e
+			}
+		}
 		_, err = fmt.Fprintf(c.Writer, "Gateway %s (%s, HTTPS port %d)\n%s\n", result.Status, result.Mode, result.HTTPSPort, result.Message)
 	case v1.DaemonStatusResponse:
 		_, err = fmt.Fprintf(c.Writer, "Daemon %s (API %s, state %d, PID %d)\n", result.Status, result.APIVersion, result.StateVersion, result.PID)
 	case v1.InstanceResponse:
+		for _, warning := range result.Instance.NativeOwnershipWarnings {
+			if _, e := fmt.Fprintln(c.ErrWriter, "Warning:", warning.Message); e != nil {
+				return e
+			}
+		}
 		_, err = fmt.Fprintf(c.Writer, "Instance %s: %s\nOperation: %s\n", result.Instance.ID, result.Instance.Status, result.Instance.Operation.ID)
 		if err == nil && result.Instance.Execution != nil && result.Instance.Execution.Origin != "" {
 			_, err = fmt.Fprintf(c.Writer, "URL: %s\n", result.Instance.Execution.Origin)
@@ -63,6 +73,12 @@ func output(c *urfave.Command, value any, err error) error {
 			for _, r := range result.Instance.Execution.NativeCleanup {
 				if _, err = fmt.Fprintf(c.Writer, "Native cleanup %s: %s (%s)\n%s\n", r.Component, r.Confidence, r.Reason, r.Detail); err != nil {
 					break
+				}
+				if r.ResourceRelease != "" {
+					_, err = fmt.Fprintf(c.Writer, "Native resource release: %s (historical confidence and collection unchanged)\n", r.ResourceRelease)
+					if err != nil {
+						break
+					}
 				}
 			}
 		}
@@ -171,12 +187,23 @@ func preparationCommands() []*urfave.Command {
 	}}}
 	for _, name := range []string{"inspect", "status", "cancel", "renew"} {
 		flags := daemonFlags(false)
+		if name == "status" {
+			flags = append(flags, statusFollowFlags()...)
+		}
 		if name == "renew" {
 			flags = append(flags, &urfave.StringFlag{Name: "lease-token", Usage: "Private capability from disposable preparation"})
 		}
 		commands = append(commands, &urfave.Command{Name: name, Usage: "Manage durable preparation metadata", Flags: flags, Action: func(ctx context.Context, c *urfave.Command) error {
 			if c.Args().Len() != 1 {
 				return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "command requires one recorded instance ID"})
+			}
+			if c.Name == "status" {
+				if _, err := statusFollowOptions(c); err != nil {
+					return output(c, nil, err)
+				}
+				if c.Bool("follow") {
+					return followStatus(ctx, c, v1.SceneRequest{APIVersion: v1.Version, Target: v1.SceneTarget{InstanceID: c.Args().First()}})
+				}
 			}
 			dir, err := directory(c)
 			if err != nil {

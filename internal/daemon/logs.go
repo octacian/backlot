@@ -33,6 +33,7 @@ func (s *service) logsSourceLocked(request v1.LogsRequest, source *os.Root) (v1.
 	if err != nil {
 		return response, err
 	}
+	response.NativeOwnershipWarnings = instance.NativeOwnershipWarnings
 	response.Active = instance.Status == v1.Starting || instance.Status == v1.RuntimeReady || instance.Status == v1.Stopping
 	if instance.Execution != nil {
 		response.Gap = instance.Execution.CollectionFailure

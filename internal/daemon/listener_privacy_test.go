@@ -80,7 +80,7 @@ func TestSessionListenerFailureExecutionExportPrivacy(t *testing.T) {
 					t.Error("socket fixture not joined")
 				}
 			})
-			identity := native.Identity{Purpose: "application", Control: socket, Token: strings.Repeat("a", 64), Birth: "private-birth", Component: "private-component", Attempt: strings.Repeat("c", 64)}
+			identity := native.Identity{Protocol: 1, PID: 42, Purpose: "application", Control: socket, Token: strings.Repeat("a", 64), Birth: "private-birth", Component: "private-component", Attempt: strings.Repeat("c", 64)}
 			if mode == "write-reset" {
 				identity.Birth = strings.Repeat("private-birth", 1<<18)
 			}

@@ -139,6 +139,10 @@ reviews, complete frozen regression suites and exact-HEAD CI remain gates. Trust
 browser/clean-machine macOS evidence is blocked pending a disposable environment;
 no browser-warning bypass or persistent trust mutation can replace it.
 
+The [recovery decision](adr/20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md)
+adds boot provenance, explicit force-stop waivers and guardian-liveness cleanup;
+[operations](https.md#managed-gateway-recovery) retain CA/configuration and truthful
+collection gaps.
 The managed origin also exposes `ca_cert_path` for explicit native environment
 assignments, with symbolic offline planning and validated existing public-root
 resolution. See [application trust](https.md#explicit-application-trust). The
@@ -273,10 +277,9 @@ See [contracts and image requirements](daemon.md#scoped-provider-diagnostics).
 Early real CLI/API/daemon/native/Docker/Caddy/data success, missing container trust
 failure/recovery and preserved-data cleanup were exercised before broad regressions;
 revision-bound private delivery evidence records fixture/tool/image dependencies.
-Private state advances to version 5 without migration: v4 and older are rejected
-without modification so incompatible binaries cannot ignore probe ownership.
-See the [state compatibility guidance](containers.md). Independent
-reviews, frozen provider/browser/macOS suites and published-HEAD CI remain required
+See [state compatibility](containers.md#state-compatibility) for v9: supported main v6/v8 upgrades in place with preserved records and data; v5/v7
+and other unsupported formats are rejected unchanged. Independent reviews,
+frozen provider/browser/macOS suites and published-HEAD CI remain required
 before delivery readiness; no browser/application trust adoption is claimed.
 
 ## Portable run export (#41)
@@ -296,14 +299,42 @@ The early real Ubuntu ci-scenes success/failure/recovery, teardown/relocation an
 browser preview precede broader feature regression development. Independent Low
 and fresh High reviews, final frozen complete provider/browser/action gates and
 published-revision CI remain required; this paragraph does not claim readiness.
-Binary distribution/version tags remain #25, with no legacy storage migration.
+Binary distribution/version tags remain #25; the direct supported-main v6/v8-to-v9 state transition
+is scoped by the native session decision.
 
+## Registered project configuration (#48)
+
+Implemented for independent review: explicit local project setup, external private
+registry/generations shared by Git common-directory identity and manifest path,
+private-only input values and strict tools composition, atomic edits/removal repair, hidden terminal input,
+local explicit reveal, private launch/current provenance and effective drift.
+Daemon state advances directly from supported main v6/v8 to v9 in place, with typed
+validation, retained ownership/data and current-only legacy activation; old private generations require
+explicit operator retention/erasure decisions. See the [setup guide](manifest.md#registered-private-project-configuration)
+and [configuration decision and inherited contracts](adr/20261021T001732173Z-register-private-project-configuration.md).
+Independent implementation reviews, frozen full validation and published-HEAD CI
+remain gates; this section does not claim final feature readiness.
+
+## Recorded persistent-scene targeting (#47)
+
+Implemented for independent review: daemon-owned `scene start/status/stop`,
+recorded canonical checkout/project/scene selection without current-manifest
+parsing for status/stop, nearest recorded project without outer fallback, typed
+absence/idempotent stop and bounded sampled observation via `status ID --follow`.
+Follow observes the named scene through absence/recreation, fences initial
+checkout/daemon continuity; ID follow stays pinned for either lifetime and history.
+Neither acquires lifecycle ownership. The accepted [targeting decision](adr/20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md)
+and [command contract](daemon.md#named-persistent-scenes) define the behavior.
+Early real CLI/daemon/native failure/recovery and peer preservation precede focused
+regressions; independent implementation reviews, frozen complete applicable suites
+and exact published-revision CI remain delivery gates. Attached owner #50 and
+streaming/history #54 remain separate; no schema or dependency change is needed.
 
 ## Native development watchers (#49)
 
 General application-session supervision integrates bounded identity handles into
 authenticated guardian membership/cleanup, application/readiness launches and
-private state v6. Stock system helpers retain strict pinned-group proof. Shared
+private state v9. Stock system helpers retain strict pinned-group proof. Shared
 per-component cleanup confidence reaches status/doctor/exports, retaining original
 job exits and unresolved ownership fences. The [Air/Vite example](../examples/native-watchers/README.md)
 uses ordinary application tooling. Initial target adapter CI is feasibility only;

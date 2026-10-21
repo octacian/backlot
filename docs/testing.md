@@ -23,6 +23,10 @@ Run these from the repository root:
 | `make notices`, `make notices-check` | Generate/verify linked dependency license notices |
 | `bin/backlot daemon start --state-dir /absolute/private/path --json` | Start an explicit local metadata daemon after building |
 | `bin/backlot doctor --state-dir /absolute/private/path --json` | Check local daemon access and paths; select scene/instance for providers |
+| `bin/backlot scene start --json dev` | Start a persistent scene in the current checkout and wait for readiness |
+| `bin/backlot scene status --follow --duration 30m --json dev` | Observe bounded sampled persistent-scene snapshots without lifecycle ownership |
+| `bin/backlot status --follow --json INSTANCE_ID` | Observe one persistent, disposable or historical ID without checkout discovery |
+| `bin/backlot scene stop --json dev` | Stop a recorded scene even with a broken or deleted manifest |
 | `go run ./cmd/backlot version --json` | Inspect the typed version result |
 | `go run ./cmd/backlot plan test --project examples/adoption --json -- -run TestExample` | Validate an offline fixture plan and forward terminal arguments |
 | `make fmt` | Format Go source |
@@ -193,7 +197,7 @@ Run the native managed suite with the same exclusive owned fixture grant:
 
 ```sh
 BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
-  go test -race ./internal/daemon -run '^TestManagedHTTPSRuntime$' -count=1 -v
+  go test -race ./internal/daemon -run '^(TestManagedHTTPSRuntime|TestManagedForceRestart)$' -count=1 -v
 ```
 
 This is required on the frozen candidate alongside the complete gateway,
@@ -301,10 +305,13 @@ then run:
 
 ```sh
 BACKLOT_ACCEPTANCE_CONFIG=/absolute/private/machine.yaml \
+BACKLOT_ACCEPTANCE_PROJECT_INPUTS=/absolute/private/inputs.yaml \
   go test -race ./internal/acceptance -run '^TestReleaseWorkflows$' -count=1 -v
 ```
 
-The machine file must select explicitly built fixture/browser image tags. This
+The separate private inputs document must select explicitly built fixture/browser
+image tags; the machine file supplies providers only. Each temporary fixture
+repository is explicitly enrolled under its owned private root. This
 suite mutates only its owned instance routes/resources, never gateway bootstrap,
 DNS or trust. An unset variable skips; a skip is not acceptance. This supplements
 the complete Docker/gateway/HTTPS suites above, which remain separate required

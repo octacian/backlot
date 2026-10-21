@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdir, writeFile, readFile, lstat, symlink } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, lstat, symlink, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import * as vm from 'node:vm';
@@ -136,6 +136,7 @@ test('real CLI adapter isolates projects, masks generation and leaves default re
  skip: !process.env.BACKLOT_BINARY && 'requires explicitly built current-head Backlot binary'
 }, async () => {
  const owner = await createOwner();
+ const projects = [];
  try {
   await mkdir(join(owner.root, 'tools'));
   const binary = join(owner.root, 'tools/backlot');
@@ -143,26 +144,32 @@ test('real CLI adapter isolates projects, masks generation and leaves default re
   await requireProjectRuntime(owner, binary);
   const machine = join(owner.root, 'machine.json');
   await writeFile(machine, '{"version":"backlot/v1"}', { mode: 0o600 });
-  const projects = [];
   for (let i = 0; i < 2; i++) {
    const project = owner.root + `-project-${i}`; projects.push(project);
    await mkdir(project);
-   // Register cleanup before later setup failures, outside the selected registry root.
-   const { rm } = await import('node:fs/promises');
-   try {
-    await writeFile(join(project, 'backlot.json'), JSON.stringify({ version:'backlot/v1', project:`private-${i}`, tools:{node:process.execPath}, inputs:{token:{secret:true, generate:'random-hex-32'}}, components:{check:{kind:'job',runtime:'native',policy:'each-start',command:{tool:'node'}}}, scenes:{test:{lifetime:'disposable',components:['check'],terminal_job:'check'}}}));
-    const generated = [];
-    await setupProject(owner, binary, machine, { requested:true, project, inputs:i ? {token:'second-private-marker'} : {}, generate:i ? [] : ['token'] }, value => generated.push(value));
-    if (!i) assert.match(generated[0], /^[0-9a-f]{64}$/);
-    const env = await backlotEnvironment(owner);
-    const inspect = async () => JSON.parse(await command(binary, ['project','setup','--project',project,'--config',machine,'--dangerously-reveal-secrets','--json'], { env, sensitive:true }));
-    const before = await inspect();
-    assert.equal(before.inputs[0].revealed_value, i ? 'second-private-marker' : generated[0]);
-    await assert.rejects(setupProject(owner, binary, machine, {requested:true,project,inputs:{unknown:'must-not-escape'},generate:[]}), /Sensitive project setup command failed/);
-    assert.equal((await inspect()).private_path, before.private_path);
-   } finally { await rm(project, { recursive:true, force:true }); }
+   // Keep both identities alive through isolation assertions; cleanup is registered
+   // before mkdir and remains outside the selected registry root.
+   await writeFile(join(project, 'backlot.json'), JSON.stringify({ version:'backlot/v1', project:`private-${i}`, tools:{node:process.execPath}, inputs:{token:{secret:true, generate:'random-hex-32'}}, components:{check:{kind:'job',runtime:'native',policy:'each-start',command:{tool:'node'}}}, scenes:{test:{lifetime:'disposable',components:['check'],terminal_job:'check'}}}));
+   const generated = [];
+   await setupProject(owner, binary, machine, { requested:true, project, inputs:i ? {token:'second-private-marker'} : {}, generate:i ? [] : ['token'] }, value => generated.push(value));
+   if (!i) assert.match(generated[0], /^[0-9a-f]{64}$/);
+   const env = await backlotEnvironment(owner);
+   const inspect = async () => JSON.parse(await command(binary, ['project','setup','--project',project,'--config',machine,'--dangerously-reveal-secrets','--json'], { env, sensitive:true }));
+   const before = await inspect();
+   assert.equal(before.inputs[0].revealed_value, i ? 'second-private-marker' : generated[0]);
+   await assert.rejects(setupProject(owner, binary, machine, {requested:true,project,inputs:{unknown:'must-not-escape'},generate:[]}), /Sensitive project setup command failed/);
+   assert.equal((await inspect()).private_path, before.private_path);
   }
- } finally { await cleanup(owner); }
+ } finally {
+  // Attempt every owned removal even when one fails, then release the registry.
+  const failures = [];
+  for (const project of projects) {
+   try { await rm(project, { recursive:true, force:true }); }
+   catch (error) { failures.push(error); }
+  }
+  try { await cleanup(owner); } catch (error) { failures.push(error); }
+  if (failures.length) throw new AggregateError(failures, 'isolation fixture cleanup failed');
+ }
  await assert.rejects(lstat(owner.root), {code:'ENOENT'});
 });
 

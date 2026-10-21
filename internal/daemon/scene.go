@@ -117,26 +117,16 @@ func (s *service) resolveScene(target v1.SceneTarget) (v1.SceneResponse, error) 
 	err = s.store.db.View(func(tx *bolt.Tx) error {
 		// Collect recorded locations before filtering by scene/status. This also makes
 		// destroyed history available for nearest-project discovery and non-Git roots.
-		var instances []v1.Instance
+		instances, err := storedSceneInstances(tx)
+		if err != nil {
+			return err
+		}
 		nearest := ""
-		err := tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
-			var r record
-			if err := decodeRecord(data, string(key), &r); err != nil {
-				return err
-			}
-			i := r.Instance
-			if err := validateStoredSceneLocation(tx, i); err != nil {
-				return err
-			}
-			instances = append(instances, i)
-			project := filepath.Dir(i.Plan.ManifestPath)
+		for _, i := range instances {
+			project := i.project
 			if within(i.Checkout.Path, anchor) && within(i.Checkout.Path, project) && within(project, anchor) && (!gitBoundary || i.Checkout.Path == root) && (target.ProjectPath == "" || project == anchor) && len(project) > len(nearest) {
 				nearest = project
 			}
-			return nil
-		})
-		if err != nil {
-			return err
 		}
 		// With no Git boundary, a recorded ancestor project is the checkout root.
 		// An unrecorded explicit non-Git directory identifies itself; no manifest read.
@@ -164,22 +154,30 @@ func (s *service) resolveScene(target v1.SceneTarget) (v1.SceneResponse, error) 
 				return problem("checkout_moved", "checkout moved; use explicit recorded ID")
 			}
 		}
+		selected := ""
 		for _, instance := range instances {
-			project := filepath.Dir(instance.Plan.ManifestPath)
+			project := instance.project
 			if project != nearest {
 				continue
 			}
 			if instance.Checkout.Path != checkout.Path || instance.Checkout.ID != checkout.ID || instance.Checkout.GitDirectory != checkout.GitDirectory {
 				return problem("checkout_changed", "recorded project checkout identity changed; use explicit recorded ID")
 			}
-			if instance.Plan.Lifetime != v1.Persistent || instance.Status == v1.Destroyed || instance.Plan.Scene != target.Scene {
+			if instance.lifetime != v1.Persistent || instance.status == v1.Destroyed || instance.scene != target.Scene {
 				continue
 			}
-			if response.Result != nil {
+			if selected != "" {
 				return problem("ambiguous_target", "multiple recorded persistent instances match; select an explicit instance ID")
 			}
+			selected = instance.id
+		}
+		if selected != "" {
+			r, err := load(tx, selected)
+			if err != nil {
+				return err
+			}
 			response.Outcome = v1.SceneFound
-			response.Result = &v1.InstanceResponse{APIVersion: v1.Version, Instance: instance}
+			response.Result = &v1.InstanceResponse{APIVersion: v1.Version, Instance: r.Instance}
 		}
 		return nil
 	})
@@ -256,17 +254,82 @@ func requireSceneLocation(instance v1.Instance, project string) error {
 	return nil
 }
 
-// validateStoredSceneLocation also checks existing checkout/path relationships
-// before a record can be excluded by the current-checkout filter. A coherent-looking
-// edited path cannot hide a record whose checkout ID still names another location.
-func validateStoredSceneLocation(tx *bolt.Tx, instance v1.Instance) error {
-	if err := validateSceneRecord(instance); err != nil {
-		return err
+// recordedScene retains only selection metadata, never historical plans or secrets.
+type recordedScene struct {
+	id, project, scene, slot string
+	Checkout                 v1.CheckoutIdentity
+	lifetime                 v1.Lifetime
+	status                   v1.InstanceStatus
+}
+
+// storedSceneInstances validates existing relationships before named discovery or
+// acceptance. Each bucket is traversed once; temporary maps keep both slot checks
+// linear without changing persistent indexes or the legacy decoder. Only a unique
+// selected result is reloaded in full by resolveScene within the same transaction.
+func storedSceneInstances(tx *bolt.Tx) (map[string]recordedScene, error) {
+	instances := make(map[string]recordedScene)
+	if err := tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
+		var r record
+		if err := decodeRecord(data, string(key), &r); err != nil {
+			return err
+		}
+		if err := validateSceneRecord(r.Instance); err != nil {
+			return err
+		}
+		i := r.Instance
+		instances[string(key)] = recordedScene{
+			id: i.ID, project: filepath.Dir(i.Plan.ManifestPath), scene: i.Plan.Scene,
+			slot: sceneSlot(i), lifetime: i.Plan.Lifetime, status: i.Status,
+			Checkout: v1.CheckoutIdentity{ID: i.Checkout.ID, Path: i.Checkout.Path, GitDirectory: i.Checkout.GitDirectory},
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	var checkout v1.CheckoutIdentity
-	data := tx.Bucket([]byte("checkouts")).Get([]byte(instance.Checkout.ID))
-	if data == nil || json.Unmarshal(data, &checkout) != nil || !sameCheckout(&checkout, &instance.Checkout) || string(tx.Bucket([]byte("paths")).Get([]byte(instance.Checkout.Path))) != instance.Checkout.ID {
-		return problem("state_corrupt", "recorded scene and checkout location indexes disagree")
+	checkouts := make(map[string]v1.CheckoutIdentity)
+	if err := tx.Bucket([]byte("checkouts")).ForEach(func(key, data []byte) error {
+		var checkout v1.CheckoutIdentity
+		if json.Unmarshal(data, &checkout) != nil || checkout.ID != string(key) {
+			return problem("state_corrupt", "cannot decode recorded checkout identity")
+		}
+		checkout.GitHead = "" // HEAD is provenance, not selection identity.
+		checkouts[string(key)] = checkout
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	return nil
+	paths := make(map[string]string)
+	if err := tx.Bucket([]byte("paths")).ForEach(func(key, data []byte) error {
+		paths[string(key)] = string(data)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	slots := make(map[string]string)
+	if err := tx.Bucket([]byte("persistent")).ForEach(func(key, data []byte) error {
+		i, exists := instances[string(data)]
+		if !exists || i.lifetime != v1.Persistent || string(key) != i.slot {
+			return problem("state_corrupt", "persistent slot and recorded scene identity disagree")
+		}
+		// Destroy commits Destroyed before removing this slot in a separate
+		// transaction. The matching slot is valid throughout that existing gap.
+		slots[string(key)] = string(data)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	for _, i := range instances {
+		checkout, exists := checkouts[i.Checkout.ID]
+		if !exists || !sameCheckout(&checkout, &i.Checkout) || paths[i.Checkout.Path] != i.Checkout.ID {
+			return nil, problem("state_corrupt", "recorded scene and checkout location indexes disagree")
+		}
+		if i.lifetime == v1.Persistent && i.status != v1.Destroyed && slots[i.slot] != i.id {
+			return nil, problem("state_corrupt", "recorded persistent scene has no matching slot")
+		}
+	}
+	return instances, nil
+}
+
+func sceneSlot(i v1.Instance) string {
+	return i.Plan.Project + "/" + i.Checkout.ID + "/" + i.Plan.Scene
 }

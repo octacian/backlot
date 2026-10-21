@@ -124,6 +124,11 @@ func (s *store) beginSelected(snapshot plan.Snapshot, checkout v1.CheckoutIdenti
 		}
 	}
 	err := s.db.Update(func(tx *bolt.Tx) error {
+		if sceneOnly {
+			if _, err := storedSceneInstances(tx); err != nil {
+				return err
+			}
+		}
 		paths := tx.Bucket([]byte("paths"))
 		if id := paths.Get([]byte(checkout.Path)); id != nil && string(id) != checkout.ID {
 			return problem("checkout_replaced", "checkout path now identifies different files; old records preserved; use a separate checkout")

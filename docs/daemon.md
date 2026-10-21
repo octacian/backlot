@@ -122,7 +122,11 @@ from named matches and remains explicitly inspectable. Failed and metadata-only
 records participate in selection and ambiguity. Malformed essential recorded
 location/selector fields return `state_corrupt` before any record can be included
 or excluded from project discovery; corrupt inner history cannot silently select
-an outer scene. Structural checks do not require the manifest file to exist.
+an outer scene. Named operations also reject disagreement between records and
+existing persistent slots, including missing live-record slots or slots pointing
+to another logical identity. Destroyed history can lack a slot or retain its exact
+slot during the existing destroy transition. Legacy recorded-ID commands remain
+available independently. Structural checks do not require the manifest file to exist.
 
 Moved/replaced checkout roots or unavailable project/Git identity fail selection;
 use explicit recorded IDs for cleanup. No branch/name/path-only ownership adoption

@@ -266,11 +266,11 @@ func (g *Group) sessionListenerRequest(ctx context.Context, address string) (boo
 	}
 	_ = conn.SetDeadline(deadline)
 	if err := json.NewEncoder(conn).Encode(cleanupRequest{Identity: g.Identity, ListenerAddress: address}); err != nil {
-		return false, false, err
+		return false, false, &authorityError{message: "session listener authority unavailable", cause: errors.Join(err, ctx.Err())}
 	}
 	var proof cleanupProof
 	if err := json.NewDecoder(conn).Decode(&proof); err != nil {
-		return false, false, err
+		return false, false, &authorityError{message: "session listener observation unavailable", cause: errors.Join(err, ctx.Err())}
 	}
 	if proof.Identity != g.Identity || proof.Error != "" {
 		return false, false, errors.New("session listener observation unavailable")

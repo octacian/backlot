@@ -818,6 +818,7 @@ func TestNativeRuntime(t *testing.T) {
 		h.write()
 		r := h.run("dev")
 		h.state(r.Instance.ID, v1.RuntimeReady)
+		h.retainGuardianCleanup(r.Instance.ID)
 		if err := h.process.Process.Kill(); err != nil {
 			t.Fatal(err)
 		}
@@ -1515,7 +1516,7 @@ func (h *nativeHarness) fixtureAction(action string) int {
 // stale or inconsistent and is never signal authority by itself: the live receiver
 // must authenticate its full identity/capability before self-fault. A failed
 // copy/read refuses injection; no observed process is a signal target.
-func (h *nativeHarness) guardianCapability(id string) native.Identity {
+func (h *nativeHarness) guardianCapabilities(id string) []native.Identity {
 	h.t.Helper()
 	data, err := os.ReadFile(filepath.Join(h.dir, "state.db"))
 	if err != nil {
@@ -1534,16 +1535,23 @@ func (h *nativeHarness) guardianCapability(id string) native.Identity {
 	if err != nil || len(journal.Groups) < 1 {
 		h.t.Fatal("private fixture guardian capability unavailable", err)
 	}
-	return journal.Groups[0]
+	return journal.Groups
+}
+
+func (h *nativeHarness) guardianCapability(id string) native.Identity {
+	h.t.Helper()
+	return h.guardianCapabilities(id)[0]
 }
 
 func (h *nativeHarness) retainGuardianCleanup(id string) {
 	h.t.Helper()
-	identity := h.guardianCapability(id)
+	identities := h.guardianCapabilities(id)
 	h.t.Cleanup(func() {
-		if err := native.Stop(identity, 0); err != nil {
-			h.cleanupUnverified = true
-			h.t.Error("retained fixture guardian cleanup", err)
+		for _, identity := range identities {
+			if err := native.Stop(identity, 0); err != nil {
+				h.cleanupUnverified = true
+				h.t.Error("retained fixture guardian cleanup", err)
+			}
 		}
 		h.absent()
 	})

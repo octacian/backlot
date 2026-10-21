@@ -155,7 +155,8 @@ func (s *store) recoverExecution(id string) error {
 	if r.LaunchPending {
 		cleanup = errors.Join(cleanup, problem("cleanup_failed", "native guardian launch intent lacks its ownership effect; an inactive helper may remain; preserve and diagnose this instance"))
 	}
-	result.NativeCleanup = nil
+	// Native observations belong to this attempt, including earlier failed
+	// readiness/workload stops. A later bound receipt cannot erase uncertainty.
 	var mu sync.Mutex
 	var joined sync.WaitGroup
 	for _, group := range r.Groups {
@@ -178,7 +179,14 @@ func (s *store) recoverExecution(id string) error {
 	}
 	joined.Wait()
 	cleanup = errors.Join(cleanup, s.recoverContainers(id, &g))
+	for _, observed := range result.NativeCleanup {
+		if observed.Confidence != v1.ObservedEmpty {
+			cleanup = errors.Join(cleanup, problem("cleanup_failed", observed.Detail))
+		}
+	}
 
+	// Reassess transient non-native failures; retain native fences through their
+	// typed observations rather than making an old mixed error string sticky.
 	result.CleanupFailure = ""
 	result.CleanupDetails = nil
 	if cleanup != nil {
@@ -308,7 +316,7 @@ func (s *store) acceptExecution(id string, journal runtimeRecord, result *v1.Exe
 }
 
 // Multiple readiness/application launches share a component. Preserve the worst
-// current confidence; a recovery pass rebuilds observations from every authority.
+// confidence for the attempt, including persisted observations during recovery.
 func mergeNativeCleanup(result *v1.ExecutionResult, observed *v1.NativeCleanupResult) {
 	if observed == nil {
 		return

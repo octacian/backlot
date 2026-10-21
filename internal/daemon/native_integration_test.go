@@ -1203,31 +1203,6 @@ func TestNativeRuntime(t *testing.T) {
 		h.state(r.Instance.ID, v1.Failed)
 		h.absent()
 	})
-	t.Run("inactive-guardian-stop-status", func(t *testing.T) {
-		output, err := os.CreateTemp(t.TempDir(), "guardian-output")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = output.Close() })
-		group, err := native.Start(binary, output, output)
-		if group != nil {
-			t.Cleanup(func() {
-				if err := group.Stop(0); err != nil {
-					t.Error("inactive guardian cleanup", err)
-				}
-			})
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := group.Stop(0); err != nil {
-			t.Fatal(err)
-		}
-		result := group.Result()
-		if result == nil || result.CollectionFailure != "" || result.Code != -1 || group.PGID() != 0 || group.Alive() {
-			t.Fatal("inactive cancellation lost status or launched work", result)
-		}
-	})
 	t.Run("cli-sigint-sigterm-cancel-unlimited-terminal", func(t *testing.T) {
 		for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
 			t.Run(sig.String(), func(t *testing.T) {
@@ -1455,32 +1430,42 @@ func TestNativeRuntime(t *testing.T) {
 		h.absent()
 	})
 
-	t.Run("inactive-guardian-verified-stop", func(t *testing.T) {
-		file, err := os.OpenFile(filepath.Join(t.TempDir(), "inactive.ndjson"), os.O_CREATE|os.O_WRONLY, 0600)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = file.Close() }()
-		for _, direct := range []bool{false, true} {
-			group, err := native.Start(binary, file, file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			start := time.Now()
-			if direct {
-				err = native.Stop(group.Identity, 0)
-			} else {
-				err = group.Stop(0)
-			}
-			if err != nil {
-				t.Fatal("never-activated stop failed", direct, err)
-			}
-			if time.Since(start) > 4*time.Second {
-				t.Fatal("inactive cancellation did not join promptly")
-			}
-			if group.Alive() {
-				t.Fatal("inactive guardian remained alive")
-			}
+	t.Run("inactive-guardian-stop", func(t *testing.T) {
+		for _, mode := range []string{"local", "recovered"} {
+			t.Run(mode, func(t *testing.T) {
+				file, err := os.CreateTemp(t.TempDir(), "guardian-output")
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = file.Close() })
+				group, err := native.Start(binary, file, file)
+				if group != nil {
+					t.Cleanup(func() {
+						if err := group.Stop(0); err != nil {
+							t.Error("inactive guardian cleanup", err)
+						}
+					})
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				start := time.Now()
+				if mode == "recovered" {
+					err = native.Stop(group.Identity, 0)
+				} else {
+					err = group.Stop(0)
+					result := group.Result()
+					if result == nil || result.CollectionFailure != "" || result.Code != -1 {
+						t.Fatal("inactive cancellation lost status", result)
+					}
+				}
+				if err != nil || group.PGID() != 0 || group.Alive() {
+					t.Fatal("never-activated stop failed or launched work", err)
+				}
+				if time.Since(start) > 4*time.Second {
+					t.Fatal("inactive cancellation did not join promptly")
+				}
+			})
 		}
 	})
 

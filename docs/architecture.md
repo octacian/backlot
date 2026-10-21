@@ -61,10 +61,10 @@ the UI or CLI. A separately published Go SDK is not required for V1.
 Recommended embedded storage is bbolt: only the daemon opens the database and
 mutations use transactions. Keep a versioned state format; reject newer unsupported
 formats. Store instance/resource IDs, allocation intent, ownership tokens,
-resolved plan snapshots, preparation completion, attempts, and results. State v6
-accepts a narrow additive v5 transition and fences older readers. Explicit force-stop
-native waivers retain per-target histories outside replaced attempt journals; safe
-warnings survive replacement, and later data removal still needs independent proof.
+resolved plan snapshots, preparation completion, attempts, and results. See
+[state compatibility](containers.md#state-compatibility) and the
+[native recovery decision](adr/20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md)
+for version fencing and durable force-stop histories.
 
 Use protected per-user state directories and secret storage. Secrets may be
 persisted for resource reuse but never appear in ordinary snapshots/results.

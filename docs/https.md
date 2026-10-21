@@ -102,33 +102,27 @@ a changed root fail explicitly rather than silently resetting trust. Restore the
 original private state under a maintenance window; deleting it while journaled
 process/route ownership remains is unsafe.
 
-Shutdown and crash recovery first attempt exact scene-route cleanup, then stop
-the gateway through authenticated guardian authority. Every new native launch
-intent/effect records kernel boot identity: a different boot proves only obsolete
-process obligations, never successful output collection. Recovery preserves CA,
-configuration and retained data, marks interrupted and requires explicit startup.
-Unavailable Caddy retains exact route intents for retry through validated saved
-configuration; stale bootstrap is never replayed.
+### Managed gateway recovery
 
-For uncertain ownership, first try `gateway stop`. If authority cannot be restored,
-`gateway stop --force` explicitly relinquishes only its native claim, then ordinary
-`gateway start` can resume retained state. **Unknown survivors may still run/write**;
-force does not prove cleanup, signal observed IDs or bypass active/kept published
-scenes, ports, configuration, CA, route or trust checks. A durable private history
-and safe status warning survive later starts. API callers select `claim_revision`
-from gateway status and retain `expected_claim_revision` in force-stop retries;
-replacement claims reject stale requests before cleanup. Scene recovery uses `stop --force
-INSTANCE` followed by ordinary restart under the same risk acknowledgement. There
-is no force start/restart/reset/destroy. Later data removal still requires independent
-absence proof; keep state rather than deleting a CA or hiding uncertainty.
+Shutdown/crash recovery attempts exact scene-route cleanup before authenticated
+gateway cleanup, preserves CA/configuration/data, marks interruption and requires explicit
+startup. An unavailable API retains route intents for retry through validated saved
+configuration. A trusted prior boot releases only obsolete process obligations;
+legacy bootless/missing-effect records and closed listeners cannot prove absence.
+See [native ownership and force semantics](daemon.md#native-execution).
 
-A new anchor's guardian-only pipe helps it terminate its own pinned group after
-guardian death. This is best-effort cleanup, not absence/collection proof; ordinary
-stop can remain fenced until explicit force. Root death leaves the guardian able
-to clean up, and daemon death leaves guardians for authenticated recovery. Legacy
-bootless or missing-effect records remain unknown unless explicitly waived; global
-process scans and closed listeners do not resolve them. Restoring authority or a
-controlled reboot remains an operational alternative to accepting survivor risk.
+First retry `gateway stop`. If authority remains unavailable, choose restoration,
+a controlled reboot, or `gateway stop --force` followed by ordinary `gateway start`.
+**Force accepts unknown survivors that may still run/write**; it does not verify
+cleanup or signal observed IDs. Active/kept published scenes, exact routes,
+containers, ports, configuration, CA and trust checks remain fences. Keep private
+state; force never authorizes data deletion or CA replacement.
+
+Private history and safe warnings survive starts and daemon recovery. API callers
+select `claim_revision` from gateway status and retain `expected_claim_revision`
+through force-stop retries; replacement claims reject stale requests before cleanup.
+There is no force start/restart/reset/destroy. Scene force recovery uses
+`stop --force INSTANCE` followed by ordinary restart under the same risk.
 
 ## Explicit application trust
 
@@ -418,8 +412,7 @@ cleanup categories in `execution.cleanup_details`, alongside readable failure
 strings. Gateway diagnostics distinguish scope/configuration, hostname conflict,
 concurrency exhaustion, unavailable API and uncertain ownership/effect.
 
-State format is now 5. Version 4 and older are rejected without modification or
-migration. Follow the [private-state compatibility guidance](containers.md) for
-legacy-compatible owned cleanup/shutdown and a fresh `--state-dir`. See [testing](testing.md)
-for isolated fixture commands and separate managed macOS/browser and external
-real-domain acceptance gates.
+See [state compatibility](containers.md#state-compatibility) for the supported
+v5-to-v6 transition, rejected versions and owned cleanup before changing state
+directories. [Testing](testing.md) separates isolated fixtures from managed
+macOS/browser and external real-domain acceptance gates.

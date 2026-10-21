@@ -90,13 +90,17 @@ func TestForceHTTPRejectsReplacedClaimBeforeCleanup(t *testing.T) {
 	}
 }
 
-func TestWaiverCancellationAfterWritesRollsBack(t *testing.T) {
-	for _, managed := range []bool{false, true} {
-		name := "scene"
-		if managed {
-			name = "managed"
-		}
-		t.Run(name, func(t *testing.T) {
+func TestWaiverAfterWritesRollsBack(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		managed, cancel bool
+	}{
+		{name: "scene-error"},
+		{name: "scene-cancel", cancel: true},
+		{name: "managed-error", managed: true},
+		{name: "managed-cancel", managed: true, cancel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			s, instance, _ := exportFixture(t)
 			j := runtimeRecord{Attempt: instance.Execution.Attempt, LaunchPending: true}
 			if err := s.store.saveRuntime(instance.ID, j); err != nil {
@@ -115,18 +119,35 @@ func TestWaiverCancellationAfterWritesRollsBack(t *testing.T) {
 			beforeManaged := storedBytes(t, s.store, "meta", "managed_gateway")
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			// This seam runs after actual bbolt Put calls. Returning nil must not hide cancellation.
-			s.store.waiverCheckpoint = func() error { cancel(); return nil }
-			if managed {
-				err = s.store.abandonManaged(ctx, &r, r, nil, errors.New("missing authority"))
-			} else {
-				_, err = s.store.abandonNative(ctx, instance.ID, j.Attempt)
+			injected := errors.New("waiver commit failure")
+			// Runs after actual bbolt Put calls; nil must not hide cancellation.
+			s.store.waiverCheckpoint = func() error {
+				if tc.cancel {
+					cancel()
+					return nil
+				}
+				return injected
 			}
-			if !errors.Is(err, context.Canceled) {
-				t.Fatal("late cancellation committed", err)
+			waive := func(ctx context.Context) error {
+				if tc.managed {
+					return s.store.abandonManaged(ctx, &r, r, nil, errors.New("missing authority"))
+				}
+				_, err := s.store.abandonNative(ctx, instance.ID, j.Attempt)
+				return err
+			}
+			err = waive(ctx)
+			if tc.cancel {
+				injected = context.Canceled
+			}
+			if !errors.Is(err, injected) {
+				t.Fatal("failed transaction claimed success", err)
 			}
 			if !bytes.Equal(beforeInstance, storedBytes(t, s.store, "instances", instance.ID)) || !bytes.Equal(beforeRuntime, storedBytes(t, s.store, "runtime", instance.ID)) || !bytes.Equal(beforeManaged, storedBytes(t, s.store, "meta", "managed_gateway")) {
-				t.Fatal("cancelled transaction released claim/history")
+				t.Fatal("failed transaction released claim/history")
+			}
+			s.store.waiverCheckpoint = nil
+			if err := waive(context.Background()); err != nil {
+				t.Fatal("retry after rollback failed", err)
 			}
 		})
 	}

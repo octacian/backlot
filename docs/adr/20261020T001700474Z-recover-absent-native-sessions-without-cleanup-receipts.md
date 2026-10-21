@@ -24,119 +24,111 @@ managed HTTPS guarantees from the superseded decisions and their referenced chai
 
 ## Context
 
-An unexpected power cycle left an installed gateway with unavailable guardian
-control/receipt and retained CA/configuration. Empty listeners do not prove process
-absence or successful collection. Existing bootless records cannot retrospectively
-prove that a reboot occurred; prevention for future boots alone does not resolve
-them. Root, daemon, guardian and combined guardian/anchor failures have different
-cleanup authority, and resource release must not manufacture application success.
+An unexpected power cycle left an installed gateway without guardian control or
+receipt but with retained CA/configuration. Empty listeners prove neither process
+absence nor collection. Bootless records cannot retrospectively attest reboot.
+Root, daemon, guardian and combined guardian/anchor failures have different cleanup
+authority; releasing resources must not manufacture application success.
 
-Global process censuses do not establish the required closed-session proof: kernel
-enumeration can omit an exited parent and a newly forked child within one call;
-equal returned lists cannot detect that lineage. Unrelated churn also denied bounded
-macOS observations. Reject that fallback rather than weakening observation errors
-or extending retry deadlines. The approved exceptional boundary uses an explicit
-operator acknowledgement instead of another inference subsystem.
+Global process censuses cannot prove a closed session: enumeration can omit an
+exited parent and newly forked child within one call, even across equal lists.
+Unrelated churn also denied bounded macOS observations. Rather than weaken errors
+or extend deadlines, use explicit operator acknowledgement, not another inference
+subsystem.
 
 ## Decision
 
-Persist valid kernel boot identity before every native launch intent, including
-scene jobs/services, command probes and the managed gateway; bind completed effects
-to that same boot. Failure to obtain provenance fails before allocation. A valid
-boot mismatch releases only its obsolete native obligations and pre-effect intents.
-Missing/invalid identities stay unknown; never invent provenance for legacy records.
-Keep route, container, configuration, CA, permission and trust checks independent.
+**Boot provenance.** Persist valid kernel boot identity before every native launch
+intent (scene jobs/services, command probes and managed gateway); bind effects to
+that boot. Missing provenance fails before allocation. A valid mismatch releases
+only obsolete native obligations and pre-effect intents. Missing/invalid identities
+stay unknown, including legacy records. Route, container, configuration, CA,
+permission and trust checks remain independent.
 
-Keep authenticated cleanup first. Distinguish authenticated collector completion
-from resource-only absence inside native lifecycle code. Only the former attests
-collection. Resource-only cleanup, authority loss and force waiver retain sticky
-collection gaps even when an original root exit is already known. Keep that code
-independently; normal EOF after authenticated completion must remain successful.
+**Collection and authority.** Try authenticated cleanup first. Only authenticated
+collector completion attests collection; resource-only absence, authority loss and
+waiver retain sticky collection gaps alongside independently known original exits.
+Normal EOF after authenticated completion remains successful. Keep the private
+guardian-only writer pipe to a live self-pinned anchor: EOF terminates its own group,
+while daemon loss must not close the pipe. This is best-effort cooperative cleanup,
+not collector proof or restart eligibility. Anchor-only death remains cleanable by
+its guardian; simultaneous authority loss may require force or controlled reboot.
+No observed PID/PGID authorizes actuation.
 
-Keep the private guardian-only writer pipe to a live self-pinned anchor. On EOF
-that anchor terminates its own group; daemon loss must not close the pipe. This is
-best-effort cooperative cleanup, not collector proof or restart eligibility.
-Anchor-only death remains cleanable by its guardian; simultaneous authority loss
-may require force or controlled reboot. No observed PID/PGID authorizes actuation.
+**Targeted force stop.** Force applies only to the two stop commands, never
+start/restart/reset/destroy. A fresh CLI inspects the selected attempt or safe
+gateway claim revision; typed requests retain that precondition through retries.
+Check it under serialization before any cleanup, including pending/legacy claims.
+Managed launch rotates the revision; stop/waiver retains it. Attempt normal cleanup,
+join its finite execution owner and retain non-native fences. Atomically commit
+relinquishment with exact unresolved identities or explicitly unidentified intent,
+prior attempt/result, time, acknowledgement and available boot provenance.
+Check cancellation after writes and before storage commit (the linearization point):
+failure/cancellation before commit cannot release claims; cancellation racing during
+commit may observe an applied result. A retry cannot waive a later attempt. Close/join
+local status readers without signaling abandoned owners; retain direct-child reaping
+ownership until accepted survivors exit.
 
-Force is supported only on the two existing stop commands, never start/restart,
-reset or destroy. A fresh CLI command inspects the selected attempt or safe gateway
-claim revision; the typed request retains that precondition through retries. Check
-it under serialization before any cleanup, including pending/legacy claims. A new
-managed launch rotates its revision; stopping/waiving retains it. First attempt normal cleanup and
-join its finite execution owner, and retain non-native cleanup fences. Commit exact
-unresolved native identities or explicitly unidentified intent, prior attempt/result,
-time, acknowledgement and available boot provenance atomically with relinquishment.
-Check cancellation after transactional writes and before storage commit, the
-operation’s linearization point. Failure/cancellation before that boundary cannot
-release a claim; cancellation racing during commit may observe an applied result.
-Retry cannot waive a later attempt. Close/join local status readers without signaling abandoned owners.
-Retain direct-child reaping ownership until accepted survivors exit.
+**History and evidence.** Keep narrow private histories on existing instance/gateway
+records, outside replaced attempt journals, across restart, daemon recovery and
+evidence pruning for the target's retained lifetime. Responses/status/logs/export
+expose safe typed warnings, never capabilities or private paths. Report applied
+acknowledgement, never verified cleanup. Abandoned attempts remain incomplete;
+fully collected replacements can be complete with the prior warning. Gateway-only
+waiver creates no scene result.
 
-Store narrow private histories on existing instance and managed gateway records,
-outside replaced attempt journals. Retain them across restart, daemon recovery and
-evidence pruning for the target's retained lifetime. Expose only safe typed warnings
-in responses/status/logs/export, excluding capabilities and private paths. Force may
-report acknowledgement applied, never verified cleanup. The abandoned attempt stays
-incomplete; a fully collected replacement can be complete with the prior-ownership
-warning retained. Gateway-only waiver does not invent a scene result.
-
-State format 6 fences older readers before waiver. Permit only a narrow additive
-transition from the complete supported v5 layout, preserving records, keys and CA/
-configuration files. Reject other versions or corrupt layouts unchanged. No state
-reset or general migration framework is introduced.
-
-A later ordinary reset/destroy or other data removal must independently prove that
-waived native consumers cannot remain, through trusted later-boot provenance or
-restored authenticated authority. Waiver/gaps are not deletion permission. Preserve
-history even when subsequent independent proof permits deletion. Force cannot
-bypass exact routes, containers, active/kept published scenes, configuration drift,
-CA identity, paths, trust, ports or ordinary startup readiness. Explicit gateway
-start resumes validated saved effective configuration rather than stale bootstrap.
+**Compatibility and deletion.** State format 6 fences older readers before waiver.
+Allow only the narrow additive transition from complete supported v5, preserving
+records, keys and CA/configuration files; reject other versions/corrupt layouts
+unchanged. No state reset or general migration framework. Later reset/destroy or
+other data removal requires independent proof that waived consumers cannot remain,
+through trusted later-boot provenance or restored authenticated authority; retain
+history even after proof permits deletion. Waivers/gaps cannot bypass exact routes,
+containers, active/kept published scenes, configuration drift, CA identity, paths,
+trust, ports or normal startup readiness. Explicit gateway start resumes validated
+saved effective configuration, never stale bootstrap.
 
 ## Consequences
 
-Recovery can support installed bootless/missing-effect cases without guessing
-ownership or resetting state. Explicit force accepts duplicate work and concurrent
-writes; a free port cannot rule those risks out. Ordinary stop preserves unknowns,
-and operators can instead restore authority or perform a controlled reboot.
+Installed bootless/missing-effect cases can recover without guessing ownership or
+resetting state. Force accepts duplicate work and concurrent writes; a free port
+cannot rule out either. Ordinary stop preserves unknowns; operators can instead
+restore authority or perform a controlled reboot.
 
-All native writers persist boot provenance. Private cleanup proof, typed stop
-requests, retained per-target histories, safe warnings and destructive guards add
-bounded lifecycle work to existing owners/storage; the pipe adds one descriptor
-pair per workload. There is no periodic scan, public rescue service, new dependency,
-privileged containment, trust operation, PGID handshake or automatic restart.
-Actual-host platform and final-candidate acceptance remain separate from design
-acceptance; container evidence is not supported Linux-host acceptance.
+Boot provenance on every native writer, private cleanup proof, typed stop requests,
+per-target histories, warnings and deletion guards add bounded work to existing
+owners/storage; the pipe adds one descriptor pair per workload. There is no periodic
+scan, public rescue service, new dependency, privileged containment, trust operation,
+PGID handshake or automatic restart. Actual-host and final-candidate acceptance
+remain separate from design acceptance; container evidence is not Linux-host proof.
 
 ## Alternatives considered
 
-Authenticated cleanup alone preserves the installed failure indefinitely. Boot-only
-prevention is smaller but cannot resolve old bootless claims. Double global census
-has insufficient completeness and availability justification. Persisting new group
-boundaries before root activation could support stronger automatic recovery but
-requires a new handshake and cannot retrofit old effects; unforced guardian-loss
-restart was not requested. More durable receipts/control paths reduce file loss
-but cannot attest collection after abrupt death.
+Authenticated cleanup alone preserves the installed failure indefinitely; boot-only
+prevention cannot resolve old bootless claims. Double global census lacks justified
+completeness and availability. Persisting group boundaries before root activation
+could strengthen automatic recovery but needs a new handshake and cannot retrofit
+old effects; unforced guardian-loss restart was not requested. More durable receipts
+or control paths reduce file loss but cannot attest collection after abrupt death.
 
-Requiring reboot attestation for every waiver reduces live-survivor risk but fails
-the selected explicit no-reboot boundary. The owner instead accepts that risk through
-force. Stronger launchd/systemd/cgroup containment or redundant authorities would add
-unjustified deployment obligations. State reset, fabricated receipts, process-name
-or port kills and observed-ID actuation violate retained guarantees.
+Reboot attestation for every waiver reduces survivor risk but fails the selected
+no-reboot boundary; the owner accepts that risk through force. Stronger
+launchd/systemd/cgroup containment or redundant authorities add unjustified deployment
+obligations. State reset, fabricated receipts, process-name/port kills and observed-ID
+actuation violate retained guarantees.
 
 ## Revisit when
 
-Unforced restart after lost authority, detached workloads, unknown-survivor recovery
-without explicit risk acknowledgement, destructive cleanup without independent
-proof, or stronger containment becomes a concrete requirement. Revisit if actual
-boot/platform evidence contradicts the provenance and retained-state assumptions.
+Unforced restart after authority loss, detached workloads, recovery without explicit
+survivor-risk acknowledgement, deletion without independent proof, or stronger
+containment becomes required; or actual boot/platform evidence contradicts the
+provenance and retained-state assumptions.
 
 ## References
 
 - [Native supervision decision](20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md)
 - [Original managed gateway decision](20261014T033700000Z-support-managed-local-ca-and-external-caddy-gateways.md)
-- [Current accepted gateway decision](20261016T201500000Z-support-explicit-linux-managed-https-reachability.md)
+- [Previous Linux gateway decision](20261016T201500000Z-support-explicit-linux-managed-https-reachability.md)
 - [Explicit scene lifetimes](20261007T052013565Z-use-explicit-scene-lifetimes-and-daemon-owned-execution.md)
 - [Native implementation](../../internal/native/authority.go)
 - [Scene recovery](../../internal/daemon/runtime_state.go)

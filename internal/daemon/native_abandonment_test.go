@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
+	"html"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/manifest"
@@ -47,19 +46,18 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	if err := s.store.saveRuntime(target, journal); err != nil {
 		t.Fatal(err)
 	}
-	// A failed/cancelled transaction cannot erase the exact pending intent.
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := s.store.abandonNative(cancelled, target, original.Attempt); !errors.Is(err, context.Canceled) {
+	// A sibling with its own pending intent must remain byte-for-byte unchanged.
+	other := newID()
+	second := instance
+	second.ID = other
+	if err := s.store.db.Update(func(tx *bolt.Tx) error { return put(tx, "instances", other, record{Instance: second}) }); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := s.store.runtime(target)
-	if !after.LaunchPending {
-		t.Fatal("cancelled waiver released intent")
+	if err := s.store.saveRuntime(other, journal); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := s.store.abandonNative(context.Background(), target, newID()); err == nil {
-		t.Fatal("later attempt waived by stale request")
-	}
+	otherRecord := storedBytes(t, s.store, "instances", other)
+	otherJournal := storedBytes(t, s.store, "runtime", other)
 	forced, err := s.stopRuntimeRequest(context.Background(), v1.StopRequest{InstanceID: target, Force: true, ExpectedAttempt: original.Attempt})
 	if err != nil || len(forced.NativeOwnershipWarnings) != 1 || forced.Execution.CollectionFailure == "" || forced.Execution.TerminalExitCode == nil || *forced.Execution.TerminalExitCode != 17 {
 		t.Fatal("waiver lost outcome", forced.Execution, err)
@@ -74,11 +72,20 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	if _, err := s.stopRuntimeRequest(context.Background(), v1.StopRequest{InstanceID: target, Force: true, ExpectedAttempt: original.Attempt}); err != nil {
 		t.Fatal(err)
 	}
-	again, _ := s.store.inspect(target)
-	if len(again.NativeOwnershipWarnings) != 1 {
+	if !bytes.Equal(otherRecord, storedBytes(t, s.store, "instances", other)) || !bytes.Equal(otherJournal, storedBytes(t, s.store, "runtime", other)) {
+		t.Fatal("waiver affected unrelated target")
+	}
+	if got, _ := s.store.inspect(target); len(got.NativeOwnershipWarnings) != 1 {
 		t.Fatal("waiver retry duplicated history")
 	}
-	code(t, s.store.guardAbandonedData(target), "native_ownership_relinquished")
+	sentinel := filepath.Join(s.directory, "retained")
+	if err := os.WriteFile(sentinel, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	code(t, s.store.removeResources(context.Background(), target), "native_ownership_relinquished")
+	if data, err := os.ReadFile(sentinel); err != nil || string(data) != "keep" {
+		t.Fatal("destructive waiver bypass", err)
+	}
 	abandoned, exportErr := s.export(context.Background(), v1.ExportRequest{APIVersion: v1.Version, InstanceID: target, Output: filepath.Join(t.TempDir(), "abandoned")})
 	code(t, exportErr, "export_incomplete")
 	if abandoned.Complete || abandoned.Published || len(abandoned.Result.NativeOwnershipWarnings) != 1 {
@@ -94,6 +101,10 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 			return err
 		}
 		r.NativeAbandonments[0].Groups = []native.Identity{privateAuthority}
+		// Synthetic hostile history fields exercise escaping through complete export.
+		// The public warning message itself is a fixed product string.
+		r.NativeAbandonments[0].Attempt += `<script>attempt</script>`
+		r.NativeAbandonments[0].RecordedAt += `<script>time</script>`
 		return put(tx, "instances", target, r)
 	}); err != nil {
 		t.Fatal(err)
@@ -111,17 +122,18 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	if _, err := s.store.execution(target, v1.Succeeded, next); err != nil {
 		t.Fatal(err)
 	}
+	warning := v1.NativeOwnershipWarning{Message: nativeWaiverWarning, Attempt: original.Attempt + `<script>attempt</script>`, RecordedAt: retained.NativeAbandonments[0].RecordedAt + `<script>time</script>`}
 	request := v1.ExportRequest{APIVersion: v1.Version, InstanceID: target, Output: filepath.Join(t.TempDir(), "report")}
 	report, err := s.export(context.Background(), request)
-	if err != nil || !report.Complete || len(report.Result.NativeOwnershipWarnings) != 1 {
+	if err != nil || !report.Complete || len(report.Result.NativeOwnershipWarnings) != 1 || report.Result.NativeOwnershipWarnings[0] != warning {
 		t.Fatal("latest clean export lost prior warning", report, err)
 	}
-	html, err := os.ReadFile(filepath.Join(request.Output, "index.html"))
+	page, err := os.ReadFile(filepath.Join(request.Output, "index.html"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, visible := range []string{nativeWaiverWarning, original.Attempt, retained.NativeAbandonments[0].RecordedAt, `>Complete<`, `class="status succeeded"`} {
-		if !bytes.Contains(html, []byte(visible)) {
+	for _, visible := range []string{nativeWaiverWarning, html.EscapeString(warning.Attempt), html.EscapeString(warning.RecordedAt), `>Complete<`, `class="status succeeded"`} {
+		if !bytes.Contains(page, []byte(visible)) {
 			t.Fatalf("complete replacement HTML omitted %q", visible)
 		}
 	}
@@ -129,8 +141,18 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got := readExportReport(t, request.Output); len(got.Result.NativeOwnershipWarnings) != 1 || got.Result.NativeOwnershipWarnings[0] != warning {
+		t.Fatal("agent warning text changed", got.Result.NativeOwnershipWarnings)
+	}
+	if bytes.Contains(page, []byte("<script")) {
+		t.Fatal("ownership warning inserted unescaped markup")
+	}
+	view, err := json.Marshal(publicInstance(replacement))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, private := range []string{privateAuthority.Token, privateAuthority.Control, privateAuthority.Birth} {
-		if bytes.Contains(html, []byte(private)) || bytes.Contains(jsonReport, []byte(private)) {
+		if bytes.Contains(page, []byte(private)) || bytes.Contains(jsonReport, []byte(private)) || bytes.Contains(view, []byte(private)) {
 			t.Fatal("portable report exposed private native authority")
 		}
 	}
@@ -152,34 +174,6 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	if len(final.NativeOwnershipWarnings) != 1 {
 		t.Fatal("proof erased history")
 	}
-}
-
-func TestNativeWaiverFailedJournalPreservesClaim(t *testing.T) {
-	s, instance, _ := exportFixture(t)
-	j := runtimeRecord{Attempt: instance.Execution.Attempt, LaunchPending: true}
-	if err := s.store.saveRuntime(instance.ID, j); err != nil {
-		t.Fatal(err)
-	}
-	// Simulate failure after both transactional writes; bbolt must roll back
-	// the released journal and the history/public result together.
-	s.store.waiverCheckpoint = func() error { return errors.New("injected waiver commit failure") }
-
-	if _, err := s.store.abandonNative(context.Background(), instance.ID, j.Attempt); err == nil {
-		t.Fatal("failed waiver transaction claimed success")
-	}
-	after, _ := s.store.runtime(instance.ID)
-	if !after.LaunchPending {
-		t.Fatal("failed journal released intent")
-	}
-	kept, err := s.store.inspect(instance.ID)
-	if err != nil || len(kept.NativeOwnershipWarnings) != 0 {
-		t.Fatal("failed transaction retained partial acknowledgement", err)
-	}
-	s.store.waiverCheckpoint = nil
-	if _, err := s.store.abandonNative(context.Background(), instance.ID, j.Attempt); err != nil {
-		t.Fatal("retry after rollback failed", err)
-	}
-
 }
 
 func TestManagedWaiverFencesAndIdempotency(t *testing.T) {
@@ -297,39 +291,6 @@ func TestScenePendingBootRecovery(t *testing.T) {
 	}
 }
 
-func TestWaiverStatusContainsNoAuthority(t *testing.T) {
-	s, instance, _ := exportFixture(t)
-	group := native.Identity{PID: 42, Birth: "private-birth", Token: strings.Repeat("a", 64), Control: filepath.Join(s.directory, "private-control")}
-	audit := nativeAbandonment{Attempt: instance.Execution.Attempt, RecordedAt: time.Now().UTC().Format(time.RFC3339Nano), Groups: []native.Identity{group}, Reason: nativeWaiverWarning}
-	if err := s.store.db.Update(func(tx *bolt.Tx) error {
-		r, err := load(tx, instance.ID)
-		if err != nil {
-			return err
-		}
-		r.NativeAbandonments = []nativeAbandonment{audit}
-		return put(tx, "instances", instance.ID, r)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	view, _ := s.store.inspect(instance.ID)
-	data, _ := json.Marshal(publicInstance(view))
-	if bytes.Contains(data, []byte(group.Token)) || bytes.Contains(data, []byte(group.Control)) || bytes.Contains(data, []byte(group.Birth)) {
-		t.Fatal("private authority exposed")
-	}
-	if len(view.NativeOwnershipWarnings) != 1 {
-		t.Fatal("warning omitted")
-	}
-	// A rejected destructive call must preserve retained files.
-	sentinel := filepath.Join(s.directory, "retained")
-	if err := os.WriteFile(sentinel, []byte("keep"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	code(t, s.store.removeResources(context.Background(), instance.ID), "native_ownership_relinquished")
-	if data, err := os.ReadFile(sentinel); err != nil || string(data) != "keep" {
-		t.Fatal("destructive waiver bypass", err)
-	}
-}
-
 func TestNativeWaiverCorruptionPreservesIntent(t *testing.T) {
 	s, instance, _ := exportFixture(t)
 	journal := runtimeRecord{Attempt: instance.Execution.Attempt, LaunchPending: true}
@@ -347,33 +308,5 @@ func TestNativeWaiverCorruptionPreservesIntent(t *testing.T) {
 	after, _ := s.store.runtime(instance.ID)
 	if !after.LaunchPending {
 		t.Fatal("preflight corruption erased intent")
-	}
-}
-
-func TestNativeWaiverOtherTargetPreserved(t *testing.T) {
-	s, instance, _ := exportFixture(t)
-	other := newID()
-	second := instance
-	second.ID = other
-	if err := s.store.db.Update(func(tx *bolt.Tx) error { return put(tx, "instances", other, record{Instance: second}) }); err != nil {
-		t.Fatal(err)
-	}
-	j := runtimeRecord{Attempt: instance.Execution.Attempt, LaunchPending: true}
-	if err := s.store.saveRuntime(instance.ID, j); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.store.saveRuntime(other, j); err != nil {
-		t.Fatal(err)
-	}
-	before, _ := s.store.inspect(other)
-	if _, err := s.store.abandonNative(context.Background(), instance.ID, j.Attempt); err != nil {
-		t.Fatal(err)
-	}
-	after, _ := s.store.inspect(other)
-	a, _ := json.Marshal(before)
-	b, _ := json.Marshal(after)
-	journal, _ := s.store.runtime(other)
-	if !bytes.Equal(a, b) || !journal.LaunchPending {
-		t.Fatal("waiver affected unrelated target")
 	}
 }

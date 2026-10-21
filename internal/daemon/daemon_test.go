@@ -416,23 +416,7 @@ func TestStateVersionRejectedWithoutMutation(t *testing.T) {
 			if err != nil || !bytes.Equal(before, after) {
 				t.Fatal("rejected database bytes changed", err)
 			}
-			db, err := bolt.Open(filepath.Join(dir, "state.db"), 0600, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() {
-				if err := db.Close(); err != nil {
-					t.Error(err)
-				}
-			}()
-			if err := db.View(func(tx *bolt.Tx) error {
-				if string(tx.Bucket([]byte("meta")).Get([]byte("version"))) != version {
-					t.Fatal("unsupported version mutated")
-				}
-				return nil
-			}); err != nil {
-				t.Fatal(err)
-			}
+
 		})
 	}
 }

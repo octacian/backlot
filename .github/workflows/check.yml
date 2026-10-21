@@ -28,6 +28,8 @@ jobs:
           cache: true
       - name: Verify repository
         run: make check
+      - name: Verify native identity adapter without cgo
+        run: CGO_ENABLED=0 go test ./internal/native/procidentity -count=1 -v
       - name: Verify module metadata
         run: |
           go mod tidy

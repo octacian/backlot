@@ -6,6 +6,7 @@ require (
 	github.com/chromedp/chromedp v0.13.7
 	github.com/coder/websocket v1.8.15
 	github.com/containerd/errdefs v1.0.0
+	github.com/ebitengine/purego v0.11.2
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/gofrs/flock v0.13.1
 	github.com/invopop/jsonschema v0.14.0

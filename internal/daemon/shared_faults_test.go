@@ -149,6 +149,10 @@ func TestSharedMariaDBSQLRecovery(t *testing.T) {
 				target = f.accept(t, f.request("host", f.h.project))
 			}
 			waitSharedCheckpoint(t, f.h, point)
+			if point == "release-effect" {
+				// Observe both SQL objects absent while the daemon is still blocked.
+				f.requireAbsent(t, before)
+			}
 			sharedCrash(t, f.h)
 			if finish != nil && finish() == nil {
 				t.Fatal("crashed release reported success")

@@ -25,7 +25,12 @@ func TestSessionFixture(t *testing.T) {
 	if os.Getenv("BACKLOT_SESSION_FIXTURE") != "1" {
 		return
 	}
-	time.AfterFunc(15*time.Second, func() { os.Exit(0) })
+	time.AfterFunc(15*time.Second, func() {
+		if path := os.Getenv("BACKLOT_SESSION_EXPIRED"); path != "" {
+			_ = os.WriteFile(path, []byte("backup lifetime expired"), 0600)
+		}
+		os.Exit(33)
+	})
 	if os.Getenv("BACKLOT_SESSION_OMIT_SCAN") == "1" && os.Getenv("BACKLOT_SESSION_CHILD") != "1" {
 		anchor := exec.Command("/bin/sleep", "15")
 		configureAnchor(anchor)
@@ -140,6 +145,7 @@ func TestApplicationSessionAndStrictHelperPolicies(t *testing.T) {
 	defer func() { _ = log.Close() }()
 	t.Run("application-reaches-child-group", func(t *testing.T) {
 		ready := filepath.Join(root, "ready")
+		expired := filepath.Join(root, "expired")
 		group, err := StartApplication(binary, log, log, "app", strings.Repeat("a", 64))
 		if err != nil {
 			t.Fatal(err)
@@ -149,7 +155,8 @@ func TestApplicationSessionAndStrictHelperPolicies(t *testing.T) {
 				t.Error("retained session cleanup", err)
 			}
 		})
-		err = group.Activate(Spec{Executable: self, Args: []string{"-test.run=^TestSessionFixture$"}, Environment: append(os.Environ(), "BACKLOT_SESSION_FIXTURE=1", "BACKLOT_SESSION_READY="+ready), Directory: root, Component: "app", Attempt: strings.Repeat("a", 64)})
+		activated := time.Now()
+		err = group.Activate(Spec{Executable: self, Args: []string{"-test.run=^TestSessionFixture$"}, Environment: append(os.Environ(), "BACKLOT_SESSION_FIXTURE=1", "BACKLOT_SESSION_READY="+ready, "BACKLOT_SESSION_EXPIRED="+expired), Directory: root, Component: "app", Attempt: strings.Repeat("a", 64)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -170,8 +177,15 @@ func TestApplicationSessionAndStrictHelperPolicies(t *testing.T) {
 		if err != nil || pgid == group.PGID() {
 			t.Fatal("fixture did not create another group", err)
 		}
+		stopStarted := time.Now()
 		if err := group.Stop(20 * time.Millisecond); err != nil {
 			t.Fatal(err)
+		}
+		if time.Since(stopStarted) >= 5*time.Second || time.Since(activated) >= 10*time.Second {
+			t.Fatal("session cleanup exceeded actuation budget")
+		}
+		if _, err := os.Stat(expired); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("backup fixture expiry cannot prove cleanup", err)
 		}
 		result := group.CleanupResult()
 		if result == nil || result.Confidence != v1.ObservedEmpty {

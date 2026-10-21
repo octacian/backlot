@@ -8,7 +8,6 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"github.com/chromedp/cdproto/network"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/client"
@@ -143,20 +143,43 @@ func TestNativeWatchers(t *testing.T) {
 		tab, stopTab := chromedp.NewContext(allocator)
 		defer stopTab()
 		var socketMu sync.Mutex
-		canonicalSocket, connected, updated := false, false, false
+		type socketEvidence struct {
+			handshake, connected, updated, editEligible bool
+		}
+		sockets := make(map[network.RequestID]*socketEvidence)
+		editStarted := false
 		chromedp.ListenTarget(tab, func(event any) {
 			socketMu.Lock()
 			defer socketMu.Unlock()
 			switch e := event.(type) {
 			case *network.EventWebSocketCreated:
-				canonicalSocket = canonicalSocket || strings.HasPrefix(e.URL, strings.Replace(instance.Execution.Origin, "https:", "wss:", 1)+"/")
+				if strings.HasPrefix(e.URL, strings.Replace(instance.Execution.Origin, "https:", "wss:", 1)+"/") {
+					sockets[e.RequestID] = &socketEvidence{}
+				}
+			case *network.EventWebSocketHandshakeResponseReceived:
+				if socket := sockets[e.RequestID]; socket != nil && e.Response.Status == http.StatusSwitchingProtocols {
+					socket.handshake = true
+				}
 			case *network.EventWebSocketFrameReceived:
+				socket := sockets[e.RequestID]
+				if socket == nil || !socket.handshake {
+					return
+				}
 				var message struct {
-					Type string `json:"type"`
+					Type    string `json:"type"`
+					Updates []struct {
+						Path string `json:"path"`
+					} `json:"updates"`
 				}
 				if json.Unmarshal([]byte(e.Response.PayloadData), &message) == nil {
-					connected = connected || message.Type == "connected"
-					updated = updated || message.Type == "update"
+					socket.connected = socket.connected || message.Type == "connected"
+					if editStarted && socket.editEligible && message.Type == "update" {
+						for _, update := range message.Updates {
+							if update.Path == "/main.js" {
+								socket.updated = true
+							}
+						}
+					}
 				}
 			}
 		})
@@ -179,6 +202,24 @@ func TestNativeWatchers(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = os.WriteFile(path, source, 0600) })
+		// Begin edit evidence only after canonical handshake and connected frame.
+		socketDeadline := time.Now().Add(10 * time.Second)
+		for {
+			socketMu.Lock()
+			for _, socket := range sockets {
+				socket.editEligible = socket.handshake && socket.connected
+				editStarted = editStarted || socket.editEligible
+			}
+			ready := editStarted
+			socketMu.Unlock()
+			if ready {
+				break
+			}
+			if time.Now().After(socketDeadline) {
+				t.Fatal("canonical WSS handshake/connected deadline")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 		if err := os.WriteFile(path, []byte(strings.ReplaceAll(string(source), "web-v1", "web-v2")), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -186,7 +227,10 @@ func TestNativeWatchers(t *testing.T) {
 			t.Fatal("Vite browser HMR without navigation", err)
 		}
 		socketMu.Lock()
-		socketOK := canonicalSocket && connected && updated
+		socketOK := false
+		for _, socket := range sockets {
+			socketOK = socketOK || (socket.handshake && socket.connected && socket.updated)
+		}
 		socketMu.Unlock()
 		if !socketOK {
 			t.Fatal("canonical browser WebSocket connected/update evidence missing")
@@ -234,8 +278,32 @@ func TestNativeWatchers(t *testing.T) {
 		}
 		writeGo(strings.ReplaceAll(string(goSource), "api-v1", "api-v2"))
 		awaitAPI("api-v2")
+		beforeFailure, err := h.cli.Logs(ctx, v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "api"})
+		if err != nil {
+			t.Fatal(err)
+		}
 		writeGo(string(goSource) + "\ninvalid Go source\n")
-		time.Sleep(time.Second)
+		failureDeadline := time.Now().Add(20 * time.Second)
+		offset := beforeFailure.NextOffset
+		var failureLog strings.Builder
+		for {
+			page, err := h.cli.Logs(ctx, v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "api", Offset: offset})
+			if err != nil {
+				t.Fatal(err)
+			}
+			offset = page.NextOffset
+			for _, record := range page.Records {
+				failureLog.WriteString(record.Message)
+			}
+			if strings.Contains(failureLog.String(), "syntax error") {
+				break
+			}
+			if time.Now().After(failureDeadline) {
+				t.Fatal("Air did not observe invalid Go revision", failureLog.String())
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Log("Air invalid revision compiler diagnostic:", failureLog.String())
 		if body() != "api-v2" {
 			t.Fatal("Air failed build did not preserve previous available app")
 		}

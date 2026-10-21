@@ -809,6 +809,76 @@ func TestNativeRuntime(t *testing.T) {
 			})
 		}
 	})
+	t.Run("mixed-valid-and-mismatched-recovery-fences", func(t *testing.T) {
+		h := newNativeHarness(t, binary)
+		h.manifest.Outputs = map[string]v1.Output{"build": {Path: "build", ConcurrencyGroup: "build"}}
+		server := h.manifest.Components["server"]
+		server.Outputs = []string{"build"}
+		h.manifest.Components["server"] = server
+		h.write()
+		r := h.run("dev")
+		h.state(r.Instance.ID, v1.RuntimeReady)
+		if err := h.process.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		_ = h.process.Wait()
+		h.waited = true
+		state, err := openStore(h.dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = state.db.Close() }()
+		journal, err := state.runtime(r.Instance.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		original := append([]native.Identity(nil), journal.Groups...)
+		t.Cleanup(func() {
+			for _, group := range original {
+				if err := native.Stop(group, 0); err != nil {
+					h.cleanupUnverified = true
+					t.Error(err)
+				}
+			}
+		})
+		// Successful sibling cleanup must never overwrite any binding refusal.
+		for range 32 {
+			mismatch := original[0]
+			mismatch.Attempt = strings.Repeat("f", 64)
+			journal.Groups = append(journal.Groups, mismatch)
+		}
+		if err := state.saveRuntime(r.Instance.ID, journal); err != nil {
+			t.Fatal(err)
+		}
+		if err := state.recoverExecution(r.Instance.ID); err != nil {
+			t.Fatal(err)
+		}
+		final, err := state.inspect(r.Instance.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if final.Execution.CleanupFailure == "" || !strings.Contains(final.Execution.CleanupFailure, "purpose/attempt/component mismatch") {
+			t.Fatal("mismatched authority refusal lost", final.Execution)
+		}
+		if len(final.Execution.NativeCleanup) != 1 || final.Execution.NativeCleanup[0].Confidence != v1.ObservedEmpty {
+			t.Fatal("successful sibling cleanup not exercised", final.Execution)
+		}
+		if err := state.outputConflict(final.Plan); err == nil {
+			t.Fatal("mismatch failed to fence output reuse")
+		}
+		// Restore only the retained original authority after verifying the fence;
+		// ordinary authenticated cleanup can then discharge the owned fixture.
+		journal.Groups = original
+		if err := state.saveRuntime(r.Instance.ID, journal); err != nil {
+			t.Fatal(err)
+		}
+		if err := state.recoverExecution(r.Instance.ID); err != nil {
+			t.Fatal(err)
+		}
+		_ = state.db.Close()
+		h.start()
+		h.absent()
+	})
 	t.Run("uncertain-recovery-preserves-group", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
 		r := h.run("dev")

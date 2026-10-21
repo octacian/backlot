@@ -160,7 +160,9 @@ func (s *store) recoverExecution(id string) error {
 	var joined sync.WaitGroup
 	for _, group := range r.Groups {
 		if group.Purpose != "application" || group.Attempt != r.Attempt || !hasComponent(result.Components, group.Component) {
+			mu.Lock()
 			cleanup = errors.Join(cleanup, problem("cleanup_failed", "native application authority purpose/attempt/component mismatch; preserve uncertain processes"))
+			mu.Unlock()
 			continue
 		}
 		if proofMissing {

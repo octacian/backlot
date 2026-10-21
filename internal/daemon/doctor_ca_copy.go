@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -272,41 +271,41 @@ func (s *store) cleanupDiagnosticProbe(ctx context.Context, d *dockerEngine, key
 		return errors.New("invalid diagnostic public CA cleanup journal")
 	}
 	if err := cleanupDiagnosticProbe(ctx, d, r); err != nil {
-		return err
+		return errors.Join(diagnosticProviderUncertain, err)
 	}
 	if r.CA == nil {
 		return nil
 	}
 	root, err := diagnosticCAParent(s.directory, r.CA.Parent)
 	if err != nil {
-		return err
+		return errors.Join(diagnosticParentMismatch, err)
 	}
 	defer func() { _ = root.Close() }()
 	name := diagnosticCACopyName(key)
 	if _, err := root.Lstat(name); errors.Is(err, os.ErrNotExist) {
 		return nil
 	} else if err != nil {
-		return err
+		return errors.Join(diagnosticCopyMismatch, err)
 	}
 	if !validID(key) || r.CA.Identity == "" {
-		return errors.New("unidentified diagnostic public CA copy requires inspection; preserved")
+		return diagnosticUnidentified
 	}
 	if err := checkDiagnosticCACopy(root, key, r.CA); err != nil {
-		return err
+		return errors.Join(diagnosticCopyMismatch, err)
 	}
 	if err := root.Remove(name); err != nil {
-		return fmt.Errorf("remove diagnostic public CA copy: %w", err)
+		return errors.Join(diagnosticRemovalFailed, err)
 	}
 	parent, err := root.Open(".")
 	if err != nil {
-		return err
+		return errors.Join(diagnosticRemovalFailed, err)
 	}
 	err = errors.Join(parent.Sync(), parent.Close())
 	if err != nil {
-		return err
+		return errors.Join(diagnosticRemovalFailed, err)
 	}
 	if _, err := root.Lstat(name); !errors.Is(err, os.ErrNotExist) {
-		return errors.New("diagnostic public CA copy absence not verified")
+		return diagnosticRemovalFailed
 	}
 	return nil
 }

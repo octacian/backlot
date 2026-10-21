@@ -405,8 +405,22 @@ cleanup does not block daemon startup, new probes or application/native fences,
 but Doctor remains unhealthy and shutdown reports the unresolved cleanup. Invalid
 journal metadata fails startup closed under the existing state-corrupt contract.
 
+Doctor's existing `diagnostic_cleanup` check reports up to eight artifact/cause
+entries plus an omitted-entry count (under 2 KiB total). Live cleanup uses the same
+sanitized format in `container_probe_cleanup`. A public certificate basename is
+derived only from a validated journal key; this correlation identifier is not a
+resource token, capability or cleanup authority. Fixed causes distinguish
+`unidentified allocation`, `copy mismatch`, `parent mismatch`,
+`provider uncertainty` and `removal failure`. They describe the failed cleanup
+step, not permission to delete. Provider failures prevent copy inspection, so
+restore provider access before interpreting any later copy obstruction. Entries
+are a bounded snapshot of failed cleanup attempts; restart retries all pending
+journals and can expose entries previously omitted. No provider error, saved
+path, key bytes or private journal is included.
+
 For a reported public-copy obstruction, stop the daemon and join any diagnostic
-owners first. Inspect the exact `doctor-public-ca-<journal-key>.crt` artifact under
+owners first, even when shutdown returns unresolved cleanup. Inspect the exact
+reported `doctor-public-ca-<journal-key>.crt` artifact under
 the selected private state directory against its private diagnostic journal; do
 not infer authority from its filename. After independently establishing that no
 relevant Engine consumer remains, an operator may quarantine that exact artifact
@@ -414,7 +428,8 @@ outside the daemon state directory for inspection. Preserve its bytes/metadata
 and the journal; do not edit the database, blindly unlink files, adopt a changed
 file or force-remove foreign resources. Restart with the recorded provider access:
 recovery authenticates consumer absence again, and an absent copy can then clear
-that journal. If consumer ownership or artifact identity cannot be established,
+that journal. If the recorded original parent cannot be established (including a parent
+mismatch), consumer ownership or artifact identity cannot be established,
 retain the uncertainty and obtain operator help. No automatic foreign-file
 cleanup or operator management subsystem is provided. Older v6 journals without
 copy metadata remain supported. Older binaries can ignore the optional metadata

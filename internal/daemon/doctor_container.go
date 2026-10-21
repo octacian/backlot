@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -60,7 +62,8 @@ func (s *store) recoverDiagnosticProbes() error {
 	if err != nil {
 		return err
 	}
-	for key, r := range records {
+	for _, key := range slices.Sorted(maps.Keys(records)) {
+		r := records[key]
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		d, e := newDocker(r.Endpoint)
 		if e == nil {
@@ -70,9 +73,12 @@ func (s *store) recoverDiagnosticProbes() error {
 		cancel()
 		if e == nil {
 			e = s.forgetDiagnosticProbe(key)
+			if e != nil {
+				e = errors.Join(diagnosticRemovalFailed, e)
+			}
 		}
 		if e != nil {
-			err = errors.Join(err, problem("cleanup_failed", "diagnostic cleanup uncertain; preserve journal/resources and inspect any public CA copy as documented"))
+			err = diagnosticRecoveryFailureFor(err, key, r, e)
 		}
 	}
 	return err
@@ -176,8 +182,16 @@ func (s *service) doctorContainer(parent context.Context, r *v1.DoctorResponse, 
 		err := s.store.cleanupDiagnosticProbe(cleanup, d, key, journal)
 		if err == nil {
 			err = s.store.forgetDiagnosticProbe(key)
+			if err != nil {
+				err = errors.Join(diagnosticRemovalFailed, err)
+			}
 		}
-		diagnosticResult(r, "container_probe_cleanup", "daemon/owned Docker", err, "owned probe removal verified and ownership journal cleared", "probe cleanup is uncertain; preserve resource/journal and inspect any public CA copy as documented")
+		diagnosticCleanupResult(r, key, journal, err)
+		if err != nil {
+			s.mu.Lock()
+			s.diagnosticRecoveryErr = diagnosticRecoveryFailureFor(s.diagnosticRecoveryErr, key, journal, err)
+			s.mu.Unlock()
+		}
 	}()
 	if journal.CA != nil {
 		if err := s.store.allocateDiagnosticCACopy(key, &journal, publicCA); err != nil {

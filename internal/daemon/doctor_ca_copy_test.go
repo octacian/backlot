@@ -255,13 +255,22 @@ func TestDoctorPublicCACopyPreservationAndRecovery(t *testing.T) {
 			if _, err := os.Lstat(path); err != nil {
 				t.Fatal("uncertain copy not preserved", err)
 			}
-			svc := service{store: state, directory: state.directory}
+			svc := service{store: state, directory: state.directory, diagnosticRecoveryErr: err}
 			response, err := svc.doctor(context.Background(), v1.DoctorRequest{APIVersion: v1.Version})
 			if err != nil || response.Healthy {
 				t.Fatal("preserved journal must make doctor unhealthy", err)
 			}
 			assertDoctorCheck(t, response, "diagnostic_cleanup", v1.DoctorFailed)
-			if !strings.Contains(response.Checks[0].Message, "public CA copy requires inspection") {
+			cause := "copy mismatch"
+			switch fault {
+			case "unidentified":
+				cause = "unidentified allocation"
+			case "parent replaced":
+				cause = "parent mismatch"
+			case "consumer uncertain":
+				cause = "provider uncertainty"
+			}
+			if !strings.Contains(response.Checks[0].Message, diagnosticCACopyName(key)+": "+cause) {
 				t.Fatal("no useful artifact recovery diagnostic", response.Checks)
 			}
 			if fault == "consumer uncertain" {
@@ -288,6 +297,7 @@ func TestDoctorPublicCACopyPreservationAndRecovery(t *testing.T) {
 			if err != nil || pending {
 				t.Fatal("externally absent copy did not reconcile", err)
 			}
+			svc.diagnosticRecoveryErr = nil // A new daemon receives the successful recovery result.
 			response, err = svc.doctor(context.Background(), v1.DoctorRequest{APIVersion: v1.Version})
 			if err != nil || !response.Healthy {
 				t.Fatal("reconciled copy remains unhealthy", response, err)

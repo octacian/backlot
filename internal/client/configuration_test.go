@@ -25,21 +25,50 @@ func TestConfigurationMutationsRequireFreshCompatibleStatus(t *testing.T) {
 		"run":     func(c *Client) error { _, err := c.Run(context.Background(), v1.RunRequest{}); return err },
 		"restart": func(c *Client) error { _, err := c.Restart(context.Background(), v1.RunRequest{}); return err },
 		"reset":   func(c *Client) error { _, err := c.Reset(context.Background(), v1.RunRequest{}); return err },
+		"gateway/start": func(c *Client) error {
+			_, err := c.Gateway(context.Background(), "start", v1.GatewayRequest{APIVersion: v1.Version})
+			return err
+		},
+		"gateway/restart": func(c *Client) error {
+			_, err := c.Gateway(context.Background(), "restart", v1.GatewayRequest{APIVersion: v1.Version})
+			return err
+		},
+		"doctor": func(c *Client) error {
+			_, err := c.Doctor(context.Background(), v1.DoctorRequest{APIVersion: v1.Version, InstanceID: id, ContainerProbeImage: "owned:diagnostic"})
+			return err
+		},
 	}
 	for name, call := range methods {
 		t.Run(name, func(t *testing.T) {
+			mutationResponse := encoded
+			var result any
+			switch name {
+			case "gateway/start", "gateway/restart":
+				result = v1.GatewayResponse{APIVersion: v1.Version, Mode: "managed", Status: "unconfigured"}
+			case "doctor":
+				result = v1.DoctorResponse{APIVersion: v1.Version, Scope: "instance", InstanceID: id, Healthy: true, Paths: []v1.DoctorPath{}, Checks: []v1.DoctorCheck{}}
+			}
+			if result != nil {
+				mutationResponse, err = json.Marshal(result)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			statusCalls, mutations := 0, 0
 			statusBody, header := valid, v1.Version
 			cli := New("unused")
 			defer cli.Close()
 			cli.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				body := string(encoded)
+				body := string(mutationResponse)
 				if r.URL.Path == "/v1/status" {
 					statusCalls++
 					body = statusBody
 				} else {
 					if r.URL.Path != "/v1/"+name {
 						t.Fatalf("unexpected mutation %s", r.URL.Path)
+					}
+					if r.Method != http.MethodPost {
+						t.Fatal("mutation was not POST")
 					}
 					mutations++
 				}
@@ -69,8 +98,64 @@ func TestConfigurationMutationsRequireFreshCompatibleStatus(t *testing.T) {
 				})
 			}
 			statusBody, header = valid, "v1"
-			if err := call(cli); err != nil || mutations != 2 {
+			before := statusCalls
+			if err := call(cli); err != nil || mutations != 2 || statusCalls != before+1 {
 				t.Fatalf("matching current recovery: %v mutations=%d", err, mutations)
+			}
+		})
+	}
+}
+
+func TestHistoricalReadsAndRecordedCleanupDoNotRequireFreshStatus(t *testing.T) {
+	ctx := context.Background()
+	id := strings.Repeat("a", 64)
+	gateway := v1.GatewayResponse{APIVersion: v1.Version, Mode: "managed", Status: "unconfigured"}
+	for _, test := range []struct {
+		name, path string
+		call       func(*Client) error
+		response   any
+	}{
+		{"gateway status", "/v1/gateway/status", func(c *Client) error {
+			_, err := c.Gateway(ctx, "status", v1.GatewayRequest{APIVersion: v1.Version})
+			return err
+		}, gateway},
+		{"gateway stop", "/v1/gateway/stop", func(c *Client) error {
+			_, err := c.Gateway(ctx, "stop", v1.GatewayRequest{APIVersion: v1.Version})
+			return err
+		}, gateway},
+		{"recorded list", "/v1/instances", func(c *Client) error { _, err := c.List(ctx, v1.ListRequest{}); return err }, v1.ListResponse{APIVersion: v1.Version, Instances: []v1.InstanceSummary{}}},
+		{"doctor daemon", "/v1/doctor", func(c *Client) error { _, err := c.Doctor(ctx, v1.DoctorRequest{APIVersion: v1.Version}); return err }, v1.DoctorResponse{APIVersion: v1.Version, Scope: "daemon", Healthy: true, Paths: []v1.DoctorPath{}, Checks: []v1.DoctorCheck{}}},
+		{"doctor instance", "/v1/doctor", func(c *Client) error {
+			_, err := c.Doctor(ctx, v1.DoctorRequest{APIVersion: v1.Version, InstanceID: id})
+			return err
+		}, v1.DoctorResponse{APIVersion: v1.Version, Scope: "instance", InstanceID: id, Healthy: true, Paths: []v1.DoctorPath{}, Checks: []v1.DoctorCheck{}}},
+		{"doctor scene", "/v1/doctor", func(c *Client) error {
+			_, err := c.Doctor(ctx, v1.DoctorRequest{APIVersion: v1.Version, ProjectPath: "/tmp/project", Scene: "test", ConfigPath: "/tmp/machine.json"})
+			return err
+		}, v1.DoctorResponse{APIVersion: v1.Version, Scope: "scene", Healthy: true, Paths: []v1.DoctorPath{}, Checks: []v1.DoctorCheck{}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cli := New("unused")
+			defer cli.Close()
+			calls := 0
+			data, err := json.Marshal(test.response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cli.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path != test.path {
+					t.Fatalf("historical operation unexpectedly requested %s", r.URL.Path)
+				}
+				calls++
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}, "X-Backlot-Api-Version": {v1.Version}}, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
+			})
+			for range 2 {
+				if err := test.call(cli); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if calls != 2 {
+				t.Fatal("historical call refreshed or retried", calls)
 			}
 		})
 	}

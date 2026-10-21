@@ -176,7 +176,7 @@ service port, `port`. Supported shapes are:
 
 | Kind | Name | Field | Planning behavior |
 | --- | --- | --- | --- |
-| `input` | Declared input | Omit | Resolve supplied machine value |
+| `input` | Declared input | Omit | Resolve registered private project value |
 | `instance` | Omit | `project`, `checkout`, `scene` | Resolve known provenance |
 | `instance` | Omit | `id` | Symbolic; no instance allocated |
 | `resource` | Attached/selected resource | `port`, `path`, `name`, `value`, `url` according to kind | Symbolic; secret values redacted |
@@ -292,9 +292,10 @@ writing, rotating, or prompting. New declarations appear missing. Use `--edit`
 for a terminal walkthrough, `--from` for a structured patch, or explicit
 `--generate`, `--remove-input NAME`, and `--remove-tool NAME` edits. Unspecified
 private entries are preserved. Removal must name an existing private entry and
-cannot accompany a replacement/generation for the same name. It exposes any
-lower machine value or manifest tool default; it does not mask them. After a
-rename, remove the retired name and supply its replacement in the same update.
+cannot accompany a replacement/generation for the same name. Input removal has no
+fallback: if the input is still declared, removal fails setup completeness. Tool
+removal can expose a machine override or manifest tool default. After a rename,
+remove the retired name and supply its replacement in the same update.
 Ordinary reads remain strict, while explicit edits defer only old private key
 membership until the complete candidate is validated. Invalid, incomplete,
 cancelled, conflicting or failed edits never partially publish.

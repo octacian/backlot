@@ -42,8 +42,18 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 	// Resolve compatibility afresh at every configuration-consuming boundary.
 	// Historical reads and snapshot-based cleanup remain available; incompatible
 	// state must be cleaned up with its matching binary (see docs/containers.md).
+	checkCompatibility := false
 	switch path {
-	case "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset":
+	case "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/gateway/start", "/v1/gateway/restart":
+		checkCompatibility = true
+	case "/v1/doctor":
+		// An explicit diagnostic image authorizes container creation/start, unlike
+		// ordinary doctor reads of current or recorded configuration and evidence.
+		if probe, ok := request.(v1.DoctorRequest); ok {
+			checkCompatibility = probe.ContainerProbeImage != ""
+		}
+	}
+	if checkCompatibility {
 		status, err := c.Status(ctx)
 		if err != nil || status.Status != "running" {
 			code := "api_version"

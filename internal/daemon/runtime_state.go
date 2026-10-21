@@ -233,7 +233,9 @@ func (s *store) recoverExecution(id string) error {
 	}
 	result.Kept = false
 	result.CompletedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	result.CollectionFailure = "daemon interruption; output/status collection may contain gaps"
+	if result.CollectionFailure == "" {
+		result.CollectionFailure = "daemon interruption; output/status collection may contain gaps"
+	}
 	result.Failure = "daemon recovery interrupted execution; explicit restart required"
 	result.FailureDetail = &v1.PlanError{Code: "execution_interrupted", Message: result.Failure}
 	if _, err := s.execution(id, v1.Interrupted, &result); err != nil {

@@ -183,6 +183,7 @@ type nativeHarness struct {
 	shutdownFailureProof       func() error
 	shutdownFailureCode        string
 	cleanupUnverified          bool
+	preserveFailureEvidence    bool // Keep diagnostic files after verified cleanup.
 	control, controlToken      string
 	extraPIDFiles              []string
 	faultMode                  bool
@@ -465,6 +466,10 @@ func newNativeHarnessConfigured(t *testing.T, binary, budget string, faults bool
 	t.Cleanup(func() {
 		if h != nil && h.cleanupUnverified {
 			t.Log("preserved unverified fixture state", root)
+			return
+		}
+		if h != nil && h.preserveFailureEvidence {
+			t.Log("preserved fixture failure evidence after cleanup", root, "daemon joined", h.waited)
 			return
 		}
 		if err := os.RemoveAll(root); err != nil {

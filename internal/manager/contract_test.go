@@ -63,3 +63,17 @@ func TestStructuredCommandResults(t *testing.T) {
 		}
 	}
 }
+
+func TestForceReleaseAuthorization(t *testing.T) {
+	request := v1.ManagerRequest{Version: v1.ManagerProtocolVersion, AllocationID: strings.Repeat("a", 64), Ownership: strings.Repeat("b", 64), Database: "bl" + strings.Repeat("c", 32), Username: "bl" + strings.Repeat("d", 32), Password: strings.Repeat("e", 64), Force: true}
+	for _, operation := range []string{"allocate", "inspect", "release", "destroy"} {
+		request.Operation = operation
+		if err := ValidateRequest(request); (err == nil) != (operation == "release") {
+			t.Fatal("force accepted outside release or rejected for release", operation, err)
+		}
+	}
+	request.Operation = "release"
+	if err := ValidateResult(request, v1.ManagerResult{Version: request.Version, AllocationID: request.AllocationID, Ownership: "uncertain", Effect: "released"}); err == nil {
+		t.Fatal("force accepted unverified absence")
+	}
+}

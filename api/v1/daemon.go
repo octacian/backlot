@@ -120,3 +120,11 @@ type DaemonStatusResponse struct {
 	PID           int    `json:"pid"`
 	LeaseDuration string `json:"lease_duration"`
 }
+
+// DestroyRequest authorizes explicit cleanup of one recorded instance.
+// Force waives shared-resource ownership proof only for this invocation.
+type DestroyRequest struct {
+	APIVersion string `json:"api_version"`
+	InstanceID string `json:"instance_id"`
+	Force      bool   `json:"force,omitempty"`
+}

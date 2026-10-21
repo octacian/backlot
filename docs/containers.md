@@ -238,6 +238,75 @@ SQL objects or Docker resources by name. Shared storage/servers survive individu
 allocation release. Shutdown/recovery joins consumers before stopping servers and
 preserves data/credentials; execution requires explicit restart.
 
+### Explicit operator force cleanup
+
+Ownership uncertainty is preserved by default, including automatic disposable
+cleanup and daemon recovery. To authorize deletion of the selected recorded shared
+target despite uncertain proof, use the existing destroy command with `--force`:
+
+```sh
+backlot destroy --force --state-dir /absolute/private/daemon --json INSTANCE_ID
+backlot shared destroy --force --state-dir /absolute/private/daemon --json SERVICE_ID
+```
+
+The flag is the acknowledgment; no second prompt is required. Instance force may
+drop its recorded database and exact application user even when the database comment,
+user authentication or grants no longer match. Shared force may remove its recorded
+server/container, volume and network despite capability-label mismatch. This can
+delete an externally replaced object at a recorded handle; Docker volume identities
+are names. Neither command accepts caller-selected SQL names or provider handles.
+Container/network effects with no acknowledged immutable ID still require original
+capability recovery or manual exact removal, not adoption of a same-name replacement.
+
+Both commands verify actual absence before settling durable cleanup obligations.
+Unavailable provider/SQL access, failed deletion or unverified absence returns
+failure and retains an inspectable obligation. Partial completion permits another
+explicit attempt on the same recorded targets. Force authority is invocation-only:
+it is not persisted or reused by recovery after a crash. An older daemon that
+rejects the flag is an error, never a reason to retry silently without it.
+
+Consumers must stop/join first. Native guardian and private directory/container
+ownership checks remain enforced; force does not authorize PID/name-only signaling
+or deletion beneath known consumers. Known overlapping retained SQL allocations
+block deletion. Shared destruction still refuses **every retained allocation**,
+including stopped instances and pending cleanup; explicitly destroy each instance
+first. Force does not remove foreign consumers, force volume/network removal, or
+implicitly remove volumes from drifted server mounts. Before SQL access, Backlot
+still verifies the exact existing server's image/configuration, storage/network,
+administration environment and current loopback binding. It creates no replacements
+on this path. Restore original topology/admin access if those checks cannot pass.
+
+A missing acknowledged server is not proof that SQL data is gone: its retained
+volume may still hold every allocation. When both the exact recorded server container
+and backing volume are authoritatively absent at the recorded provider, instance
+force can reconcile that instance's SQL effects as absent without SQL access. Missing
+network alone, missing server alone, a live server with missing volume, or provider
+contact failure cannot establish this proof. Unselected peer obligations remain.
+
+If missing infrastructure prevents SQL cleanup, either restore original topology
+and administration manually, or deliberately retire that server's data. For retirement,
+stop/join **all affected consumers** first; with trusted private operator inventory,
+use provider tools to delete only that exact server container and backing volume,
+and verify both absent. Then force-destroy each affected recorded instance ID
+individually, followed by shared-destroy of the service ID to remove its remaining
+recorded network and metadata. This is destructive whole-server retirement decided
+by the operator, not an implicit instance-cleanup cascade. If consumers cannot be
+joined, resolve that first or restore access. Manual deletion of only an exact SQL
+database/user can also be reconciled by force while the original server is usable.
+
+An unreadable, lost or corrupt state DB cannot supply a validated CLI target. Force
+does not repair/reconstruct it. Retain a private backup and diagnostic inventory;
+stop the daemon/consumers through retained authenticated authorities or their owning
+supervisor; identify exact effects from trustworthy operator records, delete only
+selected effects through provider/SQL administration and verify absence. If target
+inventory is unavailable, investigate manually; do not scan/prune or signal observed
+PIDs. A fresh state directory requires explicit accounting for old leftovers and
+cannot truthfully mark unknown old obligations released. Never publish credentials,
+capabilities, SQL statements or raw private state in recovery reports.
+
+See the [force-cleanup decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md)
+for the bounded exception and retained guarantees.
+
 The initial private `backlot.manager/v1` protocol reads one JSON stdin request and
 writes one JSON stdout result, bounded to 64 KiB per document. Requests carry the
 operation, durable allocation ID/ownership and generated allocation values. Results
@@ -248,3 +317,9 @@ obligations. Trusted project code must cooperate with inspect/reconcile/release;
 unavailable/unverifiable code preserves obligations. Gate 1 validates message
 contracts using the bundled MariaDB path; executable custom managers and the
 non-Go non-database fixture arrive at Gate 3 and may refine these initial fields.
+
+The private manager request's optional `force` boolean is valid only for `release`.
+It is passed in a copy for an explicit operation and excluded from durable requests.
+Managers must honor this bounded authorization or fail explicitly as unsupported;
+exit0 alone cannot establish absence. Gate 3 custom execution must demonstrate this
+contract; there is no capability registry or silent fallback to ordinary release.

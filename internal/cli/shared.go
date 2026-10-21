@@ -11,7 +11,11 @@ import (
 func sharedCommand() *urfave.Command {
 	var children []*urfave.Command
 	for _, name := range []string{"list", "inspect", "start", "stop", "restart", "destroy"} {
-		children = append(children, &urfave.Command{Name: name, Flags: daemonFlags(false), Action: func(ctx context.Context, c *urfave.Command) error {
+		flags := daemonFlags(false)
+		if name == "destroy" {
+			flags = append(flags, &urfave.BoolFlag{Name: "force", Usage: "Delete recorded shared targets despite ownership proof mismatch; retained allocations/consumers still block"})
+		}
+		children = append(children, &urfave.Command{Name: name, Flags: flags, Action: func(ctx context.Context, c *urfave.Command) error {
 			count := 1
 			if c.Name == "list" {
 				count = 0
@@ -28,7 +32,12 @@ func sharedCommand() *urfave.Command {
 			}
 			cli := client.New(daemon.SocketPath(dir))
 			defer cli.Close()
-			response, err := cli.Shared(ctx, c.Name, v1.SharedRequest{APIVersion: v1.Version, ServiceID: c.Args().First()})
+			var response v1.SharedResponse
+			if c.Name == "destroy" {
+				response, err = cli.DestroyShared(ctx, v1.SharedDestroyRequest{APIVersion: v1.Version, ServiceID: c.Args().First(), Force: c.Bool("force")})
+			} else {
+				response, err = cli.Shared(ctx, c.Name, v1.SharedRequest{APIVersion: v1.Version, ServiceID: c.Args().First()})
+			}
 			return output(c, response, err)
 		}})
 	}

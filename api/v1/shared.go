@@ -37,3 +37,11 @@ type SharedResponse struct {
 	APIVersion string         `json:"api_version"`
 	Services   []SharedStatus `json:"services"`
 }
+
+// SharedDestroyRequest authorizes deletion of one allocation-free recorded server.
+// Force waives capability-label proof, never retained allocation/consumer fences.
+type SharedDestroyRequest struct {
+	APIVersion string `json:"api_version"`
+	ServiceID  string `json:"service_id"`
+	Force      bool   `json:"force,omitempty"`
+}

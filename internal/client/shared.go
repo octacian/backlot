@@ -18,6 +18,21 @@ func (c *Client) Shared(ctx context.Context, action string, request v1.SharedReq
 	if request.APIVersion != v1.Version || action == "list" && request.ServiceID != "" || action != "list" && !validID(request.ServiceID) {
 		return response, &v1.PlanError{Code: "invalid_request", Message: "shared operation requires the recorded service ID; list takes no ID"}
 	}
+	if action == "destroy" {
+		return c.DestroyShared(ctx, v1.SharedDestroyRequest{APIVersion: request.APIVersion, ServiceID: request.ServiceID})
+	}
+	return c.sharedCall(ctx, action, request.ServiceID, request)
+}
+
+// DestroyShared removes one recorded server without cascading retained allocations.
+func (c *Client) DestroyShared(ctx context.Context, request v1.SharedDestroyRequest) (v1.SharedResponse, error) {
+	if request.APIVersion != v1.Version || !validID(request.ServiceID) {
+		return v1.SharedResponse{}, &v1.PlanError{Code: "invalid_request", Message: "recorded service_id and compatible API version required"}
+	}
+	return c.sharedCall(ctx, "destroy", request.ServiceID, request)
+}
+func (c *Client) sharedCall(ctx context.Context, action, serviceID string, request any) (v1.SharedResponse, error) {
+	var response v1.SharedResponse
 	err := c.call(ctx, http.MethodPost, "/v1/shared/"+action, request, &response)
 	if err == nil {
 		if response.APIVersion != v1.Version || response.Services == nil {
@@ -35,7 +50,7 @@ func (c *Client) Shared(ctx context.Context, action string, request v1.SharedReq
 				return response, responseError()
 			}
 		}
-		if action != "list" && (len(response.Services) != 1 || response.Services[0].ID != request.ServiceID) {
+		if action != "list" && (len(response.Services) != 1 || response.Services[0].ID != serviceID) {
 			return response, responseError()
 		}
 	}

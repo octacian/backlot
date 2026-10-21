@@ -36,7 +36,7 @@ func runtimeCommands() []*urfave.Command {
 		response, err := cli.StopExecution(ctx, c.Args().First())
 		return output(c, response, err)
 	}})
-	commands = append(commands, &urfave.Command{Name: "destroy", Usage: "Remove owned runtime and data; retain logs", Flags: daemonFlags(false), Action: func(ctx context.Context, c *urfave.Command) error {
+	commands = append(commands, &urfave.Command{Name: "destroy", Usage: "Remove runtime/data; --force waives shared ownership proof only, retaining consumer/native/private-resource fences", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
 			return fmt.Errorf("destroy requires one recorded instance ID")
 		}
@@ -45,7 +45,7 @@ func runtimeCommands() []*urfave.Command {
 			return output(c, nil, err)
 		}
 		defer cli.Close()
-		response, err := cli.Destroy(ctx, c.Args().First())
+		response, err := cli.DestroyWithRequest(ctx, v1.DestroyRequest{APIVersion: v1.Version, InstanceID: c.Args().First(), Force: c.Bool("force")})
 		return output(c, response, err)
 	}})
 	commands = append(commands, &urfave.Command{Name: "logs", Usage: "Read retained component logs", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "follow"}, &urfave.StringFlag{Name: "component"}), Action: func(ctx context.Context, c *urfave.Command) error {

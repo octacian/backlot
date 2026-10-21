@@ -443,3 +443,12 @@ Run the existing `TestDockerRuntime` and `TestDisposableEvidenceDocker` gates
 serially on the same frozen inputs as regression evidence, in addition to required
 `make check`. This local MariaDB evidence does not establish PostgreSQL/custom
 manager, other-platform, full feature or published-revision CI readiness.
+
+The shared Gate 2 suite also includes `TestSharedMariaDBForce.*` operator flows:
+default refusal followed by explicit actual deletion, authentication/grant drift,
+manually absent effects, exact recorded IDs with mismatched capabilities, retained
+peer fences, missing server/storage, forced partial DROP/crash/retry without automatic
+force, and provider outage. These tests are included by the complete `TestSharedMariaDB.*`
+selection above. Fixture capability drift retains actual Engine IDs; it does not
+pretend immutable container labels were edited in place. Force authority must be
+absent from persisted JSON and actual SQL/provider absence must settle obligations.

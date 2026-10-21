@@ -7,6 +7,8 @@ const ManagerProtocolVersion = "backlot.manager/v1"
 // A command reads one bounded JSON document on stdin and writes one result.
 // Credentials and ownership are persisted by Backlot before allocate effects.
 type ManagerRequest struct {
+	// Force authorizes release despite ownership mismatch; never persist this flag.
+	Force        bool   `json:"force,omitempty"`
 	Version      string `json:"version"`
 	Operation    string `json:"operation"`
 	AllocationID string `json:"allocation_id"`

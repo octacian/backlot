@@ -1,11 +1,11 @@
 ---
 title: 'Add project-scoped shared-service allocations'
 date: '2026-10-19'
-status: accepted
+status: superseded
 summary: 'Separate retained project-owned servers from instance allocations with explicit ownership observations, private provisioning and exact configuration conflicts.'
 tags: [shared-services, identity, sql, security, lifecycle]
 supersedes: []
-superseded_by: []
+superseded_by: [20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md]
 ---
 
 # Add project-scoped shared-service allocations

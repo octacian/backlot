@@ -324,7 +324,7 @@ instance allocations. Linked Git worktrees share only when common-directory
 filesystem identity, relative project location and declared project ID match;
 clones do not. Non-Git sharing requires the same canonical directory. Moves,
 replacements and exact retained server-configuration conflicts fail conservatively.
-See the [proposed allocation decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md).
+See the [accepted allocation and force-cleanup decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md).
 
 The server lifecycle is independent of allocations. Automatically ensure selected
 servers before provisioning empty allocations and starting consumers. Stop/start
@@ -352,3 +352,11 @@ bounded language-neutral custom command protocol with a non-database fixture,
 full lifecycle/concurrency/crash recovery and real provider/platform evidence.
 [Implementation status](implementation-plan.md#shared-services-issue-43) distinguishes
 the early MariaDB checkpoint from those uncompleted requirements.
+
+Explicit `destroy --force` and `shared destroy --force` provide the operator exception
+to conservative shared ownership preservation. The recorded target may be deleted
+despite mismatched proof; known peers/consumers remain fenced and verified absence
+is still required before clearing obligations. The flag is the acknowledgment and
+is never durable or automatic. With valid state, verified absence of both recorded
+server and backing volume permits selected-allocation reconciliation; unreadable
+state requires the [manual operator procedure](containers.md#explicit-operator-force-cleanup), not reconstructed identities or forgotten obligations.

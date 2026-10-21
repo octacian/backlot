@@ -352,6 +352,9 @@ func verifyResource(ctx context.Context, d *dockerEngine, r ownedResource) error
 	}
 }
 func (s *store) removeResources(ctx context.Context, id string) error {
+	return s.removeResourcesWithForce(ctx, id, false)
+}
+func (s *store) removeResourcesWithForce(ctx context.Context, id string, force bool) error {
 	g, err := s.resources(id)
 	if err != nil {
 		return err
@@ -360,7 +363,7 @@ func (s *store) removeResources(ctx context.Context, id string) error {
 		return err
 	}
 	if g.ID == "" {
-		return s.releaseSharedAllocations(ctx, id)
+		return s.releaseSharedAllocationsWithForce(ctx, id, force)
 	}
 	var d *dockerEngine
 	needsEngine := false
@@ -392,7 +395,7 @@ func (s *store) removeResources(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	if err = s.releaseSharedAllocations(ctx, id); err != nil {
+	if err = s.releaseSharedAllocationsWithForce(ctx, id, force); err != nil {
 		return err
 	}
 	names := make([]string, 0, len(g.Resources))
@@ -430,6 +433,9 @@ func (s *store) removeResources(ctx context.Context, id string) error {
 	return s.saveResources(id, resourceGeneration{})
 }
 func (s *service) destroy(ctx context.Context, id string) (v1.Instance, error) {
+	return s.destroyWithForce(ctx, id, false)
+}
+func (s *service) destroyWithForce(ctx context.Context, id string, force bool) (v1.Instance, error) {
 	ctx, finish, admissionErr := s.beginMutation(ctx)
 	if admissionErr != nil {
 		return v1.Instance{}, admissionErr
@@ -460,7 +466,7 @@ func (s *service) destroy(ctx context.Context, id string) (v1.Instance, error) {
 	}
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	if err = s.store.removeResources(cleanup, id); err != nil {
+	if err = s.store.removeResourcesWithForce(cleanup, id, force); err != nil {
 		err = s.store.recordCleanupFailure(id, err)
 		return instance, problem("cleanup_failed", fmt.Sprintf("destroy preserved remaining resources: %v", err))
 	}
@@ -479,6 +485,13 @@ func (s *service) destroy(ctx context.Context, id string) (v1.Instance, error) {
 		}
 		return nil
 	})
+	// Successful destruction has joined this owner and settled its data. Do not
+	// replay its historical collection diagnostic as active shutdown work.
+	if err == nil {
+		s.mu.Lock()
+		delete(s.executions, id)
+		s.mu.Unlock()
+	}
 	return instance, err
 }
 
@@ -511,6 +524,24 @@ func recoverResourceEffect(ctx context.Context, d *dockerEngine, r ownedResource
 			return "", err
 		}
 		return out.Volume.Name, nil
+	case "container":
+		if d == nil {
+			return "", problem("missing_provider", "recorded Docker engine required")
+		}
+		out, err := d.ContainerInspect(ctx, r.Name, client.ContainerInspectOptions{})
+		if err != nil {
+			return "", err
+		}
+		if out.Container.Config == nil {
+			return "", problem("cleanup_failed", "pending container configuration unavailable; preserved")
+		}
+		if err = owned(out.Container.Config.Labels, r); err != nil {
+			return "", err
+		}
+		if !validID(out.Container.ID) {
+			return "", problem("cleanup_failed", "pending container immutable identity unavailable; preserved")
+		}
+		return out.Container.ID, nil
 	case "network":
 		if d == nil {
 			return "", problem("missing_provider", "recorded Docker engine required")

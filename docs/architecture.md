@@ -152,5 +152,10 @@ and conservative recovery. Shared server volume/network/container effects use th
 existing official Docker client and capability verification. The same named
 `api/v1` contracts serve `shared` CLI/client/daemon control; manager messages are
 private provisioning contracts and never public status. See the
-[accepted decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
+[accepted decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md)
 and [current bounded runtime](containers.md#project-scoped-shared-services-gate-1).
+
+Explicit operator force is limited to instance/shared destroy and manager release.
+It waives shared ownership proof for recorded targets, preserves peer/consumer and
+native/private authority fences, and requires observed deletion/absence. Authority
+is transient; recovery does not continue force. See the [operator procedure](containers.md#explicit-operator-force-cleanup).

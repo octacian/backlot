@@ -227,7 +227,20 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			return
 		}
 		switch r.URL.Path {
-		case "/v1/shared/list", "/v1/shared/inspect", "/v1/shared/start", "/v1/shared/stop", "/v1/shared/restart", "/v1/shared/destroy":
+		case "/v1/shared/destroy":
+			var request v1.SharedDestroyRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+			defer cancel()
+			response, err := s.sharedDestroy(ctx, request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+		case "/v1/shared/list", "/v1/shared/inspect", "/v1/shared/start", "/v1/shared/stop", "/v1/shared/restart":
 			var request v1.SharedRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
 				return
@@ -316,7 +329,22 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				return
 			}
 			writeJSON(w, response)
-		case "/v1/runtime/stop", "/v1/destroy":
+		case "/v1/destroy":
+			var request v1.DestroyRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			if !validID(request.InstanceID) {
+				writeError(w, problem("invalid_request", "recorded instance_id required"))
+				return
+			}
+			instance, err := s.destroyWithForce(r.Context(), request.InstanceID, request.Force)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, v1.InstanceResponse{APIVersion: v1.Version, Instance: instance})
+		case "/v1/runtime/stop":
 			var request v1.InstanceRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
 				return
@@ -327,11 +355,7 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			}
 			var instance v1.Instance
 			var err error
-			if r.URL.Path == "/v1/destroy" {
-				instance, err = s.destroy(r.Context(), request.InstanceID)
-			} else {
-				instance, err = s.stopRuntime(request.InstanceID)
-			}
+			instance, err = s.stopRuntime(request.InstanceID)
 			if err != nil {
 				writeError(w, err)
 				return

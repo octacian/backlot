@@ -303,7 +303,7 @@ references, separate private server/allocation journals (state version 7), a foc
 SQL manager, typed `shared` CLI/API/client operations and context-correct native/
 container values. Configuration conflicts cannot replace peers; generated admin
 credentials remain private. Existing private per-instance containers remain available.
-The [accepted decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
+The [accepted decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md)
 and [runtime guide](containers.md#project-scoped-shared-services-gate-1) define the
 bounded contract and operational limits.
 
@@ -326,3 +326,11 @@ demands. Gate 4 completes runnable examples/docs, standard and fresh sensitive
 review, frozen complete provider/native/platform/browser suites and exact published
 HEAD CI. Those gates remain uncompleted; this slice does not claim overall #43 or
 V1 readiness, native Windows support, or broader MySQL compatibility.
+
+Gate 2 was reopened for bounded operator cleanup. The reviewed force decision is
+accepted; implementation adds only existing destroy flags, typed command-specific
+requests and release-only transient manager authority. Focused real CLI/MariaDB
+flows cover target deletion despite uncertainty, peer preservation, missing-storage
+reconciliation and explicit retry; these do not replace independent implementation
+review, frozen full verification or owner Gate 2 confirmation. Gate 3 custom managers
+must honor or explicitly reject release force; PostgreSQL/custom runtime remains later.

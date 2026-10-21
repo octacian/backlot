@@ -23,6 +23,9 @@ func ValidateRequest(r v1.ManagerRequest) error {
 	if r.Version != v1.ManagerProtocolVersion || !opaque.MatchString(r.AllocationID) || !opaque.MatchString(r.Ownership) || !sqlName.MatchString(r.Database) || !sqlName.MatchString(r.Username) || !opaque.MatchString(r.Password) {
 		return errors.New("invalid private manager request")
 	}
+	if r.Force && r.Operation != "release" {
+		return errors.New("force is supported only for manager release")
+	}
 	switch r.Operation {
 	case "allocate", "inspect", "release":
 		return nil
@@ -75,7 +78,7 @@ func inspect(ctx context.Context, db *sql.DB, request v1.ManagerRequest) (observ
 	err := db.QueryRowContext(ctx, "SELECT SCHEMA_COMMENT FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?", request.Database).Scan(&comment)
 	if err == nil {
 		out.database = true
-		if comment != fingerprint(request.Ownership) {
+		if !request.Force && comment != fingerprint(request.Ownership) {
 			return out, errors.New("database ownership uncertain; preserved")
 		}
 	} else if !errors.Is(err, sql.ErrNoRows) {
@@ -85,13 +88,13 @@ func inspect(ctx context.Context, db *sql.DB, request v1.ManagerRequest) (observ
 	err = db.QueryRowContext(ctx, "SELECT authentication_string, plugin FROM mysql.user WHERE User = ? AND Host = '%'", request.Username).Scan(&authentication, &plugin)
 	if err == nil {
 		out.user = true
-		if plugin != "mysql_native_password" || authentication != passwordHash(request.Password) {
+		if !request.Force && (plugin != "mysql_native_password" || authentication != passwordHash(request.Password)) {
 			return out, errors.New("user ownership uncertain; preserved")
 		}
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return out, errors.New("user ownership unavailable; preserved")
 	}
-	if out.user {
+	if out.user && !request.Force {
 		rows, err := db.QueryContext(ctx, "SHOW GRANTS FOR '"+request.Username+"'@'%'")
 		if err != nil {
 			return out, errors.New("user permissions unavailable; preserved")
@@ -121,7 +124,8 @@ func inspect(ctx context.Context, db *sql.DB, request v1.ManagerRequest) (observ
 
 // MariaDB implements the bounded allocation operations against a verified owned
 // MariaDB 11.4 server. Atomic database comments and the user's authentication hash
-// authenticate interrupted effects; names alone never authorize adoption/deletion.
+// authenticate interrupted effects. Explicit release force waives these proofs only
+// for the caller's recorded targets; it still observes and verifies actual absence.
 // Generated names contain no SQL grant wildcard characters. All errors are safe:
 // driver diagnostics can include credentials and never cross this boundary.
 // The optional checkpoint observes statement effects for private fault fixtures.

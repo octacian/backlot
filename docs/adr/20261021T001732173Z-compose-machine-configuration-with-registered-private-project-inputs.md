@@ -120,8 +120,9 @@ Do not execute tools or inspect providers during setup/offline planning.
 ### Setup and inspection
 
 `backlot project setup` uses the same discovery, declaration validation and
-composition functions as planning. On first setup, visit every declared input in
-stable name order, showing its description and current configured/missing status.
+composition functions as planning, with the staged private-edit validation below.
+On first setup, visit every declared input in stable name order, showing its
+description and current configured/missing status.
 Allow keeping a valid existing machine value; require an effective nonempty value
 for every declared input to complete setup. Secret custom entry uses terminal
 input with echo disabled and restored on success, cancellation and errors.
@@ -134,18 +135,59 @@ configuration storage. It installs no tools/providers and changes no app files.
 For an already registered project, ordinary setup is inspection: report association,
 exact private document path, and configured/missing input/tool names, then exit
 unchanged. New declarations appear as missing without triggering writes/prompts.
-Explicit edit options opt into an update and preserving existing values; do not
-regenerate or rotate on inspection. Explicit reassociation is required after a
+Explicit edit options opt into an update preserving unspecified existing values;
+do not regenerate or rotate on inspection. Explicit reassociation is required after a
 move/replacement and must not import old credentials implicitly.
 
 Noninteractive setup accepts one bounded structured private configuration from a
 file or stdin, plus explicit generation requests naming declared eligible inputs.
-Never accept secret values in command arguments. Supplied input entries update
-by key over current private entries; unspecified entries stay unchanged. Reject
-an input supplied both as a literal and a generation request. Validate the whole
-candidate, including effective completeness for all inputs and machine settings,
-before committing anything. Missing answers, invalid data, generation failure,
-EOF or cancellation leave the association and active private file unchanged.
+Never accept secret values in command arguments. Supplied input and tool entries
+update by key over current private entries; unspecified entries stay unchanged.
+Reject an input supplied both as a literal and a generation request.
+
+Explicit edits also accept repeatable `--remove-input NAME` and
+`--remove-tool NAME` requests, usable with structured updates or interactive edits.
+Each request removes exactly one entry from the corresponding current private
+map, whether or not the current manifest still declares that name. Require a
+syntactically valid identifier that exists in that private map; reject duplicate
+requests, nonexistent entries (including machine-only values or manifest tool
+defaults), and removal combined with a supplied/generated replacement for the
+same name in the same map. Input and tool names are separate namespaces. Removal
+does not mask a machine value or manifest tool default: composition may expose
+that lower-layer value. No deletion marker is added to stored documents.
+
+To repair declaration retirement, an explicit edit first reads the current
+registered private generation with the same bounded strict decoding, version,
+identifier syntax, scalar/NUL, tool syntax and managed-file safety checks as
+ordinary resolution. Only its membership in current manifest declarations is
+deferred until candidate validation; malformed, unsafe, missing or unreadable
+documents still fail without repair. Validate the manifest and machine layer
+normally, including every machine declaration name; private edits cannot repair
+or hide an invalid machine layer. Supplied new entries and generation requests
+must name current declarations. In memory, copy the current private maps, apply
+all validated removals, then supplied replacements and accepted generation.
+Validate every remaining candidate entry against current declarations, then
+compose with the independently valid machine layer and require an effective
+nonempty value for every declared input. Tool syntax remains mandatory, without
+checking executable availability during setup. An unremoved retired key fails
+the entire update; never prune, rename, carry forward or reinterpret it silently.
+
+For example, after `old_token` is renamed to `new_token` in the manifest, setup
+can remove private `old_token` and supply `new_token` in one edit. Ordinary scene
+resolution and setup inspection (including reveal) still reject undeclared
+private names, reporting names and explicit-edit guidance without exposing their
+values; the staged read is only for constructing a repair candidate. The same
+recovery applies to renamed or removed tools. A linked worktree whose manifest
+still expects the old declarations must also satisfy strict validation after
+the shared association is updated; recovery does not create per-worktree layers.
+
+Commit only the complete validated candidate through the publication protocol
+below. Missing answers, invalid data or removal requests, incomplete inputs,
+generation failure, EOF or cancellation leave the association and active private
+generation unchanged. This includes combined remove-and-add edits; a failed
+rename repair cannot publish just the removal. Publication conflicts and failures
+retain the same pre/post-commit handling as every setup update.
+
 Non-TTY calls without structured input/edit intent inspect existing setup or fail
 with actionable guidance for first setup; they never wait on prompts. JSON mode
 emits one named shared result/error envelope, with prompts confined to a real
@@ -258,8 +300,8 @@ The concrete implementation scope is:
 | Area | Obligations and boundary |
 | --- | --- |
 | Persistence | One registry, stable advisory lock, immutable private generations; existing daemon snapshots gain source/effective provenance and state v6. No additional database. |
-| Writers | Setup alone writes registry/private documents; existing daemon snapshot/attempt/export writers record composed provenance. Read-only consumers never enroll or repair. |
-| APIs | Named private/setup models, effective digest fields in shared v1 contracts; no setup/reveal daemon endpoint. Existing scene APIs consume the same resolver. |
+| Writers | Setup alone writes registry/private documents, including explicit input/tool removal and replacement in one validated candidate; existing daemon snapshot/attempt/export writers record composed provenance. Read-only consumers never enroll or repair. |
+| APIs | Named private/setup models, explicit setup input/tool removal requests, effective digest fields in shared v1 contracts; no setup/reveal daemon endpoint or stored deletion marker. Existing scene APIs consume the same resolver. |
 | Background work | None added: no watchers, retries, secret refresh, generation pruning or new startup workers. Existing daemon owners and retention remain unchanged. |
 | Dependencies | Reuse strict YAML/JSON parser, crypto/rand, filesystem/privacy adapters and gofrs/flock; hidden terminal input may require the maintained Go terminal package when implemented. No provider SDK or secret-manager dependency. |
 | Operator work | Explicit initial setup/edits/reassociation, private-file backups and deliberate old-generation removal; existing provider/trust installation remains separate. State v5 cleanup uses its matching binary. |
@@ -272,6 +314,12 @@ isolation, moves/replacements, strict overridden validation, selected-scene
 requirements, project-relative tools, real TTY echo restoration/generation
 acceptance/cancel, JSON/redaction/reveal isolation, concurrent setup conflicts,
 pre/post-commit failures, private provenance/drift and immutable restart behavior.
+For both inputs and tools, demonstrate declaration removal/rename, ordinary
+resolution/inspection failure, explicit combined removal/update and successful
+resolution. Cover stale-key initial reads, duplicate/nonexistent/conflicting
+removals, unremoved stale keys, invalid machine entries, incomplete replacement
+inputs, lower-layer exposure and failed/conflicting repair preserving the active
+association/generation; apply the existing post-commit uncertainty checks to repair.
 These are behavior gates, not evidence already obtained by this proposal.
 
 ## Alternatives considered
@@ -289,6 +337,14 @@ commit provide coherent readers with a deliberate retained-generation cost.
 Using the daemon database for setup would force offline planning and initial
 configuration to depend on daemon availability and state migrations. A second
 configuration database adds an engine without demonstrated query needs.
+
+Explicit named removal extends the existing patch update and publication path
+without a second full-replacement mode. Requiring a complete replacement would
+make callers resupply unchanged private values; implicit pruning would weaken
+strict declaration validation and silently discard credentials. Manual edits to
+active immutable generations would bypass coherent publication and conflict
+detection. Named removal keeps ordinary updates preserving unspecified entries
+while making declaration retirement a deliberate atomic edit.
 
 Keeping source-byte drift alone is simple but conflates source formatting with
 effective changes and cannot describe masked overrides. A deep-merge/include or

@@ -85,6 +85,20 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 		t.Fatal("strict export hid abandoned attempt", abandoned)
 	}
 
+	// Private authority sentinels stay in retained history, never the portable report.
+	// The unidentified-intent guard above and later-boot proof below never actuate them.
+	privateAuthority := native.Identity{Token: newID(), Control: filepath.Join(s.directory, "private-control.sock"), Birth: "private-birth-sentinel"}
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		r, err := load(tx, target)
+		if err != nil {
+			return err
+		}
+		r.NativeAbandonments[0].Groups = []native.Identity{privateAuthority}
+		return put(tx, "instances", target, r)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	// Replacement changes latest attempt/result, never the durable private history.
 	next := &v1.ExecutionResult{Attempt: newID(), TerminalExitCode: new(0), Components: []v1.ComponentResult{{Name: "test", Status: "completed", ExitCode: new(0)}}}
 	if _, err := s.store.acceptExecution(target, runtimeRecord{Attempt: next.Attempt}, next, true); err != nil {
@@ -101,6 +115,24 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	report, err := s.export(context.Background(), request)
 	if err != nil || !report.Complete || len(report.Result.NativeOwnershipWarnings) != 1 {
 		t.Fatal("latest clean export lost prior warning", report, err)
+	}
+	html, err := os.ReadFile(filepath.Join(request.Output, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, visible := range []string{nativeWaiverWarning, original.Attempt, retained.NativeAbandonments[0].RecordedAt, `>Complete<`, `class="status succeeded"`} {
+		if !bytes.Contains(html, []byte(visible)) {
+			t.Fatalf("complete replacement HTML omitted %q", visible)
+		}
+	}
+	jsonReport, err := os.ReadFile(filepath.Join(request.Output, "report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range []string{privateAuthority.Token, privateAuthority.Control, privateAuthority.Birth} {
+		if bytes.Contains(html, []byte(private)) || bytes.Contains(jsonReport, []byte(private)) {
+			t.Fatal("portable report exposed private native authority")
+		}
 	}
 	// A later boot supplies independent absence proof, retaining the audit.
 	if err := s.store.db.Update(func(tx *bolt.Tx) error {

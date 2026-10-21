@@ -129,7 +129,8 @@ are rejected unchanged. Older binaries reject v6 before interpreting waived clai
 | `POST /v1/cancel` | `InstanceRequest` | `InstanceResponse` |
 | `POST /v1/renew` | `LeaseRequest` | `InstanceResponse` |
 | `POST /v1/run`, `/v1/restart`, `/v1/reset` | `RunRequest` | `InstanceResponse` |
-| `POST /v1/runtime/stop`, `/v1/destroy` | `InstanceRequest` | `InstanceResponse` |
+| `POST /v1/runtime/stop` | `StopRequest` (force requires selected `expected_attempt`) | `InstanceResponse` |
+| `POST /v1/destroy` | `InstanceRequest` | `InstanceResponse` |
 | `POST /v1/logs` | `LogsRequest` | `LogsResponse` |
 
 `list` uses `ListRequest` (`after_id`, `limit`; zero means default 100, maximum

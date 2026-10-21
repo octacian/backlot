@@ -172,7 +172,9 @@ secret-access endpoints and age/size retention.
 
 The existing named `RunRequest`/`InstanceResponse` contracts serve `/v1/run`,
 `/v1/restart` and `/v1/reset`; restart/reset require `instance_id`. Named
-`InstanceRequest`/`InstanceResponse` serve `/v1/runtime/stop` and `/v1/destroy`.
+`StopRequest`/`InstanceResponse` serve `/v1/runtime/stop`; force requires the
+selected `expected_attempt`. `InstanceRequest`/`InstanceResponse` remain the
+contracts for `/v1/destroy`.
 The CLI/client and server share these Go types. Logs use the existing typed
 paged/NDJSON contracts. Resource capabilities and credential values stay private.
 

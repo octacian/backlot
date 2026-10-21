@@ -315,6 +315,24 @@ func TestExportEscapesHostileSummary(t *testing.T) {
 	}
 }
 
+func TestExportEscapesOwnershipWarnings(t *testing.T) {
+	view := exportHTMLView{ExportReport: v1.ExportReport{Complete: true, Result: v1.ExportResult{NativeOwnershipWarnings: []v1.NativeOwnershipWarning{{
+		Message: `<script>message</script> & warning`, Attempt: `<script>attempt</script>`, RecordedAt: `<script>time</script>`,
+	}}}}}
+	var html strings.Builder
+	if err := exportTemplate.Execute(&html, view); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(html.String(), "<script") {
+		t.Fatal("ownership warning inserted unescaped markup")
+	}
+	for _, escaped := range []string{"&lt;script&gt;message&lt;/script&gt; &amp; warning", "&lt;script&gt;attempt&lt;/script&gt;", "&lt;script&gt;time&lt;/script&gt;"} {
+		if !strings.Contains(html.String(), escaped) {
+			t.Fatalf("warning omitted escaped text %q", escaped)
+		}
+	}
+}
+
 func TestEmbeddedLogPreviewHeadTailBinaryAndEscaping(t *testing.T) {
 	root, err := os.OpenRoot(t.TempDir())
 	if err != nil {

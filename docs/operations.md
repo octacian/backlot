@@ -141,7 +141,7 @@ A zero test exit cannot override failed collection/cleanup.
 | Cleanup uncertain or foreign consumer present | Preserve journal/resources; restore provider access or remove only your verified consumer, then retry stop/destroy. Never prune by name, PID or hostname. |
 | Daemon crash | Start the same binary/state directory; recovery stops verifiably owned survivors and marks interrupted, retains data/managed CA and reports evidence gaps. Inspect, explicitly start the managed gateway, then restart scenes. Unavailable gateway retains exact route cleanup uncertainty for retry. |
 | Managed gateway uncertain after temporary control loss | Retry `gateway stop` in the same state directory. If still fenced, choose restored authority, controlled reboot or explicit survivor-risk acknowledgement with force; follow [managed recovery](https.md#managed-gateway-recovery). Retain configuration and CA. |
-| Unsupported state version | Follow [state compatibility](containers.md#state-compatibility): v5/v6/v7 and older versions are rejected unchanged without migration. Clean up with the matching older binary before changing directories; preserve old state until verified. |
+| Unsupported state version | Follow [state compatibility](containers.md#state-compatibility): previous main v6 upgrades in place to v8 after normal matching-binary daemon shutdown, then new-binary start on the same directory. Other formats (including v5/v7) are rejected unchanged; preserve them for matching-binary diagnosis and lifecycle. |
 | Evidence expired | Status retains `evidence_expired`; expired logs/artifacts cannot be recovered from deleted containers. Configure daemon age/size retention before runs. |
 
 Never remove retained data while a consumer may still run. A cleanup failure is a

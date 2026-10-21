@@ -100,7 +100,7 @@ func TestConfigurationMutationsRequireFreshCompatibleStatus(t *testing.T) {
 					statusBody, header = test.body, test.header
 					before := statusCalls
 					err := call(cli)
-					if err == nil || !strings.Contains(err.Error(), "matching older binary") || !strings.Contains(err.Error(), "--state-dir") || statusCalls != before+1 || mutations != 1 {
+					if err == nil || !strings.Contains(err.Error(), "matching binary") || !strings.Contains(err.Error(), "same --state-dir") || strings.Contains(err.Error(), "fresh --state-dir") || statusCalls != before+1 || mutations != 1 {
 						t.Fatalf("not fenced: %v calls=%d mutations=%d", err, statusCalls, mutations)
 					}
 				})

@@ -52,9 +52,10 @@ an explicit mutating Doctor probe, the shared Go client checks current API/state
 compatibility with a fresh bounded status request. A running older or
 malformed daemon is rejected before scene mutation; no compatibility result is
 cached. Historical reads and snapshot cleanup calls do not perform this
-configuration preflight. For incompatible state, use the matching older binary
-to inspect, clean up and shut down its daemon, then use a fresh `--state-dir` with
-the new binary; preserve old state until cleanup is verified.
+configuration preflight. Shut down an older daemon normally with its matching
+binary, then start this binary on the same `--state-dir` for the supported v6-to-v8
+upgrade. Preserve other unsupported formats for diagnosis and their matching
+binary's lifecycle; do not discard ownership records.
 
 `prepare` discovers the project locally and sends an absolute path to the daemon.
 The daemon reuses strict manifest validation/environment resolution. Provider
@@ -494,8 +495,14 @@ ownership is preserved. Existing images and global settings remain untouched.
 
 ## Configuration state compatibility
 
-Registered private project composition uses daemon state version 8. State v5/v6/v7 is
-rejected without migration or mutation: use its matching binary to clean up and
-shut down owned resources, then select a fresh state directory. The independent
-project registry survives daemon reset and state-directory replacement. See
+Registered private project composition uses daemon state version 8, with a direct
+one-way in-place upgrade from the previous merged main state version 6 only. Validation and
+the format fence share a transaction; rejected predecessor state stays unchanged.
+Versions 5 and 7 and other unsupported formats do not migrate. Existing snapshots
+remain authoritative for recorded cleanup; missing historical private/effective
+provenance stays unrecorded. Eligible historical prepared/stopped starts capture
+current project-only values with existing retained-resource/sensitive-drift fences
+and adopt them atomically with execution acceptance. Ordinary version 8 stop/start
+retains its immutable snapshot. The independent project registry remains format 1.
+See [state upgrade and operation](containers.md#state-compatibility) and
 [private setup, provenance and retention](manifest.md#registered-private-project-configuration).

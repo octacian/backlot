@@ -274,8 +274,8 @@ See [contracts and image requirements](daemon.md#scoped-provider-diagnostics).
 Early real CLI/API/daemon/native/Docker/Caddy/data success, missing container trust
 failure/recovery and preserved-data cleanup were exercised before broad regressions;
 revision-bound private delivery evidence records fixture/tool/image dependencies.
-See [state compatibility](containers.md#state-compatibility) for v8: v5/v6/v7 and
-older state are rejected unchanged, without migration. Independent reviews,
+See [state compatibility](containers.md#state-compatibility) for v8: previous main v6 upgrades in place with preserved records and data; v5/v7
+and other unsupported formats are rejected unchanged. Independent reviews,
 frozen provider/browser/macOS suites and published-HEAD CI remain required
 before delivery readiness; no browser/application trust adoption is claimed.
 
@@ -296,7 +296,8 @@ The early real Ubuntu ci-scenes success/failure/recovery, teardown/relocation an
 browser preview precede broader feature regression development. Independent Low
 and fresh High reviews, final frozen complete provider/browser/action gates and
 published-revision CI remain required; this paragraph does not claim readiness.
-Binary distribution/version tags remain #25, with no legacy storage migration.
+Binary distribution/version tags remain #25; the direct v6-to-v8 state transition
+is scoped by the configuration decision.
 
 ## Registered project configuration (#48)
 
@@ -304,7 +305,8 @@ Implemented for independent review: explicit local project setup, external priva
 registry/generations shared by Git common-directory identity and manifest path,
 private-only input values and strict tools composition, atomic edits/removal repair, hidden terminal input,
 local explicit reveal, private launch/current provenance and effective drift.
-Daemon state advances to v8 without migration; old private generations require
+Daemon state advances directly from previous main v6 to v8 in place, with typed
+validation, retained ownership/data and current-only legacy activation; old private generations require
 explicit operator retention/erasure decisions. See the [setup guide](manifest.md#registered-private-project-configuration)
 and [current decision](adr/20261021T001732173Z-register-private-project-configuration.md).
 Independent implementation reviews, frozen full validation and published-HEAD CI

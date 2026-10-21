@@ -410,7 +410,7 @@ func TestMovedAndReplacedCheckoutNeverAdopted(t *testing.T) {
 }
 
 func TestStateVersionRejectedWithoutMutation(t *testing.T) {
-	for _, version := range []string{"1", "2", "3", "4", "5", "6", "7", "999"} {
+	for _, version := range []string{"1", "2", "3", "4", "5", "7", "999"} {
 		t.Run(version, func(t *testing.T) {
 			dir := shortTemp(t)
 			state, err := openStore(dir)
@@ -434,7 +434,7 @@ func TestStateVersionRejectedWithoutMutation(t *testing.T) {
 			}
 			_, err = openStore(dir)
 			code(t, err, "state_version")
-			if !strings.Contains(err.Error(), "requires version 8") || !strings.Contains(err.Error(), "--state-dir") {
+			if !strings.Contains(err.Error(), "requires version 8") || !strings.Contains(err.Error(), "preserve") {
 				t.Fatalf("missing actionable compatibility instructions: %v", err)
 			}
 			// Startup must stop before recovery can touch incompatible resources.

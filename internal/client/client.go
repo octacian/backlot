@@ -42,7 +42,7 @@ func (c *Client) Close() { c.transport.CloseIdleConnections() }
 func (c *Client) call(ctx context.Context, method, path string, request, response any) error {
 	// Resolve compatibility afresh at every configuration-consuming boundary.
 	// Historical reads and snapshot-based cleanup remain available; incompatible
-	// state must be cleaned up with its matching binary (see docs/containers.md).
+	// state must retain its ownership records (see docs/containers.md).
 	checkCompatibility := false
 	switch path {
 	case "/v1/scenes/start", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/gateway/start", "/v1/gateway/restart":
@@ -62,7 +62,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 			if errors.As(err, &detail) {
 				code = detail.Code
 			}
-			return &v1.PlanError{Code: code, Message: "cannot verify running daemon configuration compatibility; use the matching older binary to inspect, clean up and shut down its daemon, then select a fresh --state-dir with this binary; preserve old state until cleanup is verified"}
+			return &v1.PlanError{Code: code, Message: "cannot verify running daemon configuration compatibility; shut down its daemon normally with the matching binary, then restart this binary on the same --state-dir for the supported version 6 to 8 upgrade; preserve other unsupported state for diagnosis with its matching binary"}
 		}
 	}
 	var body io.Reader

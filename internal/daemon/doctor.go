@@ -437,7 +437,11 @@ func addPrivatePath(r *v1.DoctorResponse, name string, snap plan.Snapshot) {
 }
 
 func checkCurrentComposition(r *v1.DoctorResponse, launch plan.Snapshot) {
-	r.Paths = append(r.Paths, v1.DoctorPath{Name: "launch_effective_configuration", State: "present", Digest: launch.Plan.EffectiveConfigDigest})
+	launchState := "present"
+	if launch.Plan.EffectiveConfigDigest == "" {
+		launchState = "unrecorded"
+	}
+	r.Paths = append(r.Paths, v1.DoctorPath{Name: "launch_effective_configuration", State: launchState, Digest: launch.Plan.EffectiveConfigDigest})
 	source, err := plan.Locate(launch.Plan.ManifestPath)
 	if err != nil {
 		diagnosticAdd(r, "current_configuration", "daemon/host", v1.DoctorFailed, "current project unavailable; launch snapshot remains authoritative for cleanup")
@@ -467,7 +471,7 @@ func checkCurrentComposition(r *v1.DoctorResponse, launch plan.Snapshot) {
 		r.Paths[len(r.Paths)-1].State = "changed"
 	}
 	state := "present"
-	if plan.ConfigurationDrift(launch.Plan, current.Plan) {
+	if launch.Plan.EffectiveConfigDigest != "" && plan.ConfigurationDrift(launch.Plan, current.Plan) {
 		state = "changed"
 	}
 	r.Paths = append(r.Paths, v1.DoctorPath{Name: "current_effective_configuration", State: state, Digest: current.Plan.EffectiveConfigDigest})

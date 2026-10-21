@@ -19,8 +19,8 @@ Actions reuse the setup CLI through stdin and select a job-private registry
 without changing application HOME or XDG configuration.
 
 Use daemon state version 8 for the combined private-configuration and native
-recovery contract, rejecting older state without migration. This record replaces
-only the compatibility/transition policy of the published native recovery decision;
+recovery contract, with a one-way in-place transition only from the previous merged
+main state version 6. This record replaces only the compatibility/transition policy of the published native recovery decision;
 retain all its boot provenance, authenticated ownership, explicit force-stop waiver,
 collection-gap, original-exit, deletion-guard and saved gateway/CA guarantees.
 
@@ -37,7 +37,9 @@ but keep distinct runtime checkout identities and outputs. CI needs supplied or
 explicitly generated inputs during reusable-action setup, without secret arguments,
 a separate caller-authored file, or changes to unrelated tool/application config.
 This is a deliberate pre-0.1 breaking contract: no machine-input fallback, import
-shim, automatic migration, new runner platform or secret-manager service.
+shim, migration of input values, new runner platform or secret-manager service.
+Preserving retained daemon state across the supported predecessor upgrade is a
+separate requirement from enrolling project configuration.
 
 ## Decision
 
@@ -230,24 +232,69 @@ Keep the existing ephemeral Ubuntu 24.04 amd64 Actions support boundary.
 
 ### State compatibility and native recovery
 
-The final transition from the base branch is daemon state version 6 to 8, without
-migration. Intermediate version 7 was exercised by development binaries; retaining
-8 prevents those binaries from accepting the final project-only input semantics.
-Version 6 also identifies implementations lacking one of the combined private
-configuration/native recovery contracts. Reject every unsupported/corrupt format
-before recovery or retained-resource mutation, preserving database bytes/files.
-Check running-daemon compatibility afresh before each configuration-sensitive
-mutation, including named start and gateway start/restart. Recorded reads/cleanup
-retain their supported behavior.
+Support exactly the previous merged main daemon state version 6 to final version
+8, in place and one way. Intermediate version 7 was exercised by development
+binaries; retaining 8 prevents those binaries from accepting final project-only
+input semantics. Version 5, version 7, newer/other versions and corrupt supported
+state fail unchanged before recovery or retained-resource mutation. No v5/v7
+migration, compatibility mode or accumulating migration chain is introduced.
+Main's existing additive v5-to-v6 transition is context, not a second transition
+retained by this binary. Fresh state initializes at 8; valid version 8 state reopens
+normally.
 
-This replaces the published native recovery record's narrow v5-to-v6 transition;
-retain all its unaffected boot/ownership/waiver/collection/exit/deletion and saved
-configuration/CA guarantees. Do not retrofit snapshots or copy machine inputs.
-Use the matching old binary to clean up/shut down old owned resources, preserving
-old state until cleanup is verified, then choose fresh daemon state. A fresh
-directory does not clean old resources. Existing valid format-1 project registries
-need no conversion. Explicitly remove machine inputs and supply project values
-through setup; provider/trust installation remains separate.
+Under exclusive daemon/database ownership, validate the complete v6 layout and
+known persisted records in the same bbolt write transaction that advances the
+version. Reuse existing typed persistence decoders and check only the concrete
+identity/index/parent links needed to avoid misaddressed records or lost ownership
+obligations. This is not an exhaustive lifecycle or snapshot/manifest graph audit;
+never validate historical records against current sources or repair old digests. Respect legitimate
+interrupted intent/effect states and historical missing boot/provenance fields;
+missing authority remains unknown rather than fabricated. Perform no provider,
+process, registry or retained-file effects during migration. The only persisted
+change is the format fence: preserve all other keys and record bytes, including
+unknown metadata, capabilities, private values, histories, saved configuration and
+CA/data/evidence files. Validation or pre-commit failure rolls back the whole
+transaction. A committed fence is one-way even if subsequent daemon startup fails;
+normal recovery then uses the existing lifecycle and its failure reporting.
+
+Keep existing snapshots and resolved private values readable for recorded
+inspection, redaction, comparison and authorized cleanup/recovery. The actual v6
+snapshot stores resolved plan/secrets and provider configuration, not an embedded
+machine input document; its missing private-source/effective provenance remains
+unrecorded, never inferred as absent registration or reconstructed from current
+files. Do not rewrite historical digests or invent launch/boot facts. Any legacy
+read representation needed for a recorded field stays private to persistence and
+cannot be accepted as current machine configuration or input resolution.
+
+Before any new attempt from a migrated prepared or stopped snapshot, capture
+current project-only configuration and apply existing retained-resource and
+sensitive-value compatibility checks before stopping work, replacing snapshots or
+allocating effects. Ordinary start/run must not discard that capture and execute
+legacy resolved values. Compatible attempts can retain logical identity and data;
+unsafe drift fails before mutation under existing restart/reset rules, without
+making reset/destroy a migration prerequisite. Failed/interrupted instances still
+require explicit restart. Record new source/effective provenance only with the
+new accepted snapshot/attempt, committed together in the existing execution
+acceptance transaction so rejected acceptance preserves historical provenance.
+Current machine documents containing `inputs`
+remain invalid; explicit project setup supplies current values, without automatic
+import, enrollment or fallback. Input-free scenes retain their ordinary setup rules.
+
+Check running-daemon compatibility afresh before each configuration-sensitive
+mutation, including named start and gateway start/restart. An already-running v6
+daemon requires normal shutdown/restart with the new binary in the same state
+directory, not a wipe or fresh directory. No live process handover or automatic
+application restart is promised. Recorded reads/cleanup retain their supported
+behavior. Gateway recovery/start preserves validated saved effective configuration
+and CA identity under existing fences, without rereading historical machine inputs.
+
+This replaces only the published native recovery record's transition policy;
+retain all its boot/ownership/waiver/collection/exit/deletion and saved
+configuration/CA guarantees. The supported upgrade must never require destroying
+retained workloads/data or wiping state. Existing valid format-1 project registries
+need no conversion. Unsupported formats remain preserved for diagnosis and their
+matching binary's lifecycle; changing directories never cleans old resources.
+Provider/trust installation remains separate.
 
 ## Consequences
 
@@ -258,12 +305,14 @@ terminal UX, shared schema/provenance and action process-boundary handling; no n
 service, database, provider SDK, application-file rewriting or background task.
 Unused resolution performs bounded identity/registry reads but never enrolls.
 
-The breaking input/state contract requires explicit operator setup and old-state
-cleanup, plus deliberate generation retention/deletion. Required validation covers
+The breaking input contract requires explicit operator setup, while supported
+v6 state upgrades in place without data cleanup. Deliberate private-generation
+retention/deletion remains an operator responsibility. Required validation covers
 real worktree/clone/monorepo isolation, move/replacement fences, atomic concurrent
 edits/removal repair and uncertain commits, TTY restoration, captured-generation
-launch/drift, old-daemon mutation rejection and recorded cleanup, and current-head
-CI supplied/generated input transport, failure, cleanup and evidence lifetime.
+launch/drift, atomic v6-to-v8 validation/rollback and old-reader rejection,
+legacy snapshot cleanup and current-only new attempts, old-daemon mutation
+rejection and recorded cleanup, and current-head CI supplied/generated input transport, failure, cleanup and evidence lifetime.
 Acceptance status is a decision, not a claim that those implementation gates ran.
 
 ## Alternatives considered
@@ -271,7 +320,11 @@ Acceptance status is a decision, not a claim that those implementation gates ran
 Per-command private-file flags and ignored checkout files require repeated selection
 or copying; project-name/remote matching cannot authorize credential reuse. Machine
 input fallback reintroduces ambient credentials and removal ambiguity. Automatic
-imports/migrations need unsupported provenance policy and conceal the breaking boundary.
+input import invents credential association/provenance and conceals the breaking
+boundary. Rejecting all v6 state forces unnecessary cleanup and risks retained data
+when its existing snapshot/ownership shapes can be preserved. A migration chain or
+compatibility mode adds historical writers and semantics beyond the single
+supported main-to-feature transition; the direct transactional fence is sufficient.
 
 A single mutable secret registry or two-file rollback journal adds exposure or
 transaction machinery. Immutable generations plus one commit point provide coherent
@@ -288,8 +341,8 @@ application output would exceed the selected transport/file boundary.
 
 ## Revisit when
 
-A released compatibility contract needs migration, retained generations become an
-observed burden, supported runners/platforms expand, local storage guarantees no
+A future merged predecessor needs a different transition, retained generations
+become an observed burden, supported runners/platforms expand, local storage guarantees no
 longer hold, or a demonstrated remote-secret/provider consumer requires new scope.
 Reassess selection and disclosure explicitly instead of adding silent fallback.
 

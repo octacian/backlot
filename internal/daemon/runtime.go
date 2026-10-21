@@ -160,15 +160,32 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		}
 	}
 
+	var legacyActivation *plan.Snapshot
 	if request.InstanceID == "" {
-		snapshot, err = s.store.snapshot(id)
-		if err != nil {
-			return empty, err
+		previous, loadErr := s.store.snapshot(id)
+		if loadErr != nil {
+			return empty, loadErr
+		}
+		// Only a predecessor snapshot lacks both provenance additions. Ordinary
+		// state8 stop/start retains its immutable snapshot, even after edits.
+		if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" &&
+			response.Instance.Plan.Lifetime == v1.Persistent &&
+			(response.Instance.Status == v1.Prepared || response.Instance.Status == v1.Stopped) {
+			if err := safeRestart(previous, snapshot); err != nil {
+				return empty, err
+			}
+			legacyActivation = &snapshot
+		} else {
+			if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" {
+				return empty, problem("restart_required", "historical instance requires explicit restart with current project configuration")
+			}
+			snapshot = previous
 		}
 		if err := executablePlan(snapshot.Plan); err != nil {
 			return empty, err
 		}
 	}
+
 	if request.InstanceID != "" {
 		if request.InstanceID != id || response.Instance.Plan.Lifetime != v1.Persistent {
 			return empty, problem("conflict", "restart must address the same persistent checkout and scene")
@@ -179,6 +196,9 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		previous, err := s.store.snapshot(id)
 		if err != nil {
 			return empty, err
+		}
+		if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" {
+			legacyActivation = &snapshot
 		}
 		if snapshot.Plan.Publish != nil && snapshot.Caddy != nil && response.Instance.Execution != nil && response.Instance.Execution.Origin != "" {
 			origin, err := url.Parse(response.Instance.Execution.Origin)
@@ -235,8 +255,10 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		return empty, err
 	}
 	if request.InstanceID != "" {
-		if err := s.store.replaceSnapshot(id, snapshot); err != nil {
-			return empty, err
+		if legacyActivation == nil {
+			if err := s.store.replaceSnapshot(id, snapshot); err != nil {
+				return empty, err
+			}
 		}
 		response.ManifestDrift = false
 		response.ConfigDrift = false
@@ -256,9 +278,12 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		}
 	}
 	r := runtimeRecord{ExportSource: &v1.ExportSource{Project: snapshot.Plan.Project, Scene: snapshot.Plan.Scene, Lifetime: snapshot.Plan.Lifetime, CheckoutID: identity.checkout.ID, GitHead: launchGitCommit(ctx, identity.checkout), ManifestDigest: snapshot.Plan.ManifestDigest, ConfigDigest: snapshot.Plan.ConfigDigest, EffectiveConfigDigest: snapshot.Plan.EffectiveConfigDigest}, StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Attempt: attempt, Groups: []native.Identity{}, Options: request.Options, ConfigPath: request.Plan.ConfigPath}
-	response.Instance, err = s.store.acceptExecution(id, r, result, request.InstanceID != "" || response.Instance.Status == v1.Stopped)
+	response.Instance, err = s.store.acceptExecutionSnapshot(id, r, result, request.InstanceID != "" || response.Instance.Status == v1.Stopped, legacyActivation)
 	if err != nil {
 		return empty, err
+	}
+	if legacyActivation != nil {
+		response.ManifestDrift, response.ConfigDrift = false, false
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	entry := &execution{caCertPath: caCertPath, cancel: cancel, done: make(chan struct{}), jobs: map[string]workload{}, services: map[string]workload{}, components: map[string]workload{}, source: identity, grace: mustGrace(request.Options)}

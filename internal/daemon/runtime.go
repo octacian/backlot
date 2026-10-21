@@ -81,12 +81,20 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 }
 func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool) (v1.InstanceResponse, error) {
 	var empty v1.InstanceResponse
+	if err := validatePlanRequest(request.Plan); err != nil {
+		return empty, err
+	}
+	// An omitted machine path on restart retains the recorded selection. Validate
+	// that selection too, before locating or reading any current source.
 	if request.InstanceID != "" && request.Plan.ConfigPath == "" {
 		previous, err := s.store.runtime(request.InstanceID)
 		if err != nil {
 			return empty, err
 		}
 		request.Plan.ConfigPath = previous.ConfigPath
+	}
+	if err := validatePlanRequest(request.Plan); err != nil {
+		return empty, err
 	}
 	if _, err := executionDeadlines(request.Options); err != nil {
 		return empty, err

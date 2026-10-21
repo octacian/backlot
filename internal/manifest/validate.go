@@ -779,19 +779,29 @@ func ValidatePrivate(c v1.PrivateConfig, m v1.Manifest, membership bool) error {
 	if !membership {
 		return nil
 	}
-	return ValidateMembership(m, c.Inputs, c.Tools)
+	return validateMembership(m, c.Inputs, c.Tools, true)
 }
 
 // ValidateMembership rejects all undeclared values, including unused or overridden entries.
 func ValidateMembership(m v1.Manifest, inputs, tools map[string]string) error {
+	return validateMembership(m, inputs, tools, false)
+}
+
+func validateMembership(m v1.Manifest, inputs, tools map[string]string, private bool) error {
+	repair := func(kind string) string {
+		if private {
+			return "; use project setup --remove-" + kind + " NAME with an explicit edit to repair private declarations"
+		}
+		return ""
+	}
 	for name := range inputs {
 		if _, ok := m.Inputs[name]; !ok {
-			return invalid("inputs."+name, "undeclared input; use project setup --remove-input NAME with an explicit edit to repair private declarations")
+			return invalid("inputs."+name, "undeclared input"+repair("input"))
 		}
 	}
 	for name := range tools {
 		if _, ok := m.Tools[name]; !ok {
-			return invalid("tools."+name, "undeclared tool; use project setup --remove-tool NAME with an explicit edit to repair private declarations")
+			return invalid("tools."+name, "undeclared tool"+repair("tool"))
 		}
 	}
 	return nil

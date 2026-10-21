@@ -281,3 +281,74 @@ func TestComposedDigestCapturesSelectedPATHResolution(t *testing.T) {
 		t.Fatal("selected PATH tool replacement was absent from effective drift")
 	}
 }
+
+func TestDeclarationRemediationIdentifiesLayer(t *testing.T) {
+	for _, kind := range []string{"input", "tool"} {
+		t.Run(kind, func(t *testing.T) {
+			project, machine := setupFixture(t)
+			planRequest := v1.PlanRequest{ProjectPath: project, ConfigPath: machine, Scene: "test"}
+			// Retire a previously valid declaration in an enrolled private generation.
+			setup := openSetup(t, v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine, Edit: true})
+			inputs, tools := map[string]string{"unused": "private"}, map[string]string{}
+			if kind == "tool" {
+				tools["unused"] = "sh"
+			}
+			saved := saveSetup(t, setup, inputs, tools)
+			updated := strings.Replace(setupManifest, " unused: {}\n", "", 1)
+			if kind == "tool" {
+				updated = strings.Replace(setupManifest, ", unused: /unavailable/unselected", "", 1)
+			}
+			writeSetup(t, filepath.Join(project, "backlot.yaml"), updated)
+			assertPrivate := func(err error) {
+				t.Helper()
+				if err == nil || !strings.Contains(err.Error(), "--remove-"+kind) || strings.Contains(err.Error(), "edit selected machine file") {
+					t.Fatalf("private guidance: %v", err)
+				}
+			}
+			_, err := Resolve(planRequest)
+			assertPrivate(err)
+			_, err = OpenSetup(v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine})
+			assertPrivate(err)
+			privateBefore, err := os.ReadFile(saved.PrivatePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The same undeclared name now occurs only in the machine file. A private
+			// removal cannot repair it, and setup must not mutate either source.
+			writeSetup(t, saved.PrivatePath, `{"version":"backlot/v1"}`)
+			machineData := `{"version":"backlot/v1","inputs":{"token":"machine","unused":"machine"}}`
+			if kind == "tool" {
+				machineData = `{"version":"backlot/v1","inputs":{"token":"machine"},"tools":{"unused":"sh"}}`
+			}
+			writeSetup(t, machine, machineData)
+			assertMachine := func(err error) {
+				t.Helper()
+				if err == nil || !strings.Contains(err.Error(), "edit selected machine file "+machine) || !strings.Contains(err.Error(), "undeclared "+kind) || strings.Contains(err.Error(), "--remove-") {
+					t.Fatalf("machine guidance: %v", err)
+				}
+			}
+			_, err = Resolve(planRequest)
+			assertMachine(err)
+			removal := v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine, Edit: true}
+			if kind == "input" {
+				removal.RemoveInputs = []string{"unused"}
+			} else {
+				removal.RemoveTools = []string{"unused"}
+			}
+			_, err = OpenSetup(removal)
+			assertMachine(err)
+			actual, err := os.ReadFile(machine)
+			if err != nil || string(actual) != machineData {
+				t.Fatal("setup changed machine config", err)
+			}
+			actual, err = os.ReadFile(saved.PrivatePath)
+			if err != nil || string(actual) != `{"version":"backlot/v1"}` {
+				t.Fatal("setup changed private config", err)
+			}
+			// Restore the deliberately edited immutable fixture for consistent teardown.
+			if err := os.WriteFile(saved.PrivatePath, privateBefore, 0600); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

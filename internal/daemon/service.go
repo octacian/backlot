@@ -40,9 +40,16 @@ type service struct {
 	beforeExecution func(string)
 }
 
+func validatePlanRequest(request v1.PlanRequest) error {
+	if request.Scene == "" || len(request.Scene) > 63 || !filepath.IsAbs(request.ProjectPath) || (request.ConfigPath != "" && !filepath.IsAbs(request.ConfigPath)) {
+		return problem("invalid_request", "scene and absolute project/config paths are required")
+	}
+	return nil
+}
+
 func (s *service) prepare(ctx context.Context, request v1.PrepareRequest) (v1.InstanceResponse, error) {
-	if request.Plan.Scene == "" || len(request.Plan.Scene) > 63 || !filepath.IsAbs(request.Plan.ProjectPath) || (request.Plan.ConfigPath != "" && !filepath.IsAbs(request.Plan.ConfigPath)) {
-		return v1.InstanceResponse{}, problem("invalid_request", "scene and absolute project/config paths are required")
+	if err := validatePlanRequest(request.Plan); err != nil {
+		return v1.InstanceResponse{}, err
 	}
 	source, err := plan.Locate(request.Plan.ProjectPath)
 	if err != nil {

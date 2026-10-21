@@ -2,6 +2,7 @@ package plan
 
 import (
 	"encoding/json"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -63,6 +64,10 @@ func loadLayers(source Source, configPath string, staged, reassociate bool) (lay
 		return l, err
 	}
 	if err := manifest.ValidateMembership(l.manifest, l.machine.Inputs, l.machine.Tools); err != nil {
+		var detail *v1.PlanError
+		if errors.As(err, &detail) {
+			return l, problem(detail.Code, detail.Field, detail.Message+"; edit selected machine file "+l.machinePath+" to remove or correct this key")
+		}
 		return l, err
 	}
 	if l.machine.Caddy != nil {

@@ -1,11 +1,11 @@
 ---
 title: 'Compose machine configuration with registered private project inputs'
 date: '2026-10-21'
-status: accepted
+status: superseded
 summary: 'Register private project inputs and tool overrides outside checkouts so linked worktrees reuse explicit setup while machine provider settings remain shared.'
 tags: [configuration, planning, security, identity, cli, persistence]
 supersedes: []
-superseded_by: []
+superseded_by: [20261021T033508474Z-fence-combined-configuration-and-native-recovery-state-at-version-seven.md]
 ---
 
 # Compose machine configuration with registered private project inputs

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -19,13 +20,16 @@ import (
 var bucketNames = []string{"meta", "instances", "checkouts", "paths", "persistent", "snapshots", "secrets", "runtime", "resources"}
 
 type record struct {
-	Instance  v1.Instance `json:"instance"`
-	LeaseHash string      `json:"lease_hash,omitempty"`
+	Instance           v1.Instance         `json:"instance"`
+	LeaseHash          string              `json:"lease_hash,omitempty"`
+	NativeAbandonments []nativeAbandonment `json:"native_abandonments,omitempty"`
 }
 
 type store struct {
-	db        *bolt.DB
-	directory string
+	// waiverCheckpoint is a test-only failure seam after transactional writes.
+	waiverCheckpoint func() error
+	db               *bolt.DB
+	directory        string
 }
 
 func openStore(directory string) (*store, error) {
@@ -49,6 +53,12 @@ func openStore(directory string) (*store, error) {
 			if string(version) != strconv.Itoa(v1.StateVersion) {
 				return problem("state_version", fmt.Sprintf("unsupported state format; this binary requires version %d and does not migrate older state; use the matching older binary to clean up and shut down owned resources before selecting a new --state-dir; state was not modified", v1.StateVersion))
 			}
+			// Existing state must have its complete layout before it can be opened.
+			for _, name := range bucketNames {
+				if tx.Bucket([]byte(name)) == nil {
+					return problem("state_corrupt", "private state bucket missing; state was not modified")
+				}
+			}
 		} else {
 			// Existing buckets without a version are not safe to adopt.
 			if err := tx.ForEach(func(_ []byte, _ *bolt.Bucket) error {
@@ -68,6 +78,11 @@ func openStore(directory string) (*store, error) {
 		return nil, errors.Join(err, db.Close())
 	}
 	return s, nil
+}
+
+func jsonObject(data []byte) bool {
+	trimmed := bytes.TrimSpace(data)
+	return len(trimmed) > 0 && trimmed[0] == '{'
 }
 
 func put(tx *bolt.Tx, bucket, key string, value any) error {
@@ -93,6 +108,7 @@ func decodeRecord(data []byte, id string, r *record) error {
 	if err := json.Unmarshal(data, r); err != nil {
 		return problem("state_corrupt", "cannot decode instance record; preserve state for diagnosis")
 	}
+	r.Instance.NativeOwnershipWarnings = abandonmentWarnings(r.NativeAbandonments)
 	i := r.Instance
 	if i.ID != id || !validID(i.ID) || !validID(i.Operation.ID) || !validID(i.Checkout.ID) || len(i.Operation.Allocations) != 1 || i.Plan.APIVersion != v1.Version || (i.Plan.Lifetime != v1.Persistent && i.Plan.Lifetime != v1.Disposable) || i.Operation.Status != i.Status {
 		return problem("state_corrupt", "invalid instance identity or operation record; preserve state for diagnosis")

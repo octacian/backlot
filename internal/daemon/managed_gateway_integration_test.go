@@ -362,6 +362,18 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	if err := native.Stop(*managed.Identity, 0); err != nil {
 		t.Fatal(err)
 	}
+	// Model pre-boot-ID installations after tmp cleanup. Authenticated fixture
+	// cleanup above retains authority before losing the socket/receipt; recovery
+	// must preserve uncertainty until an explicit waiver resumes saved config/CA.
+	controlDir := filepath.Dir(managed.Identity.Control)
+	if err := os.RemoveAll(controlDir); err != nil {
+		t.Fatal(err)
+	}
+	managed.Identity.Boot = ""
+	managed.Status, managed.Failure = "uncertain", "native control authority unavailable"
+	if err := state.saveManaged(managed); err != nil {
+		t.Fatal(err)
+	}
 	if err := state.db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -369,6 +381,11 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	unavailable := h.state(id, v1.Interrupted)
 	if unavailable.Instance.Execution.CleanupFailure == "" {
 		t.Fatal("unavailable gateway cleanup uncertainty discarded")
+	}
+	command(false, "gateway", "start")
+	forced := command(true, "gateway", "stop", "--force")
+	if !strings.Contains(string(forced), "native_ownership_warnings") {
+		t.Fatal("gateway waiver warning omitted")
 	}
 	command(true, "gateway", "start")
 	// No scene stop/restart intervenes: shutdown must discover the recovered

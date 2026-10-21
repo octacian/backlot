@@ -240,6 +240,12 @@ explicit restart. Leave uncertain resources untouched with diagnostics. Persist
 allocation intent and completion so crashes between external mutations and local
 recording do not silently erase ownership or create false success.
 
+Explicit `stop --force INSTANCE` and `gateway stop --force` may relinquish selected
+unresolved native claims after normal cleanup is attempted. Operators acknowledge
+that unknown survivors may still run/write; no observed IDs are signaled. Keep
+private waiver history, public warnings and truthful evidence across replacement.
+Other ownership fences and later destructive-cleanup proof remain required.
+
 Cleanup is ownership-scoped and idempotent. Names or PIDs alone are insufficient.
 Do not delete resources while an owned consumer may still be running. Report
 cleanup failures and recovery targets; never claim successful teardown on error.

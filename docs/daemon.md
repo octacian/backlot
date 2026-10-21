@@ -121,9 +121,9 @@ through `internal/client`. Administrative HTTP is available only on `daemon.sock
 never a TCP/LAN listener. Send `X-Backlot-API-Version: v1` on every request, and
 `Content-Type: application/json` for POST bodies. POST contracts also require
 `api_version: v1`. Unknown/missing versions are rejected, independently of binary
-version. The binary's declared state format is checked before state mutation;
-unsupported/missing formats in existing populated databases are rejected without
-migration. See the [private-state guide](containers.md) for compatibility.
+version. State compatibility is checked before mutation; see the
+[private-state guide](containers.md#state-compatibility) for the v7
+format and rejection/cleanup rules.
 
 | Endpoint | Named request | Named response |
 | --- | --- | --- |
@@ -136,7 +136,8 @@ migration. See the [private-state guide](containers.md) for compatibility.
 | `POST /v1/cancel` | `InstanceRequest` | `InstanceResponse` |
 | `POST /v1/renew` | `LeaseRequest` | `InstanceResponse` |
 | `POST /v1/run`, `/v1/restart`, `/v1/reset` | `RunRequest` | `InstanceResponse` |
-| `POST /v1/runtime/stop`, `/v1/destroy` | `InstanceRequest` | `InstanceResponse` |
+| `POST /v1/runtime/stop` | `StopRequest` (force requires selected `expected_attempt`) | `InstanceResponse` |
+| `POST /v1/destroy` | `InstanceRequest` | `InstanceResponse` |
 | `POST /v1/logs` | `LogsRequest` | `LogsResponse` |
 
 `list` uses `ListRequest` (`after_id`, `limit`; zero means default 100, maximum
@@ -251,19 +252,34 @@ does not cancel accepted startup; disposable client loss expires its lease.
 
 An outside guardian owns a separate anchor child in a distinct process group.
 The guardian starts and waits for the application root in that anchor group,
-reports its original result, and retains the separate anchor until group cleanup. The guardian signals only that pinned group and
-does not reap the anchor until no other member remains and the anchor has exited.
+reports its original result, and retains the anchor until group cleanup. It signals
+only that pinned group and does not reap the anchor until no other member remains and the anchor has exited.
 No observed member PID is signaled. After anchor join, a kernel signal-0 group
 query must prove ESRCH; enumeration alone cannot acknowledge absence. Successful
-stop also requires joined log/status
-collectors, a private authenticated cleanup receipt, and verified guardian exit.
+stop through the guardian also requires joined log/status collectors, a private authenticated cleanup receipt, and verified guardian exit.
 Control sockets and receipts live in random mode-0700 `/tmp/blctl-*` directories;
 their paths and random capabilities stay in the private runtime journal. Missing
 root PIDs, EOF and closed listeners do not establish cleanup. Graceful daemon
 shutdown stops owned work. Recovery requests cleanup through the same authority
 and marks interrupted with an explicit collection gap; it never resumes work.
-Missing or mismatched control authority is a cleanup failure that preserves
-uncertain survivors. Inspect the private ownership journal before manual action.
+
+All native launch intents/effects, including command probes, record kernel boot
+identity before allocation. A different boot releases obsolete process claims,
+never collection gaps. The guardian-only pipe lets a live anchor terminate its own
+group after guardian death; it provides neither collection proof nor restart
+eligibility. Root or anchor-only death remains cleanable by the guardian; daemon
+loss leaves that authority available. Combined authority loss may leave survivors.
+
+When ordinary stop cannot resolve ownership, restore authority, perform a controlled
+reboot, or explicitly accept survivor risk with `stop --force INSTANCE` before
+ordinary restart. Force attempts normal cleanup, then relinquishes only the selected
+native claims: **unknown survivors may still run/write**. The CLI selects the current
+attempt; API callers retain its `expected_attempt` through retries. Stale requests
+fail before cleanup. Force is limited to stop; non-native fences and independent
+absence proof before later data removal still apply. Private history and safe warnings survive replacement; see
+[evidence semantics](evidence.md#investigation-and-destruction),
+[gateway recovery](https.md#managed-gateway-recovery) and the
+[decision rationale](adr/20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md).
 
 See [disposable results and evidence](evidence.md) for exact exit codes, kept
 failures, artifacts, fixture access and retention settings.
@@ -382,7 +398,7 @@ ownership is preserved. Existing images and global settings remain untouched.
 
 ## Configuration state compatibility
 
-Registered private project composition uses daemon state version 6. State v5 is
+Registered private project composition uses daemon state version 7. State v5/v6 is
 rejected without migration or mutation: use its matching binary to clean up and
 shut down owned resources, then select a fresh state directory. The independent
 project registry survives daemon reset and state-directory replacement. See

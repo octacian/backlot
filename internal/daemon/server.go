@@ -295,7 +295,22 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				return
 			}
 			writeJSON(w, response)
-		case "/v1/runtime/stop", "/v1/destroy":
+		case "/v1/runtime/stop":
+			var request v1.StopRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			if !validID(request.InstanceID) {
+				writeError(w, problem("invalid_request", "recorded instance_id required"))
+				return
+			}
+			instance, err := s.stopRuntimeRequest(r.Context(), request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, v1.InstanceResponse{APIVersion: v1.Version, Instance: instance})
+		case "/v1/destroy":
 			var request v1.InstanceRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
 				return
@@ -304,13 +319,7 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				writeError(w, problem("invalid_request", "recorded instance_id required"))
 				return
 			}
-			var instance v1.Instance
-			var err error
-			if r.URL.Path == "/v1/destroy" {
-				instance, err = s.destroy(r.Context(), request.InstanceID)
-			} else {
-				instance, err = s.stopRuntime(request.InstanceID)
-			}
+			instance, err := s.destroy(r.Context(), request.InstanceID)
 			if err != nil {
 				writeError(w, err)
 				return

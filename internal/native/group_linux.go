@@ -11,6 +11,7 @@ import (
 )
 
 func supported() bool         { return true }
+func anchorOwnGroup() bool    { return syscall.Getpgrp() == os.Getpid() }
 func configure(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} }
 func process(pid int) ([]string, error) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
@@ -33,6 +34,11 @@ func identify(pid int) (Identity, error) {
 		return Identity{}, err
 	}
 	return Identity{PID: pid, Birth: f[19]}, nil
+}
+
+func bootIdentity() (string, error) {
+	data, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	return strings.TrimSpace(string(data)), err
 }
 func groupMembers(pgid int) ([]int, error) {
 	entries, err := os.ReadDir("/proc")

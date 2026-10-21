@@ -14,6 +14,9 @@ func gatewayCommand() *urfave.Command {
 	var children []*urfave.Command
 	for _, name := range []string{"start", "stop", "restart", "status"} {
 		flags := daemonFlags(false)
+		if name == "stop" {
+			flags = append(flags, &urfave.BoolFlag{Name: "force", Usage: "Relinquish unresolved native claims; survivors may still run/write"})
+		}
 		if name == "start" || name == "restart" {
 			flags = append(flags, &urfave.StringFlag{Name: "config", Usage: "Machine configuration with explicit managed Caddy mode"})
 		}
@@ -37,7 +40,15 @@ func gatewayCommand() *urfave.Command {
 			}
 			cli := client.New(daemon.SocketPath(dir))
 			defer cli.Close()
-			response, err := cli.Gateway(ctx, c.Name, v1.GatewayRequest{APIVersion: v1.Version, ConfigPath: config})
+			request := v1.GatewayRequest{APIVersion: v1.Version, ConfigPath: config, Force: c.Bool("force")}
+			if request.Force {
+				selected, err := cli.Gateway(ctx, "status", v1.GatewayRequest{APIVersion: v1.Version})
+				if err != nil {
+					return output(c, nil, err)
+				}
+				request.ExpectedClaimRevision = selected.ClaimRevision
+			}
+			response, err := cli.Gateway(ctx, c.Name, request)
 			return output(c, response, err)
 		}})
 	}

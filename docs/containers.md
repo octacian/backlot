@@ -48,9 +48,12 @@ logic. Applications own those operations and any application-level readiness
 probe. A TCP probe observes connectivity, which may precede application setup;
 use a declared native command probe when connectivity is insufficient.
 
-The durable state format is version 6. Older formats, including version 5, are
-rejected without modification or migration because older binaries cannot
-interpret composed private-source and effective-configuration drift provenance. Use the matching older
+## State compatibility
+
+The durable state format is version 7. Older formats, including versions 5 and 6,
+are rejected without modification or migration. Version 7 fences binaries that
+cannot interpret both native ownership waivers and composed private-source and
+effective-configuration drift provenance. Use the matching older
 binary to clean up owned instances and stop its gateway/daemon before selecting
 a fresh `--state-dir` with the new binary. Preserve old state until cleanup is
 verified; a new directory does not clean up resources from the old one. Backlot
@@ -171,7 +174,9 @@ secret-access endpoints and age/size retention.
 
 The existing named `RunRequest`/`InstanceResponse` contracts serve `/v1/run`,
 `/v1/restart` and `/v1/reset`; restart/reset require `instance_id`. Named
-`InstanceRequest`/`InstanceResponse` serve `/v1/runtime/stop` and `/v1/destroy`.
+`StopRequest`/`InstanceResponse` serve `/v1/runtime/stop`; force requires the
+selected `expected_attempt`. `InstanceRequest`/`InstanceResponse` remain the
+contracts for `/v1/destroy`.
 The CLI/client and server share these Go types. Logs use the existing typed
 paged/NDJSON contracts. Resource capabilities and credential values stay private.
 

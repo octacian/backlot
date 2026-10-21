@@ -49,9 +49,9 @@ daemon shutdown. Prove allocation-intent recovery before external resources arri
 Implemented for independent review: shared native run/restart/stop/log contracts,
 daemon-owned guardian activation, TCP/HTTP/command readiness, finite dependency
 jobs, deadlines including zero/unlimited, lease cancellation, durable logs and
-crash reconciliation. Commands and descendants must remain in their supervised
-group; see the [native guide](daemon.md#native-execution) and
-[supervision decision](adr/20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md).
+crash reconciliation. Application descendants may create groups within their guardian-owned
+session; see the [native guide](daemon.md#native-execution) and
+[supervision decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md).
 This milestone does not implement containers, publication, non-port resources,
 fresh-only jobs, artifact extraction, keep-on-failure or retention policy.
 Independent reviews and required final acceptance/CI remain gates.
@@ -60,7 +60,10 @@ Run a native persistent fixture and finite test job end to end. Add probe deadli
 port-conflict handling, explicit restart, process-tree cancellation, serialized
 lifecycle operations, and owned log capture with historical/follow APIs.
 
-Prove child processes cannot outlive an acknowledged successful stop. Exercise
+For strict system helpers prove group absence after acknowledged stop. For
+application sessions require bounded identity-safe cleanup and truthful observed-empty
+confidence under the accepted missed-process risk; known live/incomplete/lost
+authority must remain fenced. Exercise
 startup interruption, unexpected exits, parent/daemon crashes, and uncertain
 ownership. Implement clear interrupted/failed states rather than auto-restart.
 
@@ -294,3 +297,15 @@ browser preview precede broader feature regression development. Independent Low
 and fresh High reviews, final frozen complete provider/browser/action gates and
 published-revision CI remain required; this paragraph does not claim readiness.
 Binary distribution/version tags remain #25, with no legacy storage migration.
+
+
+## Native development watchers (#49)
+
+General application-session supervision integrates bounded identity handles into
+authenticated guardian membership/cleanup, application/readiness launches and
+private state v6. Stock system helpers retain strict pinned-group proof. Shared
+per-component cleanup confidence reaches status/doctor/exports, retaining original
+job exits and unresolved ownership fences. The [Air/Vite example](../examples/native-watchers/README.md)
+uses ordinary application tooling. Initial target adapter CI is feasibility only;
+independent final Low/High, frozen runtime/provider/browser suites and exact final
+published-content CI remain delivery gates.

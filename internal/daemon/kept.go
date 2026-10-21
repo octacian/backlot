@@ -38,6 +38,7 @@ func (s *service) stopKept(id string, entry *execution) (v1.Instance, error) {
 	var cleanup error
 	for _, group := range entry.groups {
 		cleanup = errors.Join(cleanup, group.Stop(entry.grace))
+		mergeNativeCleanup(instance.Execution, group.CleanupResult())
 		if exit := group.Result(); exit != nil && exit.CollectionFailure != "" && instance.Execution.CollectionFailure == "" {
 			instance.Execution.CollectionFailure = "retained native output/status collection could not be verified"
 		}
@@ -48,6 +49,12 @@ func (s *service) stopKept(id string, entry *execution) (v1.Instance, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cleanup = errors.Join(cleanup, s.store.removeGateway(ctx, id, &journal))
+	for _, observed := range instance.Execution.NativeCleanup {
+		if observed.Confidence != v1.ObservedEmpty {
+			cleanup = errors.Join(cleanup, errors.New("native cleanup observation remains incomplete"))
+			break
+		}
+	}
 	if cleanup == nil && entry.resources != nil {
 		cleanup = s.store.cleanupContainers(ctx, id, entry.resources, entry.docker)
 	}
@@ -104,4 +111,21 @@ func sanitizeResult(result *v1.ExecutionResult, snapshot plan.Snapshot, entry *e
 		result.CleanupDetails[i].Message = redact(result.CleanupDetails[i].Message)
 		result.CleanupDetails[i].Field = redact(result.CleanupDetails[i].Field)
 	}
+}
+
+// Successful readiness-attempt cleanup is private until the component's live
+// service is also stopped. Failed attempts remain visible and fenced while kept.
+func omitActiveNativeSuccess(result *v1.ExecutionResult, entry *execution) {
+	if !result.Kept {
+		return
+	}
+	kept := result.NativeCleanup[:0]
+	for _, r := range result.NativeCleanup {
+		work := entry.services[r.Component]
+		if r.Confidence == v1.ObservedEmpty && work != nil && work.Alive() {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	result.NativeCleanup = kept
 }

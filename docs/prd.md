@@ -137,14 +137,17 @@ route registration so server-side rendering through the public origin does not
 introduce a startup cycle. Readiness means observed availability, not proof that
 a native watcher compiled the latest source successfully.
 
-Launch native work with verified ownership and cancellation within a dedicated
-supervised process group. Native commands and all descendants (including
-readiness commands) must stay in that group: detachment through setsid/group
-changes and delegation to unrelated supervisors are unsupported. This is a
-cooperative command contract, not kernel containment; detecting or cleaning up
-deliberately escaped descendants is not guaranteed. Successful stop verifies the
-complete supervised group is empty; uncertain ownership remains untouched and
-returns failure. See the [native supervision decision](adr/20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md). Create
+Launch application native work, including readiness commands, in a live
+authenticated guardian-owned Unix session. Descendants may create process groups
+inside that session; `setsid`, privilege changes and unrelated supervisors remain
+unsupported. This is cooperative supervision, not containment. Bounded individual
+kernel-identity signals and two complete empty observations yield `observed_empty`,
+which deliberately cannot rule out unseen compliant forks or escaped descendants.
+Under the accepted risk, success may release stop/restart/output/data-deletion
+fences. Known live members, denied checks, exhausted budgets, missing joins and
+lost authority remain nonzero and fenced. Managed Caddy/system helpers retain
+strict pinned-group supervision and stronger group-absence proof. See the
+[native supervision decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md). Create
 generic containers, networks, and volumes directly through Docker, using existing
 images or project Dockerfiles/build commands. Delegate image building to existing
 Docker tooling; do not implement a build engine. Record actual engine IDs and

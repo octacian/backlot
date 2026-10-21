@@ -30,7 +30,7 @@ func (s *service) awaitProbe(ctx context.Context, id string, c v1.PlannedCompone
 				if c.Runtime == v1.Container {
 					continue
 				}
-				conflict, checkErr := native.ListenerConflict(probeCtx, group.PGID(), result.Ports[port.Resource])
+				conflict, checkErr := group.(*native.Group).ListenerConflict(probeCtx, result.Ports[port.Resource])
 				if checkErr != nil {
 					return checkErr
 				}
@@ -71,7 +71,7 @@ func (s *service) awaitProbe(ctx context.Context, id string, c v1.PlannedCompone
 				pinned := net.JoinHostPort(address.String(), target)
 				ready, err = probeDestination(probeCtx, c.Readiness.Kind, target, pinned)
 			} else {
-				ready, err = networkProbe(probeCtx, c.Readiness.Kind, target, group.PGID())
+				ready, err = networkProbeWith(probeCtx, c.Readiness.Kind, target, group.(*native.Group).ListenerEndpoint)
 			}
 			var typed *v1.PlanError
 			if errors.As(err, &typed) && typed.Code == "port_conflict" && value.Symbolic == nil {
@@ -92,6 +92,15 @@ func (s *service) awaitProbe(ctx context.Context, id string, c v1.PlannedCompone
 	}
 }
 func networkProbe(ctx context.Context, kind, target string, pgid int) (bool, error) {
+	return networkProbeWith(ctx, kind, target, func(ctx context.Context, address string) (bool, bool, error) {
+		if pgid == 0 {
+			return true, false, nil
+		}
+		return native.ListenerEndpoint(ctx, pgid, address)
+	})
+}
+
+func networkProbeWith(ctx context.Context, kind, target string, listener func(context.Context, string) (bool, bool, error)) (bool, error) {
 	address := target
 	if kind == "http" {
 		u, err := url.Parse(target)
@@ -127,11 +136,7 @@ func networkProbe(ctx context.Context, kind, target string, pgid int) (bool, err
 	conflict := false
 	for _, ip := range addresses {
 		endpoint := net.JoinHostPort(ip.String(), portText)
-		if pgid == 0 {
-			pinned = endpoint
-			break
-		}
-		owned, unrelated, err := native.ListenerEndpoint(ctx, pgid, endpoint)
+		owned, unrelated, err := listener(ctx, endpoint)
 		if err != nil {
 			return false, err
 		}

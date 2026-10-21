@@ -1,16 +1,16 @@
 ---
 title: 'Allow cooperative native process groups within an owned session'
 date: '2026-10-21'
-status: proposed
+status: accepted
 summary: 'Allow ordinary native watchers to create process groups inside a live guardian-owned session, with bounded identity-safe cleanup and explicit residual-process risk.'
 tags: [native, lifecycle, ownership, watchers, macos, linux]
-supersedes: []
+supersedes: [20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md]
 superseded_by: []
 ---
 
 # Allow cooperative native process groups within an owned session
 
-Propose replacing the single-process-group restriction with a cooperative Unix
+Replace the single-process-group restriction with a cooperative Unix
 session boundary for application native services, jobs and readiness commands.
 Keep Backlot-managed system helpers, including stock Caddy, on strict group
 supervision and its existing stronger absence contract. An internal launch purpose
@@ -20,13 +20,13 @@ application restart loop. A live authenticated guardian authorizes session
 membership; guardian-loss witnessed recovery is a deferred alternative. Signal
 individually acquired kernel process identities, with bounded cleanup scans and an explicitly weaker, observed-empty cleanup result.
 
-This proposal is intended to replace the [accepted native supervision
-ADR](20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md)
-after independent review and agreement. The old record and reciprocal metadata
-remain unchanged while proposed. Acceptance must explicitly approve observed-empty
-cleanup and retained guardian-loss uncertainty. Witness recovery, a public risk
-acknowledgement and a second keeper are outside the recommended minimum scope. Substantial
-implementation remains blocked on those choices and the platform feasibility gates.
+This decision supersedes the [former native supervision
+ADR](20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md).
+Following independent review and supported-platform adapter evidence, acceptance
+explicitly permits observed-empty cleanup to release stop/restart/output/data-deletion
+fences despite unseen compliant-fork risk, while retaining guardian-loss uncertainty.
+Witness recovery, a public risk acknowledgement and a second keeper remain outside
+this minimum scope. Acceptance establishes the contract, not completed integration.
 
 ## Context
 

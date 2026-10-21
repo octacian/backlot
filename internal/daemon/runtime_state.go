@@ -19,6 +19,7 @@ type runtimeRecord struct {
 	ExportSource  *v1.ExportSource    `json:"export_source,omitempty"`
 	StartedAt     string              `json:"started_at,omitempty"`
 	Gateway       *gateway.Intent     `json:"gateway,omitempty"`
+	LaunchPurpose string              `json:"launch_purpose,omitempty"`
 	LaunchPending bool                `json:"launch_pending,omitempty"`
 	ConfigPath    string              `json:"config_path,omitempty"`
 	Attempt       string              `json:"attempt"`
@@ -154,13 +155,24 @@ func (s *store) recoverExecution(id string) error {
 	if r.LaunchPending {
 		cleanup = errors.Join(cleanup, problem("cleanup_failed", "native guardian launch intent lacks its ownership effect; an inactive helper may remain; preserve and diagnose this instance"))
 	}
+	result.NativeCleanup = nil
 	var mu sync.Mutex
 	var joined sync.WaitGroup
 	for _, group := range r.Groups {
+		if group.Purpose != "application" || group.Attempt != r.Attempt || !hasComponent(result.Components, group.Component) {
+			cleanup = errors.Join(cleanup, problem("cleanup_failed", "native application authority purpose/attempt/component mismatch; preserve uncertain processes"))
+			continue
+		}
 		if proofMissing {
 			continue
 		}
-		joined.Go(func() { err := native.Stop(group, 0); mu.Lock(); cleanup = errors.Join(cleanup, err); mu.Unlock() })
+		joined.Go(func() {
+			observed, err := native.StopResult(group, 0)
+			mu.Lock()
+			cleanup = errors.Join(cleanup, err)
+			mergeNativeCleanup(&result, observed)
+			mu.Unlock()
+		})
 	}
 	joined.Wait()
 	cleanup = errors.Join(cleanup, s.recoverContainers(id, &g))
@@ -291,4 +303,33 @@ func (s *store) acceptExecution(id string, journal runtimeRecord, result *v1.Exe
 		return put(tx, "instances", id, r)
 	})
 	return instance, err
+}
+
+// Multiple readiness/application launches share a component. Preserve the worst
+// current confidence; a recovery pass rebuilds observations from every authority.
+func mergeNativeCleanup(result *v1.ExecutionResult, observed *v1.NativeCleanupResult) {
+	if observed == nil {
+		return
+	}
+	if observed.Confidence != v1.ObservedEmpty && result.CleanupFailure == "" {
+		result.CleanupFailure = "native session cleanup remains incomplete; lifecycle fences retained"
+	}
+	for i, r := range result.NativeCleanup {
+		if r.Component == observed.Component && r.Attempt == observed.Attempt {
+			if r.Confidence == v1.ObservedEmpty {
+				result.NativeCleanup[i] = *observed
+			}
+			return
+		}
+	}
+	result.NativeCleanup = append(result.NativeCleanup, *observed)
+}
+
+func hasComponent(components []v1.ComponentResult, name string) bool {
+	for _, c := range components {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
 }

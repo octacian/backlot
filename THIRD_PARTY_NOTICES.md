@@ -1290,7 +1290,7 @@ Apache License
 
 ## github.com/ebitengine/purego v0.11.2
 
-Linked into: native identity adapter feasibility gate (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64).
 
 ### LICENSE
 
@@ -5525,7 +5525,7 @@ SOFTWARE.
 
 ## golang.org/x/sys v0.47.0
 
-Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64); native identity adapter feasibility gate (darwin/arm64).
+Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64).
 
 ### LICENSE
 

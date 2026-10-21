@@ -12,7 +12,12 @@ the original terminal status remains in `execution.terminal_exit_code` and the
 component result. Unknown job exit status remains absent; observation or collector
 failures never substitute an application exit code. Later verified status recovery
 preserves the observed code alongside the separate failure. `failure`, `collection_failure`, `cleanup_failure` and
-`cancelled` describe separate outcomes. Finite JSON commands emit one typed result;
+`cancelled` describe separate outcomes. Application native cleanup also records
+`native_cleanup` per component/attempt with `observed_empty`, `incomplete` or
+`authority_lost` confidence and stable reason/detail. Observed empty deliberately
+permits lifecycle/data fence release despite possible unseen descendants; it is
+not universal absence. Known incomplete/lost authority remains a cleanup failure.
+Strict system helpers keep stronger group proof and omit session results. Finite JSON commands emit one typed result;
 application output is available through `logs`. Backlot captures application
 stdout/stderr as emitted, including any secrets the application prints. Backlot's
 own diagnostic messages redact resolved sensitive values.

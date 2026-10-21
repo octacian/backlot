@@ -144,6 +144,15 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 	if snap.Plan.Publish != nil {
 		s.doctorGateway(ctx, &r, snap, instance)
 	}
+	if instance.Execution != nil {
+		for _, cleanup := range instance.Execution.NativeCleanup {
+			status := v1.DoctorOK
+			if cleanup.Confidence != v1.ObservedEmpty {
+				status = v1.DoctorFailed
+			}
+			diagnosticAdd(&r, "native_cleanup", cleanup.Component, status, cleanup.Detail)
+		}
+	}
 	running := instance.Execution != nil && (instance.Status == v1.RuntimeReady || instance.Status == v1.Starting || instance.Execution.Kept)
 	if !running {
 		diagnosticAdd(&r, "upstreams", "daemon/host", v1.DoctorDeferred, "no available recorded live runtime target; start the scene explicitly then use doctor --instance")

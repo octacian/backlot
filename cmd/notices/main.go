@@ -71,7 +71,6 @@ func generate() ([]byte, error) {
 	for _, target := range []struct{ name, pkg, os, arch string }{
 		{"Backlot CLI (darwin/arm64)", "./cmd/backlot", "darwin", "arm64"},
 		{"Backlot CLI (linux/amd64)", "./cmd/backlot", "linux", "amd64"},
-		{"native identity adapter feasibility gate (darwin/arm64)", "./internal/native/procidentity", "darwin", "arm64"},
 		{"optional acceptance application (darwin/arm64)", "./examples/release-acceptance", "darwin", "arm64"},
 		{"optional acceptance application (linux/arm64 container)", "./examples/release-acceptance", "linux", "arm64"},
 	} {

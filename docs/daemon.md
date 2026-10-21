@@ -158,11 +158,12 @@ startup error in foreground output or the private `daemon.log` for background st
 ## Native execution
 
 Build with `make build`, then explicitly start a private daemon as above. Native
-commands and **all descendants** must remain in Backlot's supervised process
-group, including readiness commands. Do not use setsid, change descendant groups,
-or delegate work to an unrelated supervisor. Deliberate escape detection and
-kernel containment are not provided. The [supervision ADR](adr/20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md)
-explains the ownership and recovery boundary.
+commands and descendants, including readiness commands, may create groups within
+their live guardian-owned session. Do not use `setsid`, change privileges or delegate
+work to an unrelated supervisor. This cooperative contract is not containment.
+The [session supervision ADR](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md) defines bounded observed-empty cleanup,
+its residual-process risk and guardian-loss uncertainty. Stock managed Caddy and
+internal helpers keep strict pinned-group cleanup.
 
 ```sh
 bin/backlot run dev --state-dir /absolute/private/backlot --project /absolute/project --json
@@ -189,7 +190,7 @@ Generic containers, private volumes/directories/secrets/networks and fresh-only
 jobs follow the [private-state lifecycle](containers.md). Publication follows the
 [HTTPS guide](https.md). Metadata `prepare` retains its allocation-free semantics for all
 supported declarations. Native TCP/HTTP probes additionally require `lsof` on the
-daemon PATH, to prove the listener belongs to the supervised group at the actual
+daemon PATH, to prove the listener belongs to the authenticated application session at the actual
 dialed destination; an unrelated listener never satisfies
 readiness and is never killed. Targets must resolve exclusively to loopback
 addresses. Resolution is validated once per attempt and the owned numeric
@@ -241,21 +242,38 @@ scenes/runs. Ctrl-C/SIGTERM during a CLI
 run cancels and joins the supervised work. Ordinary persistent client disconnect
 does not cancel accepted startup; disposable client loss expires its lease.
 
-An outside guardian owns a separate anchor child in a distinct process group.
-The guardian starts and waits for the application root in that anchor group,
-reports its original result, and retains the separate anchor until group cleanup. The guardian signals only that pinned group and
-does not reap the anchor until no other member remains and the anchor has exited.
-No observed member PID is signaled. After anchor join, a kernel signal-0 group
-query must prove ESRCH; enumeration alone cannot acknowledge absence. Successful
-stop also requires joined log/status
-collectors, a private authenticated cleanup receipt, and verified guardian exit.
-Control sockets and receipts live in random mode-0700 `/tmp/blctl-*` directories;
-their paths and random capabilities stay in the private runtime journal. Missing
-root PIDs, EOF and closed listeners do not establish cleanup. Graceful daemon
-shutdown stops owned work. Recovery requests cleanup through the same authority
-and marks interrupted with an explicit collection gap; it never resumes work.
-Missing or mismatched control authority is a cleanup failure that preserves
-uncertain survivors. Inspect the private ownership journal before manual action.
+A live authenticated guardian leads the application session and owns an unreaped
+anchor child in the original workload group. It records the original root exit
+separately, acquires kernel process identities, observes session membership and
+revalidates identity before individual signals. TERM/grace/KILL scans have finite
+candidate, acquisition, handle and verification budgets. Known live identities
+remain tracked until exited or zombie; they cannot disappear merely because a
+later enumeration misses them. Two successful complete empty observations at
+least 20ms apart provide `observed_empty`, never universal descendant absence.
+The retained anchor is released only after scans; its original group retains a
+kernel absence check. Logs/status/root/guardian joins and an authenticated bound
+cleanup receipt remain required. Strict system helpers keep their stronger original
+group policy and omit application session confidence results.
+
+`execution.native_cleanup` records a named result per component/attempt:
+`confidence` is `observed_empty`, `incomplete` or `authority_lost`, with a stable
+`reason` and bounded safe `detail`. Human status, JSON, doctor and portable exports
+expose the same observation. `observed_empty` is success under the accepted risk:
+an unseen same-session fork or unsupported escape can still race restart or data
+cleanup, and ordinary lifecycle/output/data fences may be released. Known live
+members, denied observations, exhausted budgets, missing joins or authority loss
+remain nonzero and retain fences. Root exit, EOF or closed listeners alone never
+establish cleanup. No raw process/session identities are public results.
+
+Capabilities, protocol/purpose, attempt and guardian birth identity stay in the
+private journal; control sockets/receipts remain in random mode-0700 `/tmp/blctl-*`
+directories. Ordinary daemon crash with a surviving guardian uses the same bounded
+authenticated cleanup and marks interruption/collection gaps, without resuming
+work. Guardian loss preserves existing per-instance uncertainty and data/output
+fences; there is no new witnessed recovery, force-delete or automatic retry.
+Read [state compatibility](containers.md) before moving v5 work to fresh v6 state.
+The [normal Air and Vite example](../examples/native-watchers/README.md) demonstrates
+existing application commands and documents build-failure/readiness limitations.
 
 See [disposable results and evidence](evidence.md) for exact exit codes, kept
 failures, artifacts, fixture access and retention settings.

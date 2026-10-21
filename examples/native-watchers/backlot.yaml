@@ -1,0 +1,54 @@
+version: backlot/v1
+project: native-watchers
+tools:
+  air: air
+  npm: npm
+outputs:
+  build: {path: tmp, concurrency_group: api-build}
+resources:
+  api_port: {kind: port}
+  web_port: {kind: port}
+  origin: {kind: origin}
+components:
+  api:
+    kind: service
+    runtime: native
+    command: {tool: air, args: [-c, .air.toml]}
+    resources: [api_port]
+    ports: {http: {resource: api_port}}
+    outputs: [build]
+    environment:
+      assign:
+        PORT: {ref: {kind: resource, name: api_port, field: port}}
+    readiness:
+      kind: tcp
+      target: {ref: {kind: service, name: api, field: port, port: http}}
+      timeout: 30s
+  web:
+    kind: service
+    runtime: native
+    command: {tool: npm, args: [run, dev]}
+    resources: [web_port, origin]
+    ports: {http: {resource: web_port}}
+    environment:
+      assign:
+        PORT: {ref: {kind: resource, name: web_port, field: port}}
+        APP_ORIGIN: {ref: {kind: resource, name: origin, field: url}}
+    readiness:
+      kind: tcp
+      target: {ref: {kind: service, name: web, field: port, port: http}}
+      timeout: 30s
+scenes:
+  dev:
+    lifetime: persistent
+    components: [api, web]
+    resources: [api_port, web_port, origin]
+    publish:
+      resource: origin
+      routes:
+        - {path: /api, service: api, port: http, prefix: strip}
+        - {path: /, service: web, port: http, prefix: preserve}
+      probe:
+        kind: http
+        target: {ref: {kind: resource, name: origin, field: url}}
+        timeout: 15s

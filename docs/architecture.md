@@ -24,9 +24,13 @@ It owns idempotency, instance mutation locking, dependency gates, initialization
 records, cancellation, evidence, and teardown ordering. It calls narrow adapters
 for native work, containers, gateway mutations, storage, and probes.
 
-Native adapters own complete cooperative process groups, including descendants,
-not only launcher PIDs. Commands must not detach or delegate work outside that
-group; see the [native supervision decision](adr/20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md). Docker adapters
+Native application adapters own a cooperative session through its live authenticated
+guardian, retaining acquired kernel identities during bounded individual cleanup.
+Application descendants may change groups within that session. Two complete empty
+observations report observed-empty confidence, with accepted missed-process risk;
+known incomplete or lost authority remains fenced. Stock managed Caddy and system
+helpers keep strict pinned-group cleanup and its stronger proof. See the
+[native supervision decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md). Docker adapters
 use the official Go client for lifecycle/inspection and established Docker tooling
 for image builds. Gateway adapters use Caddy's HTTP API and owned route IDs/scope,
 including concurrency preconditions rather than whole-config replacement.

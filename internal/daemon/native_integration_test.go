@@ -795,7 +795,17 @@ func TestNativeRuntime(t *testing.T) {
 				h.manifest.Components["server"] = c
 				h.write()
 				r := h.run("dev")
-				h.state(r.Instance.ID, v1.RuntimeReady)
+				ready := h.state(r.Instance.ID, v1.RuntimeReady)
+				if kind == "command" && len(ready.Instance.Execution.NativeCleanup) != 0 {
+					t.Fatal("probe session cleanup mislabeled live component as cleaned", ready.Instance.Execution.NativeCleanup)
+				}
+				stopped, err := h.cli.StopExecution(context.Background(), r.Instance.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(stopped.Instance.Execution.NativeCleanup) != 1 || stopped.Instance.Execution.NativeCleanup[0].Confidence != v1.ObservedEmpty {
+					t.Fatal("component lifecycle cleanup aggregation", stopped.Instance.Execution)
+				}
 			})
 		}
 	})

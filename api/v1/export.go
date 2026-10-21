@@ -26,15 +26,16 @@ type ExportResponse struct {
 
 // ExportResult preserves original runtime outcomes without private runtime records.
 type ExportResult struct {
-	InstanceID        string            `json:"instance_id"`
-	Attempt           string            `json:"attempt"`
-	Status            InstanceStatus    `json:"status"`
-	TerminalExitCode  *int              `json:"terminal_exit_code,omitempty"`
-	Cancelled         bool              `json:"cancelled"`
-	Failure           string            `json:"failure,omitempty"`
-	CollectionFailure string            `json:"collection_failure,omitempty"`
-	CleanupFailure    string            `json:"cleanup_failure,omitempty"`
-	Components        []ComponentResult `json:"components"`
+	InstanceID        string                `json:"instance_id"`
+	Attempt           string                `json:"attempt"`
+	Status            InstanceStatus        `json:"status"`
+	TerminalExitCode  *int                  `json:"terminal_exit_code,omitempty"`
+	Cancelled         bool                  `json:"cancelled"`
+	Failure           string                `json:"failure,omitempty"`
+	CollectionFailure string                `json:"collection_failure,omitempty"`
+	NativeCleanup     []NativeCleanupResult `json:"native_cleanup,omitempty"`
+	CleanupFailure    string                `json:"cleanup_failure,omitempty"`
+	Components        []ComponentResult     `json:"components"`
 }
 
 // ExportSource records bounded launch provenance; absent historical facts remain unknown.

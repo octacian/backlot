@@ -3,8 +3,10 @@ import { test } from 'node:test';
 import { mkdir, writeFile, readFile, lstat, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import * as vm from 'node:vm';
+import { fileURLToPath } from 'node:url';
 import { captureProjectInputs, mask, setupProject, requireProjectRuntime } from './project.mjs';
-import { command, createOwner, cleanup, backlotEnvironment } from './runtime.mjs';
+import { command, createOwner, cleanup, backlotEnvironment, isInterruption } from './runtime.mjs';
 
 function capture(raw, generated = '', register = () => {}) {
   process.env['INPUT_PROJECT-INPUTS'] = raw;
@@ -12,6 +14,67 @@ function capture(raw, generated = '', register = () => {}) {
   return captureProjectInputs(register);
 }
 
+// The branch fixture evaluates the actual setup source and uses the real command
+// helper only for a retained native Node child. Platform/dependency/installer
+// adapters are bounded stubs; no apt, downloads, filesystem owner or runtime runs.
+async function setupCancellationFixture(mode) {
+ const sourcePath = fileURLToPath(new URL('./setup.mjs', import.meta.url));
+ const source = await readFile(sourcePath, 'utf8');
+ const calls = [];
+ let joined = false, lsofCalls = 0, owners = 0, runtime = 0;
+ const context = vm.createContext({
+  process: {platform:'linux',arch:'x64',env:{'INPUT_BACKLOT-REF':'a'.repeat(40),'INPUT_NODE-BINARY':'/fixture/node'},argv:[]},
+  performance, console: {log(){},warn(){},error(){}}
+ });
+ const synthetic = values => new vm.SyntheticModule(Object.keys(values),function(){
+  for(const [key,value] of Object.entries(values))this.setExport(key,value);
+ },{context});
+ const commandStub = async (binary,args) => {
+  calls.push([binary,...args].join(' '));
+  if(binary==='/fixture/node')return '';
+  if(binary==='go')return 'go version go1.27.1 linux/amd64\n';
+  if(binary==='lsof') {
+   if(mode==='missing') { if(lsofCalls++===0)throw Error('missing fixture dependency'); return ''; }
+   const timer=setTimeout(()=>process.kill(process.pid,mode),100);
+   try { return await command(process.execPath,['-e','process.stderr.write("private-output-marker");setInterval(()=>{},100)'],{timeout:1000}); }
+   finally {clearTimeout(timer);joined=true;}
+  }
+  if(binary==='sudo')return ''; // installer adapter only; never execute sudo
+  throw Error('unexpected fixture executable');
+ };
+ const module = new vm.SourceTextModule(source,{context,identifier:'file://'+sourcePath,initializeImportMeta(meta){meta.url='file://'+sourcePath;}});
+ await module.link(spec=>{
+  if(spec==='node:assert/strict')return synthetic({default:assert});
+  if(spec==='node:fs/promises')return synthetic({appendFile(){},mkdir(){},readFile:async()=> 'VERSION_ID="24.04"\n',writeFile(){}});
+  if(spec==='node:path')return synthetic({join:(...parts)=>parts.join('/'),isAbsolute:value=>value.startsWith('/'),delimiter:':'});
+  if(spec==='node:url')return synthetic({fileURLToPath:value=>String(value).replace('file://','')});
+  if(spec==='./runtime.mjs')return synthetic({command:commandStub,isInterruption,createOwner(){owners++;throw Error('positive control stops before owner allocation');},prepare(){runtime++;throw Error('runtime must not run');},cleanup(){throw Error('cleanup requires an allocated owner');}});
+  if(spec==='./project.mjs')return synthetic({captureProjectInputs(){return {requested:false};},setupProject(){},requireProjectRuntime(){}});
+  throw Error('unexpected fixture import');
+ });
+ await module.evaluate();
+ let error;
+ try {await module.namespace.setup();}catch(cause){error=cause;}
+ assert.equal(runtime,0);
+ if(mode==='missing') {
+  assert.deepEqual(calls.slice(-3),['sudo apt-get update','sudo apt-get install -y lsof','lsof -v']);
+  assert.equal(owners,1); // control reaches the owner adapter but allocates nothing
+  assert.match(error?.message??'',/positive control stops/);
+ } else {
+  assert.ok(joined,'interrupted child was not joined');
+  assert.equal(error?.code,'BACKLOT_COMMAND_INTERRUPTED');
+  assert.equal(error?.signal,mode);
+  assert.equal(error?.stdout,undefined);
+  assert.doesNotMatch(error?.message??'',/private-output-marker/);
+  assert.ok(!calls.some(call=>call.startsWith('sudo ')),'interruption entered installer fallback');
+  assert.equal(owners,0,'interruption reached owner allocation');
+ }
+ console.log(`PASS actual setup dependency branch: ${mode}; no system installer or owner/runtime allocation`);
+}
+
+if(process.argv[2]==='--setup-cancellation-fixture') {
+ await setupCancellationFixture(process.argv[3]);
+} else {
 test('structured options preserve duplicate checks, masks and explicit enrollment', () => {
   assert.equal(capture('').requested, false);
   assert.equal(capture('{}').requested, true);
@@ -143,11 +206,18 @@ test('sensitive command forwards cancellation to its retained child and joins', 
  const script = `import {command} from ${JSON.stringify(source)};
  const promise=command(process.execPath,['-e','process.stdout.write("ready");setInterval(()=>{},100)'],{sensitive:true,timeout:1000});
  setTimeout(()=>console.log('ready'),100);
- try {await promise;process.exitCode=2;}catch(error){console.error(error.message);process.exitCode=1;}`;
+ try {await promise;process.exitCode=2;}catch(error){console.error(error.code);process.exitCode=1;}`;
  const child=spawn(process.execPath,['--input-type=module','-e',script],{stdio:['ignore','pipe','pipe']});
  let stderr='';child.stderr.on('data',data=>{stderr+=data;});
  child.stdout.once('data',()=>child.kill('SIGTERM'));
  const exit=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',(code,signal)=>resolve({code,signal}));});
  assert.deepEqual(exit,{code:1,signal:null});
- assert.match(stderr,/Sensitive project setup command failed/);
+ assert.match(stderr,/BACKLOT_COMMAND_INTERRUPTED/);
 });
+
+
+for(const mode of ['SIGINT','SIGTERM','missing'])test(`actual setup dependency branch: ${mode}`,async()=>{
+ const result=await command(process.execPath,['--experimental-vm-modules',fileURLToPath(import.meta.url),'--setup-cancellation-fixture',mode],{timeout:5000});
+ assert.ok(result.includes(`PASS actual setup dependency branch: ${mode}`));
+});
+}

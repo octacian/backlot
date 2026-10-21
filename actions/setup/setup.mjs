@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, isAbsolute, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { command, createOwner, prepare, cleanup } from './runtime.mjs';
+import { command, createOwner, prepare, cleanup, isInterruption } from './runtime.mjs';
 import { captureProjectInputs, setupProject, requireProjectRuntime } from './project.mjs';
 
 export async function setup() {
@@ -30,7 +30,8 @@ export async function setup() {
     GOSUMDB: 'sum.golang.org', GOINSECURE: '', GOWORK: 'off', GOENV: 'off', GOPRIVATE: '', GONOSUMDB: '', GONOPROXY: '', GOFLAGS: '-mod=readonly' };
   assert.match(await command('go', ['version'], { env }), /^go version go1\.27\.1 linux\/amd64\s*$/,
     'install exact Go 1.27.1 using pinned actions/setup-go before Backlot setup');
-  try { await command('lsof', ['-v']); } catch {
+  try { await command('lsof', ['-v']); } catch (error) {
+    if (isInterruption(error)) throw error;
     await command('sudo', ['apt-get', 'update'], { timeout: 180_000 });
     await command('sudo', ['apt-get', 'install', '-y', 'lsof'], { timeout: 180_000 });
     await command('lsof', ['-v']);
@@ -43,7 +44,7 @@ export async function setup() {
   const paths = [(await command('go', ['env', 'GOMODCACHE'], { env })).trim(), (await command('go', ['env', 'GOCACHE'], { env })).trim()];
   const cacheKey = `backlot-source-linux-amd64-go1.27.1-${sha}-caddy2.11.6`;
   let cacheHit;
-  try { cacheHit = await restoreCache(paths, cacheKey); } catch (error) { console.warn(`Go cache restore unavailable: ${error.message}`); }
+  try { cacheHit = await restoreCache(paths, cacheKey); } catch (error) { if (isInterruption(error)) throw error; console.warn(`Go cache restore unavailable: ${error.message}`); }
   const source = join(owner.root, 'source');
   const tools = join(owner.root, 'tools');
   await mkdir(source); await mkdir(tools);
@@ -65,7 +66,7 @@ export async function setup() {
   assert.match(identity, /\tmod\tgithub\.com\/caddyserver\/caddy\/v2\tv2\.11\.6\th1:/);
   assert.ok(!identity.includes('\t=>'), 'replaced Caddy modules are not supported');
   if (!cacheHit) {
-    try { await saveCache(paths, cacheKey); } catch (error) { console.warn(`Go cache save unavailable: ${error.message}`); }
+    try { await saveCache(paths, cacheKey); } catch (error) { if (isInterruption(error)) throw error; console.warn(`Go cache save unavailable: ${error.message}`); }
   }
   const binary = join(tools, 'backlot');
   await requireProjectRuntime(owner, binary);

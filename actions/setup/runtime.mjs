@@ -17,12 +17,18 @@ export async function backlotEnvironment(owner, env = process.env) {
   await verifyOwner(owner);
   return { ...cleanEnvironment(env), BACKLOT_PROJECT_CONFIG_DIR: join(owner.root, 'project-config') };
 }
+// isInterruption lets fallback callers distinguish a consumed parent signal from
+// an unavailable dependency. Cleanup callers may still perform owned teardown.
+export function isInterruption(error) {
+  return error?.code === 'BACKLOT_COMMAND_INTERRUPTED';
+}
 export async function command(binary, args, options = {}) {
   const { rejectStderr = false, stdin, sensitive = false, maxBytes = 8 << 20, timeout = 60_000, ...spawnOptions } = options;
   const fail = () => Error('Sensitive project setup command failed; runtime was not started');
   if (stdin !== undefined && (typeof stdin !== 'string' || Buffer.byteLength(stdin) > (1 << 20))) throw fail();
   const child = spawn(binary, args, { ...spawnOptions, env: cleanEnvironment(spawnOptions.env), stdio: [stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
-  let stdout = '', stderr = '', bytes = 0, failure = '';
+  let stdout = '', stderr = '', bytes = 0, failure = '', interrupted = '';
+  const interruption = () => Object.assign(Error(`Command interrupted by ${interrupted}`), { code: 'BACKLOT_COMMAND_INTERRUPTED', signal: interrupted });
   const stop = reason => { failure ||= reason; child.kill('SIGTERM'); };
   const capture = stream => chunk => {
     bytes += Buffer.byteLength(chunk);
@@ -33,17 +39,20 @@ export async function command(binary, args, options = {}) {
   child.stdout.on('data', capture('stdout'));
   child.stderr.on('data', capture('stderr'));
   if (child.stdin) { child.stdin.on('error', () => stop('stdin failed')); child.stdin.end(stdin); }
-  const onInt = () => { failure ||= 'interrupted'; child.kill('SIGINT'); };
-  const onTerm = () => { failure ||= 'interrupted'; child.kill('SIGTERM'); };
+  const onInt = () => { interrupted ||= 'SIGINT'; child.kill('SIGINT'); };
+  const onTerm = () => { interrupted ||= 'SIGTERM'; child.kill('SIGTERM'); };
   process.on('SIGINT', onInt); process.on('SIGTERM', onTerm);
   const timer = setTimeout(() => stop('timeout'), timeout);
   // Retained child handle only; always join, including timeout and capture errors.
   const hardTimer = setTimeout(() => child.kill('SIGKILL'), timeout + 5_000);
   try {
     const code = await new Promise((resolve, reject) => {
-      child.on('error', error => reject(sensitive ? fail() : error));
+      child.on('error', error => reject(interrupted ? interruption() : sensitive ? fail() : error));
       child.on('close', (code, signal) => resolve(code ?? signal));
     });
+    // Never expose captured streams or let dependency fallback consume a parent
+    // cancellation, even when the child handles the signal and exits successfully.
+    if (interrupted) throw interruption();
     if (failure || code !== 0 || (rejectStderr && stderr.trim())) {
       if (sensitive) throw fail();
       const error = Error(`${binary} ${args[0]} failed (${failure || code}): ${stderr || stdout}`);

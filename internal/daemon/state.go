@@ -126,9 +126,25 @@ func decodeRecord(data []byte, id string, r *record) error {
 }
 
 func (s *store) begin(snapshot plan.Snapshot, checkout v1.CheckoutIdentity, lease time.Duration) (v1.InstanceResponse, bool, error) {
+	return s.beginSelected(snapshot, checkout, lease, false)
+}
+
+// beginSelected keeps the existing logical key but fences named-scene location
+// collisions in the same transaction as deduplication, before any accepted intent.
+func (s *store) beginSelected(snapshot plan.Snapshot, checkout v1.CheckoutIdentity, lease time.Duration, sceneOnly bool) (v1.InstanceResponse, bool, error) {
 	response := v1.InstanceResponse{APIVersion: v1.Version}
 	created := false
+	if sceneOnly {
+		if err := (v1.Instance{Plan: snapshot.Plan, Checkout: checkout}).ValidateSceneLocation(); err != nil {
+			return response, false, problem("invalid_request", "resolved scene location is incoherent")
+		}
+	}
 	err := s.db.Update(func(tx *bolt.Tx) error {
+		if sceneOnly {
+			if _, err := storedSceneInstances(tx); err != nil {
+				return err
+			}
+		}
 		paths := tx.Bucket([]byte("paths"))
 		if id := paths.Get([]byte(checkout.Path)); id != nil && string(id) != checkout.ID {
 			return problem("checkout_replaced", "checkout path now identifies different files; old records preserved; use a separate checkout")
@@ -150,6 +166,14 @@ func (s *store) begin(snapshot plan.Snapshot, checkout v1.CheckoutIdentity, leas
 				r, err := load(tx, string(id))
 				if err != nil {
 					return err
+				}
+				if sceneOnly {
+					if r.Instance.Plan.Project != p.Project || r.Instance.Plan.Scene != p.Scene || r.Instance.Plan.Lifetime != v1.Persistent || !sameCheckout(&r.Instance.Checkout, &checkout) {
+						return problem("state_corrupt", "persistent index and recorded scene identity disagree")
+					}
+					if err := requireSceneLocation(r.Instance, filepath.Dir(p.ManifestPath)); err != nil {
+						return err
+					}
 				}
 				response.Instance = r.Instance
 				response.ManifestDrift = r.Instance.Plan.ManifestDigest != p.ManifestDigest

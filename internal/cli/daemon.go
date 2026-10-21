@@ -174,12 +174,23 @@ func preparationCommands() []*urfave.Command {
 	}}}
 	for _, name := range []string{"inspect", "status", "cancel", "renew"} {
 		flags := daemonFlags(false)
+		if name == "status" {
+			flags = append(flags, statusFollowFlags()...)
+		}
 		if name == "renew" {
 			flags = append(flags, &urfave.StringFlag{Name: "lease-token", Usage: "Private capability from disposable preparation"})
 		}
 		commands = append(commands, &urfave.Command{Name: name, Usage: "Manage durable preparation metadata", Flags: flags, Action: func(ctx context.Context, c *urfave.Command) error {
 			if c.Args().Len() != 1 {
 				return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "command requires one recorded instance ID"})
+			}
+			if c.Name == "status" {
+				if _, err := statusFollowOptions(c); err != nil {
+					return output(c, nil, err)
+				}
+				if c.Bool("follow") {
+					return followStatus(ctx, c, v1.SceneRequest{APIVersion: v1.Version, Target: v1.SceneTarget{InstanceID: c.Args().First()}})
+				}
 			}
 			dir, err := directory(c)
 			if err != nil {

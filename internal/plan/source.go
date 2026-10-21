@@ -36,5 +36,5 @@ func Locate(projectPath string) (Source, error) {
 		}
 		return Source{}, manifest.SourceError(err, "manifest", path)
 	}
-	return Source{ManifestPath: file, ProjectPath: project, CheckoutPath: checkoutRoot(project)}, nil
+	return Source{ManifestPath: file, ProjectPath: project, CheckoutPath: CheckoutRoot(project)}, nil
 }

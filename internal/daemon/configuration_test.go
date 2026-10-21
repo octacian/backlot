@@ -19,6 +19,16 @@ import (
 )
 
 func TestRunCapturesOneConfigurationGenerationBeforeAcceptance(t *testing.T) {
+	for _, named := range []bool{false, true} {
+		name := "run"
+		if named {
+			name = "scene-start"
+		}
+		t.Run(name, func(t *testing.T) { testCapturedConfiguration(t, named) })
+	}
+}
+
+func testCapturedConfiguration(t *testing.T, named bool) {
 	home := shortTemp(t)
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", home)
@@ -65,7 +75,12 @@ func TestRunCapturesOneConfigurationGenerationBeforeAcceptance(t *testing.T) {
 		return snapshot, err
 	}}
 	svc.beforeExecution = func(id string) { accepted = id; svc.mu.Lock(); svc.closing = true; svc.mu.Unlock() }
-	_, err = svc.run(context.Background(), v1.RunRequest{APIVersion: v1.Version, Plan: v1.PlanRequest{Scene: "dev", ProjectPath: project, ConfigPath: config}})
+	request := v1.PlanRequest{Scene: "dev", ProjectPath: project, ConfigPath: config}
+	if named {
+		_, err = svc.startScene(context.Background(), v1.SceneStartRequest{APIVersion: v1.Version, CWD: project, Plan: request})
+	} else {
+		_, err = svc.run(context.Background(), v1.RunRequest{APIVersion: v1.Version, Plan: request})
+	}
 	code(t, err, "shutting_down")
 	if calls != 1 || accepted == "" {
 		t.Fatalf("capture count=%d accepted=%t", calls, accepted != "")

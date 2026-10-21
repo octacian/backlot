@@ -21,6 +21,10 @@ func TestConfigurationMutationsRequireFreshCompatibleStatus(t *testing.T) {
 	}
 	valid := fmt.Sprintf(`{"api_version":"v1","state_version":%d,"status":"running","pid":1,"lease_duration":"30s"}`, v1.StateVersion)
 	methods := map[string]func(*Client) error{
+		"scenes/start": func(c *Client) error {
+			_, err := c.StartScene(context.Background(), v1.SceneStartRequest{CWD: "/tmp/scene", Plan: v1.PlanRequest{Scene: "dev"}})
+			return err
+		},
 		"prepare": func(c *Client) error { _, err := c.Prepare(context.Background(), v1.PrepareRequest{}); return err },
 		"run":     func(c *Client) error { _, err := c.Run(context.Background(), v1.RunRequest{}); return err },
 		"restart": func(c *Client) error { _, err := c.Restart(context.Background(), v1.RunRequest{}); return err },
@@ -43,6 +47,10 @@ func TestConfigurationMutationsRequireFreshCompatibleStatus(t *testing.T) {
 			mutationResponse := encoded
 			var result any
 			switch name {
+			case "scenes/start":
+				scene := sceneResponse()
+				scene.Outcome, scene.Result = v1.SceneFound, sceneInstance("e")
+				result = scene
 			case "gateway/start", "gateway/restart":
 				result = v1.GatewayResponse{APIVersion: v1.Version, Mode: "managed", Status: "unconfigured"}
 			case "doctor":
@@ -115,6 +123,8 @@ func TestHistoricalReadsAndRecordedCleanupDoNotRequireFreshStatus(t *testing.T) 
 		call       func(*Client) error
 		response   any
 	}{
+		{"scene status", "/v1/scenes/status", func(c *Client) error { _, err := c.SceneStatus(ctx, sceneRequest()); return err }, sceneResponse()},
+		{"scene stop", "/v1/scenes/stop", func(c *Client) error { _, err := c.StopScene(ctx, sceneRequest()); return err }, sceneResponse()},
 		{"gateway status", "/v1/gateway/status", func(c *Client) error {
 			_, err := c.Gateway(ctx, "status", v1.GatewayRequest{APIVersion: v1.Version})
 			return err

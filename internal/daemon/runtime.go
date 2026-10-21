@@ -80,6 +80,10 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 	return s.runMode(ctx, request, false)
 }
 func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool) (v1.InstanceResponse, error) {
+	return s.runSelected(ctx, request, reset, false)
+}
+
+func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset, persistentOnly bool) (v1.InstanceResponse, error) {
 	var empty v1.InstanceResponse
 	if err := validatePlanRequest(request.Plan); err != nil {
 		return empty, err
@@ -115,6 +119,9 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 	if err != nil {
 		return empty, err
 	}
+	if persistentOnly && snapshot.Plan.Lifetime != v1.Persistent {
+		return empty, problem("invalid_lifetime", "scene start requires a persistent scene; use run for disposable work")
+	}
 	if err := executablePlan(snapshot.Plan); err != nil {
 		return empty, err
 	}
@@ -130,7 +137,7 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 			return empty, problem("conflict", "restart must address the same persistent project, checkout and scene")
 		}
 	}
-	response, err := s.prepareCaptured(ctx, snapshot, identity)
+	response, err := s.prepareCaptured(ctx, snapshot, identity, request.Plan.Scene, persistentOnly)
 	if err != nil {
 		return empty, err
 	}
@@ -146,6 +153,11 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 	}
 	if response.Instance.Status == v1.Destroyed {
 		return empty, problem("destroyed", "instance was destroyed during start acceptance; run the scene again for a fresh identity")
+	}
+	if persistentOnly {
+		if err := requireSceneLocation(response.Instance, identity.source.ProjectPath); err != nil {
+			return empty, err
+		}
 	}
 
 	if request.InstanceID == "" {

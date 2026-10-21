@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -44,7 +45,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 	// state must be cleaned up with its matching binary (see docs/containers.md).
 	checkCompatibility := false
 	switch path {
-	case "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/gateway/start", "/v1/gateway/restart":
+	case "/v1/scenes/start", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/gateway/start", "/v1/gateway/restart":
 		checkCompatibility = true
 	case "/v1/doctor":
 		// An explicit diagnostic image authorizes container creation/start, unlike
@@ -86,11 +87,14 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 	httpClient := *c.http
 	// Cleanup/restart can use a configured grace exceeding the transport default.
 	// The daemon bounds cleanup; callers retain context cancellation authority.
-	if path == "/v1/export" || path == "/v1/doctor" || path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
+	if path == "/v1/scenes/stop" || path == "/v1/export" || path == "/v1/doctor" || path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
 		httpClient.Timeout = 0
 	}
 	res, err := httpClient.Do(req)
 	if err != nil {
+		if strings.HasPrefix(path, "/v1/scenes/") && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			return context.Cause(ctx)
+		}
 		var detail *v1.PlanError
 		if errors.As(err, &detail) {
 			return detail
@@ -105,6 +109,9 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 		return &v1.PlanError{Code: "invalid_response", Message: "daemon response must have application/json content type"}
 	}
 	data, err := io.ReadAll(io.LimitReader(res.Body, manifest.MaxBytes+1))
+	if strings.HasPrefix(path, "/v1/scenes/") && err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+		return context.Cause(ctx)
+	}
 	if err != nil || len(data) > manifest.MaxBytes {
 		return &v1.PlanError{Code: "invalid_response", Message: "daemon response unavailable or exceeds 1 MiB limit"}
 	}

@@ -309,3 +309,18 @@ explicit operator retention/erasure decisions. See the [setup guide](manifest.md
 and [current decision](adr/20261021T040930738Z-select-a-private-project-registry-without-redirecting-application-configuration.md).
 Independent implementation reviews, frozen full validation and published-HEAD CI
 remain gates; this section does not claim final feature readiness.
+
+## Recorded persistent-scene targeting (#47)
+
+Implemented for independent review: daemon-owned `scene start/status/stop`,
+recorded canonical checkout/project/scene selection without current-manifest
+parsing for status/stop, nearest recorded project without outer fallback, typed
+absence/idempotent stop and bounded sampled observation via `status ID --follow`.
+Follow observes the named scene through absence/recreation, fences initial
+checkout/daemon continuity; ID follow stays pinned for either lifetime and history.
+Neither acquires lifecycle ownership. The accepted [targeting decision](adr/20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md)
+and [command contract](daemon.md#named-persistent-scenes) define the behavior.
+Early real CLI/daemon/native failure/recovery and peer preservation precede focused
+regressions; independent implementation reviews, frozen complete applicable suites
+and exact published-revision CI remain delivery gates. Attached owner #50 and
+streaming/history #54 remain separate; no schema or dependency change is needed.

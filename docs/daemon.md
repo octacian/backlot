@@ -47,8 +47,9 @@ covers startup through database closure. Only a private owned socket with a prov
 connection-refused result is removed as stale; live or uncertain listeners remain
 untouched. The lock file remains after shutdown and is not a PID ownership claim.
 
-Before `prepare`, `run`, `restart` or `reset`, the shared Go client checks current
-API/state compatibility with a fresh bounded status request. A running older or
+Before `prepare`, `run`, `restart`, `reset`, `scene start`, gateway start/restart or
+an explicit mutating Doctor probe, the shared Go client checks current API/state
+compatibility with a fresh bounded status request. A running older or
 malformed daemon is rejected before scene mutation; no compatibility result is
 cached. Historical reads and snapshot cleanup calls do not perform this
 configuration preflight. For incompatible state, use the matching older binary
@@ -88,6 +89,101 @@ are not reconstructed from the redacted public plan or reread during recovery.
 Allocation-dependent values stay symbolic; preparation does not generate resources
 or secrets for future providers. Do not put credentials in command arguments,
 identifiers or paths; use sensitive environment declarations.
+
+## Named persistent scenes
+
+Use `scene` to target a persistent scene by name in the current checkout. Start
+validates current inputs and waits for readiness; status and stop use recorded
+identity without parsing the current manifest or machine configuration.
+
+```sh
+bin/backlot scene start --json dev
+bin/backlot scene start --project /absolute/project --config /absolute/machine.yaml dev
+bin/backlot scene status --json dev
+bin/backlot scene stop --json dev
+bin/backlot scene status --follow --interval 1s --duration 30m --json dev
+bin/backlot status --follow --json INSTANCE_ID
+bin/backlot stop --json INSTANCE_ID
+```
+
+Use the daemon's `--state-dir` where needed. Scene commands accept names only;
+recorded-ID commands work outside a checkout. Finite `status ID` keeps its existing
+`InstanceResponse` output. ID observation includes persistent, disposable and
+historical instances; use `run` to execute disposable scenes.
+
+Start accepts `--startup-timeout`, `--job-timeout` and `--stop-grace`. Repeated or
+concurrent starts converge on the existing instance and report manifest/config
+drift without reconciling retained data. Unhealthy execution needs explicit
+restart. A logical project/checkout/scene key recorded at a different canonical
+project directory conflicts before start/join. Cancelling startup uses existing
+run cleanup; cancelling observation leaves execution alone.
+
+### Recorded selection and stop
+
+The daemon selects the nearest **recorded** project-directory ancestor in the
+canonical checkout, using history to discover project locations. If it lacks the
+scene, return successful `not_found`; never fall back to an outer project.
+`--project` selects an exact directory or recognized manifest path (`backlot.yaml`,
+`backlot.yml`, `backlot.json`). A broken/deleted manifest or changed project ID does
+not hide recorded instances while the directory and checkout identity remain usable.
+
+Multiple non-destroyed persistent records at that location/scene produce
+`ambiguous_target`; use `backlot status ID` or `backlot stop ID`. Failed and
+metadata-only records participate; destroyed history is available by ID only.
+Malformed recorded selectors or disagreement with existing persistent slots produce
+`state_corrupt` before discovery filtering. Preserve state for diagnosis; existing
+ID inspection/cleanup remains independent of named selection.
+
+Moved/replaced checkouts or unavailable project/Git identity fail selection; use
+recorded IDs. No force or path-only adoption exists. Project subdirectories within
+an unchanged Git checkout have no separately persisted inode identity; selection
+uses their recorded canonical location. Non-Git projects use the recorded project
+root as checkout identity; before any record exists, supply `--project` explicitly.
+See the [selection rationale and stored-state boundaries](adr/20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md).
+
+Finite named results are `SceneResponse`: API/daemon generation, outcome, optional
+`result: InstanceResponse`, and canonical checkout/selector metadata. `not_found`
+omits `result` but includes checkout identity. Runtime failures are snapshot data
+and status exits zero; selection, validation and transport errors are nonzero.
+Human status prints recorded runtime failures.
+
+Stop locks and rechecks the selected ID before verified cleanup; selection changes
+conflict rather than redirecting cleanup. Successful outcomes are `stopped`,
+`already_stopped` and `not_found`. Data and credentials remain. Metadata-only and
+failed records retain truthful status; cleanup/collection uncertainty stays
+nonzero. Stop shares mutation serialization with restart/reset/destroy and has no
+attempt-specific attachment authority.
+
+### Sampled status follow
+
+Both `scene status NAME --follow` and `status ID --follow` emit initial and changed
+snapshots, including instance/attempt, components, origin and failure details.
+Named follow watches the original canonical selector through absence and recreation;
+ID follow stays pinned across destroy/recreation and never switches to a replacement.
+Stopped, failed, destroyed and missing states do not end observation. Intermediate
+transitions may be missed; unchanged polling emits no duplicate snapshots.
+
+| Option | Default | Inclusive bounds |
+| --- | --- | --- |
+| `--interval` | `1s` | `100ms`–`1m` |
+| `--duration` | `30m` | `1s`–`24h` |
+
+Both options require `--follow`; zero, negative, malformed or out-of-range values
+fail. The total budget includes initial acquisition and in-flight requests. One
+cancellable request runs at a time, with the interval after completion.
+
+JSON output is NDJSON `SceneFollowRecord`: `api_version`, observation `time` and
+`type`. A `snapshot` carries `SceneResponse`; `complete` carries reason `expired`
+or `cancelled`; `error` carries a typed error. Expiry exits zero, independently of
+runtime health. SIGINT/SIGTERM cancel observation and exit 130/143. Output errors
+are nonzero; a closed pipe cannot guarantee a terminal record.
+
+Both modes pin daemon generation. Named follow also fences the initial checkout
+ID/path/Git-directory and canonical selector, including initial absence; branch
+and HEAD are provenance only. Daemon loss/replacement, ambiguity, identity loss or
+invalid responses terminate nonzero without retry, reconnect or autostart. ID
+follow reads recorded state without checkout discovery or manifest access.
+Observation never stops execution, renews leases or acquires attachment ownership.
 
 ## Cancellation and recovery
 

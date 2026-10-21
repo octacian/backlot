@@ -18,6 +18,7 @@ import (
 )
 
 type service struct {
+	generation            string
 	diagnosticRecoveryErr error
 	diagnosticOwners      map[string]*diagnosticOwner
 	gatewayGroup          *native.Group
@@ -38,6 +39,8 @@ type service struct {
 	resolve func(plan.Source, v1.PlanRequest) (plan.Snapshot, error)
 	// beforeExecution gates tests between prepare and serialized acceptance.
 	beforeExecution func(string)
+	// beforeSceneMutation is a test seam between recorded resolution and its mutation lock.
+	beforeSceneMutation func(string)
 }
 
 func validatePlanRequest(request v1.PlanRequest) error {
@@ -48,6 +51,10 @@ func validatePlanRequest(request v1.PlanRequest) error {
 }
 
 func (s *service) prepare(ctx context.Context, request v1.PrepareRequest) (v1.InstanceResponse, error) {
+	return s.prepareSelected(ctx, request, false)
+}
+
+func (s *service) prepareSelected(ctx context.Context, request v1.PrepareRequest, persistentOnly bool) (v1.InstanceResponse, error) {
 	if err := validatePlanRequest(request.Plan); err != nil {
 		return v1.InstanceResponse{}, err
 	}
@@ -67,11 +74,17 @@ func (s *service) prepare(ctx context.Context, request v1.PrepareRequest) (v1.In
 	if err != nil {
 		return v1.InstanceResponse{}, err
 	}
-	return s.prepareCaptured(ctx, snapshot, original)
+	return s.prepareCaptured(ctx, snapshot, original, request.Plan.Scene, persistentOnly)
 }
 
 // prepareCaptured accepts the exact generation resolved by preparation or launch.
-func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, original capturedSource) (v1.InstanceResponse, error) {
+func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, original capturedSource, scene string, persistentOnly bool) (v1.InstanceResponse, error) {
+	if persistentOnly && snapshot.Plan.Lifetime != v1.Persistent {
+		return v1.InstanceResponse{}, problem("invalid_lifetime", "scene start requires a persistent scene; use run for disposable work")
+	}
+	if persistentOnly && (snapshot.Plan.ManifestPath != original.source.ManifestPath || snapshot.Plan.Checkout != original.checkout.Path || snapshot.Plan.Scene != scene) {
+		return v1.InstanceResponse{}, problem("invalid_request", "resolved scene location disagrees with captured source")
+	}
 	public, err := json.Marshal(snapshot.Plan)
 	if err != nil || len(public) > manifest.MaxBytes-8192 {
 		return v1.InstanceResponse{}, problem("plan_too_large", "resolved public plan exceeds bounded API response size")
@@ -88,7 +101,7 @@ func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, o
 	if err := original.verify(); err != nil {
 		return v1.InstanceResponse{}, err
 	}
-	response, created, err := s.store.begin(snapshot, original.checkout, s.lease)
+	response, created, err := s.store.beginSelected(snapshot, original.checkout, s.lease, persistentOnly)
 	if err != nil || !created {
 		return response, err
 	}

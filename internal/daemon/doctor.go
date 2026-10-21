@@ -55,7 +55,7 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 		recoveryErr = problem("cleanup_failed", "diagnostic recovery pending")
 	}
 	if recoveryErr != nil {
-		diagnosticAdd(&r, "diagnostic_cleanup", "daemon/owned Docker", v1.DoctorFailed, "previous diagnostic resource cleanup is unresolved; preserve state, restore recorded provider access and restart daemon to retry exact ownership recovery")
+		diagnosticAdd(&r, "diagnostic_cleanup", "daemon/owned Docker", v1.DoctorFailed, "previous diagnostic cleanup is unresolved; preserve state and restore recorded provider access; a preserved public CA copy requires inspection using the daemon guide before restarting to retry exact ownership recovery")
 	}
 	diagnosticAdd(&r, "daemon_api_state", "daemon", v1.DoctorOK, "v1 daemon and supported state format reachable; this does not establish provider readiness")
 	if request.Scene == "" && request.InstanceID == "" {

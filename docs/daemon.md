@@ -366,8 +366,12 @@ The probe resolves the canonical hostname normally, checks TCP with bounded Bash
 managed consumer's declared origin `host-gateway` mapping is preserved verbatim;
 no IP inference, resolver helper or TLS bypass is added. Default image trust and
 explicit public-CA trust are separate invocations. `--probe-public-ca` mounts only
-the actual public root file read-only at `/backlot-public-ca.crt`; it never mounts
-keys/directories or changes image/system trust. TCP/TLS failures remain distinct
+a normalized certificate-only copy of the matching pinned managed public root,
+read-only at `/backlot-public-ca.crt`; it never mounts keys/directories or changes
+image/system trust. The copy is mode 0444 under the daemon's existing owned 0700
+state directory, so a file-only bind is readable by capless container root.
+Original CA/key bytes and private modes remain unchanged. This ephemeral
+Doctor-only copy does not change application `ca_cert_path` or trust delivery. TCP/TLS failures remain distinct
 from DNS failures; none establishes other application images' trust. Curl clients
 can have different `.localhost` resolution behavior and are not this probe contract.
 
@@ -375,8 +379,8 @@ Execution is bounded to ten seconds (within the overall fifteen-second observati
 budget); independent cleanup has twenty seconds. The root filesystem is read-only,
 capabilities are dropped, privileges cannot escalate, memory/process counts are
 bounded, and stdout/stderr are discarded. No command/provider output is exposed.
-The probe runs as container root so it can read the existing mode-protected public
-root without weakening host permissions. No application mounts, secrets or
+The probe retains container user `0:0`; readability comes from the public-only
+copy, not DAC capabilities or changing original host permissions. No application mounts, secrets or
 unrelated network attachments are provided.
 
 Ownership intent is persisted before each create; exact capability labels and
@@ -389,3 +393,29 @@ Cleanup failure is nonzero and retains private journals/uncertain resources;
 restore the recorded
 provider access and restart the daemon to retry recovery. Foreign/mismatched
 ownership is preserved. Existing images and global settings remain untouched.
+
+The existing diagnostic journal records copy intent before allocation, then the
+owned parent/file identity and planned-byte hash before use. Recovery proves the
+container and bridge absent before deleting the authenticated copy and clearing
+its journal. Partial allocations with a saved file identity can be removed; a
+crash between exclusive creation and saving that identity leaves an unidentified
+copy that recovery deliberately preserves. Changed identity, ownership, links,
+mode or ready bytes also preserve the copy and journal. Well-formed unresolved
+cleanup does not block daemon startup, new probes or application/native fences,
+but Doctor remains unhealthy and shutdown reports the unresolved cleanup. Invalid
+journal metadata fails startup closed under the existing state-corrupt contract.
+
+For a reported public-copy obstruction, stop the daemon and join any diagnostic
+owners first. Inspect the exact `doctor-public-ca-<journal-key>.crt` artifact under
+the selected private state directory against its private diagnostic journal; do
+not infer authority from its filename. After independently establishing that no
+relevant Engine consumer remains, an operator may quarantine that exact artifact
+outside the daemon state directory for inspection. Preserve its bytes/metadata
+and the journal; do not edit the database, blindly unlink files, adopt a changed
+file or force-remove foreign resources. Restart with the recorded provider access:
+recovery authenticates consumer absence again, and an absent copy can then clear
+that journal. If consumer ownership or artifact identity cannot be established,
+retain the uncertainty and obtain operator help. No automatic foreign-file
+cleanup or operator management subsystem is provided. Older v6 journals without
+copy metadata remain supported. Older binaries can ignore the optional metadata
+and leave a public-only copy behind; downgrade artifact cleanup is not promised.

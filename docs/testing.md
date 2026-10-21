@@ -380,7 +380,13 @@ admin stays loopback. It never changes existing gateways, machine/browser trust
 or DNS. The fixture bound listener is joined on cleanup. These tests include
 nonzero missing-trust failure/recovery, provenance drift, deferred unavailable
 runtime, retained data, cancellation after creation/start, shutdown joins,
-lost-create-effect recovery and mismatched-authority preservation. Missing opt-in
+lost-create-effect recovery and mismatched-authority preservation. The public-CA
+probe verifies a certificate-only 0444 file bind under a private 0700 parent while
+retaining capless root, read-only rootfs, no-new-privileges and the five-second TLS
+deadline. Source CA/key bytes and modes remain private and unchanged. Focused
+`TestDoctorPublicCA*` tests cover bounded pinned-certificate validation, partial
+allocation, tampering, consumer uncertainty and inspection/absent-file recovery.
+Missing opt-in
 settings skip and do not establish provider evidence. The ownership suite also
 requires Docker CLI's classic builder (`DOCKER_BUILDKIT=0`) to build a uniquely
 labeled healthcheck fixture from the exact inspected local diagnostic base ID,

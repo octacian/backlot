@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -26,9 +25,10 @@ type diagnosticOwner struct {
 	done   chan struct{}
 }
 type diagnosticProbeRecord struct {
-	Endpoint string        `json:"endpoint"`
-	Resource ownedResource `json:"resource"`
-	Network  ownedResource `json:"network"`
+	Endpoint string            `json:"endpoint"`
+	Resource ownedResource     `json:"resource"`
+	Network  ownedResource     `json:"network"`
+	CA       *diagnosticCACopy `json:"ca,omitempty"`
 }
 
 func (s *store) saveDiagnosticProbe(key string, r diagnosticProbeRecord) error {
@@ -50,6 +50,9 @@ func (s *store) recoverDiagnosticProbes() error {
 			if json.Unmarshal(data, &r) != nil || !validID(id) || !validID(r.Resource.Token) || r.Resource.Kind != "container" || r.Resource.Name != "backlot-doctor-"+id || (r.Network.Kind != "" && (r.Network.Kind != "network" || !validID(r.Network.Token) || r.Network.Name != "backlot-doctor-network-"+id)) {
 				return problem("state_corrupt", "invalid diagnostic ownership journal; preserved")
 			}
+			if !validDiagnosticCACopy(r) {
+				return problem("state_corrupt", "invalid diagnostic public CA copy journal; preserved")
+			}
 			records[id] = r
 			return nil
 		})
@@ -61,7 +64,7 @@ func (s *store) recoverDiagnosticProbes() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		d, e := newDocker(r.Endpoint)
 		if e == nil {
-			e = cleanupDiagnosticProbe(ctx, d, r)
+			e = s.cleanupDiagnosticProbe(ctx, d, key, r)
 			_ = d.Close()
 		}
 		cancel()
@@ -69,7 +72,7 @@ func (s *store) recoverDiagnosticProbes() error {
 			e = s.forgetDiagnosticProbe(key)
 		}
 		if e != nil {
-			err = errors.Join(err, problem("cleanup_failed", "diagnostic container ownership/cleanup uncertain; journal and resource preserved"))
+			err = errors.Join(err, problem("cleanup_failed", "diagnostic cleanup uncertain; preserve journal/resources and inspect any public CA copy as documented"))
 		}
 	}
 	return err
@@ -146,18 +149,20 @@ func (s *service) doctorContainer(parent context.Context, r *v1.DoctorResponse, 
 			diagnosticAdd(r, "container_probe_public_ca", "container explicit public CA", v1.DoctorUnsupported, "explicit public CA probe requires a managed gateway public certificate")
 			return
 		}
-		_, _, storage := managedPaths(s.directory)
-		path := filepath.Join(storage, "pki", "authorities", "local", "root.crt")
-		if _, err := diagnosticCA(path); err != nil {
-			diagnosticAdd(r, "container_probe_public_ca", "container explicit public CA", v1.DoctorFailed, "public CA certificate is unavailable or invalid; no probe created")
-			return
-		}
-		host.Mounts = []mount.Mount{{Type: mount.TypeBind, Source: path, Target: "/backlot-public-ca.crt", ReadOnly: true}}
+
 		ca = "/backlot-public-ca.crt"
 		execution = "container explicit public CA"
 	}
 	resource := ownedResource{Kind: "container", Name: "backlot-doctor-" + key, Token: newID()}
 	journal := diagnosticProbeRecord{Endpoint: snap.Docker.Endpoint, Resource: resource, Network: ownedResource{Kind: "network", Name: "backlot-doctor-network-" + key, Token: newID()}}
+	var publicCA []byte
+	if request.ProbePublicCA {
+		publicCA, journal.CA, err = s.store.planDiagnosticCACopy(snap)
+		if err != nil {
+			diagnosticAdd(r, "container_probe_public_ca", execution, v1.DoctorFailed, "matching pinned public CA certificate is unavailable or invalid; no probe created")
+			return
+		}
+	}
 	if err := s.store.saveDiagnosticProbe(key, journal); err != nil {
 		diagnosticAdd(r, "container_probe_journal", execution, v1.DoctorFailed, "cannot persist ownership intent; no probe created")
 		return
@@ -168,12 +173,19 @@ func (s *service) doctorContainer(parent context.Context, r *v1.DoctorResponse, 
 		cleanup, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		journal.Resource = resource
-		err := cleanupDiagnosticProbe(cleanup, d, journal)
+		err := s.store.cleanupDiagnosticProbe(cleanup, d, key, journal)
 		if err == nil {
 			err = s.store.forgetDiagnosticProbe(key)
 		}
-		diagnosticResult(r, "container_probe_cleanup", "daemon/owned Docker", err, "owned probe removal verified and ownership journal cleared", "probe cleanup/ownership is uncertain; resource and private state journal preserved for recovery")
+		diagnosticResult(r, "container_probe_cleanup", "daemon/owned Docker", err, "owned probe removal verified and ownership journal cleared", "probe cleanup is uncertain; preserve resource/journal and inspect any public CA copy as documented")
 	}()
+	if journal.CA != nil {
+		if err := s.store.allocateDiagnosticCACopy(key, &journal, publicCA); err != nil {
+			diagnosticAdd(r, "container_probe_public_ca", execution, v1.DoctorFailed, "cannot allocate verified public CA copy; owned cleanup follows")
+			return
+		}
+		host.Mounts = []mount.Mount{{Type: mount.TypeBind, Source: diagnosticCACopyPath(s.directory, key), Target: ca, ReadOnly: true}}
+	}
 	networkID, err := createDockerResource(ctx, d, journal.Network)
 	if err != nil {
 		diagnosticAdd(r, "container_probe_network", execution, v1.DoctorFailed, "owned probe bridge creation failed; cleanup reconciles uncertain effects")
@@ -202,6 +214,10 @@ case "$code" in 0) exit 0;; 124|137) exit 14;; *) exit 12;; esac`
 	}
 
 	config := &container.Config{Image: image.ID, Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}, Entrypoint: []string{"/bin/sh", "-c", script, "backlot-doctor"}, Cmd: []string{origin.Hostname(), instance.Execution.Origin, ca, port, net.JoinHostPort(origin.Hostname(), port)}, Labels: resourceLabels(resource), Env: []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/tmp"}, WorkingDir: "/", User: "0:0"}
+	if err := s.store.verifyDiagnosticCACopy(key, journal.CA); err != nil {
+		diagnosticAdd(r, "container_probe_public_ca", execution, v1.DoctorFailed, "public CA copy changed before probe creation; preserve and inspect")
+		return
+	}
 	created, err := d.ContainerCreate(ctx, moby.ContainerCreateOptions{Name: resource.Name, Config: config, HostConfig: host})
 	if err != nil {
 		diagnosticAdd(r, "container_probe", execution, v1.DoctorFailed, "owned probe creation failed; inspect image contract and selected endpoint, cleanup reconciles uncertain effect")
@@ -221,6 +237,10 @@ case "$code" in 0) exit 0;; 124|137) exit 14;; *) exit 12;; esac`
 	}
 	if err := verifyDockerResource(ctx, d, resource); err != nil {
 		diagnosticAdd(r, "container_probe", execution, v1.DoctorFailed, "probe ownership could not be verified; resource preserved if uncertain")
+		return
+	}
+	if err := s.store.verifyDiagnosticCACopy(key, journal.CA); err != nil {
+		diagnosticAdd(r, "container_probe_public_ca", execution, v1.DoctorFailed, "public CA copy changed before probe start; preserve and inspect")
 		return
 	}
 	if _, err = d.ContainerStart(ctx, resource.ID, moby.ContainerStartOptions{}); err != nil {

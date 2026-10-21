@@ -250,25 +250,38 @@ func TestNativeWatchers(t *testing.T) {
 		transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
 		defer transport.CloseIdleConnections()
 		httpClient := &http.Client{Transport: transport, Timeout: time.Second}
-		body := func() string {
+		type apiObservation struct {
+			At     time.Time
+			Status int
+			Body   string
+			Err    error
+		}
+		observeAPI := func() apiObservation {
+			observation := apiObservation{At: time.Now().UTC()}
 			r, err := httpClient.Get(instance.Execution.Origin + "/api/")
 			if err != nil {
-				return ""
+				observation.Err = err
+			} else {
+				defer func() { _ = r.Body.Close() }()
+				observation.Status = r.StatusCode
+				data, err := io.ReadAll(r.Body)
+				observation.Body, observation.Err = string(data), err
 			}
-			defer func() { _ = r.Body.Close() }()
-			data, _ := io.ReadAll(r.Body)
-			return string(data)
+			t.Logf("Air API observation: at=%s status=%d body=%q error=%v", observation.At.Format(time.RFC3339Nano), observation.Status, observation.Body, observation.Err)
+			return observation
 		}
 		awaitAPI := func(want string) {
 			t.Helper()
 			deadline := time.Now().Add(20 * time.Second)
+			var last apiObservation
 			for time.Now().Before(deadline) {
-				if body() == want {
+				last = observeAPI()
+				if last.Err == nil && last.Status == http.StatusOK && last.Body == want {
 					return
 				}
 				time.Sleep(100 * time.Millisecond)
 			}
-			t.Fatal("Air rebuild response missing", want)
+			t.Fatalf("Air API %s/api/ did not return HTTP 200 body=%q within 20s; last observation: at=%s status=%d body=%q error=%v", instance.Execution.Origin, want, last.At.Format(time.RFC3339Nano), last.Status, last.Body, last.Err)
 		}
 		writeGo := func(source string) {
 			t.Helper()
@@ -304,12 +317,13 @@ func TestNativeWatchers(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 		}
 		t.Log("Air invalid revision compiler diagnostic:", failureLog.String())
-		if body() != "api-v2" {
-			t.Fatal("Air failed build did not preserve previous available app")
-		}
+		// Air may stop and restart the last good binary after a failed compile.
+		// Observe that exact revision before any valid source can replace it.
+		awaitAPI("api-v2")
+		t.Log("Air last-good api-v2 available after compiler error and before corrected-source edit; Air may restart the binary")
 		writeGo(strings.ReplaceAll(string(goSource), "api-v1", "api-v3"))
 		awaitAPI("api-v3")
-		t.Log("Air Go rebuild, failed-build previous availability and corrected-source recovery passed through canonical HTTPS")
+		t.Log("Air Go rebuild, failed-build last-good availability and corrected-source recovery passed through canonical HTTPS")
 	}
 	visit(false)
 	cert("-A", "-d", "sql:"+db, "-n", "Backlot watcher fixture", "-t", "C,,", "-i", trust)

@@ -69,7 +69,7 @@ func sceneDirectory(path string) (string, error) {
 
 // resolveScene selects and reads one snapshot in the same transaction. It does not
 // inspect manifest/configuration contents, contact providers or persist discovery.
-func (s *service) resolveScene(target v1.SceneTarget) (v1.SceneResponse, error) {
+func (s *service) resolveScene(target v1.SceneTarget, persistentOnly bool) (v1.SceneResponse, error) {
 	response := v1.SceneResponse{APIVersion: v1.Version, DaemonGeneration: s.generation, Outcome: v1.SceneNotFound}
 	if err := target.Validate(); err != nil {
 		return response, err
@@ -83,11 +83,15 @@ func (s *service) resolveScene(target v1.SceneTarget) (v1.SceneResponse, error) 
 		if err != nil {
 			return response, err
 		}
-		if err := validateSceneRecord(instance); err != nil {
-			return response, err
-		}
-		if instance.Plan.Lifetime != v1.Persistent {
-			return response, problem("invalid_lifetime", "scene operations require persistent instances; use recorded-ID commands for disposable work")
+		// Exact-ID observation has the same lifetime/location breadth as inspect.
+		// Reusable scene stop remains subject to its persistent-scene contract.
+		if persistentOnly {
+			if err := validateSceneRecord(instance); err != nil {
+				return response, err
+			}
+			if instance.Plan.Lifetime != v1.Persistent {
+				return response, problem("invalid_lifetime", "scene stop requires a persistent instance; use backlot stop ID for disposable work")
+			}
 		}
 		response.Outcome = v1.SceneFound
 		response.Result = &v1.InstanceResponse{APIVersion: v1.Version, Instance: instance}
@@ -167,7 +171,7 @@ func (s *service) resolveScene(target v1.SceneTarget) (v1.SceneResponse, error) 
 				continue
 			}
 			if selected != "" {
-				return problem("ambiguous_target", "multiple recorded persistent instances match; select an explicit instance ID")
+				return problem("ambiguous_target", "multiple recorded persistent instances match; use backlot status ID or backlot stop ID")
 			}
 			selected = instance.id
 		}
@@ -189,7 +193,7 @@ func sameCheckout(a, b *v1.CheckoutIdentity) bool {
 }
 
 func (s *service) scene(target v1.SceneTarget, stop bool) (v1.SceneResponse, error) {
-	response, err := s.resolveScene(target)
+	response, err := s.resolveScene(target, stop)
 	if err != nil || !stop || response.Result == nil {
 		return response, err
 	}
@@ -199,7 +203,7 @@ func (s *service) scene(target v1.SceneTarget, stop bool) (v1.SceneResponse, err
 	}
 	unlock := s.lockMutation(id)
 	defer unlock()
-	current, err := s.resolveScene(target)
+	current, err := s.resolveScene(target, stop)
 	if err != nil {
 		return current, err
 	}

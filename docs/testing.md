@@ -25,6 +25,7 @@ Run these from the repository root:
 | `bin/backlot doctor --state-dir /absolute/private/path --json` | Check local daemon access and paths; select scene/instance for providers |
 | `bin/backlot scene start --json dev` | Start a persistent scene in the current checkout and wait for readiness |
 | `bin/backlot scene status --follow --duration 30m --json dev` | Observe bounded sampled persistent-scene snapshots without lifecycle ownership |
+| `bin/backlot status --follow --json INSTANCE_ID` | Observe one persistent, disposable or historical ID without checkout discovery |
 | `bin/backlot scene stop --json dev` | Stop a recorded scene even with a broken or deleted manifest |
 | `go run ./cmd/backlot version --json` | Inspect the typed version result |
 | `go run ./cmd/backlot plan test --project examples/adoption --json -- -run TestExample` | Validate an offline fixture plan and forward terminal arguments |

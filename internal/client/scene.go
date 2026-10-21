@@ -17,7 +17,7 @@ func (c *Client) StartScene(ctx context.Context, request v1.SceneStartRequest) (
 	var response v1.SceneResponse
 	err := c.call(ctx, http.MethodPost, "/v1/scenes/start", request, &response)
 	if err == nil {
-		err = validateScene(response, v1.SceneTarget{Scene: request.Plan.Scene, CWD: request.CWD, ProjectPath: request.Plan.ProjectPath})
+		err = validateScene(response, v1.SceneTarget{Scene: request.Plan.Scene, CWD: request.CWD, ProjectPath: request.Plan.ProjectPath}, true)
 	}
 	if err == nil && (response.Outcome != v1.SceneFound || response.Result == nil) {
 		err = responseError()
@@ -25,7 +25,8 @@ func (c *Client) StartScene(ctx context.Context, request v1.SceneStartRequest) (
 	return response, err
 }
 
-// SceneStatus reads recorded persistent state without current manifest inputs.
+// SceneStatus reads recorded state without current manifest inputs.
+// Named targets select persistent scenes; exact IDs support either lifetime.
 func (c *Client) SceneStatus(ctx context.Context, request v1.SceneRequest) (v1.SceneResponse, error) {
 	return c.sceneCall(ctx, "status", request)
 }
@@ -42,7 +43,7 @@ func (c *Client) sceneCall(ctx context.Context, action string, request v1.SceneR
 	}
 	err := c.call(ctx, http.MethodPost, "/v1/scenes/"+action, request, &response)
 	if err == nil {
-		err = validateScene(response, request.Target)
+		err = validateScene(response, request.Target, action == "stop" || request.Target.InstanceID == "")
 	}
 	if err == nil && (action == "status" && response.Outcome != v1.SceneFound && response.Outcome != v1.SceneNotFound || action == "stop" && response.Outcome == v1.SceneFound) {
 		err = responseError()
@@ -50,7 +51,7 @@ func (c *Client) sceneCall(ctx context.Context, action string, request v1.SceneR
 	return response, err
 }
 
-func validateScene(response v1.SceneResponse, target v1.SceneTarget) error {
+func validateScene(response v1.SceneResponse, target v1.SceneTarget, persistentOnly bool) error {
 	if response.APIVersion != v1.Version || !validID(response.DaemonGeneration) {
 		return responseError()
 	}
@@ -96,8 +97,10 @@ func validateScene(response v1.SceneResponse, target v1.SceneTarget) error {
 			return err
 		}
 		i := response.Result.Instance
-		if err := i.ValidateSceneLocation(); err != nil {
-			return responseError()
+		if persistentOnly {
+			if err := i.ValidateSceneLocation(); err != nil {
+				return responseError()
+			}
 		}
 		if canonical := response.CanonicalTarget; canonical != nil {
 			project := filepath.Dir(i.Plan.ManifestPath)
@@ -106,7 +109,7 @@ func validateScene(response v1.SceneResponse, target v1.SceneTarget) error {
 				return responseError()
 			}
 		}
-		if i.Plan.Lifetime != v1.Persistent || response.Result.LeaseToken != "" || target.InstanceID != "" && i.ID != target.InstanceID || target.Scene != "" && i.Plan.Scene != target.Scene {
+		if persistentOnly && i.Plan.Lifetime != v1.Persistent || response.Result.LeaseToken != "" || target.InstanceID != "" && i.ID != target.InstanceID || target.Scene != "" && i.Plan.Scene != target.Scene {
 			return responseError()
 		}
 		if response.Checkout != nil && !checkoutEqual(*response.Checkout, i.Checkout) {

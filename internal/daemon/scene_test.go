@@ -461,3 +461,111 @@ func TestSceneNestedGitBoundaryRootChildAndExplicitParity(t *testing.T) {
 		}
 	}
 }
+
+// Exact-ID observation keeps inspect's lifetime breadth, needs no checkout files,
+// and must not adopt a replacement logical scene or renew a disposable lease.
+func TestSceneFollowExactIDLifetimeAndHistory(t *testing.T) {
+	for _, scene := range []string{"dev", "test"} {
+		t.Run(scene, func(t *testing.T) {
+			root := shortTemp(t)
+			config := writeFixture(t, root)
+			cli, _ := startFixture(t, filepath.Join(shortTemp(t), "state"), time.Minute)
+			initial := prepareFixture(t, cli, request(root, config, scene))
+			id := initial.Instance.ID
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if err := os.Remove(filepath.Join(root, "backlot.json")); err != nil {
+				t.Fatal(err)
+			}
+			var frames []v1.SceneFollowRecord
+			var replacement string
+			err := cli.FollowScene(ctx, v1.SceneRequest{APIVersion: v1.Version, Target: v1.SceneTarget{InstanceID: id}}, client.SceneFollowOptions{Interval: 100 * time.Millisecond, Duration: 2 * time.Second}, func(record v1.SceneFollowRecord) error {
+				frames = append(frames, record)
+				if record.Snapshot == nil {
+					return nil
+				}
+				snapshot := record.Snapshot
+				if snapshot.Checkout != nil || snapshot.CanonicalTarget != nil || snapshot.Result == nil || snapshot.Result.Instance.ID != id || snapshot.Result.LeaseToken != "" {
+					t.Fatal("exact-ID observation changed selection or leaked capability", snapshot)
+				}
+				if len(frames) == 1 {
+					if snapshot.Result.Instance.Status != v1.Prepared || snapshot.Result.Instance.LeaseExpiresAt != initial.Instance.LeaseExpiresAt {
+						t.Fatal("observation changed prepared state or lease", snapshot)
+					}
+					if _, err := cli.Destroy(ctx, id); err != nil {
+						t.Fatal(err)
+					}
+					writeFixture(t, root)
+					replacement = prepareFixture(t, cli, request(root, config, scene)).Instance.ID
+					if err := os.RemoveAll(root); err != nil {
+						t.Fatal(err)
+					}
+				} else if snapshot.Result.Instance.Status == v1.Destroyed {
+					cancel()
+				}
+				return nil
+			})
+			if !errors.Is(err, context.Canceled) || len(frames) != 3 || replacement == "" || replacement == id || frames[2].Reason != "cancelled" {
+				t.Fatal(err, replacement, frames)
+			}
+			if _, err := cli.Destroy(context.Background(), replacement); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestSceneExactIDObservationDoesNotRequireNamedLocation(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	prepared := scenePrepare(t, s, root, config)
+	id := prepared.Instance.ID
+	var original record
+	if err := s.store.db.View(func(tx *bolt.Tx) error {
+		var err error
+		original, err = load(tx, id)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Register restore before damaging metadata in this offline owned database.
+	t.Cleanup(func() {
+		if err := s.store.db.Update(func(tx *bolt.Tx) error { return put(tx, "instances", id, original) }); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		r, err := load(tx, id)
+		if err != nil {
+			return err
+		}
+		r.Instance.Plan.ManifestPath = ""
+		return put(tx, "instances", id, r)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := s.scene(v1.SceneTarget{InstanceID: id}, false)
+	if err != nil || response.Result == nil || response.Result.Instance.ID != id {
+		t.Fatal(response, err)
+	}
+	_, err = s.scene(v1.SceneTarget{InstanceID: id}, true)
+	code(t, err, "state_corrupt")
+}
+
+func TestSceneExactIDDisposableStatusKeepsStopRestriction(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	prepared, err := s.prepare(context.Background(), request(root, config, "test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := v1.SceneTarget{InstanceID: prepared.Instance.ID}
+	response, err := s.scene(target, false)
+	if err != nil || response.Result == nil || response.Result.Instance.Plan.Lifetime != v1.Disposable || response.Result.LeaseToken != "" {
+		t.Fatal(response, err)
+	}
+	_, err = s.scene(target, true)
+	code(t, err, "invalid_lifetime")
+	current, err := s.store.inspect(prepared.Instance.ID)
+	if err != nil || current.Status != v1.Prepared || current.LeaseExpiresAt != prepared.Instance.LeaseExpiresAt {
+		t.Fatal(current, err)
+	}
+}

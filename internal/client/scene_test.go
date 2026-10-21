@@ -227,7 +227,7 @@ func TestSceneResponseValidationRejectsMissingBaselineLeaksAndMismatches(t *test
 			case "wrong-version":
 				response.Result.APIVersion = "v2"
 			}
-			if err := validateScene(response, target); err == nil {
+			if err := validateScene(response, target, true); err == nil {
 				t.Fatal("invalid response accepted", mode)
 			}
 		})
@@ -263,5 +263,57 @@ func TestSceneFollowRejectsCanonicalSelectorChange(t *testing.T) {
 	err := c.FollowScene(context.Background(), sceneRequest(), SceneFollowOptions{Interval: 100 * time.Millisecond, Duration: time.Second}, func(record v1.SceneFollowRecord) error { terminal = record; return nil })
 	if err == nil || calls != 2 || terminal.Type != "error" || terminal.Error.Code != "target_changed" {
 		t.Fatal(err, calls, terminal)
+	}
+}
+
+func TestSceneFollowExactIDRejectsGenerationChangeRetargetAndLeaseLeak(t *testing.T) {
+	for _, mode := range []string{"generation", "retarget", "lease"} {
+		t.Run(mode, func(t *testing.T) {
+			c := New("unused")
+			defer c.Close()
+			id := strings.Repeat("e", 64)
+			calls := 0
+			c.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path != "/v1/scenes/status" {
+					t.Fatal("observer attempted mutation", r.URL.Path)
+				}
+				var request v1.SceneRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Target != (v1.SceneTarget{InstanceID: id}) {
+					t.Fatal("observer changed selector", err, request)
+				}
+				response := sceneResponse()
+				response.Checkout, response.CanonicalTarget = nil, nil
+				response.Outcome = v1.SceneFound
+				response.Result = sceneInstance("e")
+				response.Result.Instance.Plan.Lifetime = v1.Disposable
+				response.Result.Instance.LeaseExpiresAt = "2026-10-21T12:00:00Z"
+				response.Result.Instance.Plan.ManifestPath = "" // inspect needs no named location.
+				if calls > 0 {
+					switch mode {
+					case "generation":
+						response.DaemonGeneration = strings.Repeat("f", 64)
+					case "retarget":
+						response.Result.Instance.ID = strings.Repeat("f", 64)
+					case "lease":
+						response.Result.LeaseToken = strings.Repeat("f", 64)
+					}
+				}
+				calls++
+				data, err := json.Marshal(response)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}, "X-Backlot-Api-Version": {v1.Version}}, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
+			})
+			var frames []v1.SceneFollowRecord
+			err := c.FollowScene(context.Background(), v1.SceneRequest{APIVersion: v1.Version, Target: v1.SceneTarget{InstanceID: id}}, SceneFollowOptions{Interval: 100 * time.Millisecond, Duration: time.Second}, func(record v1.SceneFollowRecord) error { frames = append(frames, record); return nil })
+			want := "invalid_response"
+			if mode == "generation" {
+				want = "daemon_changed"
+			}
+			if err == nil || calls != 2 || len(frames) != 2 || frames[0].Type != "snapshot" || frames[1].Type != "error" || frames[1].Error.Code != want {
+				t.Fatal(err, calls, frames)
+			}
+		})
 	}
 }

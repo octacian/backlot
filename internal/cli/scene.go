@@ -22,11 +22,9 @@ func sceneCommand() *urfave.Command {
 		flags := append(daemonFlags(false), &urfave.StringFlag{Name: "project", Usage: "Exact project directory or recognized manifest path"})
 		if name == "start" {
 			flags = append(flags, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s"})
-		} else {
-			flags = append(flags, &urfave.StringFlag{Name: "instance", Usage: "Explicit recorded persistent ID, instead of a scene/project"})
 		}
 		if name == "status" {
-			flags = append(flags, &urfave.BoolFlag{Name: "follow"}, &urfave.DurationFlag{Name: "interval", Value: time.Second, Usage: "Sample interval (100ms through 1m)"}, &urfave.DurationFlag{Name: "duration", Value: 30 * time.Minute, Usage: "Total follow budget (1s through 24h)"})
+			flags = append(flags, statusFollowFlags()...)
 		}
 		children = append(children, &urfave.Command{Name: name, Usage: "Target a persistent scene through the daemon", Flags: flags, Action: sceneAction})
 	}
@@ -34,50 +32,34 @@ func sceneCommand() *urfave.Command {
 }
 
 func sceneAction(ctx context.Context, c *urfave.Command) error {
-	target := v1.SceneTarget{InstanceID: c.String("instance")}
-	if target.InstanceID != "" {
-		if c.Args().Len() != 0 || c.String("project") != "" {
-			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "--instance cannot be combined with scene or --project"})
-		}
-	} else {
-		if c.Args().Len() != 1 {
-			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "scene command requires one scene name or --instance ID"})
-		}
-		target.Scene = c.Args().First()
-		var err error
-		target.CWD, err = os.Getwd()
+	if c.Args().Len() != 1 {
+		return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "scene command requires one scene name"})
+	}
+	target := v1.SceneTarget{Scene: c.Args().First()}
+	var err error
+	target.CWD, err = os.Getwd()
+	if err != nil {
+		return output(c, nil, err)
+	}
+	if c.String("project") != "" {
+		target.ProjectPath, err = filepath.Abs(c.String("project"))
 		if err != nil {
 			return output(c, nil, err)
-		}
-		if c.String("project") != "" {
-			target.ProjectPath, err = filepath.Abs(c.String("project"))
-			if err != nil {
-				return output(c, nil, err)
-			}
 		}
 	}
 	if err := target.Validate(); err != nil {
 		return output(c, nil, err)
 	}
-	options := client.SceneFollowOptions{Interval: c.Duration("interval"), Duration: c.Duration("duration")}
 	if c.Name == "status" {
-		if !c.Bool("follow") && (c.IsSet("interval") || c.IsSet("duration")) {
-			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "--interval and --duration require --follow"})
-		}
-		if c.Bool("follow") && (options.Interval == 0 || options.Duration == 0) {
-			return output(c, nil, &v1.PlanError{Code: "invalid_observation", Message: "follow interval and duration must be positive and bounded"})
+		if _, err := statusFollowOptions(c); err != nil {
+			return output(c, nil, err)
 		}
 		if c.Bool("follow") {
-			if err := options.Validate(); err != nil {
-				return output(c, nil, err)
-			}
+			return followStatus(ctx, c, v1.SceneRequest{APIVersion: v1.Version, Target: target})
 		}
 	}
 	cli, err := runtimeClient(c)
 	if err != nil {
-		if c.Name == "status" && c.Bool("follow") {
-			return sceneFollowError(c, err)
-		}
 		return output(c, nil, err)
 	}
 	defer cli.Close()
@@ -91,36 +73,67 @@ func sceneAction(ctx context.Context, c *urfave.Command) error {
 		}
 		return sceneOutput(c, response, err)
 	}
-	// Keep one local signal owner; observation cancellation never invokes cleanup.
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	return startScene(ctx, c, cli, target, signals)
+}
+
+func statusFollowFlags() []urfave.Flag {
+	return []urfave.Flag{&urfave.BoolFlag{Name: "follow", Usage: "Observe initial and changed sampled status"}, &urfave.DurationFlag{Name: "interval", Value: time.Second, Usage: "Sample interval (100ms through 1m)"}, &urfave.DurationFlag{Name: "duration", Value: 30 * time.Minute, Usage: "Total follow budget (1s through 24h)"}}
+}
+
+func statusFollowOptions(c *urfave.Command) (client.SceneFollowOptions, error) {
+	options := client.SceneFollowOptions{Interval: c.Duration("interval"), Duration: c.Duration("duration")}
+	if !c.Bool("follow") && (c.IsSet("interval") || c.IsSet("duration")) {
+		return options, &v1.PlanError{Code: "invalid_arguments", Message: "--interval and --duration require --follow"}
+	}
+	if c.Bool("follow") {
+		if options.Interval == 0 || options.Duration == 0 {
+			return options, &v1.PlanError{Code: "invalid_observation", Message: "follow interval and duration must be positive and bounded"}
+		}
+		return options, options.Validate()
+	}
+	return options, nil
+}
+
+func followStatus(ctx context.Context, c *urfave.Command, request v1.SceneRequest) error {
+	options, err := statusFollowOptions(c)
+	if err != nil {
+		return output(c, nil, err)
+	}
+	cli, err := runtimeClient(c)
+	if err != nil {
+		return sceneFollowError(c, err)
+	}
+	defer cli.Close()
+	// One joined signal owner for both named and exact-ID observation. Cancellation
+	// only stops sampling; it never invokes runtime cleanup or lease renewal.
 	signalCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(signals)
-	if c.Name == "status" && c.Bool("follow") {
-		// The signal goroutine is joined before the command returns.
-		done := make(chan struct{})
-		exitCode := 130
-		go func() {
-			defer close(done)
-			select {
-			case received := <-signals:
-				if received == syscall.SIGTERM {
-					exitCode = 143
-				}
-				cancel()
-			case <-signalCtx.Done():
+	done := make(chan struct{})
+	exitCode := 130
+	go func() {
+		defer close(done)
+		select {
+		case received := <-signals:
+			if received == syscall.SIGTERM {
+				exitCode = 143
 			}
-		}()
-		err := cli.FollowScene(signalCtx, request, options, func(record v1.SceneFollowRecord) error { return sceneRecord(c, record) })
-		cancel()
-		<-done
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return &ExitError{Code: exitCode}
+			cancel()
+		case <-signalCtx.Done():
 		}
-		return err
+	}()
+	err = cli.FollowScene(signalCtx, request, options, func(record v1.SceneFollowRecord) error { return sceneRecord(c, record) })
+	cancel()
+	<-done
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return &ExitError{Code: exitCode}
 	}
-	return startScene(ctx, c, cli, target, signals)
+	return err
 }
 
 func sceneFollowError(c *urfave.Command, err error) error {

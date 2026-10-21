@@ -15,7 +15,7 @@ coordination and recorded checkout/project locations. Status and stop do not loa
 the current manifest or configuration. Observe status through bounded polling of
 shared typed snapshots; an observer never acquires stop authority.
 
-This proposal extends the accepted lifetime and shared API decisions without
+This decision extends the accepted lifetime and shared API decisions without
 replacing their ownership, readiness, drift or retained-data contracts. The owner
 selected the nearest recorded project and named-scene observation across
 absence and recreation. Accepted after independent architecture review and
@@ -41,7 +41,7 @@ Neither “most recent” nor “currently ready” establishes an unambiguous t
 `plan.Locate` requires a manifest and cannot serve deleted-manifest cleanup.
 Checkout identity already combines directory filesystem identity and Git-directory
 identity where present; canonical paths detect moves. Project-subdirectory inode
-identity is rechecked during start but is not durable. This proposal deliberately
+identity is rechecked during start but is not durable. This decision deliberately
 uses that existing boundary, rather than adding a new persistent identity schema.
 
 [Issue 50](https://github.com/octacian/backlot/issues/50) concerns an attached
@@ -55,11 +55,12 @@ replay and streaming transport belong to [issue 54](https://github.com/octacian/
 
 Introduce `backlot scene start NAME`, `backlot scene status NAME` and
 `backlot scene stop NAME`, with existing `--state-dir`, `--project` and `--json`
-conventions. Status and stop alternatively accept `--instance ID` without a scene
-or project selector. Explicit IDs in this group address persistent instances;
-existing ID commands remain available for disposable and historical operations.
-Keep existing `run`, `inspect`, `status ID`, `stop ID`, restart, reset and destroy
-contracts and output envelopes compatible. No implicit ID/name guessing is needed.
+conventions. Scene commands take names only; use `backlot status ID` and
+`backlot stop ID` for recorded IDs. Add `backlot status ID --follow` for pinned
+observation of persistent, disposable and historical instances, including outside
+a checkout. Keep finite ID commands and their output envelopes compatible.
+No implicit ID/name guessing is needed. This same-PR interface refinement follows
+the owner's request to remove scene `--instance` and expose existing-ID follow.
 
 Start resolves and validates current inputs in the daemon, requires persistent
 lifetime before preparation/allocation, and delegates to the existing run
@@ -92,8 +93,8 @@ Scan existing instance records in a read transaction, matching the selected
 canonical project directory, verified checkout and scene. Include preparing,
 prepared, failed, interrupted and stopped persistent records; exclude disposable
 and destroyed records from named selection. Zero matches yields typed successful
-`not_found`; multiple matches yield a nonzero ambiguity error requiring explicit
-instance ID. Return no partial “best” match. Do not use only the project-ID-keyed
+`not_found`; multiple matches yield a nonzero ambiguity error requiring
+`backlot status ID` / `backlot stop ID`. Return no partial “best” match. Do not use only the project-ID-keyed
 persistent index, impose the public list page limit or make the CLI paginate.
 Corrupt records remain errors; do not skip uncertainty to produce apparent absence.
 
@@ -142,7 +143,10 @@ identity independently of that optional instance. Resolve the checkout using
 existing filesystem/Git rules even when no recorded match exists; if initial
 checkout identity cannot be resolved, return an identity error rather than a
 successful absence. Validate target/result coherence and redaction on both sides;
-preserve existing version negotiation and size bounds.
+preserve existing version negotiation and size bounds. Explicit-ID status reads
+one existing inspect record, without named-location discovery or validation, for
+either lifetime. Explicit-ID scene stop retains its persistent-only validation;
+this reusable API support does not require a duplicate CLI selector.
 
 Each new scene result also carries a random daemon generation created in memory
 once at daemon startup. A follower pins that generation and terminates nonzero on
@@ -150,7 +154,8 @@ change, including a restart between samples with no observed dial failure. This
 adds one ephemeral service field and wire field, not persistent state or an owner
 capability. No PID-based daemon continuity claim is needed.
 
-`scene status --follow` polls the finite status operation. JSON mode emits typed
+`scene status NAME --follow` and `status ID --follow` share one bounded observer
+over the finite scene-status API. JSON mode emits typed
 NDJSON with an initial `snapshot`, subsequent changed `snapshot` records and one
 `complete` or `error` terminal record when stdout remains writable. Snapshot data
 uses the same scene result contract. Records include sampling time; compare the
@@ -173,8 +178,9 @@ comparison grants no target-selection or mutation authority and is never a
 caller-supplied ownership claim. A replaced/moved checkout, ambiguity or
 unavailable identity is a terminal error, never permission to adopt another
 checkout. This baseline is observer memory only, with no persistent registration
-or subscription. Explicit-ID follow stays pinned and can report destroyed
-history. Stopped/failed states and initial absence do not finish observation.
+or subscription. Explicit-ID follow never re-resolves a name or checkout: it
+keeps the requested ID across destroy/recreation and can report destroyed history.
+It uses the same daemon-generation fence, bounds and terminal records. Stopped/failed states and initial absence do not finish observation.
 Neither mode acquires mutation authority or claims every transition was seen.
 
 Use interval default 1s, inclusive bounds 100ms through 1m; duration default 30m,
@@ -210,7 +216,8 @@ Existing lifecycle writers and recovery remain the sole persistent writers.
 The ephemeral daemon-generation assignment is the only new daemon-lifetime write.
 No new work runs when the feature is unused; existing lifecycle/lease/retention
 workers keep their contracts. Each active follower adds bounded polling requests,
-filesystem identity reads and bbolt read transactions, with no provider probes.
+bbolt reads and, for named targets, filesystem identity reads and retained-record
+scans, with no provider probes.
 
 Operators gain cleanup despite broken/deleted manifests, but unavailable identity
 still requires recorded IDs. They gain sampled state, not every transition or

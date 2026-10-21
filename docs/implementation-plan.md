@@ -299,11 +299,11 @@ Binary distribution/version tags remain #25, with no legacy storage migration.
 
 Implemented for independent review: daemon-owned `scene start/status/stop`,
 recorded canonical checkout/project/scene selection without current-manifest
-parsing for status/stop, nearest recorded project without outer fallback, explicit
-ID selection, typed absence/idempotent stop and bounded sampled observation.
+parsing for status/stop, nearest recorded project without outer fallback, typed
+absence/idempotent stop and bounded sampled observation via `status ID --follow`.
 Follow observes the named scene through absence/recreation, fences initial
-checkout/daemon continuity, and never acquires lifecycle ownership. The accepted
-[targeting decision](adr/20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md)
+checkout/daemon continuity; ID follow stays pinned for either lifetime and history.
+Neither acquires lifecycle ownership. The accepted [targeting decision](adr/20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md)
 and [command contract](daemon.md#named-persistent-scenes) define the behavior.
 Early real CLI/daemon/native failure/recovery and peer preservation precede focused
 regressions; independent implementation reviews, frozen complete applicable suites

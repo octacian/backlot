@@ -140,46 +140,55 @@ func TestSceneNativeCLI(t *testing.T) {
 		t.Fatal("old run and new scene start diverged")
 	}
 	// Signals terminate only the observer, never the native scene.
-	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGTERM} {
-		observer := exec.Command(binary, "scene", "status", "--state-dir", h.dir, "--json", "--follow", "--interval", "100ms", "--duration", "10s", "dev")
-		observer.Dir = h.project
-		stdout, err := observer.StdoutPipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := observer.Start(); err != nil {
-			t.Fatal(err)
-		}
-		// Retain direct-child ownership and join even if a later assertion fails.
-		joined := false
-		t.Cleanup(func() {
-			if !joined {
-				_ = observer.Process.Kill()
-				_ = observer.Wait()
+	for _, mode := range []string{"named", "id"} {
+		for _, sig := range []os.Signal{os.Interrupt, syscall.SIGTERM} {
+			args := []string{"scene", "status", "--state-dir", h.dir, "--json", "--follow", "--interval", "100ms", "--duration", "10s", "dev"}
+			if mode == "id" {
+				args = []string{"status", "--state-dir", h.dir, "--json", "--follow", "--interval", "100ms", "--duration", "10s", id}
 			}
-		})
-		decoder := json.NewDecoder(stdout)
-		var record v1.SceneFollowRecord
-		if err := decoder.Decode(&record); err != nil || record.Type != "snapshot" {
-			t.Fatal(err, record)
+			observer := exec.Command(binary, args...)
+			observer.Dir = h.project
+			if mode == "id" {
+				observer.Dir = t.TempDir() // Exact IDs need no checkout or manifest.
+			}
+			stdout, err := observer.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := observer.Start(); err != nil {
+				t.Fatal(err)
+			}
+			// Retain direct-child ownership and join even if a later assertion fails.
+			joined := false
+			t.Cleanup(func() {
+				if !joined {
+					_ = observer.Process.Kill()
+					_ = observer.Wait()
+				}
+			})
+			decoder := json.NewDecoder(stdout)
+			var record v1.SceneFollowRecord
+			if err := decoder.Decode(&record); err != nil || record.Type != "snapshot" {
+				t.Fatal(err, record)
+			}
+			if err := observer.Process.Signal(sig); err != nil {
+				t.Fatal(err)
+			}
+			if err := decoder.Decode(&record); err != nil || record.Type != "complete" || record.Reason != "cancelled" {
+				t.Fatal(err, record)
+			}
+			err = observer.Wait()
+			joined = true
+			exit, ok := err.(*exec.ExitError)
+			want := 130
+			if sig == syscall.SIGTERM {
+				want = 143
+			}
+			if !ok || exit.ExitCode() != want {
+				t.Fatal(err)
+			}
+			h.state(id, v1.RuntimeReady)
 		}
-		if err := observer.Process.Signal(sig); err != nil {
-			t.Fatal(err)
-		}
-		if err := decoder.Decode(&record); err != nil || record.Type != "complete" || record.Reason != "cancelled" {
-			t.Fatal(err, record)
-		}
-		err = observer.Wait()
-		joined = true
-		exit, ok := err.(*exec.ExitError)
-		want := 130
-		if sig == syscall.SIGTERM {
-			want = 143
-		}
-		if !ok || exit.ExitCode() != want {
-			t.Fatal(err)
-		}
-		h.state(id, v1.RuntimeReady)
 	}
 	h.fixtureAction("root-crash")
 	failed := h.state(id, v1.Failed)

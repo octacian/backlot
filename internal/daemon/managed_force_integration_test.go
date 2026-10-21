@@ -59,6 +59,7 @@ func TestManagedForceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = state.db.Close() })
 	r, err := state.managed()
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +71,29 @@ func TestManagedForceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = log.Close() })
 	group, err := native.Start(binary, log, log)
+	cleaned := false
+	if group != nil {
+		t.Cleanup(func() {
+			if cleaned {
+				return
+			}
+			if err := group.Stop(0); err != nil {
+				h.cleanupUnverified = true
+				t.Error("separate guardian cleanup unverified; control preserved", filepath.Dir(group.Identity.Control), err)
+				return
+			}
+			if group.Alive() {
+				h.cleanupUnverified = true
+				t.Error("separate guardian join unverified; control preserved", filepath.Dir(group.Identity.Control))
+				return
+			}
+			if err := os.RemoveAll(filepath.Dir(group.Identity.Control)); err != nil {
+				t.Error(err)
+			}
+		})
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +107,7 @@ func TestManagedForceRestart(t *testing.T) {
 	if err := os.RemoveAll(filepath.Dir(identity.Control)); err != nil {
 		t.Fatal(err)
 	}
+	cleaned = true
 	identity.Boot = ""
 	r.Identity = &identity
 	r.Status = "uncertain"

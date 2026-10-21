@@ -50,32 +50,41 @@ func (s *store) resources(id string) (resourceGeneration, error) {
 		if data == nil {
 			return nil
 		}
-		if err := json.Unmarshal(data, &g); err != nil {
-			return problem("state_corrupt", "private resource generation cannot be decoded; preserved")
-		}
-		if g.ID == "" {
-			if g.Endpoint != "" || len(g.Resources) > 0 || len(g.Containers) > 0 || len(g.Initialized) > 0 {
-				return problem("state_corrupt", "resource generation identity missing; resources preserved")
-			}
-			return nil
-		}
-		if !validID(g.ID) || g.Resources == nil || g.Initialized == nil {
-			return problem("state_corrupt", "resource generation incomplete; resources preserved")
-		}
-		for _, r := range g.Resources {
-			if !validID(r.Token) || r.Name == "" {
-				return problem("state_corrupt", "resource ownership incomplete; resources preserved")
-			}
-		}
-		for _, r := range g.Containers {
-			if r.Kind != "container" || !validID(r.Token) || r.Name == "" || !validID(r.Attempt) {
-				return problem("state_corrupt", "container ownership incomplete; resources preserved")
-			}
-		}
-		return nil
+		var decodeErr error
+		g, decodeErr = decodeResources(data)
+		return decodeErr
 	})
 	return g, err
 }
+func decodeResources(data []byte) (g resourceGeneration, err error) {
+	if !jsonObject(data) {
+		return g, problem("state_corrupt", "invalid resource record shape; preserved")
+	}
+	if err := json.Unmarshal(data, &g); err != nil {
+		return g, problem("state_corrupt", "private resource generation cannot be decoded; preserved")
+	}
+	if g.ID == "" {
+		if g.Endpoint != "" || len(g.Resources) > 0 || len(g.Containers) > 0 || len(g.Initialized) > 0 {
+			return g, problem("state_corrupt", "resource generation identity missing; resources preserved")
+		}
+		return g, nil
+	}
+	if !validID(g.ID) || g.Resources == nil || g.Initialized == nil {
+		return g, problem("state_corrupt", "resource generation incomplete; resources preserved")
+	}
+	for _, r := range g.Resources {
+		if !validID(r.Token) || r.Name == "" {
+			return g, problem("state_corrupt", "resource ownership incomplete; resources preserved")
+		}
+	}
+	for _, r := range g.Containers {
+		if r.Kind != "container" || !validID(r.Token) || r.Name == "" || !validID(r.Attempt) {
+			return g, problem("state_corrupt", "container ownership incomplete; resources preserved")
+		}
+	}
+	return g, nil
+}
+
 func (s *store) saveResources(id string, g resourceGeneration) error {
 	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, "resources", id, g) })
 }

@@ -193,7 +193,7 @@ Run the native managed suite with the same exclusive owned fixture grant:
 
 ```sh
 BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
-  go test -race ./internal/daemon -run '^TestManagedHTTPSRuntime$' -count=1 -v
+  go test -race ./internal/daemon -run '^(TestManagedHTTPSRuntime|TestManagedForceRestart)$' -count=1 -v
 ```
 
 This is required on the frozen candidate alongside the complete gateway,

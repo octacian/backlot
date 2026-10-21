@@ -13,9 +13,10 @@ const (
 
 // StopRequest targets one execution; Force acknowledges potentially live native survivors.
 type StopRequest struct {
-	APIVersion string `json:"api_version"`
-	InstanceID string `json:"instance_id"`
-	Force      bool   `json:"force,omitempty"`
+	ExpectedAttempt string `json:"expected_attempt,omitempty"`
+	APIVersion      string `json:"api_version"`
+	InstanceID      string `json:"instance_id"`
+	Force           bool   `json:"force,omitempty"`
 }
 
 // NativeOwnershipWarning reports an explicit waiver without exposing private authority.

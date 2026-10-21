@@ -60,7 +60,7 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	if _, err := s.store.abandonNative(context.Background(), target, newID()); err == nil {
 		t.Fatal("later attempt waived by stale request")
 	}
-	forced, err := s.stopRuntimeRequest(context.Background(), v1.StopRequest{InstanceID: target, Force: true})
+	forced, err := s.stopRuntimeRequest(context.Background(), v1.StopRequest{InstanceID: target, Force: true, ExpectedAttempt: original.Attempt})
 	if err != nil || len(forced.NativeOwnershipWarnings) != 1 || forced.Execution.CollectionFailure == "" || forced.Execution.TerminalExitCode == nil || *forced.Execution.TerminalExitCode != 17 {
 		t.Fatal("waiver lost outcome", forced.Execution, err)
 	}
@@ -71,7 +71,7 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	if len(retained.NativeAbandonments) != 1 || !retained.NativeAbandonments[0].Pending || retained.NativeAbandonments[0].Result.CleanupFailure == "" || *retained.NativeAbandonments[0].Result.TerminalExitCode != 17 {
 		t.Fatal("exact private history lost")
 	}
-	if _, err := s.stopRuntimeRequest(context.Background(), v1.StopRequest{InstanceID: target, Force: true}); err != nil {
+	if _, err := s.stopRuntimeRequest(context.Background(), v1.StopRequest{InstanceID: target, Force: true, ExpectedAttempt: original.Attempt}); err != nil {
 		t.Fatal(err)
 	}
 	again, _ := s.store.inspect(target)
@@ -157,12 +157,16 @@ func TestManagedWaiverFencesAndIdempotency(t *testing.T) {
 	if err := s.store.saveManaged(r); err != nil {
 		t.Fatal(err)
 	}
+	r, err := s.store.managed()
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	for _, action := range []string{"start", "restart", "status"} {
-		_, err := s.gatewayControl(ctx, action, v1.GatewayRequest{Force: true})
+		_, err := s.gatewayControl(ctx, action, v1.GatewayRequest{Force: true, ExpectedClaimRevision: r.ClaimRevision})
 		code(t, err, "invalid_request")
 	}
-	_, err := s.gatewayControl(ctx, "stop", v1.GatewayRequest{})
+	_, err = s.gatewayControl(ctx, "stop", v1.GatewayRequest{})
 	code(t, err, "gateway_ownership")
 	// Active published scenes stay a fence even for force.
 	if err := s.store.db.Update(func(tx *bolt.Tx) error {
@@ -177,16 +181,16 @@ func TestManagedWaiverFencesAndIdempotency(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.gatewayControl(ctx, "stop", v1.GatewayRequest{Force: true})
+	_, err = s.gatewayControl(ctx, "stop", v1.GatewayRequest{Force: true, ExpectedClaimRevision: r.ClaimRevision})
 	code(t, err, "gateway_busy")
 	if _, err := s.store.execution(instance.ID, v1.Stopped, instance.Execution); err != nil {
 		t.Fatal(err)
 	}
-	forced, err := s.gatewayControl(ctx, "stop", v1.GatewayRequest{Force: true})
+	forced, err := s.gatewayControl(ctx, "stop", v1.GatewayRequest{Force: true, ExpectedClaimRevision: r.ClaimRevision})
 	if err != nil || len(forced.NativeOwnershipWarnings) != 1 {
 		t.Fatal(forced, err)
 	}
-	if _, err := s.gatewayControl(ctx, "stop", v1.GatewayRequest{Force: true}); err != nil {
+	if _, err := s.gatewayControl(ctx, "stop", v1.GatewayRequest{Force: true, ExpectedClaimRevision: r.ClaimRevision}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.store.managed()

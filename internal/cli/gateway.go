@@ -40,7 +40,15 @@ func gatewayCommand() *urfave.Command {
 			}
 			cli := client.New(daemon.SocketPath(dir))
 			defer cli.Close()
-			response, err := cli.Gateway(ctx, c.Name, v1.GatewayRequest{APIVersion: v1.Version, ConfigPath: config, Force: c.Bool("force")})
+			request := v1.GatewayRequest{APIVersion: v1.Version, ConfigPath: config, Force: c.Bool("force")}
+			if request.Force {
+				selected, err := cli.Gateway(ctx, "status", v1.GatewayRequest{APIVersion: v1.Version})
+				if err != nil {
+					return output(c, nil, err)
+				}
+				request.ExpectedClaimRevision = selected.ClaimRevision
+			}
+			response, err := cli.Gateway(ctx, c.Name, request)
 			return output(c, response, err)
 		}})
 	}

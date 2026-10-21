@@ -60,12 +60,17 @@ Anchor-only death remains cleanable by its guardian; simultaneous authority loss
 may require force or controlled reboot. No observed PID/PGID authorizes actuation.
 
 Force is supported only on the two existing stop commands, never start/restart,
-reset or destroy. Serialize the selected target, first attempt normal cleanup and
+reset or destroy. A fresh CLI command inspects the selected attempt or safe gateway
+claim revision; the typed request retains that precondition through retries. Check
+it under serialization before any cleanup, including pending/legacy claims. A new
+managed launch rotates its revision; stopping/waiving retains it. First attempt normal cleanup and
 join its finite execution owner, and retain non-native cleanup fences. Commit exact
 unresolved native identities or explicitly unidentified intent, prior attempt/result,
 time, acknowledgement and available boot provenance atomically with relinquishment.
-Failure/cancellation before commit cannot release a claim; retry cannot waive a
-later attempt. Close/join local status readers without signaling abandoned owners.
+Check cancellation after transactional writes and before storage commit, the
+operation’s linearization point. Failure/cancellation before that boundary cannot
+release a claim; cancellation racing during commit may observe an applied result.
+Retry cannot waive a later attempt. Close/join local status readers without signaling abandoned owners.
 Retain direct-child reaping ownership until accepted survivors exit.
 
 Store narrow private histories on existing instance and managed gateway records,

@@ -70,6 +70,9 @@ func (s *service) stopRuntimeRequest(ctx context.Context, request v1.StopRequest
 	if err != nil {
 		return before, err
 	}
+	if request.Force && ((before.Execution != nil && request.ExpectedAttempt != before.Execution.Attempt) || (before.Execution == nil && request.ExpectedAttempt != "")) {
+		return before, problem("conflict", "selected execution attempt changed; inspect before issuing a new force stop")
+	}
 	instance, err := s.stopExecution(request.InstanceID)
 	var detail *v1.PlanError
 	if !request.Force || !errors.As(err, &detail) || detail.Code != "cleanup_failed" {
@@ -202,6 +205,9 @@ func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Insta
 				return err
 			}
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		instance = r.Instance
 		return nil
 	})
@@ -225,8 +231,8 @@ func (s *store) abandonManaged(ctx context.Context, r *managedRecord, expected m
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		var current managedRecord
-		if err := json.Unmarshal(tx.Bucket([]byte("meta")).Get([]byte("managed_gateway")), &current); err != nil {
+		current, err := decodeManagedRecord(tx.Bucket([]byte("meta")).Get([]byte("managed_gateway")))
+		if err != nil {
 			return err
 		}
 		if !reflect.DeepEqual(current, expected) {
@@ -236,9 +242,11 @@ func (s *store) abandonManaged(ctx context.Context, r *managedRecord, expected m
 			return err
 		}
 		if s.waiverCheckpoint != nil {
-			return s.waiverCheckpoint()
+			if err := s.waiverCheckpoint(); err != nil {
+				return err
+			}
 		}
-		return nil
+		return ctx.Err()
 	}); err != nil {
 		return err
 	}

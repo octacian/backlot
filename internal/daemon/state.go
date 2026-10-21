@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -63,15 +65,8 @@ func openStore(directory string) (*store, error) {
 				if err := tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error { var r record; return decodeRecord(data, string(key), &r) }); err != nil {
 					return err
 				}
-				for _, name := range []string{"checkouts", "snapshots", "secrets", "runtime", "resources"} {
-					if err := tx.Bucket([]byte(name)).ForEach(func(_, data []byte) error {
-						if !json.Valid(data) {
-							return problem("state_corrupt", "invalid private record; state was not modified")
-						}
-						return nil
-					}); err != nil {
-						return err
-					}
+				if err := validateV5Lifecycle(tx); err != nil {
+					return err
 				}
 			}
 		} else {
@@ -93,6 +88,57 @@ func openStore(directory string) (*store, error) {
 		return nil, errors.Join(err, db.Close())
 	}
 	return s, nil
+}
+
+func jsonObject(data []byte) bool {
+	trimmed := bytes.TrimSpace(data)
+	return len(trimmed) > 0 && trimmed[0] == '{'
+}
+
+// Validate supported lifecycle records before the one-way format fence. This is
+// pure: unknown metadata and all retained records/files remain byte-for-byte.
+func validateV5Lifecycle(tx *bolt.Tx) error {
+	if err := tx.Bucket([]byte("meta")).ForEach(func(key, data []byte) error {
+		switch {
+		case string(key) == "managed_gateway":
+			_, err := decodeManagedRecord(data)
+			return err
+		case strings.HasPrefix(string(key), "doctor_probe/"):
+			_, err := decodeDiagnosticProbe(strings.TrimPrefix(string(key), "doctor_probe/"), data)
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, name := range []string{"checkouts", "snapshots", "secrets", "runtime", "resources"} {
+		if err := tx.Bucket([]byte(name)).ForEach(func(_, data []byte) error {
+			if !jsonObject(data) {
+				return problem("state_corrupt", "invalid private record shape; state was not modified")
+			}
+			switch name {
+			case "runtime":
+				_, err := decodeRuntime(data)
+				return err
+			case "resources":
+				_, err := decodeResources(data)
+				return err
+			case "checkouts":
+				var r v1.CheckoutIdentity
+				return json.Unmarshal(data, &r)
+			case "snapshots":
+				var r plan.Snapshot
+				return json.Unmarshal(data, &r)
+			case "secrets":
+				var r map[string]v1.PlannedValue
+				return json.Unmarshal(data, &r)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func put(tx *bolt.Tx, bucket, key string, value any) error {

@@ -33,6 +33,7 @@ import (
 // Pending is committed before creating an inactive guardian; absence of its
 // authenticated effect is uncertainty, not authority to signal a PID.
 type managedRecord struct {
+	ClaimRevision      string              `json:"claim_revision,omitempty"`
 	Scope              string              `json:"scope"`
 	Config             v1.CaddyConfig      `json:"config"`
 	Identity           *native.Identity    `json:"identity,omitempty"`
@@ -48,21 +49,42 @@ type managedRecord struct {
 func (s *store) managed() (r managedRecord, err error) {
 	err = s.db.View(func(tx *bolt.Tx) error {
 		data := tx.Bucket([]byte("meta")).Get([]byte("managed_gateway"))
-		if data == nil {
-			r.Status = "unconfigured"
-			return nil
-		}
+		r, err = decodeManagedRecord(data)
+		return err
+	})
+	return
+}
+
+// decodeManagedRecord is shared by reads, waiver comparison and the v5 fence.
+func decodeManagedRecord(data []byte) (r managedRecord, err error) {
+	if data == nil {
+		r.Status = "unconfigured"
+	} else {
 		if json.Unmarshal(data, &r) != nil || r.Config.Mode != "managed" || !validID(r.Scope) || r.Config.HTTPSPort == nil || !reflect.DeepEqual(r.Config, manifest.CaddyDefaults(r.Config)) || manifest.ValidateMachine(v1.MachineConfig{Version: v1.ManifestVersion, Caddy: &r.Config}) != nil {
-			return problem("gateway_state", "invalid managed gateway ownership record; preserved")
+			return r, problem("gateway_state", "invalid managed gateway ownership record; preserved")
 		}
 		switch r.Status {
 		case "unconfigured", "running", "stopped", "interrupted", "uncertain":
 		default:
-			return problem("gateway_state", "invalid managed gateway status; preserved")
+			return r, problem("gateway_state", "invalid managed gateway status; preserved")
 		}
-		return nil
-	})
-	return
+	}
+	if r.ClaimRevision != "" && !validID(r.ClaimRevision) {
+		return r, problem("gateway_state", "invalid managed claim revision; preserved")
+	}
+	if r.ClaimRevision == "" {
+		// Legacy claims have no generation. Hash only their private claim tuple;
+		// this public precondition conveys no cleanup authority.
+		claim, _ := json.Marshal(struct {
+			Scope    string
+			Identity *native.Identity
+			Pending  bool
+			Boot     string
+		}{r.Scope, r.Identity, r.Pending, r.PendingBoot})
+		digest := sha256.Sum256(claim)
+		r.ClaimRevision = hex.EncodeToString(digest[:])
+	}
+	return r, nil
 }
 
 func (s *store) saveManaged(r managedRecord) error {
@@ -197,6 +219,9 @@ func (s *service) gatewayControl(ctx context.Context, action string, request v1.
 	if err != nil {
 		return v1.GatewayResponse{}, err
 	}
+	if request.Force && request.ExpectedClaimRevision != r.ClaimRevision {
+		return v1.GatewayResponse{}, problem("conflict", "selected gateway claim changed; inspect before issuing a new force stop")
+	}
 	if action == "status" {
 		return s.gatewayStatus(ctx, r), nil
 	}
@@ -286,7 +311,7 @@ func (s *store) publishedActive() error {
 }
 
 func (s *service) gatewayStatus(ctx context.Context, r managedRecord) v1.GatewayResponse {
-	response := v1.GatewayResponse{NativeOwnershipWarnings: abandonmentWarnings(r.NativeAbandonments), APIVersion: v1.Version, Mode: "managed", Status: r.Status, Endpoint: r.Config.Endpoint, Message: r.Failure}
+	response := v1.GatewayResponse{ClaimRevision: r.ClaimRevision, NativeOwnershipWarnings: abandonmentWarnings(r.NativeAbandonments), APIVersion: v1.Version, Mode: "managed", Status: r.Status, Endpoint: r.Config.Endpoint, Message: r.Failure}
 	if r.Config.HTTPSPort != nil {
 		response.HTTPSPort = *r.Config.HTTPSPort
 	}
@@ -386,6 +411,7 @@ func (s *service) startManaged(ctx context.Context, r *managedRecord) (result er
 	if err != nil {
 		return err
 	}
+	r.ClaimRevision = newID()
 	r.Pending, r.PendingBoot = true, boot
 	if err := s.store.saveManaged(*r); err != nil {
 		return err

@@ -115,7 +115,9 @@ For uncertain ownership, first try `gateway stop`. If authority cannot be restor
 `gateway start` can resume retained state. **Unknown survivors may still run/write**;
 force does not prove cleanup, signal observed IDs or bypass active/kept published
 scenes, ports, configuration, CA, route or trust checks. A durable private history
-and safe status warning survive later starts. Scene recovery uses `stop --force
+and safe status warning survive later starts. API callers select `claim_revision`
+from gateway status and retain `expected_claim_revision` in force-stop retries;
+replacement claims reject stale requests before cleanup. Scene recovery uses `stop --force
 INSTANCE` followed by ordinary restart under the same risk acknowledgement. There
 is no force start/restart/reset/destroy. Later data removal still requires independent
 absence proof; keep state rather than deleting a CA or hiding uncertainty.

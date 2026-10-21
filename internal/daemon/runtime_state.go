@@ -51,10 +51,22 @@ func (s *store) runtime(id string) (runtimeRecord, error) {
 		if data == nil {
 			return nil
 		}
-		return json.Unmarshal(data, &r)
+		var decodeErr error
+		r, decodeErr = decodeRuntime(data)
+		return decodeErr
 	})
 	return r, err
 }
+func decodeRuntime(data []byte) (r runtimeRecord, err error) {
+	if !jsonObject(data) || json.Unmarshal(data, &r) != nil {
+		return r, problem("state_corrupt", "invalid runtime record shape; preserved")
+	}
+	if r.Attempt != "" && !validID(r.Attempt) {
+		return r, problem("state_corrupt", "invalid runtime attempt; preserved")
+	}
+	return r, nil
+}
+
 func (s *store) saveRuntime(id string, r runtimeRecord) error {
 	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, "runtime", id, r) })
 }

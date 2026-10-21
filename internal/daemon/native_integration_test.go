@@ -1052,7 +1052,7 @@ func TestNativeRuntime(t *testing.T) {
 					t.Fatal(err)
 				}
 				h.state(r.Instance.ID, v1.Failed)
-				if _, err := h.cli.StopExecutionWithRequest(context.Background(), v1.StopRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID, Force: true}); err != nil {
+				if _, err := h.cli.StopExecutionWithRequest(context.Background(), v1.StopRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID, Force: true, ExpectedAttempt: r.Instance.Execution.Attempt}); err != nil {
 					t.Fatal(err)
 				}
 				// A living authenticated fixture proves force did not kill the unknown survivor.
@@ -1085,7 +1085,7 @@ func TestNativeRuntime(t *testing.T) {
 		if err := os.Rename(identity.Control, moved); err != nil {
 			t.Fatal(err)
 		}
-		forced, err := h.cli.StopExecutionWithRequest(context.Background(), v1.StopRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID, Force: true})
+		forced, err := h.cli.StopExecutionWithRequest(context.Background(), v1.StopRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID, Force: true, ExpectedAttempt: r.Instance.Execution.Attempt})
 		if err != nil || len(forced.Instance.NativeOwnershipWarnings) != 1 {
 			t.Fatal("live guardian waiver failed", err)
 		}
@@ -1108,26 +1108,28 @@ func TestNativeRuntime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer func() { _ = output.Close() }()
+		t.Cleanup(func() { _ = output.Close() })
 		group, err := native.Start(binary, output, output)
+		if group != nil {
+			t.Cleanup(func() {
+				_ = group.Stop(0)
+				group.Relinquish()
+				deadline := time.Now().Add(3 * time.Second)
+				for (group.Alive() || group.PGID() > 0 && syscall.Kill(-group.PGID(), 0) != syscall.ESRCH) && time.Now().Before(deadline) {
+					time.Sleep(20 * time.Millisecond)
+				}
+				if group.Alive() || group.PGID() > 0 && syscall.Kill(-group.PGID(), 0) != syscall.ESRCH {
+					t.Error("fixture absence unverified; control preserved")
+					return
+				}
+				if err := os.RemoveAll(filepath.Dir(group.Identity.Control)); err != nil {
+					t.Error(err)
+				}
+			})
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() {
-			_ = group.Stop(0)
-			group.Relinquish()
-			deadline := time.Now().Add(3 * time.Second)
-			for (group.Alive() || group.PGID() > 0 && syscall.Kill(-group.PGID(), 0) != syscall.ESRCH) && time.Now().Before(deadline) {
-				time.Sleep(20 * time.Millisecond)
-			}
-			if group.Alive() || group.PGID() > 0 && syscall.Kill(-group.PGID(), 0) != syscall.ESRCH {
-				t.Error("fixture absence unverified; control preserved")
-				return
-			}
-			if err := os.RemoveAll(filepath.Dir(group.Identity.Control)); err != nil {
-				t.Error(err)
-			}
-		})
 		if err := group.Activate(native.Spec{Executable: "/bin/sh", Args: []string{"-c", "sleep 30 & exit 17"}, Environment: os.Environ(), Directory: t.TempDir()}); err != nil {
 			t.Fatal(err)
 		}

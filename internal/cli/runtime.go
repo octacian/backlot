@@ -33,7 +33,17 @@ func runtimeCommands() []*urfave.Command {
 			return output(c, nil, err)
 		}
 		defer cli.Close()
-		response, err := cli.StopExecutionWithRequest(ctx, v1.StopRequest{APIVersion: v1.Version, InstanceID: c.Args().First(), Force: c.Bool("force")})
+		request := v1.StopRequest{APIVersion: v1.Version, InstanceID: c.Args().First(), Force: c.Bool("force")}
+		if request.Force {
+			selected, err := cli.Inspect(ctx, request.InstanceID)
+			if err != nil {
+				return output(c, nil, err)
+			}
+			if selected.Instance.Execution != nil {
+				request.ExpectedAttempt = selected.Instance.Execution.Attempt
+			}
+		}
+		response, err := cli.StopExecutionWithRequest(ctx, request)
 		return output(c, response, err)
 	}})
 	commands = append(commands, &urfave.Command{Name: "destroy", Usage: "Remove owned runtime and data; retain logs", Flags: daemonFlags(false), Action: func(ctx context.Context, c *urfave.Command) error {

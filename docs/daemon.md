@@ -261,7 +261,10 @@ claims; resource absence never attests complete collection. The guardian-only
 anchor pipe helps self-pinned cleanup after guardian death without providing that
 proof. Unknown effects or unavailable authority remain fenced by ordinary stop.
 `stop --force INSTANCE` explicitly relinquishes selected native claims after normal
-cleanup is attempted; unknown survivors may still run/write. Durable private history,
+cleanup is attempted; unknown survivors may still run/write. The CLI selects the
+current attempt with inspect; API callers must retain its `expected_attempt` in
+force-stop retries. A replacement attempt rejects the stale request before cleanup.
+Durable private history,
 known original exits and safe public warnings survive replacement attempts. The
 waived attempt retains a collection gap, while a fully collected replacement can
 have complete evidence with the prior warning. No force applies to reset/destroy,

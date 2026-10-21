@@ -144,18 +144,12 @@ public-origin readiness to avoid proxy/SSR dependency cycles.
 
 ## Shared-service allocation boundary
 
-Project-scoped server records and instance allocation records are separate from
-checkout identity and private resource generations. A focused `internal/manager`
-boundary owns MariaDB-specific create/inspect/release effects; the daemon owns
-private intent, credentials, exact server configuration, locking, consumer ordering
-and conservative recovery. Shared server volume/network/container effects use the
-existing official Docker client and capability verification. The same named
-`api/v1` contracts serve `shared` CLI/client/daemon control; manager messages are
-private provisioning contracts and never public status. See the
-[accepted decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md)
-and [current bounded runtime](containers.md#project-scoped-shared-services-gate-1).
-
-Explicit operator force is limited to instance/shared destroy and manager release.
-It waives shared ownership proof for recorded targets, preserves peer/consumer and
-native/private authority fences, and requires observed deletion/absence. Authority
-is transient; recovery does not continue force. See the [operator procedure](containers.md#explicit-operator-force-cleanup).
+Separate project server and instance allocation journals preserve identity and
+recovery independently of checkout/private generations. The daemon owns intent,
+credentials, exact configuration, locking and consumer ordering; `internal/manager`
+owns MariaDB create/inspect/release SQL effects. Server volume/network/container
+effects reuse the official Docker adapter. Named `api/v1` types serve CLI/client/
+daemon control; [manager messages](../api/v1/manager.go) remain private.
+The [accepted decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md)
+defines architecture and bounded transient force; the [runtime guide](containers.md#project-scoped-shared-services-gate-1)
+defines connection semantics and [operator recovery](containers.md#explicit-operator-force-cleanup).

@@ -390,65 +390,40 @@ and has no healthcheck execution state. Consumers stop before the exact created
 image is removed and its absence verified. Production doctor never pulls/builds
 images; production/default gateway exposure stays unchanged.
 
-## Early shared MariaDB checkpoint (#43 Gate 1)
+<a id="early-shared-mariadb-checkpoint-43-gate-1"></a>
+<a id="shared-mariadb-lifecycle-and-recovery-43-gate-2"></a>
 
-Run serially with an exclusive owned fixture grant and existing local MariaDB 11.4
-and Alpine 3.21 images; runtime never pulls/builds:
+## Shared MariaDB integration
 
-```sh
-BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
-  go test -race ./internal/daemon -run '^TestSharedMariaDBGate1$' -count=1 -v -timeout=6m
-```
-
-The suite builds real native/static Linux application consumers plus a uniquely
-owned local fixture image from the inspected Alpine ID (classic Docker builder,
-`--pull=false --network=none`). Two actual linked worktrees and independent scenes
-use the race CLI/daemon and one owned MariaDB server. It checks empty databases,
-DDL/DML, distinct credentials, actual bidirectional peer-data and administrative
-permission denial, server-configuration conflict/recovery and peer-preserving
-allocation destruction. Cleanup joins consumers before releasing allocations/server
-and verifies owned container/network/volume/image absence; cached base images stay.
-A configured unavailable endpoint fails; an unset endpoint skips and is incomplete
-evidence. This bounded checkpoint does not replace the Gate 2 lifecycle/crash
-matrix, Gate 3 PostgreSQL/custom-manager evidence, or frozen full provider/platform
-and published-HEAD CI requirements.
-
-## Shared MariaDB lifecycle and recovery (#43 Gate 2)
-
-Use the same exclusive owned-fixture grant, local MariaDB 11.4/Alpine images and
-Unix endpoint as the early checkpoint. Run the complete shared suite serially:
+Run serially with exclusive owned-fixture authority, an explicit local Docker Unix
+endpoint and existing MariaDB 11.4/Alpine 3.21 images. Fixtures build the static
+application image from the inspected Alpine ID with `--pull=false --network=none`;
+production never pulls/builds. An unset endpoint skips (incomplete evidence); an
+unavailable configured endpoint fails.
 
 ```sh
 BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
   go test -race ./internal/daemon -run '^(TestSharedMariaDB.*|TestSharedUnselectedOfflinePrivacy)$' -count=1 -v -timeout=30m
 ```
 
-The suite includes the early checkpoints plus live native/container persistence,
-fresh target reset, additional persistent scenes and simultaneous disposable runs;
-success/failure/cancel/deadline/client-loss retention policies; explicit cleanup and
-server fences; graceful shutdown and active crash without transparent continuation;
-SQL database/user/grant and Docker create/remove effect/acknowledgment gaps;
-provider outage/restoration; preexisting objects, ownership mismatch and missing
-acknowledged effects; multiple allocations and unselected/offline privacy. Random
-parent-written SQL witnesses cannot be recreated by application initialization.
-Private retained-child barriers observe real effects before killing/reaping the
-fixture daemon; they do not enable production fault injection. Child diagnostics
-are checked after reaping, before replacement. Cleanup verifies actual SQL absence,
-owned runtime resources and the exact image commits recorded before faults; cached
-base images remain. An unavailable configured provider fails rather than skips.
-The overall timeout accommodates the serial multi-fixture suite; operation,
-cancellation and five-second recovery API expectations are unchanged.
+For focused CLI/permission/configuration coverage, select `^TestSharedMariaDBGate1$`
+with `-timeout=6m`. The complete selection also covers live native/container
+persistence, target reset, concurrent worktrees/disposable runs, terminal keep
+policies, cancellation/client loss, consumer joins, shutdown/crash, SQL/Docker
+effect/acknowledgment gaps, ownership/configuration drift, outage/restoration,
+multiple allocations and offline/privacy behavior. Force cases add actual deletion,
+manual/missing-storage absence, peer fences and partial DROP/crash/explicit retry
+without durable or automatic force. Capability drift keeps actual Engine IDs.
 
-Run the existing `TestDockerRuntime` and `TestDisposableEvidenceDocker` gates
-serially on the same frozen inputs as regression evidence, in addition to required
-`make check`. This local MariaDB evidence does not establish PostgreSQL/custom
-manager, other-platform, full feature or published-revision CI readiness.
+Parent-written random SQL witnesses cannot be recreated by application initialization.
+Cleanup is registered before effects/faults; private barriers observe successful
+real effects before retained-child fault/reap and diagnostic checks. Recovery retains
+the five-second API expectation; the aggregate timeout accommodates serial fixtures.
+Cleanup proves SQL database/user and owned runtime/image absence, retaining cached
+base images and uncertain diagnostics.
 
-The shared Gate 2 suite also includes `TestSharedMariaDBForce.*` operator flows:
-default refusal followed by explicit actual deletion, authentication/grant drift,
-manually absent effects, exact recorded IDs with mismatched capabilities, retained
-peer fences, missing server/storage, forced partial DROP/crash/retry without automatic
-force, and provider outage. These tests are included by the complete `TestSharedMariaDB.*`
-selection above. Fixture capability drift retains actual Engine IDs; it does not
-pretend immutable container labels were edited in place. Force authority must be
-absent from persisted JSON and actual SQL/provider absence must settle obligations.
+On the frozen candidate also run `make check`, complete [DockerRuntime](#dockerprivate-state-integration)
+and `TestDisposableEvidenceDocker` regressions serially. Record revision/input/image
+provenance, failures/skips and cleanup externally per [release verification](release-acceptance/README.md).
+Prior MariaDB evidence does not establish PostgreSQL/custom execution, other-platform,
+full-feature or published-revision CI readiness.

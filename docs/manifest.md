@@ -46,9 +46,9 @@ moved-checkout reconciliation belongs to milestone 2.
 directory. Otherwise use `backlot/config.yaml` beneath Go's `os.UserConfigDir()`
 (on macOS, `~/Library/Application Support`). If absent, machine configuration is
 optional. Selected container work or shared allocations require Docker settings; published scenes require
-Caddy settings. Native-only unpublished scenes need neither. Only the selected
-scene's tools and referenced inputs are required. Supplied configuration is
-always strictly validated, including unused settings. Tool/input overrides must
+Caddy settings. Native-only unpublished scenes without selected shared allocations
+need neither. Only the selected scene's tools and referenced inputs are required.
+Supplied configuration is always strictly validated, including unused settings. Tool/input overrides must
 name project declarations. File errors are actionable and never print contents.
 
 All documents use `version: backlot/v1` with exact, case-sensitive field names.
@@ -263,9 +263,9 @@ machine example contains illustrative endpoints and an image name, no credential
 
 ## Shared-service declarations
 
-Gate 1 adds the following bounded MariaDB declaration; this is an early #43 slice,
-not final PostgreSQL/custom-manager acceptance. The image must already exist in
-the local Engine. Prefer an immutable image digest for reviewed configuration.
+Declare the bundled MariaDB 11.4 service with an already-present local Engine
+image; prefer an immutable digest for reviewed configuration. See
+[current engine scope](implementation-plan.md#shared-services-issue-43).
 
 ```yaml
 shared_services:
@@ -295,15 +295,12 @@ include the reusable environment set explicitly with `environment_sets: [databas
 The server is selected only through allocation resources. Every allocation field
 stays symbolic offline, except automatically redacted `password`. Administrative
 credentials have no application reference. Existing resource kinds cannot name a
-`shared_service`. Different allocation resources receive different empty databases,
-users and credentials, including different scenes/worktrees. Migrations/fixtures
-remain ordinary dependent project jobs. Unselected declarations require no Docker
-contact, and planning never provisions a server or allocation.
+`shared_service`. Migrations/fixtures remain ordinary dependent project jobs.
+Unselected declarations require no Docker contact; planning never provisions
+a server or allocation.
 
 The initial declaration requires explicit `manager: mariadb`, nonempty `image`,
 `storage: volume`, `admin: generated`, `port: 3306` and a positive
-`readiness_timeout` up to 24h. Unknown fields remain errors. Configuration conflicts
-preserve the retained server and peers; they do not trigger upgrades. Native and
+`readiness_timeout` up to 24h. Unknown fields remain errors. Native and
 container environments resolve the actual consumer's connection context, described
 in [shared runtime operation](containers.md#project-scoped-shared-services-gate-1).
-Custom command declarations/execution and PostgreSQL are later user gates.

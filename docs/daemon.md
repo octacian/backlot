@@ -120,7 +120,8 @@ migration. See the [private-state guide](containers.md) for compatibility.
 | Endpoint | Named request | Named response |
 | --- | --- | --- |
 | `GET /v1/status` | None | `DaemonStatusResponse` |
-| `POST /v1/shared/list`, `/v1/shared/inspect`, `/v1/shared/start`, `/v1/shared/stop`, `/v1/shared/restart`, `/v1/shared/destroy` | `SharedRequest` | `SharedResponse` (durable status; no credentials/ownership authority) |
+| `POST /v1/shared/list`, `/v1/shared/inspect`, `/v1/shared/start`, `/v1/shared/stop`, `/v1/shared/restart` | `SharedRequest` | `SharedResponse` (durable status; no credentials/ownership authority) |
+| `POST /v1/shared/destroy` | `SharedDestroyRequest` | `SharedResponse` |
 | `POST /v1/doctor` | `DoctorRequest` | `DoctorResponse` |
 | `POST /v1/instances` | `ListRequest` | `ListResponse` (at most 100 summaries) |
 | `POST /v1/stop` | `ControlRequest` | `DaemonStatusResponse` (`stopping`) |
@@ -129,8 +130,12 @@ migration. See the [private-state guide](containers.md) for compatibility.
 | `POST /v1/cancel` | `InstanceRequest` | `InstanceResponse` |
 | `POST /v1/renew` | `LeaseRequest` | `InstanceResponse` |
 | `POST /v1/run`, `/v1/restart`, `/v1/reset` | `RunRequest` | `InstanceResponse` |
-| `POST /v1/runtime/stop`, `/v1/destroy` | `InstanceRequest` | `InstanceResponse` |
+| `POST /v1/runtime/stop` | `InstanceRequest` | `InstanceResponse` |
+| `POST /v1/destroy` | `DestroyRequest` | `InstanceResponse` |
 | `POST /v1/logs` | `LogsRequest` | `LogsResponse` |
+
+Restart/reset require a recorded `instance_id`; run does not accept one.
+Only the command-specific destroy requests accept optional `force` authority.
 
 `list` uses `ListRequest` (`after_id`, `limit`; zero means default 100, maximum
 100) and returns identity-ordered summaries with a `next_after_id` continuation.

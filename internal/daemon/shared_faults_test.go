@@ -126,7 +126,7 @@ func pendingSharedDestroy(t *testing.T, f *sharedMariaDBFixture, id string, shar
 }
 
 func TestSharedMariaDBSQLRecovery(t *testing.T) {
-	for _, point := range []string{"sql-allocate:database", "sql-allocate:user", "sql-allocate:grant", "sql-release:user", "sql-release:database"} {
+	for _, point := range []string{"sql-allocate:database", "sql-allocate:user", "sql-allocate:grant", "sql-release:user", "sql-release:database", "release-effect"} {
 		t.Run(point, func(t *testing.T) {
 			f := newSharedMariaDBFixture(t, true)
 			ctx := context.Background()
@@ -135,7 +135,7 @@ func TestSharedMariaDBSQLRecovery(t *testing.T) {
 			peerWitness := independentSharedWitness(t, f.db(t, peerCredential))
 			var target v1.InstanceResponse
 			var before sharedFixtureCredential
-			releasing := strings.HasPrefix(point, "sql-release:")
+			releasing := strings.HasPrefix(point, "sql-release:") || point == "release-effect"
 			if releasing {
 				target = f.run("host", f.h.project)
 				before = f.credential(t, target.Instance.ID, "native")
@@ -163,7 +163,7 @@ func TestSharedMariaDBSQLRecovery(t *testing.T) {
 			if point == "sql-allocate:database" || point == "sql-release:user" {
 				wantUser = 0
 			}
-			if point == "sql-release:database" {
+			if point == "sql-release:database" || point == "release-effect" {
 				wantDB, wantUser = 0, 0
 			}
 			if databases != wantDB || users != wantUser {
@@ -179,20 +179,36 @@ func TestSharedMariaDBSQLRecovery(t *testing.T) {
 			if point == "sql-allocate:grant" {
 				wantEffect = "ready"
 			}
-			if point == "sql-release:database" {
+			if point == "sql-release:database" || point == "release-effect" {
 				wantEffect = "released"
 			}
 			if observed.Effect != wantEffect {
 				t.Fatal("partial/ready/absence distinction lost", point, observed.Effect)
 			}
-			if releasing && allocation.Request.Operation != "release" {
+			if releasing && (allocation.Request.Operation != "release" || allocation.Request.Force) {
 				t.Fatal("destructive intent was not durable")
 			}
 			if !releasing && allocation.Result.Effect == "ready" {
 				t.Fatal("SQL ready acknowledgment was not actually lost")
 			}
 			_ = admin.Close()
-			startSharedRecoveryDaemon(t, f.h, nil)
+			// The daemon release-effect checkpoint follows manager absence validation,
+			// unlike the statement-level sql-release:database checkpoint.
+			if point == "release-effect" {
+				startSharedRecoveryDaemon(t, f.h, func() bool {
+					observed, err := f.d.ContainerInspect(ctx, record.Server.ID, client.ContainerInspectOptions{})
+					if err != nil || observed.Container.State == nil {
+						t.Fatal("cannot observe exact retained server during recovery", err)
+					}
+					return observed.Container.State.Running
+				})
+				observed, err := f.d.ContainerInspect(ctx, record.Server.ID, client.ContainerInspectOptions{})
+				if err != nil || observed.Container.State == nil || observed.Container.State.Running {
+					t.Fatal("exact retained server not stopped at recovery API availability", err)
+				}
+			} else {
+				startSharedRecoveryDaemon(t, f.h, nil)
+			}
 			if releasing {
 				// Explicit ordinary execution cannot convert release intent back into allocate.
 				out, err := f.h.cli.Run(ctx, f.request("host", f.h.project))

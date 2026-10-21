@@ -16,18 +16,16 @@ to authorize cleanup of recorded shared targets despite missing ownership proof.
 Force deletes actual effects and verifies absence before settling obligations;
 it neither cascades through retained peers nor authorizes unverified success.
 
-This replaces [the original shared-allocation decision](20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
-after independent architecture review and authorized acceptance. The original
-architecture below is retained with the explicit operator exception at the end
-of the decision. Implementation and Gate 2 acceptance remain separate.
+This supersedes [the original shared-allocation decision](20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
+only to add the explicit operator exception below. Its unchanged architecture is
+incorporated by reference; [implementation status](../implementation-plan.md#shared-services-issue-43)
+remains separate from decision acceptance.
 
 ## Context
 
-Separate worktrees need independent application data without running an entire
-SQL server per scene. Checkout identity and the persistent instance key include
-checkout/scene, so neither can identify the shared project. SQL provisioning was
-previously outside product scope; sharing introduces explicit privilege, ownership
-and recovery obligations that generic image initialization cannot satisfy.
+The [original context](20261019T050443877Z-add-project-scoped-shared-service-allocations.md#context)
+establishes the need for independent worktree data with shared SQL overhead and
+explicit privilege, ownership and recovery obligations.
 
 The owner reopened Gate 2 because ownership uncertainty could leave cleanup
 permanently blocked. In particular, release currently requires a verified server
@@ -39,53 +37,16 @@ original issue's automatic preservation contract.
 
 ## Decision
 
-Identify a Git shared project by common-directory filesystem identity, project
-location relative to the checkout, and declared project ID. Canonical common paths
-are retained too: moved/replaced anchors fail conservatively without automatic
-relinking. Independent clones do not share. Non-Git projects share only the same
-canonical directory and filesystem identity. Branch names and Git HEAD are not
-ownership. The daemon's private state remains the local administrative boundary;
-separate state directories do not coordinate a machine-wide pool.
-
-Retain exact server declarations and local endpoint in a configuration digest.
-A conflicting branch cannot stop, replace or upgrade a peer server. New incompatible
-servers require distinct declarations. Pin the first selected local image ID;
-never pull/build implicitly or infer version compatibility. Own a separate server,
-volume and network through recorded capability labels, independently from scene
-containers and allocation generations. Native consumers use an owned loopback
-mapping; container consumers explicitly attached to the allocation use the shared
-network alias and internal port. Map every connection value through existing
-explicit environment references. Administration never becomes an application value.
-
-The Gate 1 MariaDB declaration explicitly selects an image, arguments, volume
-storage, generated private administration, port 3306 and bounded readiness.
-Allocate an empty database plus restricted user/password per instance resource.
-Generate grant identifiers without wildcard characters. Verify atomic database
-ownership comments using a one-way ownership fingerprint and user authentication
-hashes before adopting or reclaiming interrupted effects. Unexpected grants,
-identity mismatch or unavailable verification preserve the resources. Application
-schema/migrations/fixtures remain project jobs; shared servers are a common
-performance/failure boundary, not container-level isolation.
-
-Private state version 7 fences durable destructive progress from older binaries. Reject older and newer unsupported formats
-unchanged; matching old binaries must clean their resources before a fresh state
-directory is selected. Record server/allocation intent and credentials before
-effects. Release only after consumers stop/join. Stop/start retains allocations;
-reset/destroy releases only the target. Idle shared services remain until explicit
-stop; service destruction refuses all retained allocations, including stopped ones.
-Shutdown/recovery joins consumers before stopping shared services, preserves data
-and requires explicit execution restart. Unknown effects retain cleanup obligations.
-
-Use a language-neutral command protocol: one bounded structured JSON request on
-stdin and one validated JSON result on stdout for allocate, inspect/reconcile and
-release. Protocol results distinguish verified ownership, absence and uncertainty,
-and ready, partial and released effects; exit status cannot replace these facts.
-Backlot owns IDs, intent/credentials where applicable, cancellation, deadlines,
-ordering and truthful outcomes. Project commands are trusted cooperative code;
-unavailable or unverifiable cleanup code preserves resources and obligations.
-Gate 1 defines/validates the initial messages using MariaDB; custom command
-execution, PostgreSQL and the non-database fixture are subsequent user gates and
-may refine this small contract. There is no plugin framework or required language.
+Retain the [original Decision](20261019T050443877Z-add-project-scoped-shared-service-allocations.md#decision)
+in full except where the explicit exception below permits recorded-target cleanup.
+That includes project identity and independent daemon roots; exact retained server
+configuration and pinned local images; separate capability-owned server/storage/
+network and allocation generations; context-correct explicit connection references;
+private administration, empty restricted allocations and verified SQL ownership;
+state version 7 without migration; durable intent, consumer joins, target-only
+release, retained-allocation fences and explicit execution restart after recovery.
+The original bounded cooperative manager protocol and later PostgreSQL/custom
+execution obligations remain unchanged.
 
 ### Explicit operator exception
 
@@ -156,11 +117,9 @@ payloads. Existing private-resource filesystem and native ownership checks remai
 
 ## Consequences
 
-Worktrees share server overhead while retaining separate data and application
-credentials. SQL managers introduce engine-specific responsibility and require
-real permission/isolation evidence. Configuration conflicts and uncertain ownership
-can require explicit maintenance rather than automatic repair. Separate daemon
-state roots and external servers are never automatically combined or adopted.
+The [original consequences](20261019T050443877Z-add-project-scoped-shared-service-allocations.md#consequences)
+remain: shared overhead with separate credentials, engine-specific permission
+proof, conservative maintenance and no automatic pooling/adoption.
 
 The operator can intentionally delete an externally replaced recorded target;
 that risk is the purpose of force. Known peers and consumers remain protected, but
@@ -171,12 +130,9 @@ unchanged default refusal before implementation is considered complete.
 
 ## Alternatives considered
 
-Per-instance generic containers remain appropriate for privileged workloads and
-stronger separation. Machine-wide automatic pooling merges unrelated configuration
-and identity boundaries. Setup/teardown hooks alone cannot verify interrupted
-multi-step effects. A broad plugin framework before concrete engine/non-database
-evidence adds unsupported contracts. Name-only adoption or automatic relinking
-can reclaim foreign resources and is rejected.
+Retain the [original alternatives](20261019T050443877Z-add-project-scoped-shared-service-allocations.md#alternatives-considered),
+including private containers for stronger separation and the rejection of automatic
+pooling, hooks-only recovery, speculative plugins and name-only adoption.
 
 Manual SQL deletion followed by conservative release works when the original
 server remains verifiable, but fails on missing server/storage and label drift.
@@ -188,10 +144,9 @@ operator recovery requirement.
 
 ## Revisit when
 
-Use PostgreSQL 17 and a non-Go non-database command fixture to refine the minimal
-protocol. Expand storage/administrative configuration only with concrete needs and
-review. Revisit sharing across daemon roots only with an explicit machine-wide
-coordination design; never infer sharing from matching images or project names.
+The [original revisit conditions](20261019T050443877Z-add-project-scoped-shared-service-allocations.md#revisit-when)
+still apply to PostgreSQL 17/non-Go non-database evidence, storage/admin expansion
+and any explicit cross-daemon coordination design.
 
 If evidence shows the bounded storage-absence proof cannot be established, or
 operators need state reconstruction or force over native/filesystem authority,
@@ -203,12 +158,7 @@ reopen scope rather than adding recovery machinery implicitly.
 - [Draft PR 45](https://github.com/octacian/backlot/pull/45)
 - [Shared lifecycle and journals](../../internal/daemon/shared.go)
 - [MariaDB effects](../../internal/manager/mariadb.go)
-
 - [Issue 43](https://github.com/octacian/backlot/issues/43)
 - [Product requirements](../prd.md#project-scoped-shared-services)
 - [Runtime contract](../containers.md#project-scoped-shared-services-gate-1)
 - [Implementation status](../implementation-plan.md#shared-services-issue-43)
-- [Existing lifecycle decision](20261007T052013565Z-use-explicit-scene-lifetimes-and-daemon-owned-execution.md)
-- [Offline contracts](20261007T055849866Z-define-versioned-offline-scene-planning-contracts.md)
-- [MariaDB database comments](https://mariadb.com/docs/server/reference/sql-statements/data-definition/create/create-database)
-- [MariaDB user authentication](https://mariadb.com/docs/server/reference/sql-statements/account-management-sql-statements/create-user)

@@ -11,6 +11,8 @@ Only published scenes require a gateway; other scenes and metadata-only `prepare
 do not contact it. The [gateway decision](adr/20261016T201500000Z-support-explicit-linux-managed-https-reachability.md)
 records ownership and trust boundaries.
 
+<a id="managed-local-https-on-macos-arm64"></a>
+
 ## Managed local HTTPS
 
 For Linux prerequisites, resolver setup and explicit bridge reachability, follow
@@ -399,8 +401,7 @@ cleanup categories in `execution.cleanup_details`, alongside readable failure
 strings. Gateway diagnostics distinguish scope/configuration, hostname conflict,
 concurrency exhaustion, unavailable API and uncertain ownership/effect.
 
-State format is now 6. Version 5 and older are rejected without modification or
-migration. Follow the [private-state compatibility guidance](containers.md) for
-legacy-compatible owned cleanup/shutdown and a fresh `--state-dir`. See [testing](testing.md)
-for isolated fixture commands and separate managed macOS/browser and external
-real-domain acceptance gates.
+Follow the canonical [private-state compatibility guidance](containers.md#state-compatibility)
+for supported formats, matching-old-binary cleanup/shutdown and a fresh
+`--state-dir`. See [testing](testing.md) for isolated fixture commands and separate
+managed macOS/browser and external real-domain acceptance gates.

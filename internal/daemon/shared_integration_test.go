@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,13 +22,6 @@ import (
 	"github.com/octacian/backlot/internal/plan"
 )
 
-// TestSharedMariaDBGate1 is the early real CLI -> daemon -> MariaDB checkpoint.
-// It deliberately precedes the later comprehensive lifecycle/crash matrix.
-func TestSharedMariaDBGate1(t *testing.T) { testSharedMariaDB(t, false) }
-
-// TestSharedMariaDBGate2 first proves real persistence and interrupted release.
-func TestSharedMariaDBGate2(t *testing.T) { testSharedMariaDB(t, true) }
-
 type sharedMariaDBFixture struct {
 	h                                                  *nativeHarness
 	d                                                  *dockerEngine
@@ -38,7 +30,7 @@ type sharedMariaDBFixture struct {
 	run                                                func(string, string) v1.InstanceResponse
 }
 
-func newSharedMariaDBFixture(t *testing.T, gate2 bool, endpoints ...string) *sharedMariaDBFixture {
+func newSharedMariaDBFixture(t *testing.T, freshOnly bool, endpoints ...string) *sharedMariaDBFixture {
 	endpoint := os.Getenv("BACKLOT_DOCKER_TEST_ENDPOINT")
 	if len(endpoints) > 0 {
 		endpoint = endpoints[0]
@@ -191,7 +183,7 @@ func newSharedMariaDBFixture(t *testing.T, gate2 bool, endpoints ...string) *sha
 	}
 	resources := []string{"database"}
 	nativeJob := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "consumer"}, Resources: resources, Environment: env, Fixtures: fixtures}
-	if gate2 {
+	if freshOnly {
 		nativeJob.Policy = v1.FreshOnly
 		nativeJob.Initializes = []string{"database"}
 	}
@@ -245,48 +237,45 @@ func newSharedMariaDBFixture(t *testing.T, gate2 bool, endpoints ...string) *sha
 	return &sharedMariaDBFixture{h: h, d: d, binary: binary, endpoint: endpoint, configuration: configuration, linked: linked, serviceID: hash(identity.ID + "/sql"), cli: cli, run: run}
 }
 
-func testSharedMariaDB(t *testing.T, gate2 bool) {
-	f := newSharedMariaDBFixture(t, gate2)
+// TestSharedMariaDBGate1 exercises real CLI consumers, isolation and lifecycle routes.
+func TestSharedMariaDBGate1(t *testing.T) {
+	f := newSharedMariaDBFixture(t, true)
 	h, d, binary, configuration, linked, cli, run := f.h, f.d, f.binary, f.configuration, f.linked, f.cli, f.run
 	ctx := context.Background()
 	resources := []string{"database"}
 	var err error
 	var data []byte
 	var a, b v1.InstanceResponse
-	if gate2 {
-		type started struct {
-			out   []byte
-			err   error
-			index int
+	type started struct {
+		out   []byte
+		err   error
+		index int
+	}
+	results := make(chan started, 2)
+	barrier := make(chan struct{})
+	for index, selection := range [][2]string{{"host", h.project}, {"bridge", linked}} {
+		go func() {
+			<-barrier
+			out, err := exec.Command(binary, "run", selection[0], "--project", selection[1], "--config", configuration, "--state-dir", h.dir, "--startup-timeout", "90s", "--job-timeout", "30s", "--json").CombinedOutput()
+			results <- started{out, err, index}
+		}()
+	}
+	close(barrier)
+	// Join both executable commands before inspecting failures.
+	completed := []started{<-results, <-results}
+	for _, result := range completed {
+		if result.err != nil {
+			t.Fatalf("concurrent start failed: %s", result.out)
 		}
-		results := make(chan started, 2)
-		barrier := make(chan struct{})
-		for index, selection := range [][2]string{{"host", h.project}, {"bridge", linked}} {
-			go func() {
-				<-barrier
-				out, err := exec.Command(binary, "run", selection[0], "--project", selection[1], "--config", configuration, "--state-dir", h.dir, "--startup-timeout", "90s", "--job-timeout", "30s", "--json").CombinedOutput()
-				results <- started{out, err, index}
-			}()
+		var response v1.InstanceResponse
+		if err := json.Unmarshal(result.out, &response); err != nil || response.Instance.Status != v1.RuntimeReady {
+			t.Fatal("concurrent consumer failed", err)
 		}
-		close(barrier)
-		for range 2 {
-			result := <-results
-			if result.err != nil {
-				t.Fatalf("concurrent start failed: %s", result.out)
-			}
-			var response v1.InstanceResponse
-			if err := json.Unmarshal(result.out, &response); err != nil || response.Instance.Status != v1.RuntimeReady {
-				t.Fatal("concurrent consumer failed", err)
-			}
-			if result.index == 0 {
-				a = response
-			} else {
-				b = response
-			}
+		if result.index == 0 {
+			a = response
+		} else {
+			b = response
 		}
-	} else {
-		a = run("host", h.project)
-		b = run("bridge", linked)
 	}
 	var services v1.SharedResponse
 	if err = json.Unmarshal(cli("shared", "list", "--state-dir", h.dir, "--json"), &services); err != nil {
@@ -301,51 +290,11 @@ func testSharedMariaDB(t *testing.T, gate2 bool) {
 		t.Fatal("did not observe exactly one actual owned shared server", err)
 	}
 	serverID := actualServers.Items[0].ID
-	credential := func(id, component string) (string, string, string, int) {
-		t.Helper()
-		out, err := h.cli.Fixtures(ctx, v1.FixturesRequest{APIVersion: v1.Version, InstanceID: id, Component: component})
-		if err != nil {
-			t.Fatal(err)
-		}
-		values := map[string]string{}
-		for _, f := range out.Fixtures {
-			if f.Sensitive && f.Value != "" {
-				t.Fatal("ordinary fixture exposed password")
-			}
-			values[f.Name] = f.Value
-		}
-		secret, err := h.cli.FixtureSecret(ctx, v1.FixturesRequest{APIVersion: v1.Version, InstanceID: id, Component: component, SecretName: "password"})
-		if err != nil || len(secret.Fixtures) != 1 {
-			t.Fatal("explicit credential unavailable", err)
-		}
-		var port int
-		if _, err = fmt.Sscanf(values["port"], "%d", &port); err != nil {
-			t.Fatal(err)
-		}
-		return values["database"], values["username"], secret.Fixtures[0].Value, port
-	}
-	adb, auser, apass, port := credential(a.Instance.ID, "native")
-	bdb, buser, bpass, _ := credential(b.Instance.ID, "container")
-	if adb == bdb || auser == buser || apass == bpass {
+	ca, cb := f.credential(t, a.Instance.ID, "native"), f.credential(t, b.Instance.ID, "container")
+	if ca.database == cb.database || ca.user == cb.user || ca.password == cb.password {
 		t.Fatal("allocation identity collision")
 	}
-	applicationDB := func(database, user, password string) *sql.DB {
-		config := mysql.NewConfig()
-		config.User = user
-		config.Passwd = password
-		config.Net = "tcp"
-		config.Addr = fmt.Sprintf("127.0.0.1:%d", port)
-		config.DBName = database
-		connector, err := mysql.NewConnector(config)
-		if err != nil {
-			t.Fatal(err)
-		}
-		db := sql.OpenDB(connector)
-		t.Cleanup(func() { _ = db.Close() })
-		return db
-	}
-	appA := applicationDB(adb, auser, apass)
-	appB := applicationDB(bdb, buser, bpass)
+	appA, appB := f.db(t, ca), f.db(t, cb)
 	var serverVersion string
 	if err = appA.QueryRowContext(ctx, "SELECT VERSION()").Scan(&serverVersion); err != nil || !strings.HasPrefix(serverVersion, "11.4.") {
 		t.Fatal("fixture requires MariaDB 11.4", err)
@@ -361,7 +310,7 @@ func testSharedMariaDB(t *testing.T, gate2 bool) {
 	for _, pair := range []struct {
 		db   *sql.DB
 		peer string
-	}{{appA, bdb}, {appB, adb}} {
+	}{{appA, cb.database}, {appB, ca.database}} {
 		control(pair.db)
 		if _, err = pair.db.ExecContext(ctx, "SELECT * FROM `"+pair.peer+"`.witness"); !sqlAccessDenied(err) {
 			t.Fatal("peer read did not prove privilege denial")
@@ -372,132 +321,50 @@ func testSharedMariaDB(t *testing.T, gate2 bool) {
 		control(pair.db)
 	}
 	t.Log("real native and container consumers passed empty database/DDL/DML/admin checks; distinct credentials; bidirectional peer reads/writes denied")
-	if gate2 {
-		writeWitness := func(db *sql.DB) string {
-			t.Helper()
-			value := newID()
-			if _, err := db.ExecContext(ctx, "CREATE TABLE independent_witness (value VARCHAR(64) NOT NULL)"); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := db.ExecContext(ctx, "INSERT INTO independent_witness VALUES (?)", value); err != nil {
-				t.Fatal(err)
-			}
-			return value
+	wa, wb := independentSharedWitness(t, appA), independentSharedWitness(t, appB)
+	for _, action := range []string{"stop-start", "restart"} {
+		if action == "stop-start" {
+			cli("stop", "--state-dir", h.dir, "--json", a.Instance.ID)
+			run("host", h.project)
+		} else {
+			cli("restart", a.Instance.ID, "--state-dir", h.dir, "--startup-timeout", "90s", "--json")
 		}
-		witnessA, witnessB := writeWitness(appA), writeWitness(appB)
-		verifyWitness := func(db *sql.DB, expected string) {
-			t.Helper()
-			var value string
-			if err := db.QueryRowContext(ctx, "SELECT value FROM independent_witness").Scan(&value); err != nil || value != expected {
-				t.Fatal("independent data witness lost or changed", err)
-			}
+		if f.credential(t, a.Instance.ID, "native") != ca || f.credential(t, b.Instance.ID, "container") != cb {
+			t.Fatal("persistent exported credentials changed", action)
 		}
-		// Existing application data is read on every restart; credentials must stay paired.
-		for _, action := range []string{"stop-start", "restart"} {
-			if action == "stop-start" {
-				cli("stop", "--state-dir", h.dir, "--json", a.Instance.ID)
-				run("host", h.project)
-			} else {
-				cli("restart", a.Instance.ID, "--state-dir", h.dir, "--startup-timeout", "90s", "--json")
-			}
-			database, user, password, _ := credential(a.Instance.ID, "native")
-			if database != adb || user != auser || password != apass {
-				t.Fatal("persistent credentials rotated", action)
-			}
-			control(appA)
-			control(appB)
-			verifyWitness(appA, witnessA)
-			verifyWitness(appB, witnessB)
-		}
-		cli("reset", a.Instance.ID, "--state-dir", h.dir, "--startup-timeout", "90s", "--json")
-		newDatabase, newUser, newPassword, _ := credential(a.Instance.ID, "native")
-		if newDatabase == adb || newUser == auser || newPassword == apass {
-			t.Fatal("reset reused old allocation")
-		}
-		_ = appA.Close()
-		appA = applicationDB(newDatabase, newUser, newPassword)
 		control(appA)
 		control(appB)
-		var oldWitnessTables int
-		if err := appA.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='independent_witness'").Scan(&oldWitnessTables); err != nil || oldWitnessTables != 0 {
-			t.Fatal("reset retained independent witness", err)
-		}
-		verifyWitness(appB, witnessB)
-		witnessA = writeWitness(appA)
-		verifyWitness(appA, witnessA)
-		// A new connection using old credentials must fail authentication after release.
-		old := applicationDB(adb, auser, apass)
-		if oldErr := old.PingContext(ctx); oldErr == nil {
-			t.Fatal("old allocation credentials still usable")
-		} else {
-			var driver *mysql.MySQLError
-			if !errors.As(oldErr, &driver) || driver.Number != 1045 {
-				t.Fatalf("old credential rejection did not prove authentication denial: %T %v", oldErr, oldErr)
-			}
-		}
-		_ = old.Close()
-		t.Log("early Gate2: simultaneous actual worktrees/one server, stop/start and restart data+credential pairing, fresh target-only reset and peer preservation passed")
-
-		// Register the private barrier and daemon cleanup before the retained-child fault.
-		_ = appA.Close()
-		_ = appB.Close()
-		startSharedCheckpointDaemon(t, h, "release-effect")
-		completed := make(chan error, 1)
-		go func() {
-			_, err := exec.Command(binary, "destroy", "--state-dir", h.dir, "--json", a.Instance.ID).CombinedOutput()
-			completed <- err
-		}()
-		waitSharedCheckpoint(t, h, "release-effect")
-		if err := h.process.Process.Kill(); err != nil {
-			t.Fatal(err)
-		}
-		if err := h.process.Wait(); err == nil {
-			t.Fatal("retained daemon did not fault")
-		}
-		h.waited = true
-		preserveSharedDaemonLog(t, h, "faulted release daemon")
-		if err := <-completed; err == nil {
-			t.Fatal("lost acknowledgment falsely reported success")
-		}
-		// Only the dead daemon's private journal is opened here; no live writer.
-		state, err := openStore(h.dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		allocations, readErr := state.sharedAllocations(a.Instance.ID)
-		if readErr != nil || allocations["database"].Request.Operation != "release" || allocations["database"].Released {
-			t.Fatal("release intent lost", readErr)
-		}
-		_ = state.db.Close()
-		startSharedRecoveryDaemon(t, h, func() bool {
-			observed, err := d.ContainerInspect(ctx, serverID, client.ContainerInspectOptions{})
-			if err != nil || observed.Container.State == nil {
-				t.Fatal("cannot observe retained server during recovery", err)
-			}
-			return observed.Container.State.Running
-		})
-		recoveredServer, inspectErr := d.ContainerInspect(ctx, serverID, client.ContainerInspectOptions{})
-		if inspectErr != nil || recoveredServer.Container.State == nil || recoveredServer.Container.State.Running {
-			t.Fatal("recovery did not stop exact retained server before exposing API", inspectErr)
-		}
-		t.Log("observed exact retained shared server stopped at recovery API availability; execution requires explicit restart")
-		// Ordinary start must not recreate an allocation whose release lost its ack.
-		out, runErr := exec.Command(binary, "run", "host", "--project", h.project, "--config", configuration, "--state-dir", h.dir, "--startup-timeout", "90s", "--json").CombinedOutput()
-		if runErr == nil || !strings.Contains(string(out), "allocation_conflict") {
-			t.Fatalf("release obligation reopened as allocate: %s", out)
-		}
-		cli("destroy", "--state-dir", h.dir, "--json", a.Instance.ID)
-		// Recovery stops consumers/server but does not transparently resume; peer data survives explicit restart.
-		run("bridge", linked)
-		_, _, _, port = credential(b.Instance.ID, "container")
-		appB = applicationDB(bdb, buser, bpass)
-		control(appB)
-		verifyWitness(appB, witnessB)
-		cli("destroy", "--state-dir", h.dir, "--json", b.Instance.ID)
-		cli("shared", "destroy", "--state-dir", h.dir, "--json", serviceID)
-		t.Log("early Gate2: retained-child release-effect lost acknowledgment, durable release fence, repeat explicit cleanup and peer persistence across recovery passed")
-		return
+		verifySharedWitness(t, appA, wa)
+		verifySharedWitness(t, appB, wb)
 	}
+	cli("reset", a.Instance.ID, "--state-dir", h.dir, "--startup-timeout", "90s", "--json")
+	newer := f.credential(t, a.Instance.ID, "native")
+	if newer.database == ca.database || newer.user == ca.user || newer.password == ca.password {
+		t.Fatal("reset reused old allocation")
+	}
+	_ = appA.Close()
+	appA = f.db(t, newer)
+	control(appA)
+	control(appB)
+	var oldWitnessTables int
+	if err := appA.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='independent_witness'").Scan(&oldWitnessTables); err != nil || oldWitnessTables != 0 {
+		t.Fatal("reset retained independent witness", err)
+	}
+	if f.credential(t, b.Instance.ID, "container") != cb {
+		t.Fatal("reset rotated peer credentials")
+	}
+	verifySharedWitness(t, appB, wb)
+	verifySharedWitness(t, appA, independentSharedWitness(t, appA))
+	// Fresh authentication must fail with SQL1045, independently of object absence.
+	old := f.db(t, ca)
+	var driver *mysql.MySQLError
+	if err := old.PingContext(ctx); !errors.As(err, &driver) || driver.Number != 1045 {
+		t.Fatalf("old credentials did not prove authentication denial: %T %v", err, err)
+	}
+	_ = old.Close()
+	f.requireAbsent(t, ca)
+	t.Log("simultaneous first CLI starts/one server, paired persistence, fresh-only initialization and target-only reset verified")
+
 	// Relevant failure/recovery: another branch declares incompatible server args.
 	// Rejection must leave the owned server identity and peer data unchanged.
 	conflict := h.manifest

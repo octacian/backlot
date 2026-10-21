@@ -350,6 +350,9 @@ func TestSharedMariaDBLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.wait(t, a.Instance.ID, v1.RuntimeReady)
+	if f.credential(t, a.Instance.ID, "live-native") != ca {
+		t.Fatal("restart changed exported paired credentials")
+	}
 	verifySharedWitness(t, f.db(t, ca), wa)
 	verifySharedWitness(t, f.db(t, cb), wb)
 	if _, err := f.h.cli.Reset(ctx, req); err != nil {
@@ -373,14 +376,13 @@ func TestSharedMariaDBLifecycle(t *testing.T) {
 	// Additional persistent scene shares the same server, then target-only destroy.
 	extra := f.run("host", f.h.project)
 	ce := f.credential(t, extra.Instance.ID, "native")
-	we := independentSharedWitness(t, f.db(t, ce))
+	independentSharedWitness(t, f.db(t, ce))
 	f.destroy(t, extra.Instance.ID)
 	if got, _, _ := f.server(t); got != serverID {
 		t.Fatal("target destroy replaced peer server")
 	}
 	verifySharedWitness(t, f.db(t, ca), wa)
 	verifySharedWitness(t, f.db(t, cb), wb)
-	_ = we
 	// Simultaneous disposable runs retain independent live services until released.
 	var runs []v1.InstanceResponse
 	var creds []sharedFixtureCredential

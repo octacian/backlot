@@ -319,44 +319,36 @@ another OS, unit tests, or migration of one application are insufficient evidenc
 
 ## Project-scoped shared services
 
-Issue #43 extends the product scope with project-owned shared servers and separate
-instance allocations. Linked Git worktrees share only when common-directory
-filesystem identity, relative project location and declared project ID match;
-clones do not. Non-Git sharing requires the same canonical directory. Moves,
-replacements and exact retained server-configuration conflicts fail conservatively.
-See the [accepted allocation and force-cleanup decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md).
+Project-owned shared servers provide empty, isolated per-instance allocations.
+Linked worktrees share only with matching common-directory filesystem identity,
+relative project location and project ID; clones do not. Non-Git sharing requires
+the same canonical directory/identity. Moved/replaced identities and conflicting
+retained configuration fail conservatively. The [accepted decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md)
+defines identity and ownership; the [runtime guide](containers.md#project-scoped-shared-services-gate-1)
+defines operations.
 
-The server lifecycle is independent of allocations. Automatically ensure selected
-servers before provisioning empty allocations and starting consumers. Stop/start
-and restart preserve paired data/credentials; reset and destroy join consumers
-before replacing/releasing only their own allocation. Successful disposable work
-releases allocations; existing keep-on-failure policy applies to failures and
-cancellation. Idle servers remain until explicit stop. Stop/restart refuse active
-or kept dependents; destruction refuses every retained allocation. Never cascade
-through peers or adopt by names. Shutdown/crash recovery joins consumers before
-servers, preserves data and truthful cleanup obligations, and requires explicit
-execution restart. Unavailable providers or trusted cleanup code cannot erase
-ownership obligations.
+| Lifecycle | Required behavior |
+| --- | --- |
+| Selected start | Ensure server, allocate, then start consumers |
+| Stop/start/restart | Preserve paired data/credentials; scene stop leaves server running |
+| Reset/destroy | Join consumers, replace/release only target allocations |
+| Disposable completion | Release on success; existing failure/cancellation keep policy applies |
+| Shared control | Idle servers remain until explicit stop; stop/restart fence active/kept dependents; destroy fences every retained allocation |
+| Shutdown/recovery | Join consumers before servers, preserve data/obligations, require explicit execution restart |
 
-Application users need useful permissions inside their allocation and denial of
-peer application data and server administration. Native/container consumers receive
-explicit host, port, database, username and password references appropriate to their
-execution context. Administrative credentials remain private provisioning inputs;
-ordinary results redact application secrets. Migrations/fixtures remain project
-jobs. Unselected services stay untouched, planning stays offline and runtime never
-pulls/builds images. Shared performance/failure remains common; private containers
-remain available for privileged operations and stronger separation.
+Application users have useful local permissions and no peer-data/admin access.
+Native/container connection references are explicit and context-correct; admin
+credentials stay private and ordinary output redacts secrets. Project jobs own
+migrations/fixtures. Planning stays offline, unselected services stay untouched,
+and runtime never pulls/builds images. Unavailable providers/cleanup code retain
+obligations. Shared failure/performance remains common; private containers remain
+available for privileged workloads and stronger separation.
 
-Overall acceptance still requires maintained MariaDB and PostgreSQL managers, a
-bounded language-neutral custom command protocol with a non-database fixture,
-full lifecycle/concurrency/crash recovery and real provider/platform evidence.
-[Implementation status](implementation-plan.md#shared-services-issue-43) distinguishes
-the early MariaDB checkpoint from those uncompleted requirements.
-
-Explicit `destroy --force` and `shared destroy --force` provide the operator exception
-to conservative shared ownership preservation. The recorded target may be deleted
-despite mismatched proof; known peers/consumers remain fenced and verified absence
-is still required before clearing obligations. The flag is the acknowledgment and
-is never durable or automatic. With valid state, verified absence of both recorded
-server and backing volume permits selected-allocation reconciliation; unreadable
-state requires the [manual operator procedure](containers.md#explicit-operator-force-cleanup), not reconstructed identities or forgotten obligations.
+Explicit instance/shared `destroy --force` may waive ownership proof only for
+recorded targets, retaining peer/consumer fences and verified absence. Authority
+is invocation-only. Both recorded server and volume absent can reconcile selected
+allocations; unreadable state requires the [manual procedure](containers.md#explicit-operator-force-cleanup).
+[Issue 43](https://github.com/octacian/backlot/issues/43) retains MariaDB/PostgreSQL,
+custom protocol/non-database, full lifecycle and real provider/platform acceptance;
+[implementation status](implementation-plan.md#shared-services-issue-43) separates
+PR 45's MariaDB slice from those remaining requirements.

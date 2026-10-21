@@ -49,6 +49,8 @@ own application migrations or seed logic. Applications own those operations and 
 probe. A TCP probe observes connectivity, which may precede application setup;
 use a declared native command probe when connectivity is insufficient.
 
+### State compatibility
+
 The durable state format is version 7. Older formats, including version 6, are
 rejected without modification or migration because older binaries cannot
 interpret the separate shared-service/allocation recovery journals. Use the matching older
@@ -170,22 +172,19 @@ secret-access endpoints and age/size retention.
 
 ## Shared API
 
-The existing named `RunRequest`/`InstanceResponse` contracts serve `/v1/run`,
-`/v1/restart` and `/v1/reset`; restart/reset require `instance_id`. Named
-`InstanceRequest`/`InstanceResponse` serve `/v1/runtime/stop` and `/v1/destroy`.
-The CLI/client and server share these Go types. Logs use the existing typed
-paged/NDJSON contracts. Resource capabilities and credential values stay private.
-
-See [testing/tooling](testing.md) for the provider integration command and resource
-requirements. A passing local suite is milestone evidence, not all-V1 acceptance.
-
+The CLI/client and daemon use the same named Go contracts; see the canonical
+[endpoint/type table](daemon.md#local-api-and-doctor), including command-specific destroy
+requests and strict API-version/ID rules. Logs retain their typed paged/NDJSON
+contracts; capabilities and credentials stay private. [Testing](testing.md)
+defines provider commands; local milestone evidence is separate from V1 acceptance.
 
 ## Project-scoped shared services (Gate 1)
 
-This #43 slice implements a local MariaDB 11.4 path, with Gate 2 lifecycle work
-in progress after Gate 1 acceptance. It does not
-claim the full concurrency/crash/lifecycle acceptance matrix, PostgreSQL, custom
-command execution, final examples or platform CI. See [implementation status](implementation-plan.md#shared-services-issue-43).
+[PR 45](https://github.com/octacian/backlot/pull/45) implements local MariaDB 11.4
+allocation, lifecycle, concurrency and recovery, including bounded force cleanup.
+[Implementation status](implementation-plan.md#shared-services-issue-43) separates
+prior technical verification from pending owner/first-slice closeout and later
+PostgreSQL/custom execution; no full-feature or platform readiness is implied.
 
 Declare `shared_services` and select `kind: allocation` resources as documented in
 [manifest references](manifest.md#shared-service-declarations). Generated root
@@ -224,19 +223,13 @@ Server declarations/endpoint must match retained configuration exactly; use dist
 names for incompatible servers. No automatic upgrades, relinking or external
 adoption occur. Separate daemon state roots do not pool resources.
 
-Allocation intent, names, ownership and passwords are durable before SQL effects.
-Atomic database comments contain an ownership fingerprint, never the raw private
-authority. User authentication and bounded grants are checked before reclaiming
-partial effects. Missing acknowledged allocations are not silently recreated.
-Release intent is durable before SQL deletion; ordinary start cannot reopen an
-interrupted release as provisioning. Shared destruction intent survives individual
-stop/removal observations and blocks start until explicit destruction completes.
-Accepted shared-control requests are canceled and joined during daemon shutdown.
-Uncertain identities/effects and unavailable SQL retain cleanup obligations and
-return failure; restore the provider and retry explicit reset/destroy. Never delete
-SQL objects or Docker resources by name. Shared storage/servers survive individual
-allocation release. Shutdown/recovery joins consumers before stopping servers and
-preserves data/credentials; execution requires explicit restart.
+The [accepted decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md)
+defines durable intent, SQL ownership checks and recovery. Missing acknowledged
+allocations are never silently recreated; interrupted release cannot reopen as
+provisioning. Uncertain effects/unavailable SQL retain obligations: restore access
+and retry explicit reset/destroy. Never delete resources by name. Allocation release
+preserves shared storage; shutdown/recovery joins consumers before stopping servers,
+preserves data/credentials and requires explicit execution restart.
 
 ### Explicit operator force cleanup
 
@@ -307,19 +300,10 @@ capabilities, SQL statements or raw private state in recovery reports.
 See the [force-cleanup decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md)
 for the bounded exception and retained guarantees.
 
-The initial private `backlot.manager/v1` protocol reads one JSON stdin request and
-writes one JSON stdout result, bounded to 64 KiB per document. Requests carry the
-operation, durable allocation ID/ownership and generated allocation values. Results
-bind the same ID and report ownership (`owned`, `absent`, `uncertain`) separately
-from effect (`ready`, `partial`, `released`); success exit alone proves nothing.
-Backlot owns cancellation/deadlines/serialization and persists partial/unknown
-obligations. Trusted project code must cooperate with inspect/reconcile/release;
-unavailable/unverifiable code preserves obligations. Gate 1 validates message
-contracts using the bundled MariaDB path; executable custom managers and the
-non-Go non-database fixture arrive at Gate 3 and may refine these initial fields.
-
-The private manager request's optional `force` boolean is valid only for `release`.
-It is passed in a copy for an explicit operation and excluded from durable requests.
-Managers must honor this bounded authorization or fail explicitly as unsupported;
-exit0 alone cannot establish absence. Gate 3 custom execution must demonstrate this
-contract; there is no capability registry or silent fallback to ordinary release.
+The provisional private [`backlot.manager/v1` types](../api/v1/manager.go) and
+[validated-result contract](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md#decision)
+separate ownership from effect; documents are bounded to 64 KiB. The bundled
+MariaDB path validates these messages; custom command execution and the non-Go
+non-database fixture remain later work. Release-only `force` is passed transiently,
+never persisted: managers must honor it or explicitly fail as unsupported, never
+silently fall back. Exit success alone cannot prove absence.

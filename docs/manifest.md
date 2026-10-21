@@ -78,8 +78,9 @@ Go's `exec.LookPath`, without executing the tool. An explicit command such as
 Do not place credentials in command arguments, tool paths or identifiers; use
 sensitive environment mappings instead.
 
-`inputs` maps names to `{secret: true}` or `{}`. Referenced inputs must have
-nonempty values in machine `inputs`. Secret inputs remain redacted in results.
+`inputs` maps names to `{secret: true}` or `{}`, optionally with descriptions
+and secret generation hints. Referenced inputs must have nonempty effective
+values in registered private project `inputs`. Secret inputs remain redacted in results.
 An unreferenced input does not block another scene. Images can be nonempty
 literal values or declared input references; there is no image-building engine.
 Build jobs may invoke the project's existing tools.
@@ -175,7 +176,7 @@ service port, `port`. Supported shapes are:
 
 | Kind | Name | Field | Planning behavior |
 | --- | --- | --- | --- |
-| `input` | Declared input | Omit | Resolve supplied machine value |
+| `input` | Declared input | Omit | Resolve registered private project value |
 | `instance` | Omit | `project`, `checkout`, `scene` | Resolve known provenance |
 | `instance` | Omit | `id` | Symbolic; no instance allocated |
 | `resource` | Attached/selected resource | `port`, `path`, `name`, `value`, `url` according to kind | Symbolic; secret values redacted |
@@ -230,7 +231,6 @@ Components may also declare named `artifacts` and `fixtures`; see the
 Machine configuration uses the same version and may declare:
 
 - `tools`: declared tool executable overrides.
-- `inputs`: declared input values, including machine-held credentials.
 - `docker`: `endpoint` as a local Unix socket URL (canonical `unix:///...`;
   `unix:/...` is also accepted), optional container-to-native `host_address` and
   numeric mapped-port `publish_address` (default `127.0.0.1`).
@@ -255,4 +255,110 @@ project. The [fullstack fixture](../examples/fullstack/backlot.yaml) shows share
 MariaDB/native/frontend definitions across development, production preview,
 backend tests and UI tests. They exercise planning only: application commands
 are illustrative adoption inputs, and providers are not provisioned. Their
-machine example contains illustrative endpoints and an image name, no credentials.
+machine example contains illustrative endpoints; its private example supplies the image name.
+
+## Registered private project configuration
+
+Run `backlot project setup --project /path/to/project` once in a terminal. Setup
+walks declared inputs in name order, shows their descriptions, hides custom
+secret entry, and requires explicit acceptance before generating a secret.
+Declare `description: Local API credential` on an input to explain it;
+`generate: random-hex-32` is permitted only with `secret: true` and generates 32
+cryptographically random bytes encoded as 64 lowercase hex characters. The hint
+never generates during ordinary planning or execution. Every declared input must
+have an effective nonempty value to complete setup, including inputs used only
+by other scenes. Setup validates tool syntax without executing tools or checking
+unselected executable availability.
+
+For automation, supply `--from /absolute/private.yaml` or `--from -` for stdin:
+
+```yaml
+version: backlot/v1
+inputs:
+  api_token: replace-through-private-input
+tools: {} # omit tools when no override is needed
+```
+
+The document permits only `version`, `inputs`, and `tools`. Do not copy real
+credentials into committed examples. File/stdin input is bounded and strictly
+decoded as YAML/JSON; a file's extension selects its format. `--generate NAME`
+explicitly accepts generation in automation. Values are never accepted as raw
+command-line arguments. `--json` emits one named `ProjectSetupResponse` or
+`ErrorResponse`; interactive prompts go to the terminal on stderr.
+
+Completed setup is inspection: repeating the command reports the association,
+exact private file path, configured/missing input names and tool paths without
+writing, rotating, or prompting. New declarations appear missing. Use `--edit`
+for a terminal walkthrough, `--from` for a structured patch, or explicit
+`--generate`, `--remove-input NAME`, and `--remove-tool NAME` edits. Unspecified
+private entries are preserved. Removal must name an existing private entry and
+cannot accompany a replacement/generation for the same name. Input removal has no
+fallback: if the input is still declared, removal fails setup completeness. Tool
+removal can expose a machine override or manifest tool default. After a rename,
+remove the retired name and supply its replacement in the same update.
+Ordinary reads remain strict, while explicit edits defer only old private key
+membership until the complete candidate is validated. Invalid, incomplete,
+cancelled, conflicting or failed edits never partially publish.
+
+Ordinary setup never prints input values. Only local
+`project setup --dangerously-reveal-secrets` inspection includes configured
+secret values; it rejects mutation options and never affects daemon outputs.
+Keep its output private. Paths/descriptions/tool paths must not contain secrets.
+
+Setup stores a registry at `backlot/projects.json` under `os.UserConfigDir()` and
+immutable private generations under `backlot/projects/`, outside the checkout.
+Managed directories/files must be user-owned and private (0700/0600); unsafe
+existing boundaries are rejected rather than repaired. Import files are copied,
+not ongoing dependencies. Git common-directory path plus filesystem identity
+and repository-relative manifest path bind the association. Linked worktrees
+reuse it; monorepo manifest paths isolate it. Names/remotes and independent
+clones do not enroll. Moved/replaced repository identities require explicit
+`--reassociate` and new values; old credentials are not implicitly imported.
+Non-Git projects bind canonical directory identity and manifest filename.
+
+Ordinary plan/prepare/run/restart/reset and scene diagnostics automatically read
+the registered layer. Validate manifest, machine, and private sources independently,
+then compose tools by key with private overrides winning. Private project
+configuration is the sole input-value source; machine `inputs` rejects even empty,
+null or unused. Remove old fields and supply project values explicitly; no shim,
+import or migration occurs. Invalid overridden/unused
+entries still fail. Registered missing/unsafe/invalid files fail explicitly,
+including for scenes that use no inputs. Unregistered projects can select work
+that needs no inputs; selected missing values direct you to project setup. Ordinary operations create no registry, locks, or secrets.
+Relative private tools resolve from the project directory; bare PATH names and
+absolute paths remain supported. Only selected scene inputs/tools are required.
+Provider settings stay in the shared machine document; there is no per-command
+private-file override, recursive include, or deep merge.
+
+`config_digest` retains the machine-file byte digest. The additive
+`effective_config_digest` records composed validated inputs/tools/providers;
+source-only formatting or overridden tool changes do not become effective drift.
+Running attempts retain private launch values and provenance. Repeated run reports
+drift; explicit restart/reset resolves current layers subject to existing retained
+resource safety checks. Stop, destroy and recovery use recorded snapshots.
+Diagnostics distinguish launch/current private sources and effective configuration;
+export records the attempt's effective digest without private contents.
+
+Setup serializes publication under an advisory registry lock and fails if captured
+sources changed while answers were collected. Do not manually edit managed files
+while setup runs. Registry replacement is the commit point: a later sync failure
+reports `setup_committed_uncertain`; inspect before retrying. Old immutable
+private generations are retained for readers and may contain old secrets. There
+is no automatic collector. Operators must deliberately remove obsolete generations
+only after readers finish; rotation does not erase daemon snapshots, backups or
+memory. Keep private storage on a local filesystem supporting atomic rename/locks.
+
+Environment sets and literal seed files remain useful when external project
+association and executable overrides are unnecessary. They keep their existing
+ordering and do not change application files. See the
+[private project configuration decision](adr/20261021T001732173Z-register-private-project-configuration.md).
+
+
+`BACKLOT_PROJECT_CONFIG_DIR`, when present, selects the direct private registry
+folder containing `projects.json` and `projects/`. Use an absolute external path;
+empty, relative or unsafe selections fail without default fallback. When absent,
+selection remains `os.UserConfigDir()/backlot`. Existing explicitly selected roots must be private
+owned directories even before enrollment; default machine-only folders without
+a registry retain their existing behavior. This does not select machine configuration
+or change HOME/XDG or application pass-through. `version --json` reports
+`state_version` so adapters can check support without resolving configuration.

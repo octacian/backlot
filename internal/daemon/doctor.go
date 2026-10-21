@@ -101,6 +101,7 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 		} else {
 			r.Paths = append(r.Paths, v1.DoctorPath{Name: "current_machine_config", State: "unrecorded"})
 		}
+		checkCurrentComposition(&r, snap)
 		validateRecordedTools(&r, snap)
 	} else {
 		r.Scope = "scene"
@@ -123,6 +124,7 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 			return r, nil
 		}
 		addConfigPath(&r, "effective_machine_config", snap)
+		addPrivatePath(&r, "effective_private_config", snap)
 		diagnosticAdd(&r, "runtime_inputs", "daemon/host", v1.DoctorOK, "selected manifest, tools, seeds and required inputs validated without executing application work")
 	}
 	// Bound all network observations; each dial also has its own finite timeout.
@@ -195,6 +197,7 @@ func addConfigPath(r *v1.DoctorResponse, name string, snap plan.Snapshot) {
 func addLaunchPaths(r *v1.DoctorResponse, snap plan.Snapshot) {
 	r.Paths = append(r.Paths, v1.DoctorPath{Name: "launch_manifest", Path: snap.Plan.ManifestPath, State: "present", Digest: snap.Plan.ManifestDigest})
 	addConfigPath(r, "launch_machine_config", snap)
+	addPrivatePath(r, "launch_private_config", snap)
 	diagnosticAdd(r, "launch_provenance", "daemon", v1.DoctorOK, "launch paths/digests describe the preserved snapshot, not current file contents; absent means no config was loaded, unrecorded means older provenance is unknown")
 }
 func checkCurrentFile(r *v1.DoctorResponse, name, path, digest string) {
@@ -417,4 +420,60 @@ func probeExecutable(c v1.PlannedComponent) string {
 		return c.Readiness.Executable
 	}
 	return ""
+}
+
+func addPrivatePath(r *v1.DoctorResponse, name string, snap plan.Snapshot) {
+	state, path, digest, association := "unrecorded", "", "", ""
+	if p := snap.PrivateProvenance; p != nil {
+		state = "absent"
+		association = p.Association
+		path = p.Path
+		digest = p.Digest
+		if p.Present {
+			state = "present"
+		}
+	}
+	r.Paths = append(r.Paths, v1.DoctorPath{Name: name, Path: path, State: state, Digest: digest, Association: association})
+}
+
+func checkCurrentComposition(r *v1.DoctorResponse, launch plan.Snapshot) {
+	launchState := "present"
+	if launch.Plan.EffectiveConfigDigest == "" {
+		launchState = "unrecorded"
+	}
+	r.Paths = append(r.Paths, v1.DoctorPath{Name: "launch_effective_configuration", State: launchState, Digest: launch.Plan.EffectiveConfigDigest})
+	source, err := plan.Locate(launch.Plan.ManifestPath)
+	if err != nil {
+		diagnosticAdd(r, "current_configuration", "daemon/host", v1.DoctorFailed, "current project unavailable; launch snapshot remains authoritative for cleanup")
+		r.Paths = append(r.Paths, v1.DoctorPath{Name: "current_private_config", State: "unavailable"}, v1.DoctorPath{Name: "current_effective_configuration", State: "uncomputable"})
+		return
+	}
+	config := ""
+	if launch.ConfigProvenance != nil {
+		config = launch.ConfigProvenance.Path
+	}
+	// A recorded absent default must retain ordinary optional-default selection.
+	if launch.ConfigProvenance != nil && !launch.ConfigProvenance.Present {
+		config = ""
+	}
+	current, err := plan.Prepare(source, v1.PlanRequest{Scene: launch.Plan.Scene, ConfigPath: config})
+	addPrivatePath(r, "current_private_config", current)
+	if current.PrivateSourceState != "" {
+		r.Paths[len(r.Paths)-1].State = current.PrivateSourceState
+	}
+
+	if err != nil {
+		diagnosticAdd(r, "current_configuration", "daemon/host", v1.DoctorFailed, "current configuration cannot be computed; run project setup and plan; launch snapshot remains unchanged")
+		r.Paths = append(r.Paths, v1.DoctorPath{Name: "current_effective_configuration", State: "uncomputable"})
+		return
+	}
+	if launch.PrivateProvenance != nil && current.PrivateProvenance != nil && *launch.PrivateProvenance != *current.PrivateProvenance {
+		r.Paths[len(r.Paths)-1].State = "changed"
+	}
+	state := "present"
+	if launch.Plan.EffectiveConfigDigest != "" && plan.ConfigurationDrift(launch.Plan, current.Plan) {
+		state = "changed"
+	}
+	r.Paths = append(r.Paths, v1.DoctorPath{Name: "current_effective_configuration", State: state, Digest: current.Plan.EffectiveConfigDigest})
+	diagnosticAdd(r, "current_configuration", "daemon/host", v1.DoctorOK, "current configuration observed independently; launch snapshot and cleanup remain unchanged")
 }

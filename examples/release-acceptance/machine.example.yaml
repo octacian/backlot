@@ -1,8 +1,5 @@
 # Copy outside the checkout; use your approved existing DNS/TLS/gateway setup.
 version: backlot/v1
-inputs:
-  image: backlot-release-fixture:local
-  browser-image: backlot-release-browser:local
 docker:
   endpoint: unix:///absolute/path/to/docker.sock
   host_address: host.docker.internal

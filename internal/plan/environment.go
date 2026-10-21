@@ -13,7 +13,7 @@ import (
 
 var keyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-func resolveEnvironmentValues(m v1.Manifest, config v1.MachineConfig, c v1.Component, project string, p v1.PlanResponse) (map[string]resolvedValue, error) {
+func resolveEnvironmentValues(m v1.Manifest, config resolvedConfig, c v1.Component, project string, p v1.PlanResponse) (map[string]resolvedValue, error) {
 	values := map[string]resolvedValue{}
 	// The launch baseline is deliberately small; no ambient credentials are copied.
 	baseline := []string{"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "SystemRoot"}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -22,6 +23,97 @@ func TestSceneNativeCLI(t *testing.T) {
 		t.Fatal(err, string(out))
 	}
 
+	t.Run("private-inputs-and-recorded-cleanup", func(t *testing.T) {
+		t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", filepath.Join(shortTemp(t), "registry"))
+		h := newNativeHarness(t, binary)
+		h.manifest.Inputs = map[string]v1.Input{"token": {Secret: true}}
+		server := h.manifest.Components["server"]
+		server.Environment.Assign["FIXTURE_TOKEN"] = v1.Value{Ref: &v1.Reference{Kind: "input", Name: "token"}}
+		h.manifest.Components["server"] = server
+		h.write()
+		config := filepath.Join(h.project, "machine.json")
+		start := func() ([]byte, error) {
+			command := exec.Command(binary, "scene", "start", "--state-dir", h.dir, "--config", config, "--stop-grace", "50ms", "--json", "dev")
+			command.Dir = h.project
+			return command.CombinedOutput()
+		}
+		// Neither an old machine value nor missing private input may launch work.
+		if err := os.WriteFile(config, []byte(`{"version":"backlot/v1","inputs":{}}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := start(); err == nil {
+			t.Fatal("named start accepted machine inputs")
+		}
+		if err := os.WriteFile(config, []byte(`{"version":"backlot/v1"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := start(); err == nil {
+			t.Fatal("named start accepted missing private input")
+		}
+		listed, err := h.cli.List(context.Background(), v1.ListRequest{APIVersion: v1.Version})
+		if err != nil || len(listed.Instances) != 0 {
+			t.Fatal("rejected named start accepted work", err)
+		}
+		// Use the real noninteractive CLI transport; the value never enters argv.
+		payload, err := json.Marshal(v1.PrivateConfig{Version: v1.ManifestVersion, Inputs: map[string]string{"token": h.controlToken}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		setup := exec.Command(binary, "project", "setup", "--project", h.project, "--config", config, "--from", "-", "--json")
+		setup.Stdin = bytes.NewReader(payload)
+		out, err := setup.CombinedOutput()
+		if err != nil {
+			t.Fatal("private setup failed", err)
+		}
+		var configured v1.ProjectSetupResponse
+		if err := json.Unmarshal(out, &configured); err != nil {
+			t.Fatal(err)
+		}
+		out, err = start()
+		if err != nil {
+			t.Fatal("private named start failed", err)
+		}
+		if strings.Contains(string(out), h.controlToken) {
+			t.Fatal("public named response leaked private input")
+		}
+		var started v1.SceneResponse
+		if err := json.Unmarshal(out, &started); err != nil || started.Result == nil || started.Result.Instance.Status != v1.RuntimeReady {
+			t.Fatal("named start did not become ready", err)
+		}
+		id := started.Result.Instance.ID
+		// Authenticated fixture control requires the supplied input at runtime.
+		h.fixtureAction("root-crash")
+		h.state(id, v1.Failed)
+		h.absent()
+		restart := h.request("dev")
+		restart.InstanceID, restart.Plan.ConfigPath = id, config
+		if _, err := h.cli.Restart(context.Background(), restart); err != nil {
+			t.Fatal("private explicit recovery failed", err)
+		}
+		h.state(id, v1.RuntimeReady)
+		if err := os.WriteFile(configured.PrivatePath, []byte("broken"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(h.project, "backlot.json"), []byte("broken"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		for _, action := range []string{"status", "stop"} {
+			command := exec.Command(binary, "scene", action, "--state-dir", h.dir, "--json", "dev")
+			command.Dir = h.project
+			out, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatal("recorded named operation required current files", action, err)
+			}
+			var response v1.SceneResponse
+			if err := json.Unmarshal(out, &response); err != nil || response.Result == nil || response.Result.Instance.ID != id {
+				t.Fatal("recorded named identity changed", err)
+			}
+			if strings.Contains(string(out), h.controlToken) {
+				t.Fatal("recorded response leaked private input")
+			}
+		}
+		h.absent()
+	})
 	t.Run("location-collision-before-restart", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
 		git(t, filepath.Dir(h.project), "init", "-q")

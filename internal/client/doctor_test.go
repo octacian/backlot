@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -19,6 +20,9 @@ func TestDoctorNamedContractAndValidation(t *testing.T) {
 	response := v1.DoctorResponse{APIVersion: v1.Version, Healthy: false, Scope: "instance", InstanceID: request.InstanceID, Paths: []v1.DoctorPath{{Name: "launch_config", State: "unrecorded"}}, Checks: []v1.DoctorCheck{{Name: "tls", Status: v1.DoctorFailed, Context: "daemon/host system trust", Message: "configure trust explicitly"}}}
 	calls := 0
 	c.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/v1/status" {
+			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}, "X-Backlot-Api-Version": {v1.Version}}, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"api_version":"v1","state_version":%d,"status":"running","pid":1,"lease_duration":"30s"}`, v1.StateVersion)))}, nil
+		}
 		calls++
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/doctor" {
 			t.Fatal("wrong doctor operation")

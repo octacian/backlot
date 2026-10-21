@@ -1,10 +1,15 @@
 package plan
 
-import v1 "github.com/octacian/backlot/api/v1"
+import (
+	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/projectconfig"
+)
 
 // Snapshot retains validated declarations and resolved sensitive values privately.
 // Allocation references stay symbolic; this is preparation, never execution.
 type Snapshot struct {
+	PrivateSourceState string                    `json:"-"` // Safe partial current-source status; never persisted as launch fact.
+	PrivateProvenance  *projectconfig.Provenance `json:"private_provenance,omitempty"`
 	// ConfigProvenance records the effective launch file, including an absent default.
 	ConfigProvenance *ConfigProvenance          `json:"config_provenance,omitempty"`
 	Caddy            *v1.CaddyConfig            `json:"caddy,omitempty"`

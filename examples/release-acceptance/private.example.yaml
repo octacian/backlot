@@ -1,0 +1,5 @@
+# Keep outside checkout; import explicitly for each independent fixture repository.
+version: backlot/v1
+inputs:
+  image: backlot-release-fixture:local
+  browser-image: backlot-release-browser:local

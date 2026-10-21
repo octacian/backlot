@@ -43,13 +43,20 @@ type service struct {
 	beforeSceneMutation func(string)
 }
 
+func validatePlanRequest(request v1.PlanRequest) error {
+	if request.Scene == "" || len(request.Scene) > 63 || !filepath.IsAbs(request.ProjectPath) || (request.ConfigPath != "" && !filepath.IsAbs(request.ConfigPath)) {
+		return problem("invalid_request", "scene and absolute project/config paths are required")
+	}
+	return nil
+}
+
 func (s *service) prepare(ctx context.Context, request v1.PrepareRequest) (v1.InstanceResponse, error) {
 	return s.prepareSelected(ctx, request, false)
 }
 
 func (s *service) prepareSelected(ctx context.Context, request v1.PrepareRequest, persistentOnly bool) (v1.InstanceResponse, error) {
-	if request.Plan.Scene == "" || len(request.Plan.Scene) > 63 || !filepath.IsAbs(request.Plan.ProjectPath) || (request.Plan.ConfigPath != "" && !filepath.IsAbs(request.Plan.ConfigPath)) {
-		return v1.InstanceResponse{}, problem("invalid_request", "scene and absolute project/config paths are required")
+	if err := validatePlanRequest(request.Plan); err != nil {
+		return v1.InstanceResponse{}, err
 	}
 	source, err := plan.Locate(request.Plan.ProjectPath)
 	if err != nil {
@@ -67,10 +74,15 @@ func (s *service) prepareSelected(ctx context.Context, request v1.PrepareRequest
 	if err != nil {
 		return v1.InstanceResponse{}, err
 	}
+	return s.prepareCaptured(ctx, snapshot, original, request.Plan.Scene, persistentOnly)
+}
+
+// prepareCaptured accepts the exact generation resolved by preparation or launch.
+func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, original capturedSource, scene string, persistentOnly bool) (v1.InstanceResponse, error) {
 	if persistentOnly && snapshot.Plan.Lifetime != v1.Persistent {
 		return v1.InstanceResponse{}, problem("invalid_lifetime", "scene start requires a persistent scene; use run for disposable work")
 	}
-	if persistentOnly && (snapshot.Plan.ManifestPath != source.ManifestPath || snapshot.Plan.Checkout != original.checkout.Path || snapshot.Plan.Scene != request.Plan.Scene) {
+	if persistentOnly && (snapshot.Plan.ManifestPath != original.source.ManifestPath || snapshot.Plan.Checkout != original.checkout.Path || snapshot.Plan.Scene != scene) {
 		return v1.InstanceResponse{}, problem("invalid_request", "resolved scene location disagrees with captured source")
 	}
 	public, err := json.Marshal(snapshot.Plan)

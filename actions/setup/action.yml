@@ -7,6 +7,15 @@ inputs:
   node-binary:
     description: Application Node executable (absolute override; defaults to node on PATH)
     required: false
+  project:
+    description: Application project directory for explicit project setup
+    default: .
+  project-inputs:
+    description: Strict JSON object of nonempty string input values; private CLI stdin transport
+    required: false
+  project-generate-inputs:
+    description: Explicit JSON array of eligible secret input names to generate
+    required: false
 outputs:
   binary:
     description: Installed Backlot executable

@@ -153,7 +153,7 @@ func TestWaiverAfterWritesRollsBack(t *testing.T) {
 	}
 }
 
-func TestStateFiveRejectsMalformedLifecycleUnchanged(t *testing.T) {
+func TestStateSixRejectsMalformedLifecycleUnchanged(t *testing.T) {
 	cases := []struct{ name, bucket, key, value string }{
 		{"managed syntax", "meta", "managed_gateway", "{"},
 		{"managed shape", "meta", "managed_gateway", "[]"},
@@ -166,20 +166,24 @@ func TestStateFiveRejectsMalformedLifecycleUnchanged(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			s, _, _ := exportFixture(t)
+			s, instance, _ := exportFixture(t)
 			dir := s.store.directory
 			sentinel := filepath.Join(dir, "retained-ca-config")
 			if err := os.WriteFile(sentinel, []byte("retained private state"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			if err := s.store.db.Update(func(tx *bolt.Tx) error {
-				if err := tx.Bucket([]byte("meta")).Put([]byte("version"), []byte("5")); err != nil {
+				if err := tx.Bucket([]byte("meta")).Put([]byte("version"), []byte("6")); err != nil {
 					return err
 				}
 				if err := tx.Bucket([]byte("meta")).Put([]byte("unknown_metadata"), []byte("opaque preserved")); err != nil {
 					return err
 				}
-				return tx.Bucket([]byte(c.bucket)).Put([]byte(c.key), []byte(c.value))
+				key := c.key
+				if c.bucket == "runtime" || c.bucket == "resources" {
+					key = instance.ID // Exercise the typed decoder, not orphan-parent rejection.
+				}
+				return tx.Bucket([]byte(c.bucket)).Put([]byte(key), []byte(c.value))
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -193,11 +197,11 @@ func TestStateFiveRejectsMalformedLifecycleUnchanged(t *testing.T) {
 			opened, err := openStore(dir)
 			if err == nil {
 				_ = opened.db.Close()
-				t.Fatal("corrupt v5 advanced format")
+				t.Fatal("corrupt v6 advanced format")
 			}
 			after, readErr := os.ReadFile(filepath.Join(dir, "state.db"))
 			if readErr != nil || !bytes.Equal(before, after) {
-				t.Fatal("rejected v5 bytes changed", readErr)
+				t.Fatal("rejected v6 bytes changed", readErr)
 			}
 			retained, err := os.ReadFile(sentinel)
 			if err != nil || string(retained) != "retained private state" {

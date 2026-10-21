@@ -123,6 +123,18 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	warning := v1.NativeOwnershipWarning{Message: nativeWaiverWarning, Attempt: original.Attempt + `<script>attempt</script>`, RecordedAt: retained.NativeAbandonments[0].RecordedAt + `<script>time</script>`}
+	// Combined configuration/recovery reports must retain both independent facts.
+	effectiveDigest := strings.Repeat("a", 64)
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		r, err := load(tx, target)
+		if err != nil {
+			return err
+		}
+		r.Instance.Plan.EffectiveConfigDigest = effectiveDigest
+		return put(tx, "instances", target, r)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	request := v1.ExportRequest{APIVersion: v1.Version, InstanceID: target, Output: filepath.Join(t.TempDir(), "report")}
 	report, err := s.export(context.Background(), request)
 	if err != nil || !report.Complete || len(report.Result.NativeOwnershipWarnings) != 1 || report.Result.NativeOwnershipWarnings[0] != warning {
@@ -143,6 +155,9 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	}
 	if got := readExportReport(t, request.Output); len(got.Result.NativeOwnershipWarnings) != 1 || got.Result.NativeOwnershipWarnings[0] != warning {
 		t.Fatal("agent warning text changed", got.Result.NativeOwnershipWarnings)
+	}
+	if got := readExportReport(t, request.Output); got.Source.EffectiveConfigDigest != effectiveDigest {
+		t.Fatal("export lost effective configuration provenance", got.Source)
 	}
 	if bytes.Contains(page, []byte("<script")) {
 		t.Fatal("ownership warning inserted unescaped markup")
@@ -227,45 +242,6 @@ func TestManagedWaiverFencesAndIdempotency(t *testing.T) {
 	scene, _ := s.store.inspect(instance.ID)
 	if len(scene.NativeOwnershipWarnings) != 0 {
 		t.Fatal("gateway warning leaked into scene")
-	}
-}
-
-func TestStateFiveAdditiveTransition(t *testing.T) {
-	s, instance, _ := exportFixture(t)
-	path := s.store.directory
-	if err := s.store.db.Update(func(tx *bolt.Tx) error {
-		if err := tx.Bucket([]byte("meta")).Put([]byte("version"), []byte("5")); err != nil {
-			return err
-		}
-		return tx.Bucket([]byte("meta")).Put([]byte("preserved"), []byte("CA/config retained"))
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.store.db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	upgraded, err := openStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.store = upgraded
-	t.Cleanup(func() {
-		if err := upgraded.db.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	after, err := upgraded.inspect(instance.ID)
-	if err != nil || after.ID != instance.ID {
-		t.Fatal(err)
-	}
-	if err := upgraded.db.View(func(tx *bolt.Tx) error {
-		meta := tx.Bucket([]byte("meta"))
-		if string(meta.Get([]byte("version"))) != "6" || !bytes.Equal(meta.Get([]byte("preserved")), []byte("CA/config retained")) {
-			t.Fatal("transition changed private records or failed older-reader fence")
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
 	}
 }
 

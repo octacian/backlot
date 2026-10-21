@@ -305,10 +305,13 @@ then run:
 
 ```sh
 BACKLOT_ACCEPTANCE_CONFIG=/absolute/private/machine.yaml \
+BACKLOT_ACCEPTANCE_PROJECT_INPUTS=/absolute/private/inputs.yaml \
   go test -race ./internal/acceptance -run '^TestReleaseWorkflows$' -count=1 -v
 ```
 
-The machine file must select explicitly built fixture/browser image tags. This
+The separate private inputs document must select explicitly built fixture/browser
+image tags; the machine file supplies providers only. Each temporary fixture
+repository is explicitly enrolled under its owned private root. This
 suite mutates only its owned instance routes/resources, never gateway bootstrap,
 DNS or trust. An unset variable skips; a skip is not acceptance. This supplements
 the complete Docker/gateway/HTTPS suites above, which remain separate required

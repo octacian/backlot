@@ -1,11 +1,11 @@
 ---
 title: 'Recover native ownership with boot provenance and explicit waivers'
 date: '2026-10-20'
-status: accepted
+status: superseded
 summary: 'Use boot-scoped native launch records and explicit force-stop waivers while keeping ownership, collection and original exits independent.'
 tags: [native, gateway, recovery, ownership]
 supersedes: [20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md, 20261016T201500000Z-support-explicit-linux-managed-https-reachability.md]
-superseded_by: []
+superseded_by: [20261021T001732173Z-register-private-project-configuration.md]
 ---
 
 # Recover native ownership with boot provenance and explicit waivers

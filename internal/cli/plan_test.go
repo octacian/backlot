@@ -18,8 +18,8 @@ import (
 
 func TestPlanCLIForwardingAndJSONErrors(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("HOME", root)
-	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	for _, file := range []string{"backlot.yaml", "defaults.env"} {
 		data, err := os.ReadFile("../../examples/adoption/" + file)
 		if err != nil {
@@ -87,8 +87,8 @@ func TestPlanArguments(t *testing.T) {
 
 func TestPlanUnsafeKeyAndConfigVersionErrors(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("HOME", root)
-	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("APPDATA", root)
 	data, err := os.ReadFile("../../examples/adoption/backlot.yaml")
 	if err != nil {

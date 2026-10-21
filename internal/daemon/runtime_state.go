@@ -286,6 +286,12 @@ func (s *store) cleanupFailures() error {
 // acceptExecution rechecks eligibility and lease in the same transaction as launch
 // acceptance. Cached preparation responses never authorize resurrection.
 func (s *store) acceptExecution(id string, journal runtimeRecord, result *v1.ExecutionResult, restart bool) (v1.Instance, error) {
+	return s.acceptExecutionSnapshot(id, journal, result, restart, nil)
+}
+
+// acceptExecutionSnapshot adopts current configuration for a predecessor attempt
+// in the same transaction as execution acceptance. Rejection retains launch facts.
+func (s *store) acceptExecutionSnapshot(id string, journal runtimeRecord, result *v1.ExecutionResult, restart bool, snapshot *plan.Snapshot) (v1.Instance, error) {
 	var instance v1.Instance
 	err := s.db.Update(func(tx *bolt.Tx) error {
 		r, err := load(tx, id)
@@ -304,6 +310,16 @@ func (s *store) acceptExecution(id string, journal runtimeRecord, result *v1.Exe
 				return problem("lease_expired", "disposable lease is not valid for execution acceptance")
 			}
 		}
+		if snapshot != nil {
+			r.Instance.Plan = snapshot.Plan
+			if err := put(tx, "snapshots", id, snapshot); err != nil {
+				return err
+			}
+			if err := put(tx, "secrets", id, snapshot.Secrets); err != nil {
+				return err
+			}
+		}
+
 		r.Instance.Status = v1.Starting
 		r.Instance.Operation.Status = v1.Starting
 		r.Instance.Execution = result

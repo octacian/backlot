@@ -292,3 +292,17 @@ func (CaddyConfig) JSONSchemaExtend(s *jsonschema.Schema) {
 	}}
 	s.AllOf = []*jsonschema.Schema{managed}
 }
+
+// JSONSchemaExtend constrains private document version and named scalar overrides.
+func (PrivateConfig) JSONSchemaExtend(s *jsonschema.Schema) {
+	schemaProperty(s, "version").Const = ManifestVersion
+	schemaNamedMaps(s)
+	schemaProperty(s, "tools").AdditionalProperties = &jsonschema.Schema{Type: "string", MinLength: schemaOne()}
+}
+
+// JSONSchemaExtend restricts generation hints to eligible secret declarations.
+func (Input) JSONSchemaExtend(s *jsonschema.Schema) {
+	schemaProperty(s, "generate").Enum = schemaEnum("", "random-hex-32").Enum
+	s.AllOf = append(s.AllOf, schemaWhen("generate", "random-hex-32", schemaProperties(map[string]*jsonschema.Schema{"secret": {Const: true}})))
+	s.AllOf[len(s.AllOf)-1].Then.Required = []string{"secret"}
+}

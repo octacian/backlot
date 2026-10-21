@@ -50,14 +50,32 @@ use a declared native command probe when connectivity is insufficient.
 
 ## State compatibility
 
-The durable state format is version 6. A complete supported v5 layout transitions
-additively without changing records, keys or retained files; older binaries then
-reject v6 before interpreting explicit native waivers. Other formats, including v4,
-are rejected unchanged, including malformed v5 layouts. Use the matching older
-binary to clean up owned instances and stop its gateway/daemon before selecting
-a fresh `--state-dir` with the new binary. Preserve old state until cleanup is
-verified; a new directory does not clean up resources from the old one. Backlot
-never automatically deletes incompatible state.
+The durable state format is version 8. The previous merged main format 6 upgrades
+in place, one way, after typed record/addressing validation in the same transaction
+as the version fence. Only that fence changes; records, retained data, ownership
+history, saved gateway configuration and CA identity remain intact. Versions 5,
+7 and other unsupported formats, and invalid predecessor records, are rejected
+unchanged. Version 8 fences tested intermediate binaries and preserves the combined
+private configuration/native recovery contract; there is no migration chain.
+
+Use the new CLI's `daemon stop --state-dir PATH` for normal shutdown of the
+supported v6 daemon, then `daemon start --state-dir PATH` after shutdown finishes.
+Only the exact v6 `stopping` acknowledgment is accepted at this shutdown boundary;
+Status and configuration-consuming operations still require v8. The acknowledgment
+does not prove process exit or lock release; normal startup locking remains in
+force, without automatic retry/start. Cleanup and transport failures remain errors.
+No wipe, data destruction or fresh directory is required for the supported upgrade;
+this does not promise live process handover.
+Run explicit project setup for current input values and remove `inputs` from current
+machine configuration. Historical snapshots remain readable for recorded cleanup,
+without becoming a current input source or acquiring invented provenance. A new
+attempt from an eligible historical prepared/stopped instance uses current captured
+configuration after retained-resource/sensitive-value checks; unsafe drift fails
+before effects. Failed/interrupted instances still need explicit restart.
+
+Preserve unsupported state for diagnosis and its matching binary's lifecycle.
+A different directory does not clean its resources. Backlot never automatically
+deletes incompatible state. See the [configuration decision](adr/20261021T001732173Z-register-private-project-configuration.md).
 
 ## Generations, jobs and drift
 

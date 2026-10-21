@@ -21,9 +21,12 @@ import (
 
 func sceneFixture(t *testing.T) (*service, string, string) {
 	t.Helper()
+	// Multiple project fixtures share one explicitly owned registry, even when
+	// writeFixture changes its isolated HOME for each project.
+	t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", filepath.Join(shortTemp(t), "registry"))
 	root := shortTemp(t)
-	config := writeFixture(t, root)
 	git(t, root, "init", "-q")
+	config := writeFixture(t, root)
 	store, err := openStore(shortTemp(t))
 	if err != nil {
 		t.Fatal(err)
@@ -171,6 +174,8 @@ func TestSceneNonGitAndRedaction(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
 		t.Fatal(err)
 	}
+	// Removing Git changes project identity; explicitly enroll the new non-Git source.
+	fixtureInputs(t, root, config, map[string]string{"password": "resolved-fixture-secret"})
 	prepared := scenePrepare(t, s, root, config)
 	child := filepath.Join(root, "child")
 	if err := os.Mkdir(child, 0700); err != nil {
@@ -282,8 +287,8 @@ func TestSceneFollowInitialAbsenceRejectsReplacementThroughRealDaemon(t *testing
 
 func TestSceneFollowRealDaemonCreationAndRecreation(t *testing.T) {
 	root := shortTemp(t)
-	config := writeFixture(t, root)
 	git(t, root, "init", "-q")
+	config := writeFixture(t, root)
 	cli, _ := startFixture(t, filepath.Join(shortTemp(t), "state"), time.Minute)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -342,6 +347,7 @@ func TestSceneUnknownNonGitRootAndUnavailableRecordedGit(t *testing.T) {
 func TestSceneFollowFreezesCanonicalAliases(t *testing.T) {
 	for _, mode := range []string{"cwd", "project", "missing-manifest"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", filepath.Join(shortTemp(t), "registry"))
 			root := shortTemp(t)
 			git(t, root, "init", "-q")
 			a, b := filepath.Join(root, "a"), filepath.Join(root, "b")

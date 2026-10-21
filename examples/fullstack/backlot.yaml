@@ -3,7 +3,7 @@ version: backlot/v1
 project: fullstack
 tools: {go: go, npm: npm}
 inputs:
-  app_image: {}
+  app_image: {description: Prebuilt local application image}
 resources:
   db_data: {kind: volume}
   db_admin: {kind: secret}

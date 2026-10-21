@@ -177,7 +177,7 @@ func (s *service) exportSnapshot(ctx context.Context, request v1.ExportRequest, 
 	e := instance.Execution
 	report := v1.ExportReport{SchemaVersion: v1.ExportSchemaVersion, ExportedAt: time.Now().UTC().Format(time.RFC3339Nano), CreatedAt: instance.CreatedAt, CompletedAt: e.CompletedAt,
 		Result:   v1.ExportResult{NativeOwnershipWarnings: instance.NativeOwnershipWarnings, InstanceID: instance.ID, Attempt: e.Attempt, Status: instance.Status, TerminalExitCode: e.TerminalExitCode, Cancelled: e.Cancelled, Failure: e.Failure, CollectionFailure: e.CollectionFailure, CleanupFailure: e.CleanupFailure, Components: append([]v1.ComponentResult{}, e.Components...)},
-		Source:   v1.ExportSource{Project: instance.Plan.Project, Scene: instance.Plan.Scene, Lifetime: instance.Plan.Lifetime, CheckoutID: instance.Checkout.ID, ManifestDigest: instance.Plan.ManifestDigest, ConfigDigest: instance.Plan.ConfigDigest},
+		Source:   v1.ExportSource{Project: instance.Plan.Project, Scene: instance.Plan.Scene, Lifetime: instance.Plan.Lifetime, CheckoutID: instance.Checkout.ID, ManifestDigest: instance.Plan.ManifestDigest, ConfigDigest: instance.Plan.ConfigDigest, EffectiveConfigDigest: instance.Plan.EffectiveConfigDigest},
 		Complete: true, Omissions: []string{}, Evidence: []v1.ExportEvidence{}}
 	journal, err := s.store.runtime(instance.ID)
 	if err != nil {

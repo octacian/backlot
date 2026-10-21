@@ -41,6 +41,9 @@ func shortTemp(t *testing.T) string {
 
 func writeFixture(t *testing.T, root string) string {
 	t.Helper()
+	home := shortTemp(t)
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
 	if err := os.WriteFile(filepath.Join(root, "backlot.json"), []byte(fixtureManifest), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -48,10 +51,23 @@ func writeFixture(t *testing.T, root string) string {
 		t.Fatal(err)
 	}
 	config := filepath.Join(shortTemp(t), "config.json")
-	if err := os.WriteFile(config, []byte(`{"version":"backlot/v1","inputs":{"password":"resolved-fixture-secret"}}`), 0600); err != nil {
+	if err := os.WriteFile(config, []byte(`{"version":"backlot/v1"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
+	fixtureInputs(t, root, config, map[string]string{"password": "resolved-fixture-secret"})
 	return config
+}
+
+// fixtureInputs confines the real registry to owned temporary storage.
+func fixtureInputs(t *testing.T, root, config string, inputs map[string]string) {
+	t.Helper()
+	s, err := plan.OpenSetup(v1.ProjectSetupRequest{ProjectPath: root, ConfigPath: config, Edit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Save(context.Background(), v1.PrivateConfig{Version: v1.ManifestVersion, Inputs: inputs}, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 func request(root, config, scene string) v1.PrepareRequest {
 	return v1.PrepareRequest{APIVersion: v1.Version, Plan: v1.PlanRequest{ProjectPath: root, ConfigPath: config, Scene: scene}}
@@ -122,6 +138,7 @@ func TestRealWorktreesAliasesConcurrentDuplicatesAndDrift(t *testing.T) {
 	repo := shortTemp(t)
 	config := writeFixture(t, repo)
 	git(t, repo, "init", "-q")
+	fixtureInputs(t, repo, config, map[string]string{"password": "resolved-fixture-secret"})
 	git(t, repo, "add", ".")
 	git(t, repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture")
 	roots := []string{filepath.Join(shortTemp(t), "one"), filepath.Join(shortTemp(t), "two")}
@@ -374,13 +391,18 @@ func TestMovedAndReplacedCheckoutNeverAdopted(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := cli.Prepare(context.Background(), request(moved, config, "dev"))
-	code(t, err, "checkout_moved")
+	code(t, err, "project_config")
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
 	}
-	writeFixture(t, root)
+	if err := os.WriteFile(filepath.Join(root, "backlot.json"), []byte(fixtureManifest), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "seed.env"), []byte("SEED=replacement\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	_, err = cli.Prepare(context.Background(), request(root, config, "dev"))
-	code(t, err, "checkout_replaced")
+	code(t, err, "project_config")
 	inspected, err := cli.Inspect(context.Background(), original.Instance.ID)
 	if err != nil || inspected.Instance.ID != original.Instance.ID || inspected.Instance.Checkout.Path != original.Instance.Checkout.Path {
 		t.Fatal("old record mutated")
@@ -388,14 +410,19 @@ func TestMovedAndReplacedCheckoutNeverAdopted(t *testing.T) {
 }
 
 func TestStateVersionRejectedWithoutMutation(t *testing.T) {
-	for _, version := range []string{"1", "2", "3", "4", "999"} {
+	for _, version := range []string{"1", "2", "3", "4", "5", "7", "999"} {
 		t.Run(version, func(t *testing.T) {
 			dir := shortTemp(t)
 			state, err := openStore(dir)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := state.db.Update(func(tx *bolt.Tx) error { return tx.Bucket([]byte("meta")).Put([]byte("version"), []byte(version)) }); err != nil {
+			if err := state.db.Update(func(tx *bolt.Tx) error {
+				if err := tx.Bucket([]byte("meta")).Put([]byte("preserved"), []byte("CA/config retained")); err != nil {
+					return err
+				}
+				return tx.Bucket([]byte("meta")).Put([]byte("version"), []byte(version))
+			}); err != nil {
 				t.Fatal(err)
 			}
 			if err := state.db.Close(); err != nil {
@@ -407,7 +434,7 @@ func TestStateVersionRejectedWithoutMutation(t *testing.T) {
 			}
 			_, err = openStore(dir)
 			code(t, err, "state_version")
-			if !strings.Contains(err.Error(), "requires version 6") || !strings.Contains(err.Error(), "--state-dir") {
+			if !strings.Contains(err.Error(), "requires version 8") || !strings.Contains(err.Error(), "preserve") {
 				t.Fatalf("missing actionable compatibility instructions: %v", err)
 			}
 			// Startup must stop before recovery can touch incompatible resources.
@@ -416,31 +443,30 @@ func TestStateVersionRejectedWithoutMutation(t *testing.T) {
 			if err != nil || !bytes.Equal(before, after) {
 				t.Fatal("rejected database bytes changed", err)
 			}
-
 		})
 	}
 }
 
-func TestStateVersionSixDaemonRestart(t *testing.T) {
+func TestStateVersionEightDaemonRestart(t *testing.T) {
 	root := shortTemp(t)
 	config := writeFixture(t, root)
 	dir := filepath.Join(shortTemp(t), "state")
 	cli, stop := startFixture(t, dir, time.Second)
 	status, err := cli.Status(context.Background())
-	if err != nil || status.StateVersion != 6 {
-		t.Fatal("fresh daemon did not advertise state v6", status, err)
+	if err != nil || status.StateVersion != 8 {
+		t.Fatal("fresh daemon did not advertise state v8", status, err)
 	}
 	prepared := prepareFixture(t, cli, request(root, config, "dev"))
 	stop()
 	cli, stop = startFixture(t, dir, time.Second)
 	defer stop()
 	status, err = cli.Status(context.Background())
-	if err != nil || status.StateVersion != 6 {
-		t.Fatal("restarted daemon did not advertise state v6", status, err)
+	if err != nil || status.StateVersion != 8 {
+		t.Fatal("restarted daemon did not advertise state v8", status, err)
 	}
 	result, err := cli.Inspect(context.Background(), prepared.Instance.ID)
 	if err != nil || result.Instance.Status != v1.Prepared || result.Instance.ID != prepared.Instance.ID {
-		t.Fatal("v6 restart lost persistent state", result, err)
+		t.Fatal("v8 restart lost persistent state", result, err)
 	}
 }
 
@@ -653,7 +679,15 @@ func TestInFlightReplacementRejectsSnapshotBeforeDurableAcceptance(t *testing.T)
 			}); err != nil {
 				t.Fatal(err)
 			}
-			// A separate preparation from the now-stable replacement can be recorded,
+			// Explicit reassociation supplies values for the stable replacement before it can be recorded.
+			reassociated, err := plan.OpenSetup(v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: config, Edit: true, Reassociate: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := reassociated.Save(context.Background(), v1.PrivateConfig{Version: v1.ManifestVersion, Inputs: map[string]string{"password": "replacement-input"}}, nil, nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			// A separate preparation
 			// and must contain only the replacement's own resolved snapshot.
 			svc.resolve = nil
 			prepared, err := svc.prepare(context.Background(), request(alias, config, "dev"))

@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -47,98 +46,52 @@ func openStore(directory string) (*store, error) {
 		return nil, problem("state_unavailable", "cannot open state database; check permissions or another daemon")
 	}
 	s := &store{db: db, directory: directory}
-	err = db.Update(func(tx *bolt.Tx) error {
-		meta := tx.Bucket([]byte("meta"))
-		if meta != nil {
-			version := meta.Get([]byte("version"))
-			if string(version) != strconv.Itoa(v1.StateVersion) && string(version) != "5" {
-				return problem("state_version", fmt.Sprintf("unsupported state format; this binary requires version %d (additive transition from version 5 only); use the matching older binary to clean up and shut down owned resources before selecting a new --state-dir; state was not modified", v1.StateVersion))
-			}
-			// v5-to-v6 is additive: no records, keys or retained files are rewritten.
-			// Require the complete existing layout before advancing the format fence.
-			for _, name := range bucketNames {
-				if tx.Bucket([]byte(name)) == nil {
-					return problem("state_corrupt", "private state bucket missing; state was not modified")
-				}
-			}
-			if string(version) == "5" {
-				if err := tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error { var r record; return decodeRecord(data, string(key), &r) }); err != nil {
-					return err
-				}
-				if err := validateV5Lifecycle(tx); err != nil {
-					return err
-				}
-			}
-		} else {
-			// Existing buckets without a version are not safe to adopt.
-			if err := tx.ForEach(func(_ []byte, _ *bolt.Bucket) error {
-				return problem("state_version", "state format is missing; state was not modified")
-			}); err != nil {
-				return err
-			}
-		}
-		for _, name := range bucketNames {
-			if _, err := tx.CreateBucketIfNotExists([]byte(name)); err != nil {
-				return err
-			}
-		}
-		return tx.Bucket([]byte("meta")).Put([]byte("version"), []byte(strconv.Itoa(v1.StateVersion)))
-	})
+	err = db.Update(openStateTransaction)
 	if err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
 	return s, nil
 }
 
-func jsonObject(data []byte) bool {
-	trimmed := bytes.TrimSpace(data)
-	return len(trimmed) > 0 && trimmed[0] == '{'
-}
-
-// Validate supported lifecycle records before the one-way format fence. This is
-// pure: unknown metadata and all retained records/files remain byte-for-byte.
-func validateV5Lifecycle(tx *bolt.Tx) error {
-	if err := tx.Bucket([]byte("meta")).ForEach(func(key, data []byte) error {
-		switch {
-		case string(key) == "managed_gateway":
-			_, err := decodeManagedRecord(data)
-			return err
-		case strings.HasPrefix(string(key), "doctor_probe/"):
-			_, err := decodeDiagnosticProbe(strings.TrimPrefix(string(key), "doctor_probe/"), data)
-			return err
+// openStateTransaction validates the predecessor before advancing its one-way fence.
+// It performs no recovery, provider calls or retained-file effects.
+func openStateTransaction(tx *bolt.Tx) error {
+	meta := tx.Bucket([]byte("meta"))
+	if meta != nil {
+		version := meta.Get([]byte("version"))
+		if string(version) != strconv.Itoa(v1.StateVersion) && string(version) != "6" {
+			return problem("state_version", fmt.Sprintf("unsupported state format; this binary requires version %d (in-place upgrade from version 6 only); preserve this state and use its matching binary for diagnosis and lifecycle; other versions cannot upgrade with this binary; state was not modified", v1.StateVersion))
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	for _, name := range []string{"checkouts", "snapshots", "secrets", "runtime", "resources"} {
-		if err := tx.Bucket([]byte(name)).ForEach(func(_, data []byte) error {
-			if !jsonObject(data) {
-				return problem("state_corrupt", "invalid private record shape; state was not modified")
+		// Existing state must have its complete layout before it can be opened.
+		for _, name := range bucketNames {
+			if tx.Bucket([]byte(name)) == nil {
+				return problem("state_corrupt", "private state bucket missing; state was not modified")
 			}
-			switch name {
-			case "runtime":
-				_, err := decodeRuntime(data)
+		}
+		if string(version) == "6" {
+			if err := validateStateSix(tx); err != nil {
 				return err
-			case "resources":
-				_, err := decodeResources(data)
-				return err
-			case "checkouts":
-				var r v1.CheckoutIdentity
-				return json.Unmarshal(data, &r)
-			case "snapshots":
-				var r plan.Snapshot
-				return json.Unmarshal(data, &r)
-			case "secrets":
-				var r map[string]v1.PlannedValue
-				return json.Unmarshal(data, &r)
 			}
-			return nil
+		}
+	} else {
+		// Existing buckets without a version are not safe to adopt.
+		if err := tx.ForEach(func(_ []byte, _ *bolt.Bucket) error {
+			return problem("state_version", "state format is missing; state was not modified")
 		}); err != nil {
 			return err
 		}
 	}
-	return nil
+	for _, name := range bucketNames {
+		if _, err := tx.CreateBucketIfNotExists([]byte(name)); err != nil {
+			return err
+		}
+	}
+	return tx.Bucket([]byte("meta")).Put([]byte("version"), []byte(strconv.Itoa(v1.StateVersion)))
+}
+
+func jsonObject(data []byte) bool {
+	trimmed := bytes.TrimSpace(data)
+	return len(trimmed) > 0 && trimmed[0] == '{'
 }
 
 func put(tx *bolt.Tx, bucket, key string, value any) error {
@@ -233,7 +186,7 @@ func (s *store) beginSelected(snapshot plan.Snapshot, checkout v1.CheckoutIdenti
 				}
 				response.Instance = r.Instance
 				response.ManifestDrift = r.Instance.Plan.ManifestDigest != p.ManifestDigest
-				response.ConfigDrift = r.Instance.Plan.ConfigDigest != p.ConfigDigest
+				response.ConfigDrift = plan.ConfigurationDrift(r.Instance.Plan, p)
 				return nil
 			}
 		}

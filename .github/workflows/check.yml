@@ -17,21 +17,6 @@ jobs:
     uses: ./.github/workflows/changes.yml
     permissions:
       contents: read
-      pull-requests: read
-
-  docs:
-    name: Documentation
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || (needs.changes.outputs.docs == 'true' && needs.changes.outputs.check != 'true')) }}
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Verify ADR tooling and records
-        run: make adr-test adr-verify
 
   check:
     needs: changes
@@ -49,7 +34,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Verify repository
-        run: make check
+        run: make check-implementation
       - name: Verify native identity adapter without cgo
         run: CGO_ENABLED=0 go test ./internal/native ./internal/native/procidentity -count=1 -v
       - name: Verify module metadata

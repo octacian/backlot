@@ -89,7 +89,7 @@ func (c *Client) FixtureSecret(ctx context.Context, request v1.FixturesRequest) 
 }
 
 func validateFixtures(response v1.FixturesResponse, request v1.FixturesRequest, secret bool) error {
-	if response.APIVersion != v1.Version || secret && len(response.Fixtures) != 1 {
+	if response.APIVersion != v1.Version || secret && len(response.Fixtures) != 1 || request.ExpectedAttempt != "" && (response.InstanceID != request.InstanceID || response.Attempt != request.ExpectedAttempt) {
 		return responseError()
 	}
 	seen := map[string]bool{}

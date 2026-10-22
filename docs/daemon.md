@@ -611,3 +611,9 @@ and adopt them atomically with execution acceptance. Ordinary version 9 stop/sta
 retains its immutable snapshot. The independent project registry remains format 1.
 See [state upgrade and operation](containers.md#state-compatibility) and
 [private setup, provenance and retention](manifest.md#registered-private-project-configuration).
+
+## Declared startup details
+
+Persistent startup can show declared fixture details, including selected secrets.
+See [selection, output and lifecycle behavior](manifest.md#components-and-scenes)
+and the [seeded example](../examples/macos-quickstart/README.md#seeded-demo-account).

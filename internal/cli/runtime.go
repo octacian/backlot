@@ -205,6 +205,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 		return output(c, nil, err)
 	}
 	id := response.Instance.ID
+	attempt := startupAttempt(response.Instance)
 	manifestDrift, configDrift := response.ManifestDrift, response.ConfigDrift
 	token := response.LeaseToken
 	for {
@@ -224,8 +225,11 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 			}
 			return cancelledExit(response.Instance, cancellationCode())
 		}
+		if response.Instance.Plan.Lifetime == v1.Persistent && (attempt == "" || startupAttempt(response.Instance) != attempt) {
+			return output(c, nil, startupConflict())
+		}
 		if response.Instance.Status == v1.RuntimeReady {
-			return output(c, response, nil)
+			return startupOutput(signalCtx, c, cli, response)
 		}
 		switch response.Instance.Status {
 		case v1.Succeeded:

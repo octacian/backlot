@@ -359,8 +359,7 @@ func (h *nativeHarness) close() {
 	h.t.Helper()
 	if !h.waited && h.process != nil && h.process.Process != nil {
 		if h.ownerDone == nil {
-			h.ownerDone = make(chan error, 1)
-			go func() { h.ownerDone <- h.process.Wait() }()
+			h.ownerDone = waitFixtureChild(h.process)
 		}
 		result := finishNativeHarnessOwner(func(ctx context.Context) error { _, err := h.cli.Stop(ctx); return err }, h.ownerDone, h.process.Process.Kill, 40*time.Second, 40*time.Second, 2*time.Second)
 		h.waited = result.joined
@@ -397,37 +396,6 @@ func (h *nativeHarness) close() {
 	h.absent()
 }
 
-type nativeHarnessShutdown struct {
-	stopErr, ownerErr error
-	joined, killed    bool
-}
-
-// The retained Wait owner is reused on a later close after timeout. No second
-// Wait, unbounded receive, or observed-PID actuation is permitted here.
-func finishNativeHarnessOwner(stop func(context.Context) error, done <-chan error, kill func() error, stopBudget, joinBudget, killBudget time.Duration) nativeHarnessShutdown {
-	ctx, cancel := context.WithTimeout(context.Background(), stopBudget)
-	result := nativeHarnessShutdown{stopErr: stop(ctx)}
-	cancel()
-	timer := time.NewTimer(joinBudget)
-	defer timer.Stop()
-	select {
-	case result.ownerErr = <-done:
-		result.joined = true
-	case <-timer.C:
-		result.killed = true
-		result.ownerErr = errors.Join(errors.New("daemon shutdown join exceeded budget"), kill())
-		timer.Reset(killBudget)
-		select {
-		case err := <-done:
-			result.ownerErr = errors.Join(result.ownerErr, err)
-			result.joined = true
-		case <-timer.C:
-			result.ownerErr = errors.Join(result.ownerErr, errors.New("retained daemon did not join after kill; preserve owner and state"))
-		}
-	}
-	return result
-}
-
 // This exception is selected only by intentional authority-corruption fixtures,
 // after their policy assertions. Every retained original authority must prove
 // authenticated cleanup again; absence of a PID file cannot satisfy it.
@@ -462,21 +430,8 @@ func newNativeHarnessConfigured(t *testing.T, binary, budget string, faults bool
 	if err != nil {
 		t.Fatal(err)
 	}
-	var h *nativeHarness
-	t.Cleanup(func() {
-		if h != nil && h.cleanupUnverified {
-			t.Log("preserved unverified fixture state", root)
-			return
-		}
-		if h != nil && h.preserveFailureEvidence {
-			t.Log("preserved fixture failure evidence after cleanup", root, "daemon joined", h.waited)
-			return
-		}
-		if err := os.RemoveAll(root); err != nil {
-			t.Error(err)
-		}
-	})
-	h = &nativeHarness{t: t, binary: binary, lease: budget, faultMode: faults, dir: filepath.Join(root, "state"), project: filepath.Join(root, "project"), pids: filepath.Join(root, "pids")}
+	h := &nativeHarness{t: t, binary: binary, lease: budget, faultMode: faults, dir: filepath.Join(root, "state"), project: filepath.Join(root, "project"), pids: filepath.Join(root, "pids")}
+	h.registerStateCleanup(root, false)
 	if err := os.Mkdir(h.project, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -506,11 +461,7 @@ func newNativeHarnessConfigured(t *testing.T, binary, budget string, faults bool
 }
 
 func TestNativeRuntime(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "backlot")
-	build := exec.Command("go", "build", "-race", "-o", binary, "../../cmd/backlot")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build: %v %s", err, output)
-	}
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	t.Run("uncertainty-cleanup-after-fatal", func(t *testing.T) {
 		record := filepath.Join(t.TempDir(), "record")
 		self, err := os.Executable()
@@ -1011,7 +962,14 @@ func TestNativeRuntime(t *testing.T) {
 		h := newNativeHarness(t, binary)
 		c := h.manifest.Components["server"]
 		c.Environment.Assign["DELAY_BIND"] = v1.Value{Literal: ptr("1")}
+		c.Fixtures = map[string]v1.Fixture{
+			"port":         {Value: v1.Value{Ref: &v1.Reference{Kind: "resource", Name: "port", Field: "port"}}},
+			"private-port": {Value: v1.Value{Secret: true, Ref: &v1.Reference{Kind: "service", Name: "server", Field: "port", Port: "http"}}},
+		}
 		h.manifest.Components["server"] = c
+		scene := h.manifest.Scenes["dev"]
+		scene.StartupDetails = []v1.StartupDetailSelection{{Component: "server", Fixture: "port", Label: "Port"}, {Component: "server", Fixture: "private-port", Label: "Private port"}}
+		h.manifest.Scenes["dev"] = scene
 		h.write()
 		r := h.run("dev")
 		var port int
@@ -1032,6 +990,19 @@ func TestNativeRuntime(t *testing.T) {
 		final := h.state(r.Instance.ID, v1.RuntimeReady)
 		if final.Instance.Execution.Ports["port"] == port {
 			t.Fatal("unrelated listener accepted as readiness")
+		}
+		if len(final.Instance.Execution.Fixtures) != 2 {
+			t.Fatal("refresh duplicated fixture records")
+		}
+		finalPort := strconv.Itoa(final.Instance.Execution.Ports["port"])
+		for _, fixture := range final.Instance.Execution.Fixtures {
+			if fixture.Name == "port" && fixture.Value != finalPort {
+				t.Fatal("ordinary fixture retained abandoned port")
+			}
+		}
+		private, err := h.cli.FixtureSecret(context.Background(), v1.FixturesRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID, ExpectedAttempt: final.Instance.Execution.Attempt, Component: "server", SecretName: "private-port"})
+		if err != nil || len(private.Fixtures) != 1 || private.Fixtures[0].Value != finalPort {
+			t.Fatal("sensitive fixture retained abandoned port", err)
 		}
 		connection, err := net.DialTimeout("tcp", sentinel.Addr().String(), time.Second)
 		if err != nil {

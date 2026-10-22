@@ -535,3 +535,54 @@ func TestContainerKeepsImageEnvironmentBaseline(t *testing.T) {
 		t.Fatal("explicit pass-through was lost", err)
 	}
 }
+
+func TestStartupSelectionsRemainMetadata(t *testing.T) {
+	noDefaultConfig(t)
+	root := fixture(t)
+	path := filepath.Join(root, "backlot.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m v1.Manifest
+	if err := manifest.Decode(data, ".yaml", &m); err != nil {
+		t.Fatal(err)
+	}
+	server := m.Components["server"]
+	secret := "private-summary-canary"
+	server.Fixtures = map[string]v1.Fixture{"password": {Value: v1.Value{Literal: &secret, Secret: true}}}
+	m.Components["server"] = server
+	scene := m.Scenes["dev"]
+	scene.StartupDetails = []v1.StartupDetailSelection{{Component: "server", Fixture: "password", Label: "Password"}}
+	m.Scenes["dev"] = scene
+	encoded, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(root, "backlot.json"), encoded)
+	source, err := Locate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := Prepare(source, v1.PlanRequest{ProjectPath: root, Scene: "dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(snapshot.Plan.StartupDetails, scene.StartupDetails) {
+		t.Fatal("selection metadata lost")
+	}
+	public, err := json.Marshal(snapshot.Plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(public, []byte(secret)) {
+		t.Fatal("plan selection exposed sensitive fixture")
+	}
+	value := snapshot.Secrets["server/fixture/password"]
+	if value.Literal == nil || *value.Literal != secret || value.Redacted {
+		t.Fatal("private fixture resolution was erased by wire redaction")
+	}
+}

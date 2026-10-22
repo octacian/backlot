@@ -158,6 +158,36 @@ every selected component must transitively gate that job. Persistent scenes
 cannot designate a terminal job. All reusable declarations and scene graphs are
 validated before reading seeds or checking tool availability.
 
+Persistent scenes may declare ordered startup fixture selections:
+
+```yaml
+startup_details:
+  - {component: seed, fixture: email, label: Login email}
+  - {component: seed, fixture: password, label: Login password}
+```
+
+Each selection names an existing fixture on a selected component and a nonempty
+single-line label. Nonempty startup details are invalid on disposable scenes.
+Values still come from ordinary component fixtures and their existing sensitivity
+propagation; this introduces no expressions or duplicate value declarations.
+
+The selection authorizes automatic display of its sensitive values after successful
+`run`, `scene start`, `restart` and `reset`, including already-running starts.
+Human output prints labels/values after instance/URL information; JSON emits one
+result with a transient `startup_details` object containing `attempt`, ordered
+`details`, or a sanitized `warning`. No successful summary appears on failed
+readiness. If summary retrieval fails after readiness, startup still succeeds
+with its identity/URL and an unavailable warning; incomplete details are omitted.
+
+Repeated start and stop/run use actual retained selections/values despite current
+manifest/config drift. Restart/reset adopt current selections through existing
+compatibility and snapshot rules. A startup replaced before observed readiness
+conflicts instead of reporting a replacement attempt's summary. Ordinary plans,
+status/follow, inspect, diagnostics, fixture discovery, execution results and
+exports remain redacted. Keep credentials out of labels/identifiers and protect
+startup output as sensitive. See the [seeded example](../examples/macos-quickstart/README.md#seeded-demo-account)
+and [decision](adr/20261022T195459793Z-authorize-declared-sensitive-startup-details-for-persistent-scenes.md).
+
 `publish` selects an origin `resource`, nonempty `routes`, and an aggregate HTTP
 `probe` referring to that origin. Each route contains a unique absolute `path`,
 a selected `service`, its named `port`, and `prefix: preserve|strip`. This bounded

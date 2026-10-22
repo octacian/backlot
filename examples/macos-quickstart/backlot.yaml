@@ -2,25 +2,47 @@
 version: backlot/v1
 project: macos-quickstart
 tools: {node: node}
+inputs:
+  email: {description: Login email for the application-owned seed account}
 resources:
+  account: {kind: directory}
+  password: {kind: secret}
   api_port: {kind: port}
   web_port: {kind: port}
   origin: {kind: origin}
 outputs:
   reports: {path: reports, concurrency_group: reports}
 environments:
+  account:
+    assign:
+      APP_DATA: {ref: {kind: resource, name: account, field: path}}
+      LOGIN_EMAIL: {ref: {kind: input, name: email}}
+      LOGIN_PASSWORD: {ref: {kind: resource, name: password, field: value}}
   https:
     assign:
       APP_ORIGIN: {ref: {kind: resource, name: origin, field: url}}
       NODE_EXTRA_CA_CERTS: {ref: {kind: resource, name: origin, field: ca_cert_path}}
 components:
+  seed:
+    kind: job
+    runtime: native
+    policy: fresh-only
+    initializes: [account]
+    resources: [account, password]
+    environment_sets: [account]
+    command: {tool: node, args: [app.mjs, seed]}
+    fixtures:
+      email: {value: {ref: {kind: input, name: email}}}
+      password: {value: {ref: {kind: resource, name: password, field: value}}}
+      reminder: {value: {literal: Application-owned demo account}}
   api:
     kind: service
     runtime: native
     command: {tool: node, args: [app.mjs, api]}
-    resources: [api_port, origin]
+    depends_on: [{component: seed, condition: completed}]
+    resources: [api_port, origin, account, password]
     ports: {http: {resource: api_port}}
-    environment_sets: [https]
+    environment_sets: [https, account]
     environment:
       assign:
         PORT: {ref: {kind: resource, name: api_port, field: port}}
@@ -56,8 +78,12 @@ components:
 scenes:
   dev:
     lifetime: persistent
-    components: [api, web]
-    resources: [api_port, web_port, origin]
+    startup_details:
+      - {component: seed, fixture: email, label: Login email}
+      - {component: seed, fixture: password, label: Login password}
+      - {component: seed, fixture: reminder, label: Account}
+    components: [seed, api, web]
+    resources: [api_port, web_port, origin, account, password]
     publish:
       resource: origin
       routes:
@@ -66,8 +92,8 @@ scenes:
       probe: {kind: http, target: {ref: {kind: resource, name: origin, field: url}}, timeout: 10s}
   test:
     lifetime: disposable
-    components: [api, web, test]
-    resources: [api_port, web_port, origin]
+    components: [seed, api, web, test]
+    resources: [api_port, web_port, origin, account, password]
     terminal_job: test
     publish:
       resource: origin

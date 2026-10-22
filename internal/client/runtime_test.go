@@ -97,3 +97,22 @@ func TestNamedFixtureRequestAndSecretResponse(t *testing.T) {
 		}
 	}
 }
+
+func TestPinnedFixtureIdentity(t *testing.T) {
+	request := v1.FixturesRequest{APIVersion: v1.Version, InstanceID: strings.Repeat("a", 64), ExpectedAttempt: strings.Repeat("b", 64), Component: "seed", SecretName: "password"}
+	response := v1.FixturesResponse{APIVersion: v1.Version, InstanceID: request.InstanceID, Attempt: request.ExpectedAttempt, Fixtures: []v1.FixtureRecord{{Component: "seed", Name: "password", Sensitive: true, Value: "private"}}}
+	if err := validateFixtures(response, request, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, missing := range []string{"instance", "attempt"} {
+		changed := response
+		if missing == "instance" {
+			changed.InstanceID = ""
+		} else {
+			changed.Attempt = strings.Repeat("c", 64)
+		}
+		if err := validateFixtures(changed, request, true); err == nil {
+			t.Fatal("accepted unpinned or replaced fixture response", missing)
+		}
+	}
+}

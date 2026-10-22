@@ -50,16 +50,24 @@ use a declared native command probe when connectivity is insufficient.
 
 ## State compatibility
 
-The durable state format is version 9. The supported merged main formats 6 and 8 upgrade
-in place, one way, after typed record/addressing validation in the same transaction
-as the version fence. Only that fence changes; records, retained data, ownership
-history, saved gateway configuration and CA identity remain intact. Versions 5,
+The durable state format is version 9. From v9 onward, retained Go migration steps
+let the newest binary apply the complete upgrade path when users skip releases,
+without intermediate binaries or reset. The supported merged main formats 6 and 8
+upgrade in place, one way, after typed record/addressing validation in the same
+transaction as the version fence. For these existing bridges only that fence
+changes; records, retained data, ownership history, saved gateway configuration
+and CA identity remain intact. Versions 5,
 7 and other unsupported formats, and invalid predecessor records, are rejected
 unchanged. Version 9 fences older readers and preserves the combined
-private configuration/native recovery contract; experimental branch6 session/cleanup/copy extensions are incompatible and rejected unchanged. There is no migration chain.
+private configuration/native recovery contract; experimental branch6
+session/cleanup/copy extensions are incompatible and rejected unchanged. Future
+real steps and the final current-authority fence share one write transaction: any precommit error or cancellation rolls back every step. Recovery
+follows the committed upgrade separately and never restarts workloads automatically.
 
-Use the new CLI's `daemon stop --state-dir PATH` for normal shutdown of the
-supported v6/v8 daemon, then `daemon start --state-dir PATH` after shutdown finishes.
+Stop the old daemon normally, wait for its exit and lock release, then explicitly
+start the new binary with `daemon start --state-dir PATH` on the same directory.
+The new CLI's `daemon stop --state-dir PATH` also supports normal shutdown of a
+supported v6/v8 daemon.
 Only the exact v6/v8 `stopping` acknowledgment is accepted at this shutdown boundary;
 Status and configuration-consuming operations still require v9. The acknowledgment
 does not prove process exit or lock release; normal startup locking remains in
@@ -75,7 +83,7 @@ before effects. Failed/interrupted instances still need explicit restart.
 
 Preserve unsupported state for diagnosis and its matching binary's lifecycle.
 A different directory does not clean its resources. Backlot never automatically
-deletes incompatible state. See the [current native and compatibility decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md).
+deletes incompatible state. See the [migration decision](adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md).
 
 ## Generations, jobs and drift
 

@@ -566,6 +566,8 @@ copy metadata remain supported. Version9 fences older readers; downgrade is unsu
 Registered private project composition uses daemon state version 9, with a direct
 one-way in-place upgrade from the previous merged main state versions 6 and 8. Validation and
 the format fence share a transaction; rejected predecessor state stays unchanged.
+From v9 onward, retain and apply every required real migration in that transaction
+for skip-release upgrades; see the [migration policy](adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md).
 The new CLI may normally stop v6/v8 through its exact `stopping` acknowledgment on
 `POST /v1/stop`, without relaxing Status or consuming operations. This acknowledgment
 is not final process-exit/lock-release proof; it does not trigger automatic startup.

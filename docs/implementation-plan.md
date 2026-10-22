@@ -340,3 +340,17 @@ job exits and unresolved ownership fences. The [Air/Vite example](../examples/na
 uses ordinary application tooling. Initial target adapter CI is feasibility only;
 independent final Low/High, frozen runtime/provider/browser suites and exact final
 published-content CI remain delivery gates.
+
+## Cumulative daemon state upgrades (#66)
+
+Implemented for independent review: private transaction dispatch retains the v6/v8
+bridges and each subsequent real migration from v9, without a format bump or new
+dependency. Source checks precede conversion; current authority validation and the
+final fence stay in the same existing write transaction. Recovery remains separate.
+The [migration decision](adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md)
+defines the compatibility obligation. A pinned, real nonempty v9 fixture and
+[regeneration procedure](../internal/daemon/testdata/state/v9/README.md) accompany
+focused multi-step, rollback/cancellation and copied-fixture checks. Follow the
+[next-change procedure](testing.md#daemon-state-migrations) for real format changes.
+Independent Low/High reviews, frozen `make check` and exact published-revision CI
+remain delivery gates; no publication or final readiness is claimed here.

@@ -6,7 +6,6 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -71,28 +70,22 @@ func openStoreContext(ctx context.Context, directory string) (*store, error) {
 	return s, nil
 }
 
-// openStateTransaction validates the predecessor before advancing its one-way fence.
+// openStateTransaction runs retained steps and the final authority fence together.
 // It performs no recovery, provider calls or retained-file effects.
 func openStateTransaction(tx *bolt.Tx) error {
+	return openStateVersion(tx, v1.StateVersion, stateMigrations)
+}
+
+func openStateVersion(tx *bolt.Tx, target int, steps []stateMigration) error {
 	meta := tx.Bucket([]byte("meta"))
 	if meta != nil {
-		version := meta.Get([]byte("version"))
-		if string(version) != strconv.Itoa(v1.StateVersion) && string(version) != "6" && string(version) != "8" {
-			return problem("state_version", fmt.Sprintf("unsupported state format; this binary requires version %d (in-place upgrade from supported merged-main versions 6 and 8 only); preserve this state and use its matching binary for diagnosis and lifecycle; other versions cannot upgrade with this binary; state was not modified", v1.StateVersion))
+		raw := string(meta.Get([]byte("version")))
+		version, err := strconv.Atoi(raw)
+		if err != nil || version <= 0 || strconv.Itoa(version) != raw {
+			return statePreflightError(unsupportedStateVersion(target))
 		}
-		// Existing state must have its complete layout before it can be opened.
-		for _, name := range bucketNames {
-			if tx.Bucket([]byte(name)) == nil {
-				return problem("state_corrupt", "private state bucket missing; state was not modified; preserve it and use its matching binary for diagnosis and lifecycle")
-			}
-		}
-		if err := validateStateAuthority(tx, string(version)); err != nil {
+		if err := migrateState(tx, version, target, steps); err != nil {
 			return statePreflightError(err)
-		}
-		if string(version) == "6" || string(version) == "8" {
-			if err := validateStateSix(tx); err != nil {
-				return statePreflightError(err)
-			}
 		}
 	} else {
 		// Existing buckets without a version are not safe to adopt.
@@ -101,13 +94,19 @@ func openStateTransaction(tx *bolt.Tx) error {
 		}); err != nil {
 			return err
 		}
-	}
-	for _, name := range bucketNames {
-		if _, err := tx.CreateBucketIfNotExists([]byte(name)); err != nil {
-			return err
+		for _, name := range bucketNames {
+			if _, err := tx.CreateBucket([]byte(name)); err != nil {
+				return err
+			}
 		}
 	}
-	return tx.Bucket([]byte("meta")).Put([]byte("version"), []byte(strconv.Itoa(v1.StateVersion)))
+	if err := requireStateBuckets(tx); err != nil {
+		return statePreflightError(err)
+	}
+	if err := validateStateAuthority(tx, strconv.Itoa(target)); err != nil {
+		return statePreflightError(err)
+	}
+	return tx.Bucket([]byte("meta")).Put([]byte("version"), []byte(strconv.Itoa(target)))
 }
 
 // statePreflightError keeps the domain code while giving every rejected known

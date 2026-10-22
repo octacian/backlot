@@ -34,7 +34,22 @@ func attachedRecord(c *urfave.Command, record v1.AttachedRecord) error {
 		return err
 	}
 	if record.Result != nil {
-		return output(c, *record.Result, nil)
+		if err := output(c, *record.Result, nil); err != nil {
+			return err
+		}
+		if result := record.Result.Instance.Execution; result != nil {
+			for _, failure := range []struct{ label, reason string }{
+				{"Runtime failure", result.Failure},
+				{"Collection failure", result.CollectionFailure},
+				{"Cleanup failure", result.CleanupFailure},
+			} {
+				if failure.reason != "" {
+					if _, err := fmt.Fprintln(c.Writer, failure.label+":", failure.reason); err != nil {
+						return err
+					}
+				}
+			}
+		}
 	}
 	return nil
 }

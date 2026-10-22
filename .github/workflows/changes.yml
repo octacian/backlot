@@ -11,8 +11,6 @@ on:
         value: ${{ jobs.paths.outputs.scenes }}
       project-inputs:
         value: ${{ jobs.paths.outputs.project-inputs }}
-      consumer:
-        value: ${{ jobs.paths.outputs.consumer }}
 
 permissions:
   contents: read
@@ -26,7 +24,6 @@ jobs:
       docs: ${{ steps.filter.outputs.docs == 'true' || steps.filter.outputs.ci == 'true' }}
       scenes: ${{ steps.filter.outputs.implementation == 'true' || steps.filter.outputs.actions == 'true' || steps.filter.outputs.scenes == 'true' || steps.filter.outputs.ci == 'true' }}
       project-inputs: ${{ steps.filter.outputs.implementation == 'true' || steps.filter.outputs.actions == 'true' || steps.filter.outputs.project-inputs == 'true' || steps.filter.outputs.ci == 'true' }}
-      consumer: ${{ steps.filter.outputs.consumer == 'true' || steps.filter.outputs.ci == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -62,9 +59,5 @@ jobs:
               - 'examples/ci-inputs/**'
               - '!**/*.md'
               - '.github/workflows/project-inputs.yml'
-            consumer:
-              - 'examples/ci-scenes/**'
-              - '!**/*.md'
-              - '.github/workflows/setup-consumer.yml'
             ci:
               - '.github/workflows/changes.yml'

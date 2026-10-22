@@ -58,8 +58,8 @@ native Windows runtime CI is planned in #37/#38 and is not implemented here.
 The [Windows acceptance matrix](windows-design.md#epic-acceptance-and-evidence-matrix)
 separates future runtime CI from required Windows 11 desktop adoption evidence.
 Debian 13.4 amd64 requires actual-host runtime evidence; WSL is configuration guidance only. See [platform policy](platforms.md).
-Workflows start on every PR and push to `main` (the independent pinned consumer
-runs on PRs and manual dispatch). A shared
+Workflows start on every PR and push to `main` (the independent consumer
+is manual-only). A shared
 [changed-paths workflow](../.github/workflows/changes.yml) uses pinned
 [dorny/paths-filter](https://github.com/dorny/paths-filter) to skip irrelevant jobs.
 Selection happens at job level; workflow-level path filters can leave required
@@ -69,18 +69,19 @@ forks; main pushes compare with the pre-push commit, including multi-commit push
 
 | Changed files | Jobs that run |
 | --- | --- |
-| Markdown, including ADR additions/deletions | Documentation: ADR tooling tests and record verification |
+| Markdown, including ADR additions/deletions | Documentation: ADR tooling tests and record verification; covered by repository checks when those also run |
 | Go/runtime sources, schemas, non-CI examples, module/build/lint configuration | macOS/Ubuntu repository checks, Linux runtime, current-head scenes and project inputs |
-| `THIRD_PARTY_NOTICES.md` | Repository and Linux installation checks, plus Documentation |
+| `THIRD_PARTY_NOTICES.md` | Repository and Linux installation checks, including ADR verification |
 | `actions/` implementation | Current-head scenes and project inputs |
-| `examples/ci-scenes/` implementation | Scenes and the independent pinned consumer |
+| `examples/ci-scenes/` implementation | Scenes |
 | `examples/ci-inputs/` implementation | Project inputs |
-| A workflow | Its own gates; shared change-detection edits run all gates |
+| An automatic workflow | Its own gates; shared change-detection edits run all automatic gates |
 
 Markdown inside implementation/example directories stays documentation-only.
-ADR tooling, module and Makefile changes also run Documentation. The independent
-consumer uses pinned action/runtime revisions, so current runtime/action edits do
-not rerun it. Manual consumer dispatch always runs, regardless of changed paths.
+ADR tooling, module and Makefile changes are covered by the repository gate,
+including ADR tests and verification. The independent consumer is a manual
+[current-commit packaging smoke test](ci.md#independent-action-consumer), without
+browser shards or repeated lifecycle checks. It does not use path detection.
 Go package tests remain together: shared packages and separately built subprocesses
 make narrower package selection unreliable. Keep new executable inputs covered
 by the filters when adding directories or build configuration. Local `make check`

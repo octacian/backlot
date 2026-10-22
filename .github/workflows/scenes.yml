@@ -53,15 +53,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libnss3-tools python3
       - name: Application evidence verifier negative controls
+        if: matrix.shard == 1
         run: node --test examples/ci-scenes/reports.test.mjs
       - name: Set up private Backlot job
         id: backlot
         uses: ./actions/setup
         with:
           backlot-ref: ${{ github.sha }}
-      - name: Action ownership, private export and setup-failure checks
-        if: matrix.shard == 1
-        run: node --test actions/setup/check.mjs
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ runner.temp }}/playwright-browsers

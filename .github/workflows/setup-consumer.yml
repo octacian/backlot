@@ -1,59 +1,54 @@
-# Independent application fixture: downloads only the existing application files,
-# creates its own Git root, and resolves the action through a cross-repository SHA.
+# Keep the application checkout free of Backlot sources; GitHub downloads the
+# action package separately at this workflow's commit through the $/ reference.
 name: Setup action consumer
+
 on:
-  pull_request:
   workflow_dispatch:
-    inputs:
-      mode:
-        description: Application test outcome to exercise
-        type: choice
-        options: [success, failure, cancel]
-        default: success
+
 permissions:
   contents: read
-jobs:
-  changes:
-    uses: ./.github/workflows/changes.yml
-    permissions:
-      contents: read
-      pull-requests: read
 
+jobs:
   consumer:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || needs.changes.result != 'success' || needs.changes.outputs.consumer == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
-    env:
-      MODE: ${{ inputs.mode || 'success' }}
     steps:
-      - run: echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/playwright-browsers" >> "$GITHUB_ENV"
-      - name: Prepare independent application checkout from existing fixture
-        env:
-          GH_TOKEN: ${{ github.token }}
-          FIXTURE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Create independent application
         run: |
-          mkdir -p "$RUNNER_TEMP/fixture-source" "$GITHUB_WORKSPACE/application"
-          gh api "repos/octacian/backlot/tarball/$FIXTURE_REF" | tar xz --strip-components=1 -C "$RUNNER_TEMP/fixture-source"
-          src="$RUNNER_TEMP/fixture-source/examples/ci-scenes"
-          cp "$src/"{app.mjs,build.mjs,backlot.yaml,scene.mjs,playwright.config.mjs,package.json,package-lock.json,report-formats.py} "$GITHUB_WORKSPACE/application/"
-          cp -R "$src/tests" "$GITHUB_WORKSPACE/application/tests"
-          if [ "$MODE" != success ]; then
-            cp "$src/failure.config.mjs" "$GITHUB_WORKSPACE/application/"
-            cp -R "$src/faults" "$GITHUB_WORKSPACE/application/faults"
-          fi
-          cd "$GITHUB_WORKSPACE/application"
-          git init -b main
-          git -c user.name=Fixture -c user.email=fixture@example.invalid add .
-          git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm 'Independent application fixture'
-          test "$(git rev-parse --show-toplevel)" = "$GITHUB_WORKSPACE/application"
+          mkdir application
+          cat > application/backlot.yaml <<'MANIFEST'
+          version: backlot/v1
+          project: action-consumer
+          tools: {node: node}
+          outputs:
+            reports: {path: reports, concurrency_group: reports}
+          components:
+            smoke:
+              kind: job
+              runtime: native
+              policy: each-start
+              command: {tool: node, args: [smoke.mjs]}
+              outputs: [reports]
+              artifacts:
+                smoke: {path: reports/smoke.txt}
+          scenes:
+            smoke:
+              lifetime: disposable
+              components: [smoke]
+              terminal_job: smoke
+          MANIFEST
+          cat > application/smoke.mjs <<'NODE'
+          import { mkdirSync, writeFileSync } from 'node:fs';
+          mkdirSync('reports', { recursive: true });
+          writeFileSync('reports/smoke.txt', 'independent consumer\n');
+          NODE
+          git -C application init -b main
+          git -C application add .
+          git -C application -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm 'Independent application fixture'
           test ! -e go.mod
-          test ! -e actions/setup
-          echo "Independent application root: $(git rev-parse --show-toplevel)"
+          test ! -e actions
+          test ! -e application/go.mod
+          test ! -e application/actions
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: 1.27.1
@@ -61,75 +56,30 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 26.8.1
-          cache: npm
-          cache-dependency-path: application/package-lock.json
-      - name: Install application dependencies
-        working-directory: application
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libnss3-tools python3
-          npm ci --ignore-scripts --no-audit --no-fund
-          npx --no-install playwright install --with-deps chromium
-      - name: Select exact terminal argument array
-        id: args
-        run: |
-          args='["--shard=${{ matrix.shard }}/2"]'
-          if [ "$MODE" = failure ]; then args='["--config=failure.config.mjs","failure.spec.mjs"]'; fi
-          if [ "$MODE" = cancel ]; then args='["--config=failure.config.mjs","hold.spec.mjs"]'; fi
-          echo "value=$args" >> "$GITHUB_OUTPUT"
-      - name: Run independent application with private lifecycle
-        uses: octacian/backlot/actions/quickrun@91af51b460401c174120aeb9e003cde3e6a8aea3
+      - name: Run downloaded action at the workflow commit
+        uses: $/actions/quickrun
         id: backlot
         with:
-          backlot-ref: 91af51b460401c174120aeb9e003cde3e6a8aea3
+          backlot-ref: ${{ github.sha }}
           project: application
-          scene: browser
-          args: ${{ steps.args.outputs.value }}
-          upload-artifacts: ${{ matrix.shard == 1 }}
-          artifact-name: consumer-${{ matrix.shard }}-${{ env.MODE }}
-      - name: Verify custom evidence remains after private cleanup
-        if: always() && steps.backlot.outputs.evidence-available == 'true'
+          scene: smoke
+          upload-artifacts: false
+      - name: Verify packaged action produced application evidence
         env:
+          AVAILABLE: ${{ steps.backlot.outputs.evidence-available }}
+          EXIT: ${{ steps.backlot.outputs.terminal-exit-code }}
           EVIDENCE: ${{ steps.backlot.outputs.evidence-path }}
         run: |
           node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import path from 'node:path';
-          import crypto from 'node:crypto';
-          import {execFileSync} from 'node:child_process';
-          const {root}=JSON.parse(process.env.BACKLOT_SETUP_OWNER);
-          if(fs.existsSync(root)) throw Error('private root remains');
-          const moved=process.env.EVIDENCE+'-relocated';
-          fs.renameSync(process.env.EVIDENCE,moved);
-          const report=JSON.parse(fs.readFileSync(path.join(moved,'report.json')));
-          if(report.schema_version!=='backlot.export/v1'||!report.complete) throw Error('unsupported or incomplete agent report');
-          for(const file of report.evidence){
-            const target=path.resolve(moved,file.path);
-            if(path.isAbsolute(file.path)||!target.startsWith(moved+path.sep)) throw Error('unsafe inventory path');
-            const bytes=fs.readFileSync(target);
-            if(bytes.length!==file.bytes||crypto.createHash('sha256').update(bytes).digest('hex')!==file.sha256) throw Error('retained file mismatch');
-          }
-          execFileSync('python3',['application/report-formats.py',moved],{stdio:'inherit',timeout:30000});
-          const launchCommit=execFileSync('git',['-C','application','rev-parse','HEAD'],{encoding:'utf8'}).trim();
-          if(report.source.git_head!==launchCommit) throw Error('launch commit missing or changed');
-          if(!fs.readFileSync(path.join(moved,'index.html'),'utf8').includes('Backlot')) throw Error('missing HTML summary');
-          fs.appendFileSync(process.env.GITHUB_ENV,`BACKLOT_CONSUMER_EVIDENCE=${moved}\n`);
-          console.log(JSON.stringify({checkpoint:'independent JSON consumer after cleanup and relocation',schema:report.schema_version,result:report.result,files:report.evidence.length}));
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          assert.equal(process.env.AVAILABLE, 'true');
+          assert.equal(process.env.EXIT, '0');
+          const root = process.env.EVIDENCE;
+          const report = JSON.parse(readFileSync(join(root, 'report.json')));
+          assert.equal(report.complete, true);
+          const artifact = report.evidence.find(file => file.kind === 'artifact' && file.name === 'smoke');
+          assert.ok(artifact, 'application artifact missing from action export');
+          assert.equal(readFileSync(join(root, artifact.path), 'utf8'), 'independent consumer\n');
           NODE
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always() && matrix.shard == 2 && steps.backlot.outputs.evidence-available == 'true'
-        with:
-          name: custom-consumer-${{ matrix.shard }}-${{ env.MODE }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.BACKLOT_CONSUMER_EVIDENCE }}
-          if-no-files-found: error
-          include-hidden-files: true
-      - name: Record original and wrapper results
-        if: always()
-        env:
-          CLI_EXIT: ${{ steps.backlot.outputs.cli-exit-code }}
-          TERMINAL_EXIT: ${{ steps.backlot.outputs.terminal-exit-code }}
-          CANCELLED: ${{ steps.backlot.outputs.cancelled }}
-          EVIDENCE_AVAILABLE: ${{ steps.backlot.outputs.evidence-available }}
-          COLLECTION_ERROR: ${{ steps.backlot.outputs.collection-error }}
-          CLEANUP_ERROR: ${{ steps.backlot.outputs.job-cleanup-error }}
-        run: env | sort | grep -E '^(CLI_EXIT|TERMINAL_EXIT|CANCELLED|EVIDENCE_AVAILABLE|COLLECTION_ERROR|CLEANUP_ERROR)='

@@ -3,8 +3,8 @@
 This is an application CI example: a native Node notes application, an
 instance-owned directory, stock managed Caddy, and a disposable Playwright
 Chromium job. [The automatic workflow](../../.github/workflows/scenes.yml) runs
-two independent shards on every PR and `main` push. It adds no Backlot scheduler
-and does not repeat the existing Linux installation/Docker/provider suites.
+two independent shards on relevant PRs and `main` pushes. It adds no Backlot
+scheduler and does not repeat the existing Linux installation/Docker/provider suites.
 
 The bounded combination is Ubuntu 24.04 **amd64**, Go 1.27.1, Node 26.8.1,
 Caddy 2.11.6, and `@playwright/test` 1.64.1's Chromium headless shell
@@ -25,9 +25,9 @@ uses [`actions/setup`](../../actions/setup/action.yml) for pinned source/Caddy
 installation and private daemon/gateway preparation. It then exercises two
 sequential `actions/run` calls, verifies distinct retained exports and a live
 shared gateway, and runs the original fault/trust/lifecycle suite below. The
-independent application workflow uses remote `actions/quickrun`, including a
-custom uploader reading exports after private cleanup. Go module/build, npm and
-browser download caches contain no private job state.
+[manual independent consumer](../../docs/ci.md#independent-action-consumer) checks
+current-commit action packaging with a minimal native application. Go module/build,
+npm and browser download caches contain no private job state.
 
 After setup, the verification workflow records its private root pointer and runs:
 
@@ -71,9 +71,8 @@ Native terminal results remain separate from the outer and CLI signal exits.
 Queued clients that never launch must have no terminal result or collected
 reports. The verification harness uses workflow-owned Python 3 (`zipfile`/`json` standard
 libraries) to validate PNG signatures and each trace/network NDJSON record inside
-actual ZIP entries, including compressed entries. The independent consumer repeats
-these application format assertions after cleanup and relocation; generic product
-audit contains no Playwright parsing. Run its positive/negative controls with
+actual ZIP entries, including compressed entries; generic product audit contains
+no Playwright parsing. Run its positive/negative controls with
 `node --test examples/ci-scenes/reports.test.mjs`.
 
 Before export, each launched report's invocation origin and exact

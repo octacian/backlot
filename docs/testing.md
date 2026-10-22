@@ -100,8 +100,8 @@ Follow the [retained migration decision](adr/20261022T201438827Z-retain-cumulati
 Before a real format change, capture a nonempty closed database with the unmodified
 predecessor producer; retain its pinned revision, build settings/hashes, fixture
 inputs and regeneration commands. The committed [v9 fixture](../internal/daemon/testdata/state/v9/README.md)
-is the forward baseline. Never recreate historical evidence using current structs;
-`predecessorFixture` remains synthetic unit input. Do not rebuild v6/v8 matrices.
+is the forward baseline. Never recreate historical evidence using current structs.
+Pre-v9 formats are unsupported; retain fixture coverage from v9 onward.
 
 Add the smallest private Go step in `internal/daemon/state_upgrade.go` with explicit
 source/destination versions. Validate source layout/authority before converting;
@@ -123,7 +123,7 @@ failure and cancellation after tentative writes through the production dispatche
 These are algorithm evidence, not additional supported production versions.
 
 ```sh
-go test ./internal/daemon -run '^Test(State|RetainedStateNine|CanceledStartupPreservesPredecessor|PredecessorUncertain)' -count=1 -v
+go test ./internal/daemon -run '^Test(State|RetainedStateNine|CanceledStartup)' -count=1 -v
 make check
 ```
 

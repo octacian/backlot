@@ -50,36 +50,31 @@ use a declared native command probe when connectivity is insufficient.
 
 ## State compatibility
 
-The durable state format is version 9. From v9 onward, retained Go migration steps
-let the newest binary apply the complete upgrade path when users skip releases,
-without intermediate binaries or reset. The supported merged main formats 6 and 8
-upgrade in place, one way, after typed record/addressing validation in the same
-transaction as the version fence. For these existing bridges only that fence
-changes; records, retained data, ownership history, saved gateway configuration
-and CA identity remain intact. Versions 5,
-7 and other unsupported formats, and invalid predecessor records, are rejected
-unchanged. Version 9 fences older readers and preserves the combined
-private configuration/native recovery contract; experimental branch6
-session/cleanup/copy extensions are incompatible and rejected unchanged. Future
-real steps and the final current-authority fence share one write transaction: any precommit error or cancellation rolls back every step. Recovery
-follows the committed upgrade separately and never restarts workloads automatically.
+The durable state format is version 9, the minimum supported baseline. Pre-v9
+formats, including 6 and 8, are rejected unchanged; no migration from those
+preproduction formats is provided. From v9 onward, retain every real Go migration
+so the newest binary can apply the complete path when users skip releases,
+without intermediate binaries or reset.
 
-Stop the old daemon normally, wait for its exit and lock release, then explicitly
-start the new binary with `daemon start --state-dir PATH` on the same directory.
-The new CLI's `daemon stop --state-dir PATH` also supports normal shutdown of a
-supported v6/v8 daemon.
-Only the exact v6/v8 `stopping` acknowledgment is accepted at this shutdown boundary;
-Status and configuration-consuming operations still require v9. The acknowledgment
-does not prove process exit or lock release; normal startup locking remains in
-force, without automatic retry/start. Cleanup and transport failures remain errors.
-No wipe, data destruction or fresh directory is required for the supported upgrade;
-this does not promise live process handover.
-Run explicit project setup for current input values and remove `inputs` from current
-machine configuration. Historical snapshots remain readable for recorded cleanup,
-without becoming a current input source or acquiring invented provenance. A new
-attempt from an eligible historical prepared/stopped instance uses current captured
-configuration after retained-resource/sensitive-value checks; unsafe drift fails
-before effects. Failed/interrupted instances still need explicit restart.
+Source validation, transformations, current authority validation and the final
+version fence share one write transaction. Any precommit error, cancellation or
+interruption rolls back the complete path. Preserve records and passive metadata
+outside each step's explicit transformation; opening state does not touch retained
+data, saved gateway configuration or CA identity. Recovery follows a committed
+upgrade separately and never restarts workloads automatically.
+
+Stop the old daemon normally before upgrading, wait for its exit and lock release,
+then explicitly start the new binary with `daemon start --state-dir PATH` on the
+same directory. Client status and shutdown responses require matching API/state
+versions; use the matching binary for an incompatible daemon's lifecycle. A stopping
+acknowledgment does not prove process exit or lock release. Startup keeps its normal
+locking, without automatic retry/start or live process handover. Cleanup and
+transport failures remain errors. Supported upgrades require no wipe or fresh directory.
+
+Existing snapshots remain readable for recorded cleanup without becoming a current
+input source or acquiring invented provenance. Eligible prepared/stopped starts use
+current captured configuration after retained-resource/sensitive-value checks;
+unsafe drift fails before effects. Failed/interrupted instances need explicit restart.
 
 Preserve unsupported state for diagnosis and its matching binary's lifecycle.
 A different directory does not clean its resources. Backlot never automatically

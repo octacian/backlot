@@ -136,7 +136,7 @@ func TestDoctorPublicCACopyJournal(t *testing.T) {
 		}
 	}
 	if !validDiagnosticCACopy(diagnosticProbeRecord{}) {
-		t.Fatal("legacy v6 record rejected")
+		t.Fatal("probe without CA copy metadata rejected")
 	}
 }
 

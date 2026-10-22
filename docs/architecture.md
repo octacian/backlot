@@ -65,12 +65,12 @@ the UI or CLI. A separately published Go SDK is not required for V1.
 Recommended embedded storage is bbolt: only the daemon opens the database and
 mutations use transactions. Keep a versioned state format. The current format is
 9. Retain each real Go migration from v9 onward so the newest binary can apply
-all required steps when users skip releases. Preserve the existing v6/v8-to-v9
-bridges. Source-specific validation, transformations, final current-authority
+all required steps when users skip releases. Version 9 is the minimum supported
+baseline. Source-specific validation, transformations, final current-authority
 validation and the version fence share one startup write transaction under
 exclusive ownership; any precommit failure rolls back the chain. Preserve all
-records outside explicit transformations. Reject unsupported formats, including
-5, 7 and incompatible experimental format6 authority, unchanged. Store
+records outside explicit transformations. Reject all pre-v9 and other unsupported
+formats unchanged. Store
 instance/resource IDs, allocation intent, ownership tokens, resolved plan snapshots,
 preparation completion, attempts, and results. See [state compatibility](containers.md#state-compatibility),
 the [migration decision](adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md) and the

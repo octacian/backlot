@@ -12,27 +12,26 @@ import (
 	"github.com/octacian/backlot/internal/manifest"
 )
 
-func TestStopAcceptsOnlyExactPredecessorAcknowledgment(t *testing.T) {
-	valid := `{"api_version":"v1","state_version":6,"status":"stopping","pid":10,"lease_duration":"30s"}`
+func TestStopValidatesAcknowledgment(t *testing.T) {
+	valid := `{"api_version":"v1","state_version":9,"status":"stopping","pid":10,"lease_duration":"30s"}`
 	for _, tc := range []struct {
 		name, body, header, content, code string
 		status, version                   int
 	}{
-		{"predecessor", valid, "v1", "application/json", "", 200, 6},
-		{"predecessor8", strings.Replace(valid, `"state_version":6`, `"state_version":8`, 1), "v1", "application/json", "", 200, 8},
-		{"current", strings.Replace(valid, `"state_version":6`, `"state_version":9`, 1), "v1", "application/json", "", 200, 9},
-		{"running", strings.Replace(valid, `"stopping"`, `"running"`, 1), "v1", "application/json", "api_version", 200, 0},
-		{"five", strings.Replace(valid, `"state_version":6`, `"state_version":5`, 1), "v1", "application/json", "api_version", 200, 0},
-		{"seven", strings.Replace(valid, `"state_version":6`, `"state_version":7`, 1), "v1", "application/json", "api_version", 200, 0},
-		{"future", strings.Replace(valid, `"state_version":6`, `"state_version":99`, 1), "v1", "application/json", "api_version", 200, 0},
-		{"version type", strings.Replace(valid, `"state_version":6`, `"state_version":"6"`, 1), "v1", "application/json", "invalid_response", 200, 0},
+		{"current", valid, "v1", "application/json", "", 200, 9},
+		{"six", strings.Replace(valid, `"state_version":9`, `"state_version":6`, 1), "v1", "application/json", "api_version", 200, 0},
+		{"eight", strings.Replace(valid, `"state_version":9`, `"state_version":8`, 1), "v1", "application/json", "api_version", 200, 0},
+		{"five", strings.Replace(valid, `"state_version":9`, `"state_version":5`, 1), "v1", "application/json", "api_version", 200, 0},
+		{"seven", strings.Replace(valid, `"state_version":9`, `"state_version":7`, 1), "v1", "application/json", "api_version", 200, 0},
+		{"future", strings.Replace(valid, `"state_version":9`, `"state_version":99`, 1), "v1", "application/json", "api_version", 200, 0},
+		{"version type", strings.Replace(valid, `"state_version":9`, `"state_version":"6"`, 1), "v1", "application/json", "invalid_response", 200, 0},
 		{"body API", strings.Replace(valid, `"api_version":"v1"`, `"api_version":"v2"`, 1), "v1", "application/json", "api_version", 200, 0},
 		{"header", valid, "v2", "application/json", "api_version", 200, 0},
 		{"content", valid, "v1", "text/plain", "invalid_response", 200, 0},
 		{"PID", strings.Replace(valid, `"pid":10`, `"pid":0`, 1), "v1", "application/json", "invalid_response", 200, 0},
 		{"lease", strings.Replace(valid, `"30s"`, `"99h"`, 1), "v1", "application/json", "invalid_response", 200, 0},
 		{"lease minimum", strings.Replace(valid, `"30s"`, `"1ms"`, 1), "v1", "application/json", "invalid_response", 200, 0},
-		{"missing", `{"api_version":"v1","state_version":6,"status":"stopping"}`, "v1", "application/json", "invalid_response", 200, 0},
+		{"missing", `{"api_version":"v1","state_version":9,"status":"stopping"}`, "v1", "application/json", "invalid_response", 200, 0},
 		{"syntax", `{`, "v1", "application/json", "invalid_response", 200, 0},
 		{"unknown", strings.Replace(valid, `"pid":10`, `"pid":10,"unknown":true`, 1), "v1", "application/json", "invalid_response", 200, 0},
 		{"duplicate", strings.Replace(valid, `"pid":10`, `"pid":10,"pid":11`, 1), "v1", "application/json", "invalid_response", 200, 0},
@@ -78,7 +77,7 @@ func TestStopAcceptsOnlyExactPredecessorAcknowledgment(t *testing.T) {
 	}
 }
 
-func TestPredecessorStopDoesNotRelaxOtherCalls(t *testing.T) {
+func TestPreV9DaemonRejected(t *testing.T) {
 	cli := New("unused")
 	defer cli.Close()
 	stop := `{"api_version":"v1","state_version":6,"status":"stopping","pid":10,"lease_duration":"30s"}`
@@ -95,18 +94,18 @@ func TestPredecessorStopDoesNotRelaxOtherCalls(t *testing.T) {
 		}
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}, "X-Backlot-Api-Version": {"v1"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})
-	if result, err := cli.Stop(context.Background()); err != nil || result.StateVersion != 6 {
-		t.Fatal(err)
+	if _, err := cli.Stop(context.Background()); err == nil {
+		t.Fatal("pre-v9 shutdown acknowledgment accepted")
 	}
 	if _, err := cli.Status(context.Background()); err == nil {
-		t.Fatal("predecessor Status accepted")
+		t.Fatal("pre-v9 Status accepted")
 	}
 	for _, path := range []string{"/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/scenes/start", "/v1/gateway/start", "/v1/gateway/restart"} {
 		if err := cli.call(context.Background(), http.MethodPost, path, nil, &v1.InstanceResponse{}); err == nil {
-			t.Fatal("predecessor mutation accepted", path)
+			t.Fatal("pre-v9 mutation accepted", path)
 		}
 	}
-	// The response exception is method/path scoped even with the same result type.
+	// The same result type cannot admit an incompatible daemon through another path.
 	for _, target := range []struct{ method, path string }{{http.MethodGet, "/v1/stop"}, {http.MethodPost, "/other"}} {
 		if err := cli.call(context.Background(), target.method, target.path, nil, &v1.DaemonStatusResponse{}); err == nil {
 			t.Fatal("unrelated call accepted")
@@ -117,7 +116,7 @@ func TestPredecessorStopDoesNotRelaxOtherCalls(t *testing.T) {
 	}
 }
 
-func TestPredecessorStopPreservesTransportAndCancellationErrors(t *testing.T) {
+func TestStopPreservesTransportAndCancellationErrors(t *testing.T) {
 	for _, cancelled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "transport", true: "cancellation"}[cancelled], func(t *testing.T) {
 			cli := New("unused")

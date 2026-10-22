@@ -410,7 +410,7 @@ func TestMovedAndReplacedCheckoutNeverAdopted(t *testing.T) {
 }
 
 func TestStateVersionRejectedWithoutMutation(t *testing.T) {
-	for _, version := range []string{"1", "2", "3", "4", "5", "7", "999"} {
+	for _, version := range []string{"1", "2", "3", "4", "5", "6", "7", "8", "999"} {
 		t.Run(version, func(t *testing.T) {
 			dir := shortTemp(t)
 			state, err := openStore(dir)

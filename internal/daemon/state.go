@@ -103,7 +103,7 @@ func openStateVersion(tx *bolt.Tx, target int, steps []stateMigration) error {
 	if err := requireStateBuckets(tx); err != nil {
 		return statePreflightError(err)
 	}
-	if err := validateStateAuthority(tx, strconv.Itoa(target)); err != nil {
+	if err := validateStateAuthority(tx); err != nil {
 		return statePreflightError(err)
 	}
 	return tx.Bucket([]byte("meta")).Put([]byte("version"), []byte(strconv.Itoa(target)))

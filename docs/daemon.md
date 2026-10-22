@@ -53,13 +53,12 @@ an explicit mutating Doctor probe, the shared Go client checks current API/state
 compatibility with a fresh bounded status request. A running older or
 malformed daemon is rejected before scene mutation; no compatibility result is
 cached. Historical reads and snapshot cleanup calls do not perform this
-configuration preflight. For the supported main v6/v8-to-v9 upgrade, this CLI's normal
-`daemon stop` accepts only an exact v6/v8 `stopping` response to `POST /v1/stop`, with
-all ordinary response/error checks and its reported version preserved. Once
-shutdown finishes, start this binary on the same `--state-dir`. The acknowledgment
-does not prove process exit or released locks, and adds no polling/automatic
-restart. Status stays strict v9. Preserve other unsupported formats for diagnosis
-and their matching binary's lifecycle; do not discard ownership records.
+configuration preflight. Status and shutdown responses require matching API/state
+versions, including `daemon stop`; there is no pre-v9 shutdown exception. Preserve
+unsupported state for diagnosis and its matching binary's lifecycle; do not discard
+ownership records. Stop the old daemon before upgrading, wait for process exit and
+lock release, then explicitly start the new binary. A stopping acknowledgment alone
+does not prove either, and adds no polling or automatic restart.
 
 `prepare` discovers the project locally and sends an absolute path to the daemon.
 The daemon reuses strict manifest validation/environment resolution. Provider
@@ -273,8 +272,8 @@ format and rejection/cleanup rules.
 Empty lists contain an empty array. Historical/destroyed targets remain discoverable.
 `status` is a CLI alias for `inspect`. Every instance response removes snapshot
 ownership tokens while preserving the private durable recovery authority. Stop
-the old daemon before starting the new binary; only the supported predecessor's
-normal shutdown acknowledgment has the [bounded exception](#configuration-state-compatibility).
+the old daemon before upgrading; use its matching binary for an incompatible
+daemon, following [state compatibility](#configuration-state-compatibility).
 Fixture discovery and explicit sensitive access use `FixturesRequest` through
 `POST /v1/fixtures` and `/v1/fixtures/secret`; see [evidence](evidence.md).
 
@@ -597,17 +596,15 @@ copy metadata remain supported. Version9 fences older readers; downgrade is unsu
 
 ## Configuration state compatibility
 
-Registered private project composition uses daemon state version 9, with a direct
-one-way in-place upgrade from the previous merged main state versions 6 and 8. Validation and
-the format fence share a transaction; rejected predecessor state stays unchanged.
-From v9 onward, retain and apply every required real migration in that transaction
-for skip-release upgrades; see the [migration policy](adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md).
-The new CLI may normally stop v6/v8 through its exact `stopping` acknowledgment on
-`POST /v1/stop`, without relaxing Status or consuming operations. This acknowledgment
-is not final process-exit/lock-release proof; it does not trigger automatic startup.
-Versions 5 and 7 and other unsupported formats do not migrate. Existing snapshots
-remain authoritative for recorded cleanup; missing historical private/effective
-provenance stays unrecorded. Eligible historical prepared/stopped starts capture
+Registered private project composition uses daemon state version 9, the minimum
+supported format. Pre-v9 databases are rejected unchanged. From v9 onward, retain
+and apply every required real migration in one transaction for skip-release
+upgrades; see the [migration policy](adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md).
+Status and shutdown responses require matching API/state versions. Stop an
+incompatible daemon using its matching binary before upgrading; a stopping
+acknowledgment does not prove process exit or lock release or trigger automatic startup.
+Existing snapshots remain authoritative for recorded cleanup; missing historical
+private/effective provenance stays unrecorded. Eligible historical prepared/stopped starts capture
 current project-only values with existing retained-resource/sensitive-drift fences
 and adopt them atomically with execution acceptance. Ordinary version 9 stop/start
 retains its immutable snapshot. The independent project registry remains format 1.

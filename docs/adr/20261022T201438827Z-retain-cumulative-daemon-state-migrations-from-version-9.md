@@ -13,7 +13,8 @@ superseded_by: []
 Retain each real daemon state migration from version 9 onward and apply all
 required steps at startup in one existing bbolt write transaction. Users can skip
 releases and upgrade with the newest binary, without intermediate binaries or a
-state reset. Preserve the existing supported main v6/v8-to-v9 transitions.
+state reset. Version 9 is the minimum supported format; pre-v9 state is rejected
+unchanged.
 
 This decision replaces only the state-transition policy in the
 [native session decision](20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md).
@@ -24,10 +25,11 @@ configuration/privacy contracts continue in force by reference.
 
 [Issue #66](https://github.com/octacian/backlot/issues/66) asks for repeatable
 compatibility evidence and a maintainable upgrade policy. The approved outcome
-sets v9 as the forward baseline. The current opener already validates v6/v8/v9
-and fences v6/v8 to v9 in one transaction, but the accepted policy explicitly
-excludes a retained chain. Repeating predecessor-specific delivery exercises or
-requiring intermediate releases would defeat the approved outcome.
+sets v9 as the forward baseline. The previous opener accepted v6/v8/v9, but the
+owner chose to drop pre-v9 support because Backlot has no adopters to migrate.
+Retaining preproduction validation and old-daemon exceptions adds maintenance
+without a current user need. Repeating predecessor-specific delivery exercises or
+requiring intermediate releases would defeat the approved forward outcome.
 
 Prefer a tested existing migration library when it fits. The inspected
 [golang-migrate interface](https://github.com/golang-migrate/migrate/blob/504568a3cbd23b8754760f55a3d89aec1b0c4963/database/driver.go)
@@ -43,12 +45,12 @@ its metadata schema rather than an independently reusable migration library.
 
 ## Decision
 
-Keep migration dispatch private to `internal/daemon`, beside the existing opener
-and predecessor checks. Use an explicit ordered list of source/destination
+Keep migration dispatch private to `internal/daemon`, beside the existing opener.
+Use an explicit ordered list of source/destination
 versions and Go functions accepting the already-open `*bbolt.Tx`. Permit only
 listed forward transitions; reject malformed versions, unsupported predecessors,
-missing steps, and newer state. Retain the existing v6/v8 bridge to v9; subsequent
-real steps continue from v9. No registry, plugin interface, migration scripting,
+missing steps, and newer state. Do not retain pre-v9 migration entries; real steps
+start from the v9 baseline. No registry, plugin interface, migration scripting,
 second history store, dirty marker, downgrade path or new dependency is needed.
 Keep `StateVersion` at 9 until an actual persisted-format change requires a bump;
 representative later versions belong only to tests.
@@ -59,7 +61,7 @@ uses source-appropriate layout and authority checks before transformation, then
 runs the complete path and validates the resulting current authority before
 writing the final version fence. Do not apply today's required bucket layout or
 future-only decoder requirements to an older format before its step can convert
-it. Preserve current v6/v8 validation and incompatible experimental-v6 rejection.
+it. Reject all pre-v9 formats before authority validation or runtime recovery.
 Each future change supplies only the historical decoding needed by that step;
 current structs are not historical fixture evidence.
 
@@ -76,8 +78,9 @@ process actuation, registry writes or retained-file effects.
 Recovery follows successful database open under its existing ownership rules;
 opening state never restarts workloads. Operators stop the old daemon normally,
 wait for shutdown/lock release, then explicitly start the new binary on the same
-directory. Existing v6/v8 shutdown-response compatibility stays bounded as today;
-future wire shutdown compatibility must be decided with the relevant real change.
+directory. Client status and shutdown responses require matching API/state versions;
+use the matching binary for an incompatible daemon's lifecycle. Future wire shutdown
+compatibility must be decided with the relevant real change.
 There is no automatic handover, polling restart or promise that older binaries
 can read newer state. Preserve incompatible state for diagnosis; reset is not an
 ordinary upgrade step.
@@ -87,8 +90,8 @@ record its source revision, binary/build provenance, fixture inputs, commands an
 artifact hashes, and commit it with a regeneration procedure. Use only fixture
 values and private owned resources. Copy closed database files; tests copy the
 fixture to temporary state before opening it and never recover its historical
-external paths. Retain existing v6/v8 support/tests without recreating historical
-fixture matrices. For each future real format change, capture its predecessor
+external paths. Do not retain pre-v9 fixture matrices or old-binary test hooks.
+For each future real format change, capture its predecessor
 before changing the producer, retain prior steps/fixtures, and verify opening the
 oldest retained fixture through the complete current path and reopening it.
 Removing a supported path requires an explicit compatibility decision.
@@ -117,6 +120,8 @@ all-step rollback. No current transformation or schema bump is justified.
 
 ## Alternatives considered
 
+- **Preserve preproduction v6/v8 compatibility.** Adds validation, old-daemon
+  exceptions and fixture maintenance without existing adopters; v9 is the baseline.
 - **Keep only the latest predecessor or require intermediate binaries.** Less
   retained code, but fails the approved skip-release outcome.
 - **Adopt an inspected migration package.** Preferable if it removes maintained
@@ -140,6 +145,6 @@ change needs external-file effects or different shutdown wire compatibility.
 
 - [Issue #66](https://github.com/octacian/backlot/issues/66)
 - [Current state opener](../../internal/daemon/state.go), [authority preflight](../../internal/daemon/state_authority.go), and [legacy validation](../../internal/daemon/state_upgrade.go)
-- [Upgrade tests](../../internal/daemon/state_upgrade_test.go), [interruption tests](../../internal/daemon/state_integration_test.go), and [opt-in actual predecessor evidence](../../internal/daemon/state_actual_predecessor_test.go)
+- [Migration tests](../../internal/daemon/state_migration_test.go), [interruption tests](../../internal/daemon/state_integration_test.go), and [retained v9 fixture](../../internal/daemon/testdata/state/v9/README.md)
 - [State and recovery architecture](../architecture.md#state-and-recovery)
 - [State operation](../containers.md#state-compatibility) and [testing guidance](../testing.md)

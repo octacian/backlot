@@ -1,0 +1,1 @@
+{"name":"backlot-native-watchers","private":true,"type":"module","engines":{"node":"26.8.1"},"scripts":{"dev":"vite"},"devDependencies":{"vite":"8.3.4"}}

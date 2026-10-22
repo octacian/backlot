@@ -82,7 +82,7 @@ func TestStateSixUpgradePreservesRecordsAndRollsBack(t *testing.T) {
 		if err := openStateTransaction(tx); err != nil {
 			return err
 		}
-		if string(tx.Bucket([]byte("meta")).Get([]byte("version"))) != "8" {
+		if string(tx.Bucket([]byte("meta")).Get([]byte("version"))) != "9" {
 			t.Fatal("no tentative fence")
 		}
 		return injected
@@ -95,7 +95,7 @@ func TestStateSixUpgradePreservesRecordsAndRollsBack(t *testing.T) {
 	if err := s.store.db.Update(openStateTransaction); err != nil {
 		t.Fatal(err)
 	}
-	before["meta"]["version"] = "8"
+	before["meta"]["version"] = "9"
 	if !reflect.DeepEqual(before, stateContents(t, s.store)) {
 		t.Fatal("upgrade changed retained records")
 	}
@@ -407,7 +407,7 @@ func TestStateSixDestroyedBeforeSlotRemovalRemainsSupported(t *testing.T) {
 	if err := state.db.Update(openStateTransaction); err != nil {
 		t.Fatal(err)
 	}
-	before["meta"]["version"] = "8"
+	before["meta"]["version"] = "9"
 	if !reflect.DeepEqual(before, stateContents(t, state)) {
 		t.Fatal("destroy gap history or slot changed")
 	}
@@ -454,7 +454,7 @@ func TestStateSixRequiresNonDestroyedPersistentSlot(t *testing.T) {
 				if err != nil {
 					t.Fatal("slotless destroyed persistent history rejected", err)
 				}
-				before["meta"]["version"] = "8"
+				before["meta"]["version"] = "9"
 			} else {
 				code(t, err, "state_corrupt")
 				after, err := os.ReadFile(path)

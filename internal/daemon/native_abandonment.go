@@ -155,8 +155,20 @@ func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Insta
 	if len(journal.Groups) == 0 && len(resources.Containers) == 0 {
 		pending = true
 	}
+	// A sticky observation still requires an exact-attempt acknowledgement even
+	// after every authority has recovered a successful receipt. Retain those
+	// known authorities so data deletion can independently recheck their proof;
+	// an empty unknown set is not an unidentified survivor.
+	sticky := false
+	for _, observed := range instance.Execution.NativeCleanup {
+		sticky = sticky || observed.FencesResources(instance.NativeOwnershipWarnings)
+	}
+	auditGroups := unknown
+	if sticky && len(unknown) == 0 && !pending {
+		auditGroups = append([]native.Identity(nil), journal.Groups...)
+	}
 	boot, _ := native.CurrentBoot()
-	audit := nativeAbandonment{Attempt: attempt, RecordedAt: time.Now().UTC().Format(time.RFC3339Nano), Reason: nativeWaiverWarning, Boot: boot, Groups: unknown, Pending: pending, PendingBoot: journal.PendingBoot, Result: instance.Execution}
+	audit := nativeAbandonment{Attempt: attempt, RecordedAt: time.Now().UTC().Format(time.RFC3339Nano), Reason: nativeWaiverWarning, Boot: boot, Groups: auditGroups, Pending: pending, PendingBoot: journal.PendingBoot, Result: instance.Execution}
 	err = s.db.Update(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -176,7 +188,7 @@ func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Insta
 			return problem("conflict", "native claims changed before waiver; preserved")
 		}
 		audit.Result = r.Instance.Execution
-		if len(unknown) > 0 || pending {
+		if len(unknown) > 0 || pending || sticky {
 			r.NativeAbandonments = append(r.NativeAbandonments, audit)
 		}
 		current.Groups = nil
@@ -184,7 +196,9 @@ func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Insta
 		current.PendingBoot = ""
 		result := *r.Instance.Execution
 		result.Kept = false
-		result.CollectionFailure = "native output/status collection could not be verified"
+		if result.CollectionFailure == "" {
+			result.CollectionFailure = "native output/status collection could not be verified"
+		}
 		// Non-native fences succeeded above. Prior cleanup failure stays in the audit.
 		result.CleanupFailure = ""
 		result.CleanupDetails = nil

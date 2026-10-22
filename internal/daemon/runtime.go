@@ -167,7 +167,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 			return empty, loadErr
 		}
 		// Only a predecessor snapshot lacks both provenance additions. Ordinary
-		// state8 stop/start retains its immutable snapshot, even after edits.
+		// state9 stop/start retains its immutable snapshot, even after edits.
 		if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" &&
 			response.Instance.Plan.Lifetime == v1.Persistent &&
 			(response.Instance.Status == v1.Prepared || response.Instance.Status == v1.Stopped) {
@@ -456,6 +456,9 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 				cleanupMu.Lock()
 				defer cleanupMu.Unlock()
 				cleanup = errors.Join(cleanup, err)
+				if group, ok := work.(*native.Group); ok {
+					mergeNativeCleanup(result, group.CleanupResult())
+				}
 				if exit != nil && exit.CollectionFailure != "" {
 					result.CollectionFailure = "application output collection failed"
 				}
@@ -480,6 +483,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		keep := potentialKeep && (failure != nil || result.Cancelled || result.TerminalExitCode != nil && *result.TerminalExitCode != 0 || result.CollectionFailure != "" || cleanup != nil) && !shuttingDown
 		result.Kept = keep
 		entry.kept = keep
+		omitActiveNativeSuccess(result, entry)
 		_ = save(v1.Stopping)
 		var joined sync.WaitGroup
 		joined.Go(func() {
@@ -502,6 +506,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 				cleanupMu.Lock()
 				defer cleanupMu.Unlock()
 				cleanup = errors.Join(cleanup, err)
+				mergeNativeCleanup(result, group.CleanupResult())
 				if exit := group.Result(); exit != nil && exit.CollectionFailure != "" {
 					result.CollectionFailure = exit.CollectionFailure
 					status = v1.Failed
@@ -526,6 +531,10 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		}
 
 		joined.Wait()
+		omitActiveNativeSuccess(result, entry)
+		if cleanup == nil && result.CleanupFailure != "" {
+			cleanup = errors.New(result.CleanupFailure)
+		}
 
 		if entry.resources != nil && cleanup == nil && !keep {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -889,12 +898,13 @@ func (s *service) launch(ctx context.Context, id, name, executable string, args 
 		_ = file.Close()
 		return nil, err
 	}
+	journal.LaunchPurpose = "application"
 	journal.LaunchPending, journal.PendingBoot = true, boot
 	if err := s.store.saveRuntime(id, *journal); err != nil {
 		_ = file.Close()
 		return nil, err
 	}
-	group, startErr := native.Start(self, file, file)
+	group, startErr := native.StartApplication(self, file, file, name, result.Attempt)
 	journal.LaunchPending, journal.PendingBoot = false, ""
 	closeErr := file.Close()
 	if group != nil {

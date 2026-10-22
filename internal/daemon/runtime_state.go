@@ -19,6 +19,7 @@ type runtimeRecord struct {
 	ExportSource  *v1.ExportSource    `json:"export_source,omitempty"`
 	StartedAt     string              `json:"started_at,omitempty"`
 	Gateway       *gateway.Intent     `json:"gateway,omitempty"`
+	LaunchPurpose string              `json:"launch_purpose,omitempty"`
 	PendingBoot   string              `json:"pending_boot,omitempty"`
 	LaunchPending bool                `json:"launch_pending,omitempty"`
 	ConfigPath    string              `json:"config_path,omitempty"`
@@ -152,6 +153,7 @@ func (s *store) recoverExecution(id string) error {
 		return nil
 	}
 	result := *instance.Execution
+	result.NativeCleanup = append([]v1.NativeCleanupResult(nil), result.NativeCleanup...)
 	var cleanup error
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	cleanup = s.removeGateway(cleanupCtx, id, &r)
@@ -160,6 +162,7 @@ func (s *store) recoverExecution(id string) error {
 	if err != nil {
 		return err
 	}
+	previousBoot := allNativePreviousBoot(r, result.Attempt)
 	pendingAbsent := false
 	if r.LaunchPending {
 		pendingAbsent, _ = native.PreviousBoot(r.PendingBoot)
@@ -177,17 +180,45 @@ func (s *store) recoverExecution(id string) error {
 	if r.LaunchPending {
 		cleanup = errors.Join(cleanup, problem("cleanup_failed", "native guardian launch intent lacks its ownership effect; an inactive helper may remain; preserve and diagnose this instance"))
 	}
+	// Native observations belong to this attempt, including earlier failed
+	// readiness/workload stops. A later bound receipt cannot erase uncertainty.
 	var mu sync.Mutex
 	var joined sync.WaitGroup
 	for _, group := range r.Groups {
+		if group.Protocol != 0 && (group.Purpose != "application" || group.Attempt != r.Attempt || !hasComponent(result.Components, group.Component)) {
+			mu.Lock()
+			cleanup = errors.Join(cleanup, problem("cleanup_failed", "native application authority purpose/attempt/component mismatch; preserve uncertain processes"))
+			mu.Unlock()
+			continue
+		}
 		if proofMissing {
 			continue
 		}
-		joined.Go(func() { err := native.Stop(group, 0); mu.Lock(); cleanup = errors.Join(cleanup, err); mu.Unlock() })
+		joined.Go(func() {
+			observed, err := native.StopResult(group, 0)
+			mu.Lock()
+			cleanup = errors.Join(cleanup, err)
+			mergeNativeCleanup(&result, observed)
+			mu.Unlock()
+		})
 	}
 	joined.Wait()
 	cleanup = errors.Join(cleanup, s.recoverContainers(id, &g))
+	if previousBoot {
+		for i := range result.NativeCleanup {
+			if result.NativeCleanup[i].Confidence != v1.ObservedEmpty {
+				result.NativeCleanup[i].ResourceRelease = "previous_boot"
+			}
+		}
+	}
+	for _, observed := range result.NativeCleanup {
+		if observed.FencesResources(instance.NativeOwnershipWarnings) {
+			cleanup = errors.Join(cleanup, problem("cleanup_failed", observed.Detail))
+		}
+	}
 
+	// Reassess transient non-native failures; retain native fences through their
+	// typed observations rather than making an old mixed error string sticky.
 	result.CleanupFailure = ""
 	result.CleanupDetails = nil
 	if cleanup != nil {
@@ -202,7 +233,9 @@ func (s *store) recoverExecution(id string) error {
 	}
 	result.Kept = false
 	result.CompletedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	result.CollectionFailure = "daemon interruption; output/status collection may contain gaps"
+	if result.CollectionFailure == "" {
+		result.CollectionFailure = "daemon interruption; output/status collection may contain gaps"
+	}
 	result.Failure = "daemon recovery interrupted execution; explicit restart required"
 	result.FailureDetail = &v1.PlanError{Code: "execution_interrupted", Message: result.Failure}
 	if _, err := s.execution(id, v1.Interrupted, &result); err != nil {
@@ -330,4 +363,52 @@ func (s *store) acceptExecutionSnapshot(id string, journal runtimeRecord, result
 		return put(tx, "instances", id, r)
 	})
 	return instance, err
+}
+
+// Multiple readiness/application launches share a component. Preserve the worst
+// confidence for the attempt, including persisted observations during recovery.
+func mergeNativeCleanup(result *v1.ExecutionResult, observed *v1.NativeCleanupResult) {
+	if observed == nil {
+		return
+	}
+	if observed.Confidence != v1.ObservedEmpty && result.CleanupFailure == "" {
+		result.CleanupFailure = "native session cleanup remains incomplete; lifecycle fences retained"
+	}
+	for i, r := range result.NativeCleanup {
+		if r.Component == observed.Component && r.Attempt == observed.Attempt {
+			if r.Confidence == v1.ObservedEmpty {
+				result.NativeCleanup[i] = *observed
+			}
+			return
+		}
+	}
+	result.NativeCleanup = append(result.NativeCleanup, *observed)
+}
+
+func hasComponent(components []v1.ComponentResult, name string) bool {
+	for _, c := range components {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// allNativePreviousBoot requires every recorded launch obligation, including an
+// uncommitted effect, to prove older boot before releasing aggregated observations.
+func allNativePreviousBoot(r runtimeRecord, attempt string) bool {
+	if r.Attempt != attempt || len(r.Groups) == 0 && !r.LaunchPending {
+		return false
+	}
+	if r.LaunchPending {
+		if old, err := native.PreviousBoot(r.PendingBoot); err != nil || !old {
+			return false
+		}
+	}
+	for _, id := range r.Groups {
+		if old, err := native.PreviousBoot(id.Boot); err != nil || !old {
+			return false
+		}
+	}
+	return true
 }

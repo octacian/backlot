@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -33,6 +34,15 @@ type store struct {
 }
 
 func openStore(directory string) (*store, error) {
+	return openStoreContext(context.Background(), directory)
+}
+
+// openStoreContext observes startup cancellation on both sides of validation in
+// the same transaction as the fence. Once commit wins, it never downgrades state.
+func openStoreContext(ctx context.Context, directory string) (*store, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(directory, "state.db")
 	if _, err := os.Lstat(path); err == nil {
 		if err := localipc.File(path, false); err != nil {
@@ -46,7 +56,15 @@ func openStore(directory string) (*store, error) {
 		return nil, problem("state_unavailable", "cannot open state database; check permissions or another daemon")
 	}
 	s := &store{db: db, directory: directory}
-	err = db.Update(openStateTransaction)
+	err = db.Update(func(tx *bolt.Tx) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := openStateTransaction(tx); err != nil {
+			return err
+		}
+		return ctx.Err()
+	})
 	if err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
@@ -59,24 +77,27 @@ func openStateTransaction(tx *bolt.Tx) error {
 	meta := tx.Bucket([]byte("meta"))
 	if meta != nil {
 		version := meta.Get([]byte("version"))
-		if string(version) != strconv.Itoa(v1.StateVersion) && string(version) != "6" {
-			return problem("state_version", fmt.Sprintf("unsupported state format; this binary requires version %d (in-place upgrade from version 6 only); preserve this state and use its matching binary for diagnosis and lifecycle; other versions cannot upgrade with this binary; state was not modified", v1.StateVersion))
+		if string(version) != strconv.Itoa(v1.StateVersion) && string(version) != "6" && string(version) != "8" {
+			return problem("state_version", fmt.Sprintf("unsupported state format; this binary requires version %d (in-place upgrade from supported merged-main versions 6 and 8 only); preserve this state and use its matching binary for diagnosis and lifecycle; other versions cannot upgrade with this binary; state was not modified", v1.StateVersion))
 		}
 		// Existing state must have its complete layout before it can be opened.
 		for _, name := range bucketNames {
 			if tx.Bucket([]byte(name)) == nil {
-				return problem("state_corrupt", "private state bucket missing; state was not modified")
+				return problem("state_corrupt", "private state bucket missing; state was not modified; preserve it and use its matching binary for diagnosis and lifecycle")
 			}
 		}
-		if string(version) == "6" {
+		if err := validateStateAuthority(tx, string(version)); err != nil {
+			return statePreflightError(err)
+		}
+		if string(version) == "6" || string(version) == "8" {
 			if err := validateStateSix(tx); err != nil {
-				return err
+				return statePreflightError(err)
 			}
 		}
 	} else {
 		// Existing buckets without a version are not safe to adopt.
 		if err := tx.ForEach(func(_ []byte, _ *bolt.Bucket) error {
-			return problem("state_version", "state format is missing; state was not modified")
+			return problem("state_version", "state format is missing; state was not modified; preserve it and use its matching binary for diagnosis and lifecycle")
 		}); err != nil {
 			return err
 		}
@@ -87,6 +108,16 @@ func openStateTransaction(tx *bolt.Tx) error {
 		}
 	}
 	return tx.Bucket([]byte("meta")).Put([]byte("version"), []byte(strconv.Itoa(v1.StateVersion)))
+}
+
+// statePreflightError keeps the domain code while giving every rejected known
+// record the same non-destructive operational next step. No private cause leaks.
+func statePreflightError(err error) error {
+	var detail *v1.PlanError
+	if errors.As(err, &detail) {
+		return problem(detail.Code, detail.Message+"; state was not modified; preserve it and use its matching binary for diagnosis and lifecycle")
+	}
+	return problem("state_corrupt", "invalid retained state; state was not modified; preserve it and use its matching binary for diagnosis and lifecycle")
 }
 
 func jsonObject(data []byte) bool {

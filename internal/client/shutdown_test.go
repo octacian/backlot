@@ -19,7 +19,8 @@ func TestStopAcceptsOnlyExactPredecessorAcknowledgment(t *testing.T) {
 		status, version                   int
 	}{
 		{"predecessor", valid, "v1", "application/json", "", 200, 6},
-		{"current", strings.Replace(valid, `"state_version":6`, `"state_version":8`, 1), "v1", "application/json", "", 200, 8},
+		{"predecessor8", strings.Replace(valid, `"state_version":6`, `"state_version":8`, 1), "v1", "application/json", "", 200, 8},
+		{"current", strings.Replace(valid, `"state_version":6`, `"state_version":9`, 1), "v1", "application/json", "", 200, 9},
 		{"running", strings.Replace(valid, `"stopping"`, `"running"`, 1), "v1", "application/json", "api_version", 200, 0},
 		{"five", strings.Replace(valid, `"state_version":6`, `"state_version":5`, 1), "v1", "application/json", "api_version", 200, 0},
 		{"seven", strings.Replace(valid, `"state_version":6`, `"state_version":7`, 1), "v1", "application/json", "api_version", 200, 0},

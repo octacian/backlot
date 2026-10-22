@@ -387,7 +387,13 @@ admin stays loopback. It never changes existing gateways, machine/browser trust
 or DNS. The fixture bound listener is joined on cleanup. These tests include
 nonzero missing-trust failure/recovery, provenance drift, deferred unavailable
 runtime, retained data, cancellation after creation/start, shutdown joins,
-lost-create-effect recovery and mismatched-authority preservation. Missing opt-in
+lost-create-effect recovery and mismatched-authority preservation. The public-CA
+probe verifies a certificate-only 0444 file bind under a private 0700 parent while
+retaining capless root, read-only rootfs, no-new-privileges and the five-second TLS
+deadline. Source CA/key bytes and modes remain private and unchanged. Focused
+`TestDoctorPublicCA*` tests cover bounded pinned-certificate validation, partial
+allocation, tampering, consumer uncertainty and inspection/absent-file recovery.
+Missing opt-in
 settings skip and do not establish provider evidence. The ownership suite also
 requires Docker CLI's classic builder (`DOCKER_BUILDKIT=0`) to build a uniquely
 labeled healthcheck fixture from the exact inspected local diagnostic base ID,
@@ -396,3 +402,29 @@ healthcheck executes; the actual probe's effective Engine config disables it
 and has no healthcheck execution state. Consumers stop before the exact created
 image is removed and its absence verified. Production doctor never pulls/builds
 images; production/default gateway exposure stays unchanged.
+
+## Native watcher example and browser HMR
+
+Prepare a private copy of `examples/native-watchers` with Go 1.27.1, Air 1.67.4,
+Node 26.8.1 and `npm ci --ignore-scripts` (Vite 8.3.4). Put those tools on the
+fixture daemon PATH. The test mutates the private copy's `main.js`; never point it
+at a working checkout. Select an existing private empty fixture root on a short
+path, explicit stock Caddy, and Linux Chromium/certutil:
+
+```sh
+BACKLOT_WATCHER_TEST_PROJECT=/absolute/private/native-watchers \
+BACKLOT_WATCHER_TEST_ROOT=/tmp/private-watcher-fixture \
+BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
+BACKLOT_BROWSER_TEST_BINARY=/absolute/path/to/chromium \
+BACKLOT_CERTUTIL_TEST_BINARY=/usr/bin/certutil \
+  go test ./internal/daemon -run '^TestNativeWatchers$' -count=1 -v -timeout=9m
+```
+
+This builds the real race CLI, launches ordinary Air/npm through the daemon,
+uses default canonical hostname resolution and verified TLS, rejects missing
+browser trust, imports only the fixture public root into disposable HOME/NSS,
+and checks an HMR edit in the same browser document. Authenticated teardown and
+browser joins precede fixture removal. A failed cleanup preserves private state;
+no TLS bypass, resolver override, user/system trust mutation or Docker is used.
+This bounded browser gate does not establish macOS system/browser adoption or
+replace frozen native/provider/regression and exact published-content CI gates.

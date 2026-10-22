@@ -69,6 +69,19 @@ func output(c *urfave.Command, value any, err error) error {
 		if err == nil && result.Instance.Execution != nil && result.Instance.Execution.Origin != "" {
 			_, err = fmt.Fprintf(c.Writer, "URL: %s\n", result.Instance.Execution.Origin)
 		}
+		if result.Instance.Execution != nil && err == nil {
+			for _, r := range result.Instance.Execution.NativeCleanup {
+				if _, err = fmt.Fprintf(c.Writer, "Native cleanup %s: %s (%s)\n%s\n", r.Component, r.Confidence, r.Reason, r.Detail); err != nil {
+					break
+				}
+				if r.ResourceRelease != "" {
+					_, err = fmt.Fprintf(c.Writer, "Native resource release: %s (historical confidence and collection unchanged)\n", r.ResourceRelease)
+					if err != nil {
+						break
+					}
+				}
+			}
+		}
 		if result.Instance.Execution == nil && err == nil {
 			_, err = fmt.Fprintln(c.Writer, "Metadata only; no application work executed or readiness observed.")
 		}

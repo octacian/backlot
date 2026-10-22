@@ -49,9 +49,9 @@ daemon shutdown. Prove allocation-intent recovery before external resources arri
 Implemented for independent review: shared native run/restart/stop/log contracts,
 daemon-owned guardian activation, TCP/HTTP/command readiness, finite dependency
 jobs, deadlines including zero/unlimited, lease cancellation, durable logs and
-crash reconciliation. Commands and descendants must remain in their supervised
-group; see the [native guide](daemon.md#native-execution) and
-[supervision decision](adr/20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md).
+crash reconciliation. Application descendants may create groups within their guardian-owned
+session; see the [native guide](daemon.md#native-execution) and
+[supervision decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md).
 This milestone does not implement containers, publication, non-port resources,
 fresh-only jobs, artifact extraction, keep-on-failure or retention policy.
 Independent reviews and required final acceptance/CI remain gates.
@@ -60,7 +60,10 @@ Run a native persistent fixture and finite test job end to end. Add probe deadli
 port-conflict handling, explicit restart, process-tree cancellation, serialized
 lifecycle operations, and owned log capture with historical/follow APIs.
 
-Prove child processes cannot outlive an acknowledged successful stop. Exercise
+For strict system helpers prove group absence after acknowledged stop. For
+application sessions require bounded identity-safe cleanup and truthful observed-empty
+confidence under the accepted missed-process risk; known live/incomplete/lost
+authority must remain fenced. Exercise
 startup interruption, unexpected exits, parent/daemon crashes, and uncertain
 ownership. Implement clear interrupted/failed states rather than auto-restart.
 
@@ -274,7 +277,7 @@ See [contracts and image requirements](daemon.md#scoped-provider-diagnostics).
 Early real CLI/API/daemon/native/Docker/Caddy/data success, missing container trust
 failure/recovery and preserved-data cleanup were exercised before broad regressions;
 revision-bound private delivery evidence records fixture/tool/image dependencies.
-See [state compatibility](containers.md#state-compatibility) for v8: previous main v6 upgrades in place with preserved records and data; v5/v7
+See [state compatibility](containers.md#state-compatibility) for v9: supported main v6/v8 upgrades in place with preserved records and data; v5/v7
 and other unsupported formats are rejected unchanged. Independent reviews,
 frozen provider/browser/macOS suites and published-HEAD CI remain required
 before delivery readiness; no browser/application trust adoption is claimed.
@@ -296,8 +299,8 @@ The early real Ubuntu ci-scenes success/failure/recovery, teardown/relocation an
 browser preview precede broader feature regression development. Independent Low
 and fresh High reviews, final frozen complete provider/browser/action gates and
 published-revision CI remain required; this paragraph does not claim readiness.
-Binary distribution/version tags remain #25; the direct v6-to-v8 state transition
-is scoped by the configuration decision.
+Binary distribution/version tags remain #25; the direct supported-main v6/v8-to-v9 state transition
+is scoped by the native session decision.
 
 ## Registered project configuration (#48)
 
@@ -305,10 +308,10 @@ Implemented for independent review: explicit local project setup, external priva
 registry/generations shared by Git common-directory identity and manifest path,
 private-only input values and strict tools composition, atomic edits/removal repair, hidden terminal input,
 local explicit reveal, private launch/current provenance and effective drift.
-Daemon state advances directly from previous main v6 to v8 in place, with typed
+Daemon state advances directly from supported main v6/v8 to v9 in place, with typed
 validation, retained ownership/data and current-only legacy activation; old private generations require
 explicit operator retention/erasure decisions. See the [setup guide](manifest.md#registered-private-project-configuration)
-and [current decision](adr/20261021T001732173Z-register-private-project-configuration.md).
+and [configuration decision and inherited contracts](adr/20261021T001732173Z-register-private-project-configuration.md).
 Independent implementation reviews, frozen full validation and published-HEAD CI
 remain gates; this section does not claim final feature readiness.
 
@@ -326,3 +329,14 @@ Early real CLI/daemon/native failure/recovery and peer preservation precede focu
 regressions; independent implementation reviews, frozen complete applicable suites
 and exact published-revision CI remain delivery gates. Attached owner #50 and
 streaming/history #54 remain separate; no schema or dependency change is needed.
+
+## Native development watchers (#49)
+
+General application-session supervision integrates bounded identity handles into
+authenticated guardian membership/cleanup, application/readiness launches and
+private state v9. Stock system helpers retain strict pinned-group proof. Shared
+per-component cleanup confidence reaches status/doctor/exports, retaining original
+job exits and unresolved ownership fences. The [Air/Vite example](../examples/native-watchers/README.md)
+uses ordinary application tooling. Initial target adapter CI is feasibility only;
+independent final Low/High, frozen runtime/provider/browser suites and exact final
+published-content CI remain delivery gates.

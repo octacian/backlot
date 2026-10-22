@@ -51,11 +51,11 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 	recoveryErr := s.diagnosticRecoveryErr
 	s.mu.Unlock()
 	pending, pendingErr := s.store.diagnosticPending(active)
-	if pending || pendingErr != nil {
+	if recoveryErr == nil && (pending || pendingErr != nil) {
 		recoveryErr = problem("cleanup_failed", "diagnostic recovery pending")
 	}
 	if recoveryErr != nil {
-		diagnosticAdd(&r, "diagnostic_cleanup", "daemon/owned Docker", v1.DoctorFailed, "previous diagnostic resource cleanup is unresolved; preserve state, restore recorded provider access and restart daemon to retry exact ownership recovery")
+		diagnosticAdd(&r, "diagnostic_cleanup", "daemon/owned Docker", v1.DoctorFailed, diagnosticRecoveryMessage(recoveryErr))
 	}
 	diagnosticAdd(&r, "daemon_api_state", "daemon", v1.DoctorOK, "v1 daemon and supported state format reachable; this does not establish provider readiness")
 	if request.Scene == "" && request.InstanceID == "" {
@@ -145,6 +145,21 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 	}
 	if snap.Plan.Publish != nil {
 		s.doctorGateway(ctx, &r, snap, instance)
+	}
+	if instance.Execution != nil {
+		for _, cleanup := range instance.Execution.NativeCleanup {
+			status := v1.DoctorOK
+			if cleanup.Confidence != v1.ObservedEmpty {
+				status = v1.DoctorFailed
+			}
+			detail := cleanup.Detail
+			if cleanup.ResourceRelease == "previous_boot" {
+				detail = "Historical observation: " + detail + " Native resources released by earlier-boot proof; collection gaps remain."
+			} else if cleanup.Confidence != v1.ObservedEmpty && !cleanup.FencesResources(instance.NativeOwnershipWarnings) {
+				detail = "Historical observation: " + detail + " Native claims were explicitly relinquished for this attempt; unknown survivors may still run or write. Cleanup and collection were not verified."
+			}
+			diagnosticAdd(&r, "native_cleanup", cleanup.Component, status, detail)
+		}
 	}
 	running := instance.Execution != nil && (instance.Status == v1.RuntimeReady || instance.Status == v1.Starting || instance.Execution.Kept)
 	if !running {

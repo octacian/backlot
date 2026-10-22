@@ -32,6 +32,7 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	original := *instance.Execution
 	original.CollectionFailure = "lost original output"
 	original.CleanupFailure = "native authority missing"
+	original.NativeCleanup = []v1.NativeCleanupResult{{Component: "test", Attempt: original.Attempt, Confidence: v1.CleanupAuthorityLost, Reason: "guardian_authority_lost", Detail: "Historical guardian authority lost."}}
 	original.TerminalExitCode = new(17)
 	if _, err := s.store.execution(target, v1.Failed, &original); err != nil {
 		t.Fatal(err)
@@ -69,6 +70,12 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	if len(retained.NativeAbandonments) != 1 || !retained.NativeAbandonments[0].Pending || retained.NativeAbandonments[0].Result.CleanupFailure == "" || *retained.NativeAbandonments[0].Result.TerminalExitCode != 17 {
 		t.Fatal("exact private history lost")
 	}
+	if len(forced.Execution.NativeCleanup) != 1 || forced.Execution.NativeCleanup[0] != original.NativeCleanup[0] || forced.Execution.NativeCleanup[0].FencesResources(forced.NativeOwnershipWarnings) {
+		t.Fatal("waiver lost historical observation or kept native claim fenced")
+	}
+	if retained.NativeAbandonments[0].Result.NativeCleanup[0] != original.NativeCleanup[0] {
+		t.Fatal("waiver rewrote original audit observation")
+	}
 	if _, err := s.stopRuntimeRequest(context.Background(), v1.StopRequest{InstanceID: target, Force: true, ExpectedAttempt: original.Attempt}); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +93,7 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	if data, err := os.ReadFile(sentinel); err != nil || string(data) != "keep" {
 		t.Fatal("destructive waiver bypass", err)
 	}
-	abandoned, exportErr := s.export(context.Background(), v1.ExportRequest{APIVersion: v1.Version, InstanceID: target, Output: filepath.Join(t.TempDir(), "abandoned")})
+	abandoned, exportErr := s.export(context.Background(), v1.ExportRequest{APIVersion: v1.Version, InstanceID: target, Output: filepath.Join(privateExportParent(t), "abandoned")})
 	code(t, exportErr, "export_incomplete")
 	if abandoned.Complete || abandoned.Published || len(abandoned.Result.NativeOwnershipWarnings) != 1 {
 		t.Fatal("strict export hid abandoned attempt", abandoned)
@@ -94,7 +101,7 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 
 	// Private authority sentinels stay in retained history, never the portable report.
 	// The unidentified-intent guard above and later-boot proof below never actuate them.
-	privateAuthority := native.Identity{Token: newID(), Control: filepath.Join(s.directory, "private-control.sock"), Birth: "private-birth-sentinel"}
+	privateAuthority := native.Identity{PID: 42, Token: newID(), Control: filepath.Join(s.directory, "private-control.sock"), Birth: "private-birth-sentinel"}
 	if err := s.store.db.Update(func(tx *bolt.Tx) error {
 		r, err := load(tx, target)
 		if err != nil {
@@ -135,7 +142,7 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	request := v1.ExportRequest{APIVersion: v1.Version, InstanceID: target, Output: filepath.Join(t.TempDir(), "report")}
+	request := v1.ExportRequest{APIVersion: v1.Version, InstanceID: target, Output: filepath.Join(privateExportParent(t), "report")}
 	report, err := s.export(context.Background(), request)
 	if err != nil || !report.Complete || len(report.Result.NativeOwnershipWarnings) != 1 || report.Result.NativeOwnershipWarnings[0] != warning {
 		t.Fatal("latest clean export lost prior warning", report, err)

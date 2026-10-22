@@ -1,11 +1,11 @@
 ---
 title: 'Register private project configuration'
 date: '2026-10-21'
-status: accepted
+status: superseded
 summary: 'Register project-only private inputs and tool overrides outside checkouts, reuse them across linked worktrees, and isolate CI setup without redirecting application configuration.'
 tags: [configuration, security, identity, cli, persistence, ci, compatibility]
 supersedes: [20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md]
-superseded_by: []
+superseded_by: [20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md]
 ---
 
 # Register private project configuration

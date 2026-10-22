@@ -1,5 +1,11 @@
 package v1
 
+import (
+	"encoding/hex"
+	"regexp"
+	"strings"
+)
+
 // Runtime states distinguish observed execution from metadata preparation.
 const (
 	Starting     InstanceStatus = "starting"
@@ -51,6 +57,30 @@ type ComponentResult struct {
 	ExitCode *int   `json:"exit_code,omitempty"`
 }
 
+// NativeCleanupResult records bounded application-session observation, not universal absence.
+// Strict system helpers retain their stronger pinned-group proof and omit this result.
+type NativeCleanupResult struct {
+	// ResourceRelease explains current native eligibility without changing historical observation.
+	ResourceRelease string                  `json:"resource_release,omitempty"`
+	Component       string                  `json:"component"`
+	Attempt         string                  `json:"attempt"`
+	Confidence      NativeCleanupConfidence `json:"confidence"`
+	Reason          string                  `json:"reason"`
+	Detail          string                  `json:"detail"`
+}
+
+// NativeCleanupConfidence distinguishes successful observation from unresolved cleanup.
+type NativeCleanupConfidence string
+
+const (
+	// ObservedEmpty permits lifecycle release under the accepted missed-process risk.
+	ObservedEmpty NativeCleanupConfidence = "observed_empty"
+	// CleanupIncomplete retains fences because cleanup or required joins failed.
+	CleanupIncomplete NativeCleanupConfidence = "incomplete"
+	// CleanupAuthorityLost retains fences because the original guardian cannot attest cleanup.
+	CleanupAuthorityLost NativeCleanupConfidence = "authority_lost"
+)
+
 // ExecutionResult is the durable redacted runtime view.
 type ExecutionResult struct {
 	// Outcome preserves the terminal execution status across later stop/destroy operations.
@@ -60,19 +90,20 @@ type ExecutionResult struct {
 	Kept             bool            `json:"kept,omitempty"`
 	CompletedAt      string          `json:"completed_at,omitempty"`
 	// EvidenceObservedAt is the persisted inferred retention start for legacy results without a completion time.
-	EvidenceObservedAt string            `json:"evidence_observed_at,omitempty"`
-	EvidenceExpired    bool              `json:"evidence_expired,omitempty"`
-	Artifacts          []ArtifactRecord  `json:"artifacts,omitempty"`
-	Origin             string            `json:"origin,omitempty"`
-	Attempt            string            `json:"attempt"`
-	Components         []ComponentResult `json:"components"`
-	Ports              map[string]int    `json:"ports,omitempty"`
-	Failure            string            `json:"failure,omitempty"`
-	FailureDetail      *PlanError        `json:"failure_detail,omitempty"`
-	CleanupFailure     string            `json:"cleanup_failure,omitempty"`
-	CleanupDetails     []PlanError       `json:"cleanup_details,omitempty"`
-	CollectionFailure  string            `json:"collection_failure,omitempty"`
-	Cancelled          bool              `json:"cancelled,omitempty"`
+	EvidenceObservedAt string                `json:"evidence_observed_at,omitempty"`
+	EvidenceExpired    bool                  `json:"evidence_expired,omitempty"`
+	Artifacts          []ArtifactRecord      `json:"artifacts,omitempty"`
+	Origin             string                `json:"origin,omitempty"`
+	Attempt            string                `json:"attempt"`
+	Components         []ComponentResult     `json:"components"`
+	Ports              map[string]int        `json:"ports,omitempty"`
+	Failure            string                `json:"failure,omitempty"`
+	FailureDetail      *PlanError            `json:"failure_detail,omitempty"`
+	NativeCleanup      []NativeCleanupResult `json:"native_cleanup,omitempty"`
+	CleanupFailure     string                `json:"cleanup_failure,omitempty"`
+	CleanupDetails     []PlanError           `json:"cleanup_details,omitempty"`
+	CollectionFailure  string                `json:"collection_failure,omitempty"`
+	Cancelled          bool                  `json:"cancelled,omitempty"`
 }
 
 // LogsRequest selects retained records by component and absolute record offset.
@@ -134,4 +165,46 @@ type FixtureRecord struct {
 type FixturesResponse struct {
 	APIVersion string          `json:"api_version"`
 	Fixtures   []FixtureRecord `json:"fixtures"`
+}
+
+// Validate checks cleanup enums and bounded public diagnostics without private authority data.
+func (r NativeCleanupResult) Validate() error {
+	bad := func() error { return &PlanError{Code: "invalid_response", Message: "invalid native cleanup result"} }
+	decoded, err := hex.DecodeString(r.Attempt)
+	if err != nil || len(decoded) != 32 || strings.ToLower(r.Attempt) != r.Attempt || !regexp.MustCompile(schemaIdentifier).MatchString(r.Component) || len(r.Detail) == 0 || len(r.Detail) > 256 || strings.ContainsAny(r.Detail, "\x00\r\n") {
+		return bad()
+	}
+	reason := ""
+	switch r.Confidence {
+	case ObservedEmpty:
+		reason = "session_observed_empty"
+	case CleanupIncomplete:
+		reason = "cleanup_incomplete"
+	case CleanupAuthorityLost:
+		reason = "guardian_authority_lost"
+	default:
+		return bad()
+	}
+	if r.ResourceRelease != "" && (r.ResourceRelease != "previous_boot" || r.Confidence == ObservedEmpty) {
+		return bad()
+	}
+	if r.Reason != reason {
+		return bad()
+	}
+	return nil
+}
+
+// FencesResources reports the active native obligation, separately from historical
+// confidence and collection. Only an exact-attempt committed waiver or persisted
+// previous-boot release can explain an incomplete observation without that fence.
+func (r NativeCleanupResult) FencesResources(warnings []NativeOwnershipWarning) bool {
+	if r.Confidence == ObservedEmpty || r.ResourceRelease == "previous_boot" {
+		return false
+	}
+	for _, w := range warnings {
+		if w.Attempt == r.Attempt && w.RecordedAt != "" {
+			return false
+		}
+	}
+	return true
 }

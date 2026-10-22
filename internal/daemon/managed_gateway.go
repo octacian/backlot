@@ -194,6 +194,9 @@ func (s *store) stopManaged(r *managedRecord, group *native.Group) error {
 		r.Pending, r.PendingBoot = false, ""
 	}
 	if r.Identity != nil {
+		if (r.Identity.Protocol != 0 && (r.Identity.Purpose != "strict" || r.Identity.Protocol != 1)) || group != nil && group.Identity != *r.Identity {
+			return problem("gateway_ownership", "managed guardian strict policy binding mismatch; preserve uncertain resources")
+		}
 		var err error
 		if group != nil {
 			err = group.Stop(time.Second)

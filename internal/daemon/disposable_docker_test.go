@@ -4,14 +4,19 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
+	bolt "go.etcd.io/bbolt"
 )
 
 func TestDisposableEvidenceDocker(t *testing.T) {
@@ -58,6 +63,10 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			h.tokens[id] = response.LeaseToken
 			if mode == "cancellation" || mode == "cleanup-failure" {
 				h.waitTerminalRunning(id)
+			}
+			var proveObjectsAbsent func() error
+			if mode == "cleanup-failure" {
+				proveObjectsAbsent = h.observeDisposableDockerObjects(id)
 			}
 			var marker string
 			var proof []byte
@@ -114,6 +123,9 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			}
 			if mode == "cancellation" && !result.Cancelled {
 				t.Fatal("cancellation omitted")
+			}
+			if mode == "collection-failure" {
+				proveObjectsAbsent = h.observeDisposableDockerObjects(id)
 			}
 			if result.Kept != request.Options.KeepOnFailure {
 				t.Fatalf("kept resources=%v want=%v", result.Kept, request.Options.KeepOnFailure)
@@ -173,6 +185,174 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			if err != nil || inspected.Instance.Status != v1.Destroyed || inspected.Instance.Execution.CleanupFailure != "" {
 				t.Fatal("destroy failed", inspected, err)
 			}
+			if proveObjectsAbsent != nil {
+				h.expectDisposableDockerCollectionFailure(inspected.Instance, proveObjectsAbsent)
+			}
 		})
+	}
+}
+
+// These observations never authorize removal. The normal fixture journal owns
+// reconciliation; exact live Engine objects and the directory owner marker give
+// an independent absence check after Destroy, in addition to the closed journal.
+func (h *dockerHarness) observeDisposableDockerObjects(id string) func() error {
+	h.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	objects := map[string]ownedResource{}
+	remember := func(r ownedResource) {
+		if err := verifyResource(ctx, h.engine, r); err != nil {
+			h.t.Fatal("original fixture object ownership unavailable", err)
+		}
+		objects[r.Kind+":"+resourceHandle(r)] = r
+	}
+	list, err := h.engine.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "io.backlot.owner")})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	for _, item := range list.Items {
+		out, err := h.engine.ContainerInspect(ctx, item.ID, client.ContainerInspectOptions{})
+		if errdefs.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		c := out.Container
+		if c.Config == nil || !contains(c.Config.Env, "BACKLOT_FIXTURE="+h.token) || !contains(c.Config.Env, "INSTANCE="+id) {
+			continue
+		}
+		remember(ownedResource{Kind: "container", ID: c.ID, Token: c.Config.Labels["io.backlot.owner"]})
+		for _, m := range c.Mounts {
+			if m.Type == "volume" {
+				volume, err := h.engine.VolumeInspect(ctx, m.Name, client.VolumeInspectOptions{})
+				if err != nil {
+					h.t.Fatal(err)
+				}
+				remember(ownedResource{Kind: "volume", ID: volume.Volume.Name, Token: volume.Volume.Labels["io.backlot.owner"]})
+			}
+		}
+		for _, endpoint := range c.NetworkSettings.Networks {
+			network, err := h.engine.NetworkInspect(ctx, endpoint.NetworkID, client.NetworkInspectOptions{})
+			if err != nil {
+				h.t.Fatal(err)
+			}
+			remember(ownedResource{Kind: "network", ID: endpoint.NetworkID, Token: network.Network.Labels["io.backlot.owner"]})
+		}
+	}
+	fixtures, err := h.cli.Fixtures(ctx, v1.FixturesRequest{APIVersion: v1.Version, InstanceID: id, Component: "each"})
+	if err != nil || len(fixtures.Fixtures) != 1 {
+		h.t.Fatal("original fixture directory unavailable", err)
+	}
+	directory := fixtures.Fixtures[0].Value
+	marker, err := os.ReadFile(filepath.Join(directory, ".backlot-owner"))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	remember(ownedResource{Kind: "directory", Name: directory, Token: string(marker), ID: string(marker)})
+	for _, kind := range []string{"container", "network", "volume", "directory"} {
+		found := false
+		for _, r := range objects {
+			found = found || r.Kind == kind
+		}
+		if !found {
+			h.t.Fatal("independent original fixture observation missing", kind)
+		}
+	}
+	return func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for _, r := range objects {
+			var err error
+			switch r.Kind {
+			case "container":
+				_, err = h.engine.ContainerInspect(ctx, r.ID, client.ContainerInspectOptions{})
+			case "network":
+				_, err = h.engine.NetworkInspect(ctx, r.ID, client.NetworkInspectOptions{})
+			case "volume":
+				_, err = h.engine.VolumeInspect(ctx, r.ID, client.VolumeInspectOptions{})
+			case "directory":
+				_, err = os.Lstat(r.Name)
+				if os.IsNotExist(err) {
+					continue
+				}
+			}
+			if !errdefs.IsNotFound(err) {
+				return errors.New("original fixture object absence unverified: " + r.Kind)
+			}
+		}
+		return nil
+	}
+}
+
+// This exception is deliberately limited to the one fully destroyed Docker-only
+// disposable attempt. Native/Caddy authority, extra instances, pending effects or
+// changed historical results require their own proof and fail this one closed.
+func (h *dockerHarness) expectDisposableDockerCollectionFailure(want v1.Instance, proveObjectsAbsent func() error) {
+	h.t.Helper()
+	if want.Status != v1.Destroyed || want.Execution == nil || want.Execution.CollectionFailure == "" || want.Execution.CleanupFailure != "" || want.Execution.TerminalExitCode == nil || *want.Execution.TerminalExitCode != 0 {
+		h.t.Fatal("expected destroyed original collection-failure result missing")
+	}
+	h.shutdownFailureCode = "collection_failed"
+	h.shutdownFailureProof = func() error {
+		db, err := bolt.Open(filepath.Join(h.dir, "state.db"), 0600, &bolt.Options{ReadOnly: true, Timeout: time.Second})
+		if err != nil {
+			return err
+		}
+		err = db.View(func(tx *bolt.Tx) error {
+			count := 0
+			if err := tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
+				var r record
+				if err := decodeRecord(data, string(key), &r); err != nil {
+					return err
+				}
+				count++
+				if r.Instance.ID != want.ID || !reflect.DeepEqual(r.Instance.Execution, want.Execution) || r.Instance.Status != v1.Destroyed || len(r.NativeAbandonments) != 0 || r.Instance.Plan.Publish != nil {
+					return errors.New("destroyed original attempt/history or authority changed")
+				}
+				for _, c := range r.Instance.Plan.Components {
+					if c.Runtime != v1.Container {
+						return errors.New("native authority requires independent authenticated cleanup proof")
+					}
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			if count != 1 || tx.Bucket([]byte("meta")).Get([]byte("managed_gateway")) != nil {
+				return errors.New("unexpected instance or managed gateway authority")
+			}
+			for _, name := range []string{"resources", "runtime"} {
+				entries := 0
+				if err := tx.Bucket([]byte(name)).ForEach(func(key, data []byte) error {
+					entries++
+					if string(key) != want.ID {
+						return errors.New("unexpected private resource/runtime journal")
+					}
+					if name == "resources" {
+						g, err := decodeResources(data)
+						if err != nil || g.ID != "" {
+							return errors.New("recorded resource cleanup incomplete")
+						}
+					} else {
+						r, err := decodeRuntime(data)
+						if err != nil || r.LaunchPending || len(r.Groups) != 0 || r.Gateway != nil {
+							return errors.New("recorded native/pending/gateway cleanup incomplete")
+						}
+					}
+					return nil
+				}); err != nil {
+					return err
+				}
+				if entries != 1 {
+					return errors.New("original private resource/runtime journal missing")
+				}
+			}
+			return nil
+		})
+		if err := errors.Join(err, db.Close()); err != nil {
+			return err
+		}
+		return proveObjectsAbsent()
 	}
 }

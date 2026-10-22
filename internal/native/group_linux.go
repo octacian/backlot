@@ -1,6 +1,7 @@
 package native
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 func supported() bool         { return true }
@@ -41,18 +43,29 @@ func bootIdentity() (string, error) {
 	return strings.TrimSpace(string(data)), err
 }
 func groupMembers(pgid int) ([]int, error) {
-	entries, err := os.ReadDir("/proc")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return groupMembersContext(ctx, pgid)
+}
+func groupMembersContext(ctx context.Context, pgid int) ([]int, error) {
+	entries, err := processEntries(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return scanGroupMembers(pgid, entries, process)
+	return scanGroupMembersContext(ctx, pgid, entries, process)
 }
 
 // scanGroupMembers tolerates processes disappearing between enumeration and
 // observation. Other observation failures must still prevent cleanup proof.
 func scanGroupMembers(pgid int, entries []os.DirEntry, readProcess func(int) ([]string, error)) ([]int, error) {
+	return scanGroupMembersContext(context.Background(), pgid, entries, readProcess)
+}
+func scanGroupMembersContext(ctx context.Context, pgid int, entries []os.DirEntry, readProcess func(int) ([]string, error)) ([]int, error) {
 	var out []int
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		pid, err := strconv.Atoi(entry.Name())
 		if err != nil {
 			continue

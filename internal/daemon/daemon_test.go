@@ -434,7 +434,7 @@ func TestStateVersionRejectedWithoutMutation(t *testing.T) {
 			}
 			_, err = openStore(dir)
 			code(t, err, "state_version")
-			if !strings.Contains(err.Error(), "requires version 8") || !strings.Contains(err.Error(), "preserve") {
+			if !strings.Contains(err.Error(), "requires version 9") || !strings.Contains(err.Error(), "preserve") {
 				t.Fatalf("missing actionable compatibility instructions: %v", err)
 			}
 			// Startup must stop before recovery can touch incompatible resources.
@@ -447,26 +447,26 @@ func TestStateVersionRejectedWithoutMutation(t *testing.T) {
 	}
 }
 
-func TestStateVersionEightDaemonRestart(t *testing.T) {
+func TestStateVersionNineDaemonRestart(t *testing.T) {
 	root := shortTemp(t)
 	config := writeFixture(t, root)
 	dir := filepath.Join(shortTemp(t), "state")
 	cli, stop := startFixture(t, dir, time.Second)
 	status, err := cli.Status(context.Background())
-	if err != nil || status.StateVersion != 8 {
-		t.Fatal("fresh daemon did not advertise state v8", status, err)
+	if err != nil || status.StateVersion != 9 {
+		t.Fatal("fresh daemon did not advertise state v9", status, err)
 	}
 	prepared := prepareFixture(t, cli, request(root, config, "dev"))
 	stop()
 	cli, stop = startFixture(t, dir, time.Second)
 	defer stop()
 	status, err = cli.Status(context.Background())
-	if err != nil || status.StateVersion != 8 {
-		t.Fatal("restarted daemon did not advertise state v8", status, err)
+	if err != nil || status.StateVersion != 9 {
+		t.Fatal("restarted daemon did not advertise state v9", status, err)
 	}
 	result, err := cli.Inspect(context.Background(), prepared.Instance.ID)
 	if err != nil || result.Instance.Status != v1.Prepared || result.Instance.ID != prepared.Instance.ID {
-		t.Fatal("v8 restart lost persistent state", result, err)
+		t.Fatal("v9 restart lost persistent state", result, err)
 	}
 }
 

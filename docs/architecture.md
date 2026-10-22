@@ -24,9 +24,13 @@ It owns idempotency, instance mutation locking, dependency gates, initialization
 records, cancellation, evidence, and teardown ordering. It calls narrow adapters
 for native work, containers, gateway mutations, storage, and probes.
 
-Native adapters own complete cooperative process groups, including descendants,
-not only launcher PIDs. Commands must not detach or delegate work outside that
-group; see the [native supervision decision](adr/20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md). Docker adapters
+Native application adapters own a cooperative session through its live authenticated
+guardian, retaining acquired kernel identities during bounded individual cleanup.
+Application descendants may change groups within that session. Two complete empty
+observations report observed-empty confidence, with accepted missed-process risk;
+known incomplete or lost authority remains fenced. Stock managed Caddy and system
+helpers keep strict pinned-group cleanup and its stronger proof. See the
+[native supervision decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md). Docker adapters
 use the official Go client for lifecycle/inspection and established Docker tooling
 for image builds. Gateway adapters use Caddy's HTTP API and owned route IDs/scope,
 including concurrency preconditions rather than whole-config replacement.
@@ -59,16 +63,17 @@ the UI or CLI. A separately published Go SDK is not required for V1.
 ## State and recovery
 
 Recommended embedded storage is bbolt: only the daemon opens the database and
-mutations use transactions. Keep a versioned state format. Each format change
-supports a validated, one-way
-in-place transition from the previous merged format, then operates only on the
-current format. Replace the predecessor transition instead of accumulating a
-migration chain; reject other unsupported formats unchanged. The current direct
-transition is 6 to 8, with no 5 or 7 path. Store instance/resource IDs, allocation
+mutations use transactions. Keep a versioned state format. The current format is
+9, with validated, one-way direct transitions from supported merged-main formats
+6 and 8. Under exclusive ownership, validate recovery-safe
+record shapes and authority before atomically advancing only the version fence;
+preserve all other record bytes. Reject unsupported formats, including 5, 7 and
+incompatible experimental format6 authority, unchanged. Keep this transition
+bounded to these supported predecessors. Store instance/resource IDs, allocation
 intent, ownership tokens,
 resolved plan snapshots, preparation completion, attempts, and results. See
 [state compatibility](containers.md#state-compatibility) and the
-[native recovery decision](adr/20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md)
+[current native supervision and recovery decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md)
 for version fencing and durable force-stop histories.
 
 Use protected per-user state directories and secret storage. Secrets may be

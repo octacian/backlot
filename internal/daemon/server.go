@@ -67,7 +67,7 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	if !acquired {
 		return problem("already_running", "a daemon already owns this state directory")
 	}
-	state, err := openStore(options.Directory)
+	state, err := openStoreContext(ctx, options.Directory)
 	if err != nil {
 		return err
 	}
@@ -76,6 +76,11 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 			resultErr = errors.Join(resultErr, state.db.Close())
 		}
 	}()
+	// Cancellation after a committed fence is a forward-recoverable startup
+	// failure, never permission to recover resources or roll the version back.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	path := SocketPath(options.Directory)
 	if staleInfo, err := os.Lstat(path); err == nil {
 		if err := localipc.File(path, true); err != nil {

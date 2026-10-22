@@ -36,6 +36,7 @@ type ExportResult struct {
 	CollectionFailure       string                   `json:"collection_failure,omitempty"`
 	CleanupFailure          string                   `json:"cleanup_failure,omitempty"`
 	Components              []ComponentResult        `json:"components"`
+	NativeCleanup           []NativeCleanupResult    `json:"native_cleanup,omitempty"`
 }
 
 // ExportSource records bounded launch provenance; absent historical facts remain unknown.

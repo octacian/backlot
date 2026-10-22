@@ -127,7 +127,7 @@ test('version fence and child registry selection preserve HOME/XDG and unrelated
     await mkdir(join(owner.root, 'tools'));
     const binary = join(owner.root, 'tools/backlot');
     await writeFile(binary, `#!${process.execPath}\nif(process.argv[2]!=='version')throw Error('resolution attempted');console.log('{"api_version":"v1"}');`, { mode: 0o700 });
-    await assert.rejects(requireProjectRuntime(owner, binary), /state-version-8/);
+    await assert.rejects(requireProjectRuntime(owner, binary), /state-version-9/);
     await assert.rejects(lstat(join(owner.root, 'project-config')), { code: 'ENOENT' });
   } finally { await cleanup(owner); }
 });

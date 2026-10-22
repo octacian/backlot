@@ -50,18 +50,18 @@ use a declared native command probe when connectivity is insufficient.
 
 ## State compatibility
 
-The durable state format is version 8. The previous merged main format 6 upgrades
+The durable state format is version 9. The supported merged main formats 6 and 8 upgrade
 in place, one way, after typed record/addressing validation in the same transaction
 as the version fence. Only that fence changes; records, retained data, ownership
 history, saved gateway configuration and CA identity remain intact. Versions 5,
 7 and other unsupported formats, and invalid predecessor records, are rejected
-unchanged. Version 8 fences tested intermediate binaries and preserves the combined
-private configuration/native recovery contract; there is no migration chain.
+unchanged. Version 9 fences older readers and preserves the combined
+private configuration/native recovery contract; experimental branch6 session/cleanup/copy extensions are incompatible and rejected unchanged. There is no migration chain.
 
 Use the new CLI's `daemon stop --state-dir PATH` for normal shutdown of the
-supported v6 daemon, then `daemon start --state-dir PATH` after shutdown finishes.
-Only the exact v6 `stopping` acknowledgment is accepted at this shutdown boundary;
-Status and configuration-consuming operations still require v8. The acknowledgment
+supported v6/v8 daemon, then `daemon start --state-dir PATH` after shutdown finishes.
+Only the exact v6/v8 `stopping` acknowledgment is accepted at this shutdown boundary;
+Status and configuration-consuming operations still require v9. The acknowledgment
 does not prove process exit or lock release; normal startup locking remains in
 force, without automatic retry/start. Cleanup and transport failures remain errors.
 No wipe, data destruction or fresh directory is required for the supported upgrade;
@@ -75,7 +75,7 @@ before effects. Failed/interrupted instances still need explicit restart.
 
 Preserve unsupported state for diagnosis and its matching binary's lifecycle.
 A different directory does not clean its resources. Backlot never automatically
-deletes incompatible state. See the [configuration decision](adr/20261021T001732173Z-register-private-project-configuration.md).
+deletes incompatible state. See the [current native and compatibility decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md).
 
 ## Generations, jobs and drift
 

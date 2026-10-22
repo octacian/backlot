@@ -4,6 +4,7 @@ package native
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/netip"
@@ -17,6 +18,10 @@ import (
 // OwnsListener proves that every listener on the selected port belongs to this group.
 // An unrelated port owner is never signaled and never satisfies readiness.
 func listenerState(ctx context.Context, pgid, port int, endpoint string) (bool, bool, error) {
+	return listenerStateWith(ctx, pgid, port, endpoint, syscall.Getpgid)
+}
+
+func listenerStateWith(ctx context.Context, pgid, port int, endpoint string, membership func(int) (int, error)) (bool, bool, error) {
 	query, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	data, err := listenerOutput(query, port)
@@ -28,15 +33,21 @@ func listenerState(ctx context.Context, pgid, port int, endpoint string) (bool, 
 	currentPID, currentFD := 0, -1
 	family := ""
 	for _, line := range strings.Split(string(data), "\n") {
+		if err := query.Err(); err != nil {
+			return false, false, err
+		}
 		if strings.HasPrefix(line, "p") {
 			pid, err := strconv.Atoi(line[1:])
 			if err != nil {
 				return false, false, err
 			}
 			currentPID, currentFD = pid, -1
-			currentGroup, err = syscall.Getpgid(pid)
+			currentGroup, err = membership(pid)
 			if err != nil {
-				currentGroup = 0
+				if errors.Is(err, syscall.ESRCH) {
+					return false, false, nil
+				}
+				return false, false, err
 			}
 			if endpoint == "" && currentGroup != 0 {
 				if currentGroup != pgid {
@@ -115,6 +126,7 @@ func ListenerEndpoint(ctx context.Context, pgid int, address string) (bool, bool
 // listenerOutput observes lsof under the caller's bounded query context.
 func listenerOutput(ctx context.Context, port int) ([]byte, error) {
 	command := exec.CommandContext(ctx, "lsof", "-nP", "-a", "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN", "-Fpftn")
+	command.WaitDelay = 100 * time.Millisecond
 	data, err := command.Output()
 	if err != nil {
 		if ctx.Err() != nil {
@@ -219,4 +231,58 @@ func OwnsListenerAddresses(ctx context.Context, pgid, port int, addresses []stri
 		}
 	}
 	return true, nil
+}
+
+// ListenerEndpoint verifies every relevant listener through this attempt's policy.
+// Application membership is observed by the live authenticated session guardian.
+func (g *Group) ListenerEndpoint(ctx context.Context, address string) (bool, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if g.Identity.Purpose != "application" {
+		return ListenerEndpoint(ctx, g.PGID(), address)
+	}
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil {
+		return false, false, err
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		return false, false, err
+	}
+	return g.sessionListenerRequest(ctx, net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
+func (g *Group) sessionListenerRequest(ctx context.Context, address string) (bool, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", g.Identity.Control)
+	if err != nil {
+		return false, false, errors.New("session listener authority unavailable")
+	}
+	defer func() { _ = conn.Close() }()
+	deadline := time.Now().Add(time.Second)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	_ = conn.SetDeadline(deadline)
+	if err := json.NewEncoder(conn).Encode(cleanupRequest{Identity: g.Identity, ListenerAddress: address}); err != nil {
+		return false, false, &authorityError{message: "session listener authority unavailable", cause: errors.Join(err, ctx.Err())}
+	}
+	var proof cleanupProof
+	if err := json.NewDecoder(conn).Decode(&proof); err != nil {
+		return false, false, &authorityError{message: "session listener observation unavailable", cause: errors.Join(err, ctx.Err())}
+	}
+	if proof.Identity != g.Identity || proof.Error != "" {
+		return false, false, errors.New("session listener observation unavailable")
+	}
+	return proof.Owned, proof.Conflict, nil
+}
+
+// ListenerConflict checks all listeners on a port against the application's live authority.
+func (g *Group) ListenerConflict(ctx context.Context, port int) (bool, error) {
+	if g.Identity.Purpose != "application" {
+		return ListenerConflict(ctx, g.PGID(), port)
+	}
+	_, conflict, err := g.sessionListenerRequest(ctx, net.JoinHostPort("", strconv.Itoa(port)))
+	return conflict, err
 }

@@ -50,7 +50,7 @@ func TestExportNativeFlow(t *testing.T) {
 	if current := launchGitCommit(context.Background(), checkout); current == launchCommit {
 		t.Fatal("branch did not move")
 	}
-	destination := filepath.Join(t.TempDir(), "bundle")
+	destination := filepath.Join(privateExportParent(t), "bundle")
 	command := exec.Command(binary, "export", instance.ID, "--output", destination, "--wait", "--state-dir", h.dir, "--json")
 	output, err := command.CombinedOutput()
 	if err != nil {

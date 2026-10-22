@@ -3,11 +3,13 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
+	"github.com/octacian/backlot/internal/plan"
 	"io"
 	"net/url"
 	"os"
@@ -95,9 +97,10 @@ func TestDoctorRuntime(t *testing.T) {
 	portRef := fixtureRef("resource", "port", "port")
 	originRef := fixtureRef("resource", "origin", "url")
 	server := v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "app"}, Resources: []string{"port", "origin", "data"}, Ports: map[string]v1.ServicePort{"http": {Resource: "port"}}, Environment: v1.Environment{Assign: map[string]v1.Value{"PORT": portRef, "ROLE": fixtureLiteral("doctor")}}, Readiness: &v1.Probe{Kind: "tcp", Target: &portRef, Timeout: "5s"}}
-	consumerPort := fixtureRef("resource", "consumer-port", "port")
-	consumer := v1.Component{Kind: v1.Service, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"sh", "-c", "while true; do nc -l -p 9000; done"}, Resources: []string{"consumer-port", "origin"}, Ports: map[string]v1.ServicePort{"tcp": {Resource: "consumer-port", ContainerPort: 9000}}, HostMappings: []v1.HostMapping{{Origin: "origin", Host: "host-gateway"}}, Readiness: &v1.Probe{Kind: "tcp", Target: &consumerPort, Timeout: "10s"}}
-	h.manifest = v1.Manifest{Version: v1.ManifestVersion, Project: "doctor-fixture", Tools: map[string]string{"app": app}, Resources: map[string]v1.Resource{"port": {Kind: "port"}, "consumer-port": {Kind: "port"}, "origin": {Kind: "origin"}, "data": {Kind: "directory"}}, Components: map[string]v1.Component{"server": server, "consumer": consumer}, Scenes: map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"server", "consumer"}, Resources: []string{"port", "consumer-port", "origin", "data"}, Publish: &v1.Publication{Resource: "origin", Routes: []v1.Route{{Path: "/", Service: "server", Port: "http", Prefix: "preserve"}}, Probe: v1.Probe{Kind: "http", Target: &originRef, Timeout: "10s"}}}}}
+	// The recorded mapping selects host-gateway for the owned diagnostic probes;
+	// the native server supplies the live upstream, so this consumer can finish.
+	consumer := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"true"}, Resources: []string{"origin"}, HostMappings: []v1.HostMapping{{Origin: "origin", Host: "host-gateway"}}}
+	h.manifest = v1.Manifest{Version: v1.ManifestVersion, Project: "doctor-fixture", Tools: map[string]string{"app": app}, Resources: map[string]v1.Resource{"port": {Kind: "port"}, "origin": {Kind: "origin"}, "data": {Kind: "directory"}}, Components: map[string]v1.Component{"server": server, "consumer": consumer}, Scenes: map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"server", "consumer"}, Resources: []string{"port", "origin", "data"}, Publish: &v1.Publication{Resource: "origin", Routes: []v1.Route{{Path: "/", Service: "server", Port: "http", Prefix: "preserve"}}, Probe: v1.Probe{Kind: "http", Target: &originRef, Timeout: "10s"}}}}}
 	server.Fixtures = map[string]v1.Fixture{"data": {Value: fixtureRef("resource", "data", "path")}}
 	h.manifest.Components["server"] = server
 	h.write()
@@ -113,6 +116,21 @@ func TestDoctorRuntime(t *testing.T) {
 	if err != nil || !state.Healthy {
 		t.Fatal(err, state)
 	}
+	originalCA := map[string][]byte{}
+	originalModes := map[string]os.FileMode{}
+	for _, name := range []string{"root.crt", "root.key", "intermediate.crt", "intermediate.key"} {
+		path := filepath.Join(filepath.Dir(caPath), name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		originalCA[path] = data
+		originalModes[path] = info.Mode()
+	}
 	doctor := func(success bool, extra ...string) v1.DoctorResponse {
 		t.Helper()
 		args := append([]string{"doctor", "--instance", id}, extra...)
@@ -124,12 +142,64 @@ func TestDoctorRuntime(t *testing.T) {
 		if err := result.Validate(); err != nil {
 			t.Fatal(err)
 		}
+		for path, before := range originalCA {
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("diagnostic changed original CA/key bytes", err)
+			}
+			info, err := os.Lstat(path)
+			if err != nil || info.Mode() != originalModes[path] {
+				t.Fatal("diagnostic changed original CA/key mode", err)
+			}
+		}
+		assertDoctorCopiesAbsent(t, h.dir)
 		return result
 	}
 	good := doctor(true, "--container-probe-image", image, "--probe-public-ca")
 	assertDoctorCheck(t, good, "container_dns", v1.DoctorOK)
 	assertDoctorCheck(t, good, "container_https", v1.DoctorOK)
 	assertDoctorCheck(t, good, "container_probe_cleanup", v1.DoctorOK)
+	t.Log("secured public-copy TLS positive; original private CA/key bytes and modes unchanged; copy cleanup verified")
+	t.Run("wrong-public-root", func(t *testing.T) {
+		root, err := os.MkdirTemp("/tmp", "bl-doctor-owned-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrong, err := openStore(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			err := errors.Join(wrong.recoverDiagnosticProbes(), wrong.db.Close())
+			if err != nil {
+				t.Error("preserved uncertain wrong-root fixture", root, err)
+			} else if err := os.RemoveAll(root); err != nil {
+				t.Error(err)
+			}
+		})
+		snap := plan.Snapshot{Docker: &v1.DockerConfig{Endpoint: endpoint}, Caddy: doctorCopyManagedFixture(t, wrong), Plan: v1.PlanResponse{Publish: &v1.Publication{Resource: "origin"}, Components: []v1.PlannedComponent{{HostMappings: []v1.HostMapping{{Origin: "origin", Host: "host-gateway"}}}}}}
+		svc := service{store: wrong, directory: root}
+		svc.checkpoint = func(point string) error {
+			if point == "doctor-effect" {
+				d, err := newDocker(endpoint)
+				if err != nil {
+					return err
+				}
+				defer func() { _ = d.Close() }()
+				assertDoctorCopyMount(t, wrong, d)
+			}
+			return nil
+		}
+		response := v1.DoctorResponse{Healthy: true, Checks: []v1.DoctorCheck{}}
+		svc.doctorContainer(context.Background(), &response, v1.DoctorRequest{ContainerProbeImage: image, ProbePublicCA: true}, snap, launched.Instance)
+		assertDoctorCheck(t, response, "container_dns", v1.DoctorOK)
+		assertDoctorCheck(t, response, "container_https", v1.DoctorFailed)
+		assertDoctorCheck(t, response, "container_probe_cleanup", v1.DoctorOK)
+		if response.Healthy || !svc.ownersJoined() {
+			t.Fatal("wrong public root must fail and join")
+		}
+		assertDoctorCopiesAbsent(t, root)
+	})
 	encoded, _ := json.Marshal(good)
 	t.Log("early successful CLI doctor", string(encoded))
 	for _, path := range good.Paths {

@@ -236,7 +236,7 @@ func (Scene) JSONSchemaExtend(s *jsonschema.Schema) {
 	p.UniqueItems = true
 	p.Items.MinLength = schemaOne()
 	schemaProperty(s, "resources").UniqueItems = true
-	s.AllOf = []*jsonschema.Schema{schemaWhen("lifetime", string(Disposable), &jsonschema.Schema{AllOf: []*jsonschema.Schema{schemaRequire("terminal_job"), schemaProperties(map[string]*jsonschema.Schema{"terminal_job": {MinLength: schemaOne()}})}}), schemaWhen("lifetime", string(Persistent), schemaProperties(map[string]*jsonschema.Schema{"terminal_job": {Const: ""}}))}
+	s.AllOf = []*jsonschema.Schema{schemaWhen("lifetime", string(Disposable), &jsonschema.Schema{AllOf: []*jsonschema.Schema{schemaRequire("terminal_job"), schemaProperties(map[string]*jsonschema.Schema{"startup_details": {MaxItems: schemaZero()}}), schemaProperties(map[string]*jsonschema.Schema{"terminal_job": {MinLength: schemaOne()}})}}), schemaWhen("lifetime", string(Persistent), schemaProperties(map[string]*jsonschema.Schema{"terminal_job": {Const: ""}}))}
 }
 
 // JSONSchemaExtend constrains dependency gates.
@@ -305,4 +305,11 @@ func (Input) JSONSchemaExtend(s *jsonschema.Schema) {
 	schemaProperty(s, "generate").Enum = schemaEnum("", "random-hex-32").Enum
 	s.AllOf = append(s.AllOf, schemaWhen("generate", "random-hex-32", schemaProperties(map[string]*jsonschema.Schema{"secret": {Const: true}})))
 	s.AllOf[len(s.AllOf)-1].Then.Required = []string{"secret"}
+}
+
+// JSONSchemaExtend constrains startup fixture selectors without duplicating values.
+func (StartupDetailSelection) JSONSchemaExtend(s *jsonschema.Schema) {
+	schemaProperty(s, "component").Pattern = schemaIdentifier
+	schemaProperty(s, "fixture").Pattern = schemaIdentifier
+	schemaProperty(s, "label").Pattern = `^[^\x00\r\n]*\S[^\x00\r\n]*$`
 }

@@ -11,6 +11,9 @@ import (
 func (c *Client) Run(ctx context.Context, request v1.RunRequest) (v1.InstanceResponse, error) {
 	var response v1.InstanceResponse
 	err := c.call(ctx, http.MethodPost, "/v1/run", request, &response)
+	if err == nil {
+		err = validateAttachment(response, request.Attached)
+	}
 	return response, err
 }
 
@@ -86,7 +89,7 @@ func (c *Client) FixtureSecret(ctx context.Context, request v1.FixturesRequest) 
 }
 
 func validateFixtures(response v1.FixturesResponse, request v1.FixturesRequest, secret bool) error {
-	if response.APIVersion != v1.Version || secret && len(response.Fixtures) != 1 {
+	if response.APIVersion != v1.Version || secret && len(response.Fixtures) != 1 || request.ExpectedAttempt != "" && (response.InstanceID != request.InstanceID || response.Attempt != request.ExpectedAttempt) {
 		return responseError()
 	}
 	seen := map[string]bool{}

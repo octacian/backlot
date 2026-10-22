@@ -354,3 +354,13 @@ focused multi-step, rollback/cancellation and copied-fixture checks. Follow the
 [next-change procedure](testing.md#daemon-state-migrations) for real format changes.
 Independent Low/High reviews, frozen `make check` and exact published-revision CI
 remain delivery gates; no publication or final readiness is claimed here.
+
+## Attached persistent ownership (#50)
+
+Implemented for review: optional `scene start --attached`/`run --attached`, ephemeral
+attempt/generation-bound daemon authority, existing lease expiry/cleanup and
+aggregate log pages. Default background/disposable semantics remain unchanged.
+See the [decision](adr/20261022T194804759Z-bind-attached-persistent-execution-to-one-daemon-owned-attempt.md)
+and [command/API contract](daemon.md#attached-execution). Independent implementation
+reviews, frozen native/provider suites and published-head CI remain required;
+focused development evidence is not a release/adoption claim.

@@ -46,6 +46,8 @@ func TestStrictNativeWireContracts(t *testing.T) {
 		{"/v1/destroy", `{"api_version":"v1","instance_id":"bad"}`},
 		{"/v1/runtime/stop", `{"api_version":"v1","instance_id":"bad"}`},
 		{"/v1/logs", `{"api_version":"v1","instance_id":"bad","offset":-1}`},
+		{"/v1/attached/renew", `{"api_version":"v1","instance_id":"bad","owner":{}}`},
+		{"/v1/attached/cancel", `{"api_version":"v1","instance_id":"bad","owner":{},"extra":true}`},
 		{"/v1/logs", `{"api_version":"v2","instance_id":"bad","offset":0}`},
 		{"/v1/fixtures", `{"api_version":"v1","instance_id":"bad"}`},
 		{"/v1/fixtures", `{"api_version":"v1","instance_id":"bad","secret_name":"password"}`},

@@ -79,6 +79,8 @@ the [migration decision](adr/20261022T201438827Z-retain-cumulative-daemon-state-
 Use protected per-user state directories and secret storage. Secrets may be
 persisted for resource reuse but never appear in ordinary snapshots/results.
 Keep logs/artifacts in separately retained files with restrictive permissions.
+[Declared startup disclosure](adr/20261022T195459793Z-authorize-declared-sensitive-startup-details-for-persistent-scenes.md)
+uses dedicated sensitive retrieval and transient output, never persisted public results.
 
 An external engine call and a database transaction are not atomic together.
 Record intent before allocation, label/identify engine resources, then record the

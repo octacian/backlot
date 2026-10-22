@@ -20,7 +20,7 @@ import (
 )
 
 func TestNativeRecoveryRetainsObservations(t *testing.T) {
-	binary := reviewFixBinary(t)
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	for _, confidence := range []v1.NativeCleanupConfidence{v1.CleanupIncomplete, v1.CleanupAuthorityLost} {
 		t.Run(string(confidence), func(t *testing.T) {
 			h := newNativeHarness(t, binary)
@@ -202,7 +202,7 @@ func TestNativeRecoveryRetainsObservations(t *testing.T) {
 }
 
 func TestNativeMixedRecoveryCleanupAfterFatal(t *testing.T) {
-	binary := reviewFixBinary(t)
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	record := filepath.Join(t.TempDir(), "record")
 	self, err := os.Executable()
 	if err != nil {

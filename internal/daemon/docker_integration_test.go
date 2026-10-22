@@ -1031,6 +1031,26 @@ func TestDockerRuntime(t *testing.T) {
 		if h.sql(r, "SELECT value FROM fixture.mutations") != "42" || fingerprint(r) != secret {
 			t.Fatal("stop/run lost data or rotated credentials")
 		}
+		if _, err := h.cli.StopExecution(context.Background(), id); err != nil {
+			t.Fatal(err)
+		}
+		attached := h.request("dev")
+		attached.Attached = true
+		owned, err := h.cli.Run(context.Background(), attached)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.state(id, v1.RuntimeReady)
+		if _, err := h.cli.Attached(context.Background(), ownerRequest(owned), true); err != nil {
+			t.Fatal(err)
+		}
+		h.run("dev")
+		h.state(id, v1.RuntimeReady)
+		r = h.container(id, "db")
+		if h.sql(r, "SELECT value FROM fixture.mutations") != "42" || fingerprint(r) != secret {
+			t.Fatal("attached cancellation lost data or rotated credentials")
+		}
+
 		db.Environment.Assign["ORDINARY"] = fixtureLiteral("updated")
 		h.manifest.Components["db"] = db
 		h.write()

@@ -84,6 +84,7 @@ func TestMacOSQuickstart(t *testing.T) {
 		h.worktrees = append(h.worktrees, path)
 		run(path, npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund")
 	}
+	t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", filepath.Join(root, "registry"))
 	h.project = h.worktrees[0]
 	// Hold the HTTPS port to prove conflict handling preserves its real owner.
 	blocker, err := net.Listen("tcp", "127.0.0.1:0")
@@ -118,6 +119,11 @@ func TestMacOSQuickstart(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.start()
+	setup := exec.Command(h.binary, "project", "setup", "--project", h.project, "--config", h.config, "--from", "-", "--json")
+	setup.Stdin = strings.NewReader(`{"version":"backlot/v1","inputs":{"email":"demo@example.invalid"}}`)
+	if output, err := setup.CombinedOutput(); err != nil {
+		t.Fatalf("isolated account input setup: %v %s", err, output)
+	}
 	gateway := func(ok bool, action string, extra ...string) []byte {
 		t.Helper()
 		args := append([]string{"gateway", action, "--state-dir", h.state, "--json"}, extra...)
@@ -169,6 +175,40 @@ func TestMacOSQuickstart(t *testing.T) {
 		}
 	}
 	first := h.require("run", "dev")
+	// Read the actual finite CLI summary and authenticate against application-seeded state.
+	summaryOutput, err := h.command("run", "dev", "--project", h.project, "--state-dir", h.state, "--config", h.config, "--json")
+	if err != nil {
+		t.Fatal("repeated startup summary", err)
+	}
+	var summaryResponse v1.InstanceResponse
+	if err := json.Unmarshal(summaryOutput, &summaryResponse); err != nil || summaryResponse.StartupDetails == nil || len(summaryResponse.StartupDetails.Details) != 3 {
+		t.Fatal("missing ordered startup details", err)
+	}
+	details := summaryResponse.StartupDetails.Details
+	if details[0].Label != "Login email" || details[1].Label != "Login password" || !details[1].Sensitive {
+		t.Fatal("incorrect summary order/sensitivity")
+	}
+	credentials, err := json.Marshal(map[string]string{"email": details[0].Value, "password": details[1].Value})
+	if err != nil {
+		t.Fatal(err)
+	}
+	login, err := client.Post(first.Execution.Origin+"/api/login", "application/json", bytes.NewReader(credentials))
+	if err != nil {
+		t.Fatal("seeded application login", err)
+	}
+	_ = login.Body.Close()
+	if login.StatusCode != http.StatusOK {
+		t.Fatal("displayed credentials do not match seeded application")
+	}
+	rejected, err := client.Post(first.Execution.Origin+"/api/login", "application/json", strings.NewReader(`{"email":"wrong","password":"wrong"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = rejected.Body.Close()
+	if rejected.StatusCode != http.StatusUnauthorized {
+		t.Fatal("application login did not reject wrong credentials")
+	}
+	t.Log("real CLI startup details authenticate the application-owned seeded account; wrong credentials rejected")
 	h.project = h.worktrees[1]
 	second := h.require("run", "dev")
 	if first.ID == second.ID || first.Execution.Origin == second.Execution.Origin || first.Checkout.ID == second.Checkout.ID {

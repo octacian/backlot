@@ -447,6 +447,18 @@ func scene(m v1.Manifest, name string, s v1.Scene) error {
 			return invalid(f+".resources", "unknown resource")
 		}
 	}
+	if len(s.StartupDetails) > 0 && s.Lifetime != v1.Persistent {
+		return invalid(f+".startup_details", "startup details require a persistent scene")
+	}
+	for _, detail := range s.StartupDetails {
+		component, ok := m.Components[detail.Component]
+		if !ok || !slices.Contains(s.Components, detail.Component) {
+			return invalid(f+".startup_details", "select a fixture on a selected component")
+		}
+		if _, ok := component.Fixtures[detail.Fixture]; !ok || strings.TrimSpace(detail.Label) == "" || strings.ContainsAny(detail.Label, "\x00\r\n") {
+			return invalid(f+".startup_details", "select an existing fixture and a nonempty single-line label")
+		}
+	}
 	ports := map[string]bool{}
 	initializers := map[string]bool{}
 	for _, name := range s.Components {

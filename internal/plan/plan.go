@@ -52,7 +52,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 			return result, problem("invalid_arguments", "terminal_args", "NUL is not permitted")
 		}
 	}
-	result = v1.PlanResponse{APIVersion: v1.Version, Project: m.Project, Checkout: source.CheckoutPath, ManifestPath: file, ManifestDigest: layers.manifestDigest, ConfigDigest: layers.machineDigest, Scene: request.Scene, Lifetime: scene.Lifetime, TerminalJob: scene.TerminalJob, Resources: map[string]v1.Resource{}, Outputs: map[string]v1.Output{}, Publish: scene.Publish}
+	result = v1.PlanResponse{APIVersion: v1.Version, Project: m.Project, Checkout: source.CheckoutPath, ManifestPath: file, ManifestDigest: layers.manifestDigest, ConfigDigest: layers.machineDigest, Scene: request.Scene, Lifetime: scene.Lifetime, StartupDetails: scene.StartupDetails, TerminalJob: scene.TerminalJob, Resources: map[string]v1.Resource{}, Outputs: map[string]v1.Output{}, Publish: scene.Publish}
 	for _, name := range scene.Resources {
 		result.Resources[name] = m.Resources[name]
 	}

@@ -55,6 +55,7 @@ type SceneRequest struct {
 
 // SceneStartRequest selects current inputs for the existing persistent run coordinator.
 type SceneStartRequest struct {
+	Attached   bool             `json:"attached,omitempty"`
 	APIVersion string           `json:"api_version"`
 	CWD        string           `json:"cwd"`
 	Plan       PlanRequest      `json:"plan"`

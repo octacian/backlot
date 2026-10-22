@@ -44,6 +44,7 @@ type ExecutionOptions struct {
 
 // RunRequest starts or explicitly restarts a validated scene.
 type RunRequest struct {
+	Attached   bool             `json:"attached,omitempty"`
 	APIVersion string           `json:"api_version"`
 	Plan       PlanRequest      `json:"plan"`
 	Options    ExecutionOptions `json:"options"`
@@ -146,10 +147,11 @@ type ArtifactRecord struct {
 
 // FixturesRequest selects component metadata; SecretName enables explicit access.
 type FixturesRequest struct {
-	APIVersion string `json:"api_version"`
-	InstanceID string `json:"instance_id"`
-	Component  string `json:"component,omitempty"`
-	SecretName string `json:"secret_name,omitempty"`
+	ExpectedAttempt string `json:"expected_attempt,omitempty"`
+	APIVersion      string `json:"api_version"`
+	InstanceID      string `json:"instance_id"`
+	Component       string `json:"component,omitempty"`
+	SecretName      string `json:"secret_name,omitempty"`
 }
 
 // FixtureRecord is a resolved fixture identity, redacted unless explicitly requested.
@@ -163,6 +165,8 @@ type FixtureRecord struct {
 
 // FixturesResponse returns named fixture identities and explicitly requested secrets.
 type FixturesResponse struct {
+	InstanceID string          `json:"instance_id,omitempty"`
+	Attempt    string          `json:"attempt,omitempty"`
 	APIVersion string          `json:"api_version"`
 	Fixtures   []FixtureRecord `json:"fixtures"`
 }
@@ -207,4 +211,18 @@ func (r NativeCleanupResult) FencesResources(warnings []NativeOwnershipWarning) 
 		}
 	}
 	return true
+}
+
+// StartupSummary is transient startup output, never a persisted execution result.
+type StartupSummary struct {
+	Attempt string          `json:"attempt"`
+	Details []StartupDetail `json:"details,omitempty"`
+	Warning *PlanError      `json:"warning,omitempty"`
+}
+
+// StartupDetail contains an authorized selected fixture value for startup output.
+type StartupDetail struct {
+	StartupDetailSelection
+	Value     string `json:"value"`
+	Sensitive bool   `json:"sensitive,omitempty"`
 }

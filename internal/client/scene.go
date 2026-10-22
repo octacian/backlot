@@ -22,6 +22,12 @@ func (c *Client) StartScene(ctx context.Context, request v1.SceneStartRequest) (
 	if err == nil && (response.Outcome != v1.SceneFound || response.Result == nil) {
 		err = responseError()
 	}
+	if err == nil {
+		err = validateAttachment(*response.Result, request.Attached)
+	}
+	if err == nil && request.Attached && response.Result.Attachment.Owner.DaemonGeneration != response.DaemonGeneration {
+		err = responseError()
+	}
 	return response, err
 }
 
@@ -44,6 +50,9 @@ func (c *Client) sceneCall(ctx context.Context, action string, request v1.SceneR
 	err := c.call(ctx, http.MethodPost, "/v1/scenes/"+action, request, &response)
 	if err == nil {
 		err = validateScene(response, request.Target, action == "stop" || request.Target.InstanceID == "")
+	}
+	if err == nil && response.Result != nil && response.Result.Attachment != nil {
+		err = responseError()
 	}
 	if err == nil && (action == "status" && response.Outcome != v1.SceneFound && response.Outcome != v1.SceneNotFound || action == "stop" && response.Outcome == v1.SceneFound) {
 		err = responseError()

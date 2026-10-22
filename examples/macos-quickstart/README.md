@@ -54,7 +54,32 @@ certificate authority. In BrowserOS Neo, open certificate management from browse
 settings, import this public file into its trusted authorities/local certificates,
 and enable website trust if prompted. Verify the actual origin without a warning;
 browser versions/policies differ. Keep signing keys and the remaining CA directory
-private. [Trust and lifecycle details](../../docs/https.md#managed-local-https-on-macos-arm64).
+private. [Trust and lifecycle details](../../docs/https.md#managed-local-https).
+
+## Seeded demo account
+
+Register the application email once from this example directory, using the same
+private machine file as above:
+
+```sh
+backlot project setup --project . --config "$HOME/.config/backlot/machine.yaml" --from - --json <<'JSON'
+{"version":"backlot/v1","inputs":{"email":"demo@example.invalid"}}
+JSON
+```
+
+The manifest maps the email input and a generated password into the `seed` job
+and its fixtures. The application stores the demo account in its private retained
+directory and verifies the credentials at `POST /api/login`.
+
+After readiness, startup output includes the selected email, password and reminder;
+JSON exposes them in `startup_details.details`. Selection authorizes disclosure
+without a reveal flag, so treat captured output as sensitive. See the
+[startup-details contract](../../docs/manifest.md#components-and-scenes).
+
+`seed` is fresh-only and initializes `account`: stop/run and restart retain the
+account/password; reset replaces both. The each-start `test` job checks every
+disposable invocation. Applications own seeding/authentication and choose dependency
+gates and job policies; application-side edits can invalidate displayed credentials.
 
 ## Run daily
 

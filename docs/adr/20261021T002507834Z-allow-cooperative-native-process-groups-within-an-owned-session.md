@@ -5,7 +5,7 @@ status: superseded
 summary: 'Allow ordinary native watchers to create process groups inside a live guardian-owned session, with bounded identity-safe cleanup and explicit residual-process risk.'
 tags: [native, lifecycle, ownership, watchers, macos, linux, implemented]
 supersedes: [20261021T001732173Z-register-private-project-configuration.md]
-superseded_by: [20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md]
+superseded_by: [20261022T195459793Z-authorize-declared-sensitive-startup-details-for-persistent-scenes.md, 20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md]
 ---
 
 # Allow cooperative native process groups within an owned session

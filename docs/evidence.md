@@ -26,6 +26,12 @@ Disposable clients renew a finite lease while waiting. Losing the client stops
 renewals; the daemon cancels after the configured lease expires, gathers available
 evidence, and cleans up. Execution deadlines of zero do not disable the lease.
 
+Attached persistent commands emit typed lifecycle/log NDJSON and aggregate only
+the accepted attempt. They retain the same log encoding, gaps and retention limits,
+without a replay or completeness guarantee. Their signal/loss cleanup preserves
+persistent data and paired credentials. See [attached execution](daemon.md#attached-execution)
+for leases, operator overrides and exit results.
+
 ## Declared artifacts and fixtures
 
 Components can declare named artifact sources and discoverable fixture identities:
@@ -74,10 +80,12 @@ backlot fixtures --state-dir /private/backlot --component tests INSTANCE_ID
 backlot secret --state-dir /private/backlot --component tests --json INSTANCE_ID password
 ```
 
-Only `secret` and its dedicated `/v1/fixtures/secret` endpoint return a named
-sensitive fixture's value. `/v1/fixtures` returns ordinary metadata. The local
-permissioned administration socket is the authorization boundary; do not share
-sensitive command output or private daemon state.
+`secret` retrieves a named sensitive fixture through `/v1/fixtures/secret`;
+`/v1/fixtures` returns ordinary metadata. Persistent startup uses the sensitive
+endpoint for [declared selections](manifest.md#components-and-scenes), without
+adding their values to execution results, status, diagnostics or exports. The
+permissioned local socket is the authorization boundary; protect sensitive output
+and private daemon state.
 
 ## Investigation and destruction
 

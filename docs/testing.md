@@ -58,8 +58,33 @@ native Windows runtime CI is planned in #37/#38 and is not implemented here.
 The [Windows acceptance matrix](windows-design.md#epic-acceptance-and-evidence-matrix)
 separates future runtime CI from required Windows 11 desktop adoption evidence.
 Debian 13.4 amd64 requires actual-host runtime evidence; WSL is configuration guidance only. See [platform policy](platforms.md).
-The workflow runs on every PR and push to `main`, without path filters that
-could leave required checks missing.
+Workflows start on every PR and push to `main` (the independent pinned consumer
+runs on PRs and manual dispatch). A shared
+[changed-paths workflow](../.github/workflows/changes.yml) uses pinned
+[dorny/paths-filter](https://github.com/dorny/paths-filter) to skip irrelevant jobs.
+Selection happens at job level; workflow-level path filters can leave required
+checks pending. Detection failures run the gates rather than
+silently skipping validation. PR detection uses the complete PR diff, including
+forks; main pushes compare with the pre-push commit, including multi-commit pushes.
+
+| Changed files | Jobs that run |
+| --- | --- |
+| Markdown, including ADR additions/deletions | Documentation: ADR tooling tests and record verification |
+| Go/runtime sources, schemas, non-CI examples, module/build/lint configuration | macOS/Ubuntu repository checks, Linux runtime, current-head scenes and project inputs |
+| `THIRD_PARTY_NOTICES.md` | Repository and Linux installation checks, plus Documentation |
+| `actions/` implementation | Current-head scenes and project inputs |
+| `examples/ci-scenes/` implementation | Scenes and the independent pinned consumer |
+| `examples/ci-inputs/` implementation | Project inputs |
+| A workflow | Its own gates; shared change-detection edits run all gates |
+
+Markdown inside implementation/example directories stays documentation-only.
+ADR tooling, module and Makefile changes also run Documentation. The independent
+consumer uses pinned action/runtime revisions, so current runtime/action edits do
+not rerun it. Manual consumer dispatch always runs, regardless of changed paths.
+Go package tests remain together: shared packages and separately built subprocesses
+make narrower package selection unreliable. Keep new executable inputs covered
+by the filters when adding directories or build configuration. Local `make check`
+continues to run the complete contributor gate.
 
 Schema tests use a maintained JSON Schema validator on the real YAML examples
 and negative/variant cases, in addition to checking deterministic generated output.

@@ -364,10 +364,10 @@ func (h *nativeHarness) close() {
 		}
 		result := finishNativeHarnessOwner(func(ctx context.Context) error { _, err := h.cli.Stop(ctx); return err }, h.ownerDone, h.process.Process.Kill, 40*time.Second, 40*time.Second, 2*time.Second)
 		h.waited = result.joined
-		if result.stopErr != nil || result.ownerErr != nil || !result.joined {
+		if result.stopErr != nil || result.ownerErr != nil || !result.joined || h.shutdownFailureProof != nil {
 			var detail *v1.PlanError
 			expected := errors.As(result.stopErr, &detail) && detail.Code == h.shutdownFailureCode && result.joined && !result.killed
-			if exit, ok := result.ownerErr.(*exec.ExitError); result.ownerErr != nil && (!ok || exit.ExitCode() != 1) {
+			if exit, ok := result.ownerErr.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
 				expected = false
 			}
 			if expected && h.shutdownFailureProof != nil {
@@ -1541,7 +1541,9 @@ func TestNativeRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		original := append([]native.Identity(nil), journal.Groups...)
-		h.expectShutdownFailureAfterCleanup("cleanup_failed", original)
+		// This synthetic journal loss checks recovery diagnostics and no signaling
+		// without authority. Retained fixture authorities independently stop the
+		// originals below; daemon shutdown need not repeat the recovered error.
 		t.Cleanup(func() {
 			for _, id := range original {
 				if err := native.Stop(id, 0); err != nil {

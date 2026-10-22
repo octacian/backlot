@@ -93,7 +93,7 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	if data, err := os.ReadFile(sentinel); err != nil || string(data) != "keep" {
 		t.Fatal("destructive waiver bypass", err)
 	}
-	abandoned, exportErr := s.export(context.Background(), v1.ExportRequest{APIVersion: v1.Version, InstanceID: target, Output: filepath.Join(t.TempDir(), "abandoned")})
+	abandoned, exportErr := s.export(context.Background(), v1.ExportRequest{APIVersion: v1.Version, InstanceID: target, Output: filepath.Join(privateExportParent(t), "abandoned")})
 	code(t, exportErr, "export_incomplete")
 	if abandoned.Complete || abandoned.Published || len(abandoned.Result.NativeOwnershipWarnings) != 1 {
 		t.Fatal("strict export hid abandoned attempt", abandoned)
@@ -142,7 +142,7 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	request := v1.ExportRequest{APIVersion: v1.Version, InstanceID: target, Output: filepath.Join(t.TempDir(), "report")}
+	request := v1.ExportRequest{APIVersion: v1.Version, InstanceID: target, Output: filepath.Join(privateExportParent(t), "report")}
 	report, err := s.export(context.Background(), request)
 	if err != nil || !report.Complete || len(report.Result.NativeOwnershipWarnings) != 1 || report.Result.NativeOwnershipWarnings[0] != warning {
 		t.Fatal("latest clean export lost prior warning", report, err)

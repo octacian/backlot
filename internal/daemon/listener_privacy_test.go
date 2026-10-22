@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -44,9 +45,19 @@ func TestSessionListenerFailureExecutionExportPrivacy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			identity := native.Identity{Protocol: 1, PID: 42, Purpose: "application", Control: socket, Token: strings.Repeat("a", 64), Birth: "private-birth", Component: "private-component", Attempt: strings.Repeat("c", 64)}
+			if mode == "write-reset" {
+				// Match the native transport fixture: exceed the socket buffers,
+				// preparing the bounded payload before starting the request budget.
+				identity.Birth = strings.Repeat("private-birth", 1<<16)
+			}
+			group := &native.Group{Identity: identity}
 			done := make(chan error, 1)
+			received := make(chan struct{})
+			serverReady := make(chan struct{})
 			joined = false
 			go func() {
+				close(serverReady)
 				conn, err := listener.AcceptUnix()
 				if err != nil {
 					done <- err
@@ -55,17 +66,29 @@ func TestSessionListenerFailureExecutionExportPrivacy(t *testing.T) {
 				defer func() { _ = conn.Close(); done <- err }()
 				_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
 				if mode == "write-reset" {
-					var b [1]byte
-					_, err = conn.Read(b[:])
+					err = conn.SetReadBuffer(1024)
+					if err == nil {
+						var b [1]byte
+						var n int
+						n, err = conn.Read(b[:])
+						if err == nil && n != 1 {
+							err = io.ErrUnexpectedEOF
+						}
+					}
 				} else {
 					var payload json.RawMessage
 					err = json.NewDecoder(conn).Decode(&payload)
+					close(received)
 					if err == nil {
 						_, err = io.Copy(io.Discard, conn)
 						if errors.Is(err, io.EOF) {
 							err = nil
 						}
 					}
+				}
+				if mode == "write-reset" && err == nil {
+					close(received)
+					// Closing with unread request bytes supplies the real reset.
 				}
 			}()
 			t.Cleanup(func() {
@@ -80,12 +103,16 @@ func TestSessionListenerFailureExecutionExportPrivacy(t *testing.T) {
 					t.Error("socket fixture not joined")
 				}
 			})
-			identity := native.Identity{Protocol: 1, PID: 42, Purpose: "application", Control: socket, Token: strings.Repeat("a", 64), Birth: "private-birth", Component: "private-component", Attempt: strings.Repeat("c", 64)}
-			if mode == "write-reset" {
-				identity.Birth = strings.Repeat("private-birth", 1<<18)
+			select {
+			case <-serverReady:
+			case <-time.After(time.Second):
+				t.Fatal("socket fixture not ready")
 			}
-			group := &native.Group{Identity: identity}
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			budget := time.Second
+			if mode == "deadline" {
+				budget = 100 * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), budget)
 			defer cancel()
 			ready, err := networkProbeWith(ctx, "tcp", "12345", group.ListenerEndpoint)
 			if err == nil || ready {
@@ -94,6 +121,14 @@ func TestSessionListenerFailureExecutionExportPrivacy(t *testing.T) {
 			var transport *net.OpError
 			if !errors.As(err, &transport) || mode == "deadline" && !transport.Timeout() {
 				t.Fatal("transport classification lost", err)
+			}
+			select {
+			case <-received:
+			default:
+				t.Fatal("request did not reach fixture")
+			}
+			if mode == "write-reset" && (transport.Timeout() || !errors.Is(err, syscall.EPIPE) && !errors.Is(err, syscall.ECONNRESET)) {
+				t.Fatal("actual non-timeout reset cause lost", err)
 			}
 			// Same public error-to-failure assignment used by execute; keep arbitrary
 			// application streams out of this diagnostic privacy test.

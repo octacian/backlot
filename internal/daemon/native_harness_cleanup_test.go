@@ -35,6 +35,14 @@ func TestNativeHarnessShutdownFailureChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &nativeHarness{t: t, dir: root, pids: filepath.Join(root, "never-published")}
+	expectedFailure := os.Getenv("BACKLOT_HARNESS_EXPECTED_FAILURE")
+	if expectedFailure != "" {
+		h.shutdownFailureCode = "cleanup_failed"
+		h.shutdownFailureProof = func() error {
+			t.Error("proof ran without expected shutdown result")
+			return nil
+		}
+	}
 	// Match the real outer harness's retention rule, without allocating runtime.
 	t.Cleanup(func() {
 		if !h.cleanupUnverified {
@@ -51,6 +59,10 @@ func TestNativeHarnessShutdownFailureChild(t *testing.T) {
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Backlot-API-Version", v1.Version)
+		if expectedFailure == "missing-error" {
+			writeJSON(w, v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, PID: os.Getpid(), Status: "stopping", LeaseDuration: "2s"})
+			return
+		}
 		writeError(w, problem("cleanup_failed", "controlled shutdown cleanup failure"))
 	}), ReadHeaderTimeout: time.Second}
 	served := make(chan error, 1)
@@ -58,7 +70,10 @@ func TestNativeHarnessShutdownFailureChild(t *testing.T) {
 	defer func() { _ = server.Close(); <-served }()
 	h.cli = client.New(filepath.Join(root, "api.sock"))
 	h.process = exec.Command(os.Args[0], "-test.run=^TestNativeHarnessOwnerProcess$")
-	h.process.Env = append(os.Environ(), "BACKLOT_HARNESS_OWNER=1")
+	h.process.Env = os.Environ()
+	if expectedFailure == "" {
+		h.process.Env = append(h.process.Env, "BACKLOT_HARNESS_OWNER=1")
+	}
 	if err := h.process.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -66,17 +81,30 @@ func TestNativeHarnessShutdownFailureChild(t *testing.T) {
 }
 
 func TestNativeHarnessShutdownFailureRetainsNoPIDState(t *testing.T) {
+	for _, mode := range []string{"unexpected-owner-exit", "expected-error-owner-exit-zero", "missing-error"} {
+		t.Run(mode, func(t *testing.T) { nativeHarnessShutdownFailureRetainsNoPIDState(t, mode) })
+	}
+}
+
+func nativeHarnessShutdownFailureRetainsNoPIDState(t *testing.T, mode string) {
+	t.Helper()
 	root := filepath.Join(shortTemp(t), "uncertain")
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeHarnessShutdownFailureChild$", "-test.v")
 	child.Env = append(os.Environ(), "BACKLOT_HARNESS_FAILURE_ROOT="+root)
+	if mode != "unexpected-owner-exit" {
+		child.Env = append(child.Env, "BACKLOT_HARNESS_EXPECTED_FAILURE="+mode)
+	}
 	output, err := child.CombinedOutput()
 	if ctx.Err() != nil {
 		t.Fatal("cleanup failure path did not finish", string(output))
 	}
-	if err == nil || !strings.Contains(string(output), "controlled shutdown cleanup failure") || !strings.Contains(string(output), "exit status 23") || !strings.Contains(string(output), "unverified daemon shutdown") {
+	if err == nil || !strings.Contains(string(output), "unverified daemon shutdown") || strings.Contains(string(output), "proof ran without expected shutdown result") {
 		t.Error("shutdown and nonzero daemon failure were suppressed", string(output))
+	}
+	if mode == "unexpected-owner-exit" && (!strings.Contains(string(output), "controlled shutdown cleanup failure") || !strings.Contains(string(output), "exit status 23")) {
+		t.Error("original unexpected owner failure was lost", string(output))
 	}
 	if _, err := os.Stat(root); err != nil {
 		t.Error("uncertain no-PID state deleted", err)

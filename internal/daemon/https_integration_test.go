@@ -136,6 +136,22 @@ func TestHTTPSRuntime(t *testing.T) {
 			if httpsBody(t, f, origin, "/api/value") != "unrelated sentinel" {
 				t.Fatal("stop did not remove route")
 			}
+			attached := h.request("dev")
+			attached.Attached = true
+			owned, err := h.cli.Run(context.Background(), attached)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.state(id, v1.RuntimeReady)
+			if httpsBody(t, f, origin, "/ssr") != "ssr:api:/value" {
+				t.Fatal("attached publication failed")
+			}
+			if _, err := h.cli.Attached(context.Background(), ownerRequest(owned), true); err != nil {
+				t.Fatal(err)
+			}
+			if httpsBody(t, f, origin, "/api/value") != "unrelated sentinel" {
+				t.Fatal("attached cancellation removed unrelated route or retained owned route")
+			}
 			for _, operation := range []string{"start", "restart", "reset"} {
 				var response v1.InstanceResponse
 				if operation == "start" {

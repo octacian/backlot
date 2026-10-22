@@ -44,6 +44,7 @@ type ExecutionOptions struct {
 
 // RunRequest starts or explicitly restarts a validated scene.
 type RunRequest struct {
+	Attached   bool             `json:"attached,omitempty"`
 	APIVersion string           `json:"api_version"`
 	Plan       PlanRequest      `json:"plan"`
 	Options    ExecutionOptions `json:"options"`

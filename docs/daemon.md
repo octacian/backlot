@@ -123,6 +123,32 @@ restart. A logical project/checkout/scene key recorded at a different canonical
 project directory conflicts before start/join. Cancelling startup uses existing
 run cleanup; cancelling observation leaves execution alone.
 
+### Attached execution
+
+`scene start --attached dev` and `run --attached dev` start and exclusively own a
+new persistent execution attempt. They stay alive at readiness and show aggregate
+startup/service logs until the attempt ends. `--json` emits typed NDJSON lifecycle
+and log records (`starting`, `ready`, `stopping`, `stopped`, `failure`, `log`, and
+explicit gap/warning records); private attachment authority is never command output.
+Default starts still return at readiness and leave runtime running. Disposable
+scenes, terminal arguments, `--keep-on-failure`, restart and reset reject attached mode.
+
+An attached start refuses existing runtime rather than adopting it. Ordinary
+starts may join without gaining authority. SIGINT/SIGTERM stop/join the exact
+owned attempt, remove its routes, retain data/paired credentials and exit 130/143
+when cleanup succeeds. The daemon uses its existing `--lease-duration` (30s default)
+to stop runtime if the client dies or stops renewing, including blocked output.
+Stop/restart/reset/destroy remain operator overrides with their original semantics;
+old client requests cannot affect a replacement attempt. A verified external stop
+exits 0; replacement, daemon change, startup/runtime failure and cleanup/collection
+uncertainty are nonzero. No reconnect or automatic restart is provided.
+
+Readiness and runtime liveness retain existing detectors; attachment adds no
+continuous health probes. Log delivery uses existing retained pages and gaps,
+selecting the accepted attempt without a new ordering/completeness/replay promise.
+Standalone status-follow/logs remain observers. See the
+[attached execution decision](adr/20261022T194804759Z-bind-attached-persistent-execution-to-one-daemon-owned-attempt.md).
+
 ### Recorded selection and stop
 
 The daemon selects the nearest **recorded** project-directory ancestor in the
@@ -239,6 +265,7 @@ format and rejection/cleanup rules.
 | `POST /v1/run`, `/v1/restart`, `/v1/reset` | `RunRequest` | `InstanceResponse` |
 | `POST /v1/runtime/stop` | `StopRequest` (force requires selected `expected_attempt`) | `InstanceResponse` |
 | `POST /v1/destroy` | `InstanceRequest` | `InstanceResponse` |
+| `POST /v1/attached/renew`, `/v1/attached/cancel` | `AttachedRequest` | `SceneResponse` |
 | `POST /v1/logs` | `LogsRequest` | `LogsResponse` |
 
 `list` uses `ListRequest` (`after_id`, `limit`; zero means default 100, maximum
@@ -250,6 +277,13 @@ the old daemon before starting the new binary; only the supported predecessor's
 normal shutdown acknowledgment has the [bounded exception](#configuration-state-compatibility).
 Fixture discovery and explicit sensitive access use `FixturesRequest` through
 `POST /v1/fixtures` and `/v1/fixtures/secret`; see [evidence](evidence.md).
+
+Attached starts opt in with `attached: true` on `RunRequest` or
+`SceneStartRequest`. Only their initial `InstanceResponse` carries `attachment`
+(private `owner` with daemon generation, attempt and token, plus expiry and lease
+duration). Renewal/cancellation carry that owner and instance ID; their recorded
+snapshots contain no capability. Never persist or emit the capability as logs or
+ordinary command results. Attachment does not change durable state format 9.
 
 Failures use `ErrorResponse` with safe code/field/message values and an HTTP error
 status. Request/response documents are bounded to 1 MiB, with strict types, exact

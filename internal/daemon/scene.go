@@ -36,7 +36,7 @@ func (s *service) startScene(ctx context.Context, request v1.SceneStartRequest) 
 	}
 	result.CanonicalTarget = &canonicalTarget
 	request.Plan.ProjectPath = project
-	response, err := s.runSelected(ctx, v1.RunRequest{APIVersion: v1.Version, Plan: request.Plan, Options: request.Options}, false, true)
+	response, err := s.runSelected(ctx, v1.RunRequest{Attached: request.Attached, APIVersion: v1.Version, Plan: request.Plan, Options: request.Options}, false, true)
 	if err != nil {
 		return result, err
 	}

@@ -87,7 +87,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 	httpClient := *c.http
 	// Cleanup/restart can use a configured grace exceeding the transport default.
 	// The daemon bounds cleanup; callers retain context cancellation authority.
-	if path == "/v1/scenes/stop" || path == "/v1/export" || path == "/v1/doctor" || path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
+	if path == "/v1/attached/cancel" || path == "/v1/scenes/stop" || path == "/v1/export" || path == "/v1/doctor" || path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
 		httpClient.Timeout = 0
 	}
 	res, err := httpClient.Do(req)
@@ -195,6 +195,9 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 			return responseError()
 		}
 	case *v1.InstanceResponse:
+		if value.Attachment != nil && path != "/v1/run" {
+			return responseError()
+		}
 		if value.APIVersion != v1.Version {
 			return &v1.PlanError{Code: "api_version", Message: "incompatible daemon response version"}
 		}

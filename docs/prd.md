@@ -207,6 +207,12 @@ URL where applicable, and status. Closing the CLI leaves it running. Concurrent
 or repeated starts of the same scene join the existing start or return the ready
 instance. An unhealthy instance reports failure and requires explicit restart.
 
+Optional `scene start --attached` and `run --attached` exclusively own a newly
+accepted persistent attempt, keep aggregate logs visible and stop runtime on client
+cancellation/loss while retaining data and paired credentials. Existing runtime
+cannot be adopted. Operator lifecycle commands override attachment; stale owner
+requests cannot affect replacement attempts. See [attached execution](daemon.md#attached-execution).
+
 `run` for a disposable scene creates a new instance, waits for its designated
 terminal job, gathers evidence, and tears down owned resources. Forward arguments
 after `--` to that terminal job only. Keep the original test exit status in the

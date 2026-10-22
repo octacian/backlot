@@ -11,6 +11,9 @@ import (
 func (c *Client) Run(ctx context.Context, request v1.RunRequest) (v1.InstanceResponse, error) {
 	var response v1.InstanceResponse
 	err := c.call(ctx, http.MethodPost, "/v1/run", request, &response)
+	if err == nil {
+		err = validateAttachment(response, request.Attached)
+	}
 	return response, err
 }
 

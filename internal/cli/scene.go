@@ -21,7 +21,7 @@ func sceneCommand() *urfave.Command {
 	for _, name := range []string{"start", "status", "stop"} {
 		flags := append(daemonFlags(false), &urfave.StringFlag{Name: "project", Usage: "Exact project directory or recognized manifest path"})
 		if name == "start" {
-			flags = append(flags, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s"})
+			flags = append(flags, &urfave.BoolFlag{Name: "attached", Usage: "Own a persistent attempt until this client ends"}, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s"})
 		}
 		if name == "status" {
 			flags = append(flags, statusFollowFlags()...)
@@ -72,6 +72,9 @@ func sceneAction(ctx context.Context, c *urfave.Command) error {
 			response, err = cli.SceneStatus(ctx, request)
 		}
 		return sceneOutput(c, response, err)
+	}
+	if c.Bool("attached") {
+		return startScene(ctx, c, cli, target, nil)
 	}
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
@@ -186,13 +189,22 @@ func sceneOutput(c *urfave.Command, response v1.SceneResponse, err error) error 
 }
 
 func startScene(ctx context.Context, c *urfave.Command, cli *client.Client, target v1.SceneTarget, signals <-chan os.Signal) error {
-	request := v1.SceneStartRequest{APIVersion: v1.Version, CWD: target.CWD, Plan: v1.PlanRequest{Scene: target.Scene, ProjectPath: target.ProjectPath}, Options: v1.ExecutionOptions{StartupTimeout: c.String("startup-timeout"), JobTimeout: c.String("job-timeout"), StopGrace: c.String("stop-grace")}}
+	request := v1.SceneStartRequest{Attached: c.Bool("attached"), APIVersion: v1.Version, CWD: target.CWD, Plan: v1.PlanRequest{Scene: target.Scene, ProjectPath: target.ProjectPath}, Options: v1.ExecutionOptions{StartupTimeout: c.String("startup-timeout"), JobTimeout: c.String("job-timeout"), StopGrace: c.String("stop-grace")}}
 	if c.String("config") != "" {
 		var err error
 		request.Plan.ConfigPath, err = filepath.Abs(c.String("config"))
 		if err != nil {
 			return output(c, nil, err)
 		}
+	}
+	if request.Attached {
+		return runAttached(ctx, c, cli, request.Options.StopGrace, func(start context.Context) (v1.InstanceResponse, error) {
+			response, err := cli.StartScene(start, request)
+			if err != nil {
+				return v1.InstanceResponse{}, err
+			}
+			return *response.Result, nil
+		})
 	}
 	response, err := cli.StartScene(context.WithoutCancel(ctx), request)
 	if err != nil {

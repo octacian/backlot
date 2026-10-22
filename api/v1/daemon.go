@@ -80,6 +80,7 @@ type Instance struct {
 // InstanceResponse returns redacted metadata and explicit snapshot drift.
 // LeaseToken appears only on initial disposable preparation, never inspection.
 type InstanceResponse struct {
+	Attachment     *Attachment     `json:"attachment,omitempty"`
 	StartupDetails *StartupSummary `json:"startup_details,omitempty"`
 	APIVersion     string          `json:"api_version"`
 	Instance       Instance        `json:"instance"`

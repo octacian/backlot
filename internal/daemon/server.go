@@ -323,6 +323,17 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				return
 			}
 			writeJSON(w, response)
+		case "/v1/attached/renew", "/v1/attached/cancel":
+			var request v1.AttachedRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.attached(request, r.URL.Path == "/v1/attached/cancel")
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
 		case "/v1/runtime/stop":
 			var request v1.StopRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {

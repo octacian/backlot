@@ -580,10 +580,6 @@ See [state upgrade and operation](containers.md#state-compatibility) and
 
 ## Declared startup details
 
-Successful persistent `run`, `scene start`, `restart` and `reset` automatically
-show ordered selected fixture values, including selected sensitive values.
-Already-running starts use retained actual values and selections under drift.
-This is transient startup output, separate from ordinary redacted status/results.
-A summary retrieval failure warns without changing successfully observed startup.
-See [manifest selection and output](manifest.md#components-and-scenes) and the
-[application-owned seeded example](../examples/macos-quickstart/README.md#seeded-demo-account).
+Persistent startup can show declared fixture details, including selected secrets.
+See [selection, output and lifecycle behavior](manifest.md#components-and-scenes)
+and the [seeded example](../examples/macos-quickstart/README.md#seeded-demo-account).

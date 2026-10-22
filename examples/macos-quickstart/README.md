@@ -54,7 +54,7 @@ certificate authority. In BrowserOS Neo, open certificate management from browse
 settings, import this public file into its trusted authorities/local certificates,
 and enable website trust if prompted. Verify the actual origin without a warning;
 browser versions/policies differ. Keep signing keys and the remaining CA directory
-private. [Trust and lifecycle details](../../docs/https.md#managed-local-https-on-macos-arm64).
+private. [Trust and lifecycle details](../../docs/https.md#managed-local-https).
 
 ## Seeded demo account
 
@@ -67,25 +67,19 @@ backlot project setup --project . --config "$HOME/.config/backlot/machine.yaml" 
 JSON
 ```
 
-The manifest maps that input and one generated password into the `seed` job and
-its declared fixtures. The application writes its demo account into its private
-retained directory; the API accepts these credentials as JSON at `POST /api/login`
-and rejects incorrect credentials. This demonstrates application-owned seeding,
-not a Backlot account-provisioning feature.
+The manifest maps the email input and a generated password into the `seed` job
+and its fixtures. The application stores the demo account in its private retained
+directory and verifies the credentials at `POST /api/login`.
 
-After persistent readiness, startup output automatically includes the selected
-email, password and reminder in declaration order. JSON carries them in
-`startup_details.details` alongside the existing instance result. Treat captured
-startup output as sensitive. Ordinary status, fixture discovery and exported
-results stay redacted; `backlot secret` remains explicit sensitive inspection.
-The manifest's selection itself authorizes display; no reveal flag is needed.
+After readiness, startup output includes the selected email, password and reminder;
+JSON exposes them in `startup_details.details`. Selection authorizes disclosure
+without a reveal flag, so treat captured output as sensitive. See the
+[startup-details contract](../../docs/manifest.md#components-and-scenes).
 
-`seed` is fresh-only and initializes `account`: stop/run and restart retain its
-account/password, while reset replaces both. The existing `test` job is each-start
-and checks every disposable invocation; projects choose these policies and
-explicit dependency gates to match their own migration/seeding commands. Displayed
-credentials are configured connection details; application-side edits can later
-invalidate them.
+`seed` is fresh-only and initializes `account`: stop/run and restart retain the
+account/password; reset replaces both. The each-start `test` job checks every
+disposable invocation. Applications own seeding/authentication and choose dependency
+gates and job policies; application-side edits can invalidate displayed credentials.
 
 ## Run daily
 

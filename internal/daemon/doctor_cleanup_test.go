@@ -234,45 +234,11 @@ func TestDoctorCleanupCausePrivacy(t *testing.T) {
 	}
 }
 
-// doctorDaemonJoin retains the sole Wait owner and its terminal observation.
-// A timed-out owner is never waited again by registered cleanup. killErr stays
-// private to the fixture; it is not included in the bounded failure message.
-type doctorDaemonJoin struct {
-	done                      <-chan error
-	attempted, joined         bool
-	waitErr, killErr, failure error
-}
-
-func (j *doctorDaemonJoin) join(budget, killBudget time.Duration, kill func() error) error {
-	if j.attempted {
-		return j.failure
-	}
-	j.attempted = true
-	timer := time.NewTimer(budget)
-	defer timer.Stop()
-	select {
-	case j.waitErr = <-j.done:
-		j.joined = true
-		return nil
-	case <-timer.C:
-	}
-	j.killErr = kill() // Only the retained, unreaped direct child authorizes this.
-	timer.Reset(killBudget)
-	select {
-	case j.waitErr = <-j.done:
-		j.joined = true
-		j.failure = errors.New("daemon shutdown exceeded finite join budget; direct-child Wait owner joined after kill")
-	case <-timer.C:
-		j.failure = errors.New("daemon shutdown exceeded finite join budget; direct-child Wait owner unfinished; preserving owned fixture state")
-	}
-	return j.failure
-}
-
 func TestDoctorDaemonJoinTimeout(t *testing.T) {
 	for _, joined := range []bool{false, true} {
 		t.Run(fmt.Sprint("post-kill-joined-", joined), func(t *testing.T) {
 			done := make(chan error, 1)
-			j := &doctorDaemonJoin{done: done}
+			j := &fixtureOwnerJoin{done: done}
 			private := errors.New("private kill cause")
 			kills := 0
 			kill := func() error {
@@ -319,23 +285,11 @@ func TestDoctorUnresolvedCopyDaemonAvailability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var h *nativeHarness
-	t.Cleanup(func() {
-		if retained != "" || (h != nil && h.cleanupUnverified) {
-			t.Log("preserved owned daemon fixture", root)
-			return
-		}
-		if err := os.RemoveAll(root); err != nil {
-			t.Error(err)
-		}
-	})
-	binary := filepath.Join(root, "backlot")
-	build := exec.Command("go", "build", "-race", "-o", binary, "../../cmd/backlot")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build daemon: %v %s", err, output)
-	}
+	h := &nativeHarness{t: t, lease: "2s", dir: filepath.Join(root, "state"), project: filepath.Join(root, "project"), pids: filepath.Join(root, "pids")}
+	h.registerStateCleanup(root, retained != "")
+	binary := buildFixtureBinary(t, root, "../../cmd/backlot")
+	h.binary = binary
 	endpoint, _, inspections, _ := doctorRecoveryEngine(t)
-	h = &nativeHarness{t: t, binary: binary, lease: "2s", dir: filepath.Join(root, "state"), project: filepath.Join(root, "project"), pids: filepath.Join(root, "pids")}
 	for _, dir := range []string{h.dir, h.project} {
 		if err := os.Mkdir(dir, 0700); err != nil {
 			t.Fatal(err)
@@ -353,13 +307,10 @@ func TestDoctorUnresolvedCopyDaemonAvailability(t *testing.T) {
 	// Cleanup is retained before allocating the unresolved artifact or starting
 	// the daemon child. The configured evidence root is deliberately not removed.
 	h.waited = true
-	var owner *doctorDaemonJoin
+	var owner *fixtureOwnerJoin
 	join := func() error {
 		if owner == nil {
-			done := make(chan error, 1)
-			command := h.process
-			owner = &doctorDaemonJoin{done: done}
-			go func() { done <- command.Wait() }()
+			owner = &fixtureOwnerJoin{done: waitFixtureChild(h.process)}
 		}
 		err := owner.join(40*time.Second, 5*time.Second, h.process.Process.Kill)
 		h.waited = owner.joined

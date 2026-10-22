@@ -23,17 +23,8 @@ import (
 	"github.com/octacian/backlot/internal/native"
 )
 
-func reviewFixBinary(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "backlot")
-	if out, err := exec.Command("go", "build", "-race", "-o", binary, "../../cmd/backlot").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v %s", err, out)
-	}
-	return binary
-}
-
 func TestDestroyActiveKeptNative(t *testing.T) {
-	binary := reviewFixBinary(t)
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	for _, complete := range []bool{false, true} {
 		t.Run(fmt.Sprintf("completion-race-%v", complete), func(t *testing.T) {
 			h := newNativeHarness(t, binary, "20s")
@@ -105,7 +96,7 @@ func TestDestroyActiveKeptNative(t *testing.T) {
 }
 
 func TestLeaseCollectionFailureIsInstanceLocal(t *testing.T) {
-	binary := reviewFixBinary(t)
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	h := newNativeHarness(t, binary, "500ms")
 	// Separate witnesses/control paths keep cleanup attribution exact for both owners.
 	other := h.manifest.Components["server"]
@@ -187,7 +178,7 @@ func TestDestroyActiveKeptDocker(t *testing.T) {
 	if endpoint == "" {
 		t.Skip("requires explicit owned Docker fixture endpoint")
 	}
-	binary := reviewFixBinary(t)
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	for _, complete := range []bool{false, true} {
 		t.Run(fmt.Sprintf("completion-race-%v", complete), func(t *testing.T) {
 			h := newDockerHarness(t, binary, endpoint)
@@ -243,7 +234,7 @@ func TestPublicationReadinessSignals(t *testing.T) {
 	if os.Getenv("BACKLOT_CADDY_TEST_BINARY") == "" {
 		t.Skip("requires explicit owned Caddy fixture binary")
 	}
-	binary := reviewFixBinary(t)
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGTERM} {
 		t.Run(sig.String(), func(t *testing.T) {
 			f := gatewaytest.Start(t, "fixture.localhost")
@@ -376,7 +367,7 @@ func TestLeaseCollectorOutcomeDoesNotPoisonSweeper(t *testing.T) {
 }
 
 func TestKeptGuardianLossReportsEvidenceGap(t *testing.T) {
-	binary := reviewFixBinary(t)
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	h := newNativeFaultHarness(t, binary)
 	job := h.manifest.Components["job"]
 	job.Command.Args[len(job.Command.Args)-1] = "job-fail"

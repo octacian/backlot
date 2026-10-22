@@ -56,6 +56,37 @@ and enable website trust if prompted. Verify the actual origin without a warning
 browser versions/policies differ. Keep signing keys and the remaining CA directory
 private. [Trust and lifecycle details](../../docs/https.md#managed-local-https-on-macos-arm64).
 
+## Seeded demo account
+
+Register the application email once from this example directory, using the same
+private machine file as above:
+
+```sh
+backlot project setup --project . --config "$HOME/.config/backlot/machine.yaml" --from - --json <<'JSON'
+{"version":"backlot/v1","inputs":{"email":"demo@example.invalid"}}
+JSON
+```
+
+The manifest maps that input and one generated password into the `seed` job and
+its declared fixtures. The application writes its demo account into its private
+retained directory; the API accepts these credentials as JSON at `POST /api/login`
+and rejects incorrect credentials. This demonstrates application-owned seeding,
+not a Backlot account-provisioning feature.
+
+After persistent readiness, startup output automatically includes the selected
+email, password and reminder in declaration order. JSON carries them in
+`startup_details.details` alongside the existing instance result. Treat captured
+startup output as sensitive. Ordinary status, fixture discovery and exported
+results stay redacted; `backlot secret` remains explicit sensitive inspection.
+The manifest's selection itself authorizes display; no reveal flag is needed.
+
+`seed` is fresh-only and initializes `account`: stop/run and restart retain its
+account/password, while reset replaces both. The existing `test` job is each-start
+and checks every disposable invocation; projects choose these policies and
+explicit dependency gates to match their own migration/seeding commands. Displayed
+credentials are configured connection details; application-side edits can later
+invalidate them.
+
 ## Run daily
 
 From `examples/macos-quickstart` (or its corresponding directory in a Git worktree):

@@ -313,3 +313,156 @@ func TestSceneNativeCLI(t *testing.T) {
 		t.Fatal(missing)
 	}
 }
+
+func TestStartupDetailsCLI(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "backlot")
+	if out, err := exec.Command("go", "build", "-race", "-o", binary, "../../cmd/backlot").CombinedOutput(); err != nil {
+		t.Fatal(err, string(out))
+	}
+	t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", filepath.Join(shortTemp(t), "registry"))
+	h := newNativeHarness(t, binary)
+	h.manifest.Inputs = map[string]v1.Input{"token": {Secret: true}}
+	h.manifest.Resources["password"] = v1.Resource{Kind: "secret"}
+	server := h.manifest.Components["server"]
+	server.Resources = append(server.Resources, "password")
+	server.Fixtures = map[string]v1.Fixture{
+		"reminder":   {Value: v1.Value{Literal: ptr("original reminder")}},
+		"input":      {Value: v1.Value{Ref: &v1.Reference{Kind: "input", Name: "token"}}},
+		"generated":  {Value: v1.Value{Ref: &v1.Reference{Kind: "resource", Name: "password", Field: "value"}}},
+		"literal":    {Value: v1.Value{Literal: ptr("literal-private-canary"), Secret: true}},
+		"unselected": {Value: v1.Value{Literal: ptr("never-selected-canary"), Secret: true}},
+	}
+	h.manifest.Components["server"] = server
+	scene := h.manifest.Scenes["dev"]
+	scene.Resources = append(scene.Resources, "password")
+	for _, name := range []string{"reminder", "input", "generated", "literal"} {
+		scene.StartupDetails = append(scene.StartupDetails, v1.StartupDetailSelection{Component: "server", Fixture: name, Label: name})
+	}
+	h.manifest.Scenes["dev"] = scene
+	disposable := h.manifest.Scenes["test"]
+	disposable.Resources = append(disposable.Resources, "password")
+	h.manifest.Scenes["test"] = disposable
+	h.write()
+	config := filepath.Join(h.project, "machine.json")
+	if err := os.WriteFile(config, []byte(`{"version":"backlot/v1"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	execute := func(args ...string) ([]byte, error) {
+		t.Helper()
+		command := exec.Command(binary, args...)
+		command.Dir = h.project
+		var out, stderr bytes.Buffer
+		command.Stdout = &out
+		command.Stderr = &stderr
+		err := command.Run()
+		return out.Bytes(), err
+	}
+	configure := func(token string) {
+		t.Helper()
+		payload, err := json.Marshal(v1.PrivateConfig{Version: v1.ManifestVersion, Inputs: map[string]string{"token": token}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		setup := exec.Command(binary, "project", "setup", "--project", h.project, "--config", config, "--from", "-", "--json")
+		setup.Stdin = bytes.NewReader(payload)
+		if _, err := setup.CombinedOutput(); err != nil {
+			t.Fatal("private setup", err)
+		}
+	}
+	configure("input-private-canary")
+	read := func(args ...string) v1.InstanceResponse {
+		t.Helper()
+		out, err := execute(args...)
+		if err != nil {
+			t.Fatal("startup CLI failed", args[0], err)
+		}
+		var response v1.InstanceResponse
+		if args[0] == "scene" {
+			var named v1.SceneResponse
+			if err := json.Unmarshal(out, &named); err != nil || named.Result == nil {
+				t.Fatal("scene envelope", err)
+			}
+			response = *named.Result
+		} else if err := json.Unmarshal(out, &response); err != nil {
+			t.Fatal("finite JSON envelope", err)
+		}
+		if response.StartupDetails == nil || response.StartupDetails.Warning != nil || len(response.StartupDetails.Details) != 4 {
+			t.Fatal("missing authorized summary")
+		}
+		if strings.Contains(string(out), "never-selected-canary") {
+			t.Fatal("unselected credential exposed")
+		}
+		return response
+	}
+	runArgs := []string{"run", "dev", "--config", config, "--state-dir", h.dir, "--json", "--stop-grace", "50ms"}
+	first := read(runArgs...)
+	id := first.Instance.ID
+	generated := first.StartupDetails.Details[2].Value
+	if first.StartupDetails.Details[0].Value != "original reminder" || first.StartupDetails.Details[1].Value != "input-private-canary" || generated == "" || !first.StartupDetails.Details[2].Sensitive || first.StartupDetails.Details[3].Value != "literal-private-canary" {
+		t.Fatal("fixture resolution or order changed")
+	}
+	// Changing current selection/value must not silently adopt it on repeated start.
+	scene.StartupDetails[0].Label = "changed label"
+	h.manifest.Scenes["dev"] = scene
+	server.Fixtures["reminder"] = v1.Fixture{Value: v1.Value{Literal: ptr("changed reminder")}}
+	h.manifest.Components["server"] = server
+	h.write()
+	configure("changed-input-canary")
+	repeated := read(runArgs...)
+	if !repeated.ManifestDrift || repeated.StartupDetails.Details[0].Label != "reminder" || repeated.StartupDetails.Details[0].Value != "original reminder" || repeated.StartupDetails.Details[2].Value != generated || repeated.StartupDetails.Details[1].Value != "input-private-canary" {
+		t.Fatal("repeated start used unadopted values")
+	}
+	named := read("scene", "start", "--config", config, "--state-dir", h.dir, "--json", "dev")
+	if named.Instance.ID != id || named.StartupDetails.Details[2].Value != generated {
+		t.Fatal("named repeat lost retained values")
+	}
+	for _, action := range []string{"status", "inspect", "fixtures"} {
+		out, err := execute(action, "--state-dir", h.dir, "--json", id)
+		if err != nil {
+			t.Fatal(action, err)
+		}
+		for _, secret := range []string{generated, "input-private-canary", "literal-private-canary", "never-selected-canary"} {
+			if strings.Contains(string(out), secret) {
+				t.Fatal("ordinary output leaked credentials", action)
+			}
+		}
+		if strings.Contains(string(out), `"startup_details":{"attempt"`) {
+			t.Fatal("startup-only result persisted")
+		}
+	}
+	if _, err := execute("restart", id, "--state-dir", h.dir, "--json"); err == nil {
+		t.Fatal("restart accepted changed sensitive input")
+	}
+	configure("input-private-canary")
+	restarted := read("restart", id, "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
+	if restarted.StartupDetails.Details[2].Value != generated || restarted.StartupDetails.Details[0].Value != "changed reminder" {
+		t.Fatal("restart did not preserve generation/adopt ordinary drift")
+	}
+	stale := v1.FixturesRequest{APIVersion: v1.Version, InstanceID: id, ExpectedAttempt: first.Instance.Execution.Attempt, Component: "server", SecretName: "generated"}
+	if _, err := h.cli.FixtureSecret(context.Background(), stale); err == nil {
+		t.Fatal("replaced attempt retrieved current secret")
+	}
+	reset := read("reset", id, "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
+	if reset.StartupDetails.Details[2].Value == generated {
+		t.Fatal("reset retained generated credential")
+	}
+	if _, err := h.cli.StopExecution(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	retained := read(runArgs...)
+	if retained.StartupDetails.Details[2].Value != reset.StartupDetails.Details[2].Value {
+		t.Fatal("stop/run lost retained actual value")
+	}
+	if _, err := h.cli.StopExecution(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	// A new failed startup must not hydrate details or claim readiness.
+	server.Command.Args = []string{"-test.run=TestNativeFixtureProcess", "--", "fail"}
+	h.manifest.Components["server"] = server
+	h.write()
+	out, err := execute("restart", id, "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
+	var failed v1.InstanceResponse
+	if err == nil || json.Unmarshal(out, &failed) != nil || failed.StartupDetails != nil {
+		t.Fatal("failed readiness emitted startup summary")
+	}
+}

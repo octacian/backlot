@@ -367,3 +367,27 @@ scenes:
 		})
 	}
 }
+
+func TestStartupDetailsSchemaParity(t *testing.T) {
+	schema := compile(t, "manifest-v1.schema.json")
+	for _, tc := range []struct {
+		name, lifetime, selection, terminal string
+		valid                               bool
+	}{
+		{"persistent", "persistent", "[{component: seed, fixture: account, label: Account}]", "", true},
+		{"disposable excluded", "disposable", "[{component: seed, fixture: account, label: Account}]", "terminal_job: seed", false},
+		{"blank label", "persistent", "[{component: seed, fixture: account, label: ' '}]", "", false},
+		{"unknown field", "persistent", "[{component: seed, fixture: account, label: Account, value: nope}]", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			document := fmt.Sprintf("version: backlot/v1\nproject: detail\ntools: {go: go}\ncomponents:\n  seed: {kind: job, runtime: native, policy: each-start, command: {tool: go}, fixtures: {account: {value: {literal: demo}}}}\nscenes:\n  dev:\n    lifetime: %s\n    components: [seed]\n    startup_details: %s\n    %s\n", tc.lifetime, tc.selection, tc.terminal)
+			var m v1.Manifest
+			decodeErr := manifest.Decode([]byte(document), ".yaml", &m)
+			runtimeOK := decodeErr == nil && manifest.Validate(m) == nil
+			schemaOK := schema.Validate(yamlValue(t, []byte(document))) == nil
+			if runtimeOK != tc.valid || schemaOK != tc.valid {
+				t.Fatalf("runtime=%t schema=%t want=%t", runtimeOK, schemaOK, tc.valid)
+			}
+		})
+	}
+}

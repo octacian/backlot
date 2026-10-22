@@ -1366,6 +1366,13 @@
               },
               {
                 "properties": {
+                  "startup_details": {
+                    "maxItems": 0
+                  }
+                }
+              },
+              {
+                "properties": {
                   "terminal_job": {
                     "minLength": 1
                   }
@@ -1395,6 +1402,13 @@
         }
       ],
       "properties": {
+        "startup_details": {
+          "items": {
+            "$ref": "#/$defs/StartupDetailSelection"
+          },
+          "type": "array",
+          "description": "Ordered fixtures automatically displayed after persistent startup, including selected sensitive values."
+        },
         "lifetime": {
           "type": "string",
           "enum": [
@@ -1458,6 +1472,31 @@
         "resource"
       ],
       "description": "ServicePort maps an allocated host port to an explicit container listener when needed."
+    },
+    "StartupDetailSelection": {
+      "properties": {
+        "component": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+        },
+        "fixture": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^\\x00\\r\\n]*\\S[^\\x00\\r\\n]*$"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "component",
+        "fixture",
+        "label"
+      ],
+      "description": "StartupDetailSelection authorizes displaying one selected component fixture."
     },
     "Value": {
       "oneOf": [

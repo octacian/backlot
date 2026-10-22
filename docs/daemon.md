@@ -577,3 +577,13 @@ and adopt them atomically with execution acceptance. Ordinary version 9 stop/sta
 retains its immutable snapshot. The independent project registry remains format 1.
 See [state upgrade and operation](containers.md#state-compatibility) and
 [private setup, provenance and retention](manifest.md#registered-private-project-configuration).
+
+## Declared startup details
+
+Successful persistent `run`, `scene start`, `restart` and `reset` automatically
+show ordered selected fixture values, including selected sensitive values.
+Already-running starts use retained actual values and selections under drift.
+This is transient startup output, separate from ordinary redacted status/results.
+A summary retrieval failure warns without changing successfully observed startup.
+See [manifest selection and output](manifest.md#components-and-scenes) and the
+[application-owned seeded example](../examples/macos-quickstart/README.md#seeded-demo-account).

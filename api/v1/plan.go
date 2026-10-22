@@ -10,20 +10,21 @@ type PlanRequest struct {
 
 // PlanResponse is a redacted, allocation-free execution plan.
 type PlanResponse struct {
-	EffectiveConfigDigest string              `json:"effective_config_digest,omitempty"`
-	APIVersion            string              `json:"api_version"`
-	Project               string              `json:"project"`
-	Checkout              string              `json:"checkout"`
-	ManifestPath          string              `json:"manifest_path"`
-	ManifestDigest        string              `json:"manifest_digest"`
-	ConfigDigest          string              `json:"config_digest,omitempty"`
-	Scene                 string              `json:"scene"`
-	Lifetime              Lifetime            `json:"lifetime"`
-	TerminalJob           string              `json:"terminal_job,omitempty"`
-	Components            []PlannedComponent  `json:"components"`
-	Resources             map[string]Resource `json:"resources,omitempty"`
-	Outputs               map[string]Output   `json:"outputs,omitempty"`
-	Publish               *Publication        `json:"publish,omitempty"`
+	StartupDetails        []StartupDetailSelection `json:"startup_details,omitempty"`
+	EffectiveConfigDigest string                   `json:"effective_config_digest,omitempty"`
+	APIVersion            string                   `json:"api_version"`
+	Project               string                   `json:"project"`
+	Checkout              string                   `json:"checkout"`
+	ManifestPath          string                   `json:"manifest_path"`
+	ManifestDigest        string                   `json:"manifest_digest"`
+	ConfigDigest          string                   `json:"config_digest,omitempty"`
+	Scene                 string                   `json:"scene"`
+	Lifetime              Lifetime                 `json:"lifetime"`
+	TerminalJob           string                   `json:"terminal_job,omitempty"`
+	Components            []PlannedComponent       `json:"components"`
+	Resources             map[string]Resource      `json:"resources,omitempty"`
+	Outputs               map[string]Output        `json:"outputs,omitempty"`
+	Publish               *Publication             `json:"publish,omitempty"`
 }
 
 // PlannedValue contains a known value, a symbolic allocation reference, or redaction.

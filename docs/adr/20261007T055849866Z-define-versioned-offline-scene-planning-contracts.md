@@ -1,11 +1,11 @@
 ---
 title: "Define versioned offline scene planning contracts"
 date: '2026-10-07'
-status: accepted
+status: superseded
 summary: "Use shared backlot/v1 contracts and allocation-free planning to validate declarative scenes before runtime mutation."
 tags: [contracts, configuration, planning, security]
 supersedes: []
-superseded_by: []
+superseded_by: [20261022T195459793Z-authorize-declared-sensitive-startup-details-for-persistent-scenes.md]
 ---
 
 # Define versioned offline scene planning contracts

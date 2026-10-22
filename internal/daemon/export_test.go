@@ -724,3 +724,25 @@ func TestExportRejectsUnsafeLogSources(t *testing.T) {
 		})
 	}
 }
+
+func TestExportExcludesStartupFixtures(t *testing.T) {
+	s, instance, request := exportFixture(t)
+	result := *instance.Execution
+	result.Fixtures = []v1.FixtureRecord{{Component: "test", Name: "account", Value: "fixture-export-canary"}, {Component: "test", Name: "password", Sensitive: true}}
+	if _, err := s.store.execution(instance.ID, instance.Status, &result); err != nil {
+		t.Fatal(err)
+	}
+	response, err := s.export(context.Background(), request)
+	if err != nil || !response.Published {
+		t.Fatal("export failed", err)
+	}
+	for _, name := range []string{"report.json", "index.html"} {
+		data, err := os.ReadFile(filepath.Join(request.Output, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "fixture-export-canary") || strings.Contains(string(data), "startup_details") {
+			t.Fatal("export serialized startup fixture values", name)
+		}
+	}
+}

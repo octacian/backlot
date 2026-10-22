@@ -23,6 +23,9 @@ func validID(id string) bool {
 }
 func validateInstance(response v1.InstanceResponse) error {
 	instance := response.Instance
+	if response.StartupDetails != nil {
+		return responseError()
+	}
 	if !validID(instance.ID) || !validID(instance.Checkout.ID) || !validID(instance.Operation.ID) || !filepath.IsAbs(instance.Checkout.Path) || instance.Plan.APIVersion != v1.Version || instance.Plan.Project == "" || instance.Plan.Scene == "" {
 		return responseError()
 	}
@@ -107,6 +110,14 @@ func validateExecution(instance v1.Instance) error {
 		if detail.Code == "" || detail.Message == "" || result.CleanupFailure == "" {
 			return responseError()
 		}
+	}
+	seenFixtures := map[string]bool{}
+	for _, fixture := range result.Fixtures {
+		key := fixture.Component + "/" + fixture.Name
+		if fixture.Component == "" || fixture.Name == "" || seenFixtures[key] || fixture.Sensitive && fixture.Value != "" {
+			return responseError()
+		}
+		seenFixtures[key] = true
 	}
 	for _, port := range result.Ports {
 		if port < 1 || port > 65535 {

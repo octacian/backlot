@@ -74,10 +74,12 @@ backlot fixtures --state-dir /private/backlot --component tests INSTANCE_ID
 backlot secret --state-dir /private/backlot --component tests --json INSTANCE_ID password
 ```
 
-Only `secret` and its dedicated `/v1/fixtures/secret` endpoint return a named
-sensitive fixture's value. `/v1/fixtures` returns ordinary metadata. The local
-permissioned administration socket is the authorization boundary; do not share
-sensitive command output or private daemon state.
+`secret` retrieves a named sensitive fixture through `/v1/fixtures/secret`;
+`/v1/fixtures` returns ordinary metadata. Persistent startup uses the sensitive
+endpoint for [declared selections](manifest.md#components-and-scenes), without
+adding their values to execution results, status, diagnostics or exports. The
+permissioned local socket is the authorization boundary; protect sensitive output
+and private daemon state.
 
 ## Investigation and destruction
 

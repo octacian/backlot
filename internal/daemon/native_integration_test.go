@@ -962,7 +962,14 @@ func TestNativeRuntime(t *testing.T) {
 		h := newNativeHarness(t, binary)
 		c := h.manifest.Components["server"]
 		c.Environment.Assign["DELAY_BIND"] = v1.Value{Literal: ptr("1")}
+		c.Fixtures = map[string]v1.Fixture{
+			"port":         {Value: v1.Value{Ref: &v1.Reference{Kind: "resource", Name: "port", Field: "port"}}},
+			"private-port": {Value: v1.Value{Secret: true, Ref: &v1.Reference{Kind: "service", Name: "server", Field: "port", Port: "http"}}},
+		}
 		h.manifest.Components["server"] = c
+		scene := h.manifest.Scenes["dev"]
+		scene.StartupDetails = []v1.StartupDetailSelection{{Component: "server", Fixture: "port", Label: "Port"}, {Component: "server", Fixture: "private-port", Label: "Private port"}}
+		h.manifest.Scenes["dev"] = scene
 		h.write()
 		r := h.run("dev")
 		var port int
@@ -983,6 +990,19 @@ func TestNativeRuntime(t *testing.T) {
 		final := h.state(r.Instance.ID, v1.RuntimeReady)
 		if final.Instance.Execution.Ports["port"] == port {
 			t.Fatal("unrelated listener accepted as readiness")
+		}
+		if len(final.Instance.Execution.Fixtures) != 2 {
+			t.Fatal("refresh duplicated fixture records")
+		}
+		finalPort := strconv.Itoa(final.Instance.Execution.Ports["port"])
+		for _, fixture := range final.Instance.Execution.Fixtures {
+			if fixture.Name == "port" && fixture.Value != finalPort {
+				t.Fatal("ordinary fixture retained abandoned port")
+			}
+		}
+		private, err := h.cli.FixtureSecret(context.Background(), v1.FixturesRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID, ExpectedAttempt: final.Instance.Execution.Attempt, Component: "server", SecretName: "private-port"})
+		if err != nil || len(private.Fixtures) != 1 || private.Fixtures[0].Value != finalPort {
+			t.Fatal("sensitive fixture retained abandoned port", err)
 		}
 		connection, err := net.DialTimeout("tcp", sentinel.Addr().String(), time.Second)
 		if err != nil {

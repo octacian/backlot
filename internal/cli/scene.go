@@ -199,6 +199,7 @@ func startScene(ctx context.Context, c *urfave.Command, cli *client.Client, targ
 		return sceneOutput(c, response, err)
 	}
 	id := response.Result.Instance.ID
+	attempt := startupAttempt(response.Result.Instance)
 	checkout := response.Checkout
 	canonicalTarget := response.CanonicalTarget
 	driftManifest, driftConfig := response.Result.ManifestDrift, response.Result.ConfigDrift
@@ -227,9 +228,30 @@ func startScene(ctx context.Context, c *urfave.Command, cli *client.Client, targ
 			return cancelStart(code)
 		default:
 		}
+		if attempt == "" || startupAttempt(instance) != attempt {
+			return output(c, nil, startupConflict())
+		}
 		switch instance.Status {
 		case v1.RuntimeReady:
-			return sceneOutput(c, response, nil)
+			if len(instance.Plan.StartupDetails) > 0 {
+				summaryCtx, cancel := context.WithCancel(ctx)
+				joined := make(chan struct{})
+				go func() {
+					defer close(joined)
+					select {
+					case <-signals:
+						cancel()
+					case <-summaryCtx.Done():
+					}
+				}()
+				response.Result.StartupDetails = startupSummary(summaryCtx, cli, *response.Result)
+				cancel()
+				<-joined
+			}
+			if err := sceneOutput(c, response, nil); err != nil {
+				return err
+			}
+			return startupDetailsOutput(c, response.Result.StartupDetails)
 		case v1.Failed, v1.Interrupted, v1.Cancelled, v1.Stopped, v1.Destroyed:
 			if err := sceneOutput(c, response, nil); err != nil {
 				return err

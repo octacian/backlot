@@ -189,11 +189,12 @@ type Publication struct {
 
 // Scene explicitly selects all work and resources for one workflow.
 type Scene struct {
-	Lifetime    Lifetime     `json:"lifetime" yaml:"lifetime" jsonschema_description:"Persistent retains data; disposable runs finish at a terminal job."`
-	Components  []string     `json:"components" yaml:"components" jsonschema_description:"Explicit nonempty selection of component names; dependencies are never included implicitly."`
-	Resources   []string     `json:"resources,omitempty" yaml:"resources,omitempty" jsonschema_description:"Instance-owned allocations selected explicitly; planning does not provision them."`
-	TerminalJob string       `json:"terminal_job,omitempty" yaml:"terminal_job,omitempty" jsonschema_description:"Selected each-start job; required for disposable scenes."`
-	Publish     *Publication `json:"publish,omitempty" yaml:"publish,omitempty" jsonschema_description:"Optional owned HTTPS origin, routes and aggregate readiness."`
+	StartupDetails []StartupDetailSelection `json:"startup_details,omitempty" yaml:"startup_details,omitempty" jsonschema_description:"Ordered fixtures automatically displayed after persistent startup, including selected sensitive values."`
+	Lifetime       Lifetime                 `json:"lifetime" yaml:"lifetime" jsonschema_description:"Persistent retains data; disposable runs finish at a terminal job."`
+	Components     []string                 `json:"components" yaml:"components" jsonschema_description:"Explicit nonempty selection of component names; dependencies are never included implicitly."`
+	Resources      []string                 `json:"resources,omitempty" yaml:"resources,omitempty" jsonschema_description:"Instance-owned allocations selected explicitly; planning does not provision them."`
+	TerminalJob    string                   `json:"terminal_job,omitempty" yaml:"terminal_job,omitempty" jsonschema_description:"Selected each-start job; required for disposable scenes."`
+	Publish        *Publication             `json:"publish,omitempty" yaml:"publish,omitempty" jsonschema_description:"Optional owned HTTPS origin, routes and aggregate readiness."`
 }
 
 // MachineConfig contains local provider settings and executable overrides.
@@ -242,4 +243,11 @@ type ArtifactSource struct {
 type Fixture struct {
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 	Value       Value  `json:"value" yaml:"value"`
+}
+
+// StartupDetailSelection authorizes displaying one selected component fixture.
+type StartupDetailSelection struct {
+	Component string `json:"component" yaml:"component"`
+	Fixture   string `json:"fixture" yaml:"fixture"`
+	Label     string `json:"label" yaml:"label" jsonschema:"minLength=1"`
 }

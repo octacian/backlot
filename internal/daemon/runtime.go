@@ -803,6 +803,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		status = v1.Succeeded
 		return
 	}
+	s.refreshStartupFixtures(id, snapshot, result, entry)
 	status = v1.RuntimeReady
 	if failure = save(v1.RuntimeReady); failure != nil {
 		return

@@ -62,5 +62,7 @@ unfinished prompts, reciprocal existing references, and supersession cycles.
 Markdown examples cannot satisfy required headings. Validation cannot determine
 decision quality, approval, or implementation completion; those require review.
 
-GitHub Actions runs ADR tests and verification with the repository checks on every
-PR and push to `main`, including record deletions.
+GitHub Actions runs ADR tests and verification for Markdown and ADR tooling
+changes, including record deletions, in the dedicated Docs workflow on PRs and
+pushes to `main`. It runs independently of implementation checks. See
+[CI selection](../testing.md#ci-and-platform-evidence) for the shared path filters.

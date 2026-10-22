@@ -170,9 +170,9 @@ retain private state locally for authenticated diagnosis; never prune unrelated
 resources or upload the private root.
 
 [The scenes workflow](../.github/workflows/scenes.yml) exercises sequential setup/run
-and existing browser/trust/fault/lifecycle checks. [The independent consumer](../.github/workflows/setup-consumer.yml)
-exercises remote quickrun and custom upload after private cleanup from a separate
-application Git root. New revision-bound evidence and remaining gates are recorded
+and existing browser/trust/fault/lifecycle checks. The
+[independent consumer](#independent-action-consumer) checks action packaging.
+New revision-bound evidence and remaining gates are recorded
 with the delivery; these examples make no broader release/provider readiness claim.
 
 
@@ -218,5 +218,24 @@ secret redaction remains in force; public inputs may appear as public plan value
 Applications remain responsible for secret values they print or write to logs,
 reports and artifacts. Workflow masks are a log backstop and do not sanitize
 arbitrary artifact bytes. The current-head project-inputs workflow exercises the
-new setup/run/quickrun contract; the pinned independent consumer workflow retains
-historical consumer coverage and is not evidence of the new contract.
+new setup/run/quickrun contract. The independent consumer checks packaging only;
+it does not repeat this input/failure/lifecycle suite.
+
+
+## Independent action consumer
+
+[Setup action consumer](../.github/workflows/setup-consumer.yml) is a manual-only
+packaging smoke test. Dispatch it on the branch being verified. GitHub's
+[`$/` action reference](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-using-an-action-in-the-same-repository-as-the-workflow-at-the-running-commit-recommended)
+downloads `actions/quickrun` at the workflow's running commit without checking out
+Backlot into the application workspace. `backlot-ref: ${{ github.sha }}` selects
+the same runtime revision. There are no historical action/runtime pins.
+
+The workspace contains a separate minimal application Git repository with no
+Backlot sources or actions. One native Node job writes an artifact; the workflow
+requires successful action outputs and the expected artifact in the exported
+bundle. This catches missing packaged sibling modules and accidental dependencies
+on the application's checkout. The regular scenes and project-inputs workflows
+own browser, trust, failure/cancellation, reuse, cleanup, upload and input coverage;
+the consumer does not repeat those suites. External adopters should continue to
+pin reviewed SHAs as described above.

@@ -41,7 +41,9 @@ Run these from the repository root:
 | `make adr-test` | Run ADR tooling tests |
 | `make schema-generate` | Regenerate committed editor schemas from `api/v1` |
 | `make schema-check` | Reject stale generated schemas without writing |
-| `make check` | Run schema drift checks, formatting, vet, lint, race tests, ADR verification, and build |
+| `make check-implementation` | Run schema/notice drift checks, formatting, vet, lint, Go race tests, and build |
+| `make check-docs` | Run ADR tooling tests and verify ADR records |
+| `make check` | Run both implementation and documentation checks |
 
 Before committing scaffold or Go/tooling changes, run `make check`. Documentation
 changes require ADR verification when records change and manual checking of
@@ -58,8 +60,40 @@ native Windows runtime CI is planned in #37/#38 and is not implemented here.
 The [Windows acceptance matrix](windows-design.md#epic-acceptance-and-evidence-matrix)
 separates future runtime CI from required Windows 11 desktop adoption evidence.
 Debian 13.4 amd64 requires actual-host runtime evidence; WSL is configuration guidance only. See [platform policy](platforms.md).
-The workflow runs on every PR and push to `main`, without path filters that
-could leave required checks missing.
+Workflows start on every PR and push to `main` (the independent consumer
+is manual-only). A shared
+[changed-paths workflow](../.github/workflows/changes.yml) uses pinned
+[dorny/paths-filter](https://github.com/dorny/paths-filter) to skip irrelevant jobs.
+Selection happens at job level; workflow-level path filters can leave required
+checks pending. Detection failures run the gates rather than
+silently skipping validation. PR detection uses Git to compare the checked-out
+merge commit with the event's base SHA, including fork PRs, avoiding the PR files
+API's 3,000-file limit. Main pushes compare with the pre-push commit, including
+multi-commit pushes.
+
+| Changed files | Jobs that run |
+| --- | --- |
+| `docs/` files or Markdown anywhere, including ADR additions/deletions | Docs workflow: ADR tooling tests and record verification |
+| Go/runtime sources, schemas, non-CI examples, module/build/lint configuration | macOS/Ubuntu repository checks, Linux runtime, current-head scenes and project inputs |
+| `THIRD_PARTY_NOTICES.md` | Repository and Linux installation checks, plus Docs |
+| `actions/` implementation | Current-head scenes and project inputs |
+| `examples/ci-scenes/` implementation | Scenes |
+| `examples/ci-inputs/` implementation | Project inputs |
+| An automatic workflow | Its own gates; shared change-detection edits run all automatic gates |
+
+Markdown inside implementation/example directories stays documentation-only.
+The [Docs workflow](../.github/workflows/docs.yml) always owns documentation
+validation: it runs `make check-docs` whenever documentation or its tooling,
+module dependencies or Makefile change. Mixed implementation/documentation PRs
+run both workflows independently. The Check workflow runs
+`make check-implementation` and does not validate ADR records. Its Go test suite
+still tests ADR tooling code as part of the complete Go suite. The independent consumer is a manual
+[current-commit packaging smoke test](ci.md#independent-action-consumer), without
+browser shards or repeated lifecycle checks. It does not use path detection.
+Go package tests remain together: shared packages and separately built subprocesses
+make narrower package selection unreliable. Keep new executable inputs covered
+by the filters when adding directories or build configuration. Local `make check`
+continues to run the complete contributor gate.
 
 Schema tests use a maintained JSON Schema validator on the real YAML examples
 and negative/variant cases, in addition to checking deterministic generated output.

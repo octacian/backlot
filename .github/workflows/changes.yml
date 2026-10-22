@@ -1,0 +1,64 @@
+name: Changed paths
+
+on:
+  workflow_call:
+    outputs:
+      check:
+        value: ${{ jobs.paths.outputs.check }}
+      docs:
+        value: ${{ jobs.paths.outputs.docs }}
+      scenes:
+        value: ${{ jobs.paths.outputs.scenes }}
+      project-inputs:
+        value: ${{ jobs.paths.outputs.project-inputs }}
+
+permissions:
+  contents: read
+
+jobs:
+  paths:
+    runs-on: ubuntu-24.04
+    outputs:
+      check: ${{ steps.filter.outputs.implementation == 'true' || steps.filter.outputs.repository == 'true' || steps.filter.outputs.ci == 'true' }}
+      docs: ${{ steps.filter.outputs.docs == 'true' || steps.filter.outputs.ci == 'true' }}
+      scenes: ${{ steps.filter.outputs.implementation == 'true' || steps.filter.outputs.actions == 'true' || steps.filter.outputs.scenes == 'true' || steps.filter.outputs.ci == 'true' }}
+      project-inputs: ${{ steps.filter.outputs.implementation == 'true' || steps.filter.outputs.actions == 'true' || steps.filter.outputs.project-inputs == 'true' || steps.filter.outputs.ci == 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          # Git avoids the PR files API limit; pushes compare with the pre-push commit.
+          token: ''
+          base: ${{ github.event.pull_request.base.sha || github.ref }}
+          predicate-quantifier: some-with-excludes
+          filters: |
+            implementation:
+              - '{api,cmd,internal,schemas}/**'
+              - 'examples/**'
+              - '!examples/ci-scenes/**'
+              - '!examples/ci-inputs/**'
+              - '!**/*.md'
+              - '{go.mod,go.sum,Makefile,.golangci.yml,.gitattributes,.gitignore}'
+            repository:
+              - 'THIRD_PARTY_NOTICES.md'
+              - '.github/workflows/check.yml'
+            docs:
+              - 'docs/**'
+              - '**/*.md'
+              - '{cmd,internal}/adr/**'
+              - '{go.mod,go.sum,Makefile}'
+              - '.github/workflows/docs.yml'
+            actions:
+              - 'actions/**'
+              - '!**/*.md'
+            scenes:
+              - 'examples/ci-scenes/**'
+              - '!**/*.md'
+              - '.github/workflows/scenes.yml'
+            project-inputs:
+              - 'examples/ci-inputs/**'
+              - '!**/*.md'
+              - '.github/workflows/project-inputs.yml'
+            ci:
+              - '.github/workflows/changes.yml'

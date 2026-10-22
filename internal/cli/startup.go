@@ -47,6 +47,9 @@ func startupSummary(ctx context.Context, cli *client.Client, response v1.Instanc
 		}
 		summary.Details = append(summary.Details, v1.StartupDetail{StartupDetailSelection: selection, Value: selected.Value, Sensitive: selected.Sensitive})
 	}
+	if ctx.Err() != nil {
+		return unavailable()
+	}
 	return summary
 }
 

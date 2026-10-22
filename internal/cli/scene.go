@@ -233,7 +233,21 @@ func startScene(ctx context.Context, c *urfave.Command, cli *client.Client, targ
 		}
 		switch instance.Status {
 		case v1.RuntimeReady:
-			response.Result.StartupDetails = startupSummary(ctx, cli, *response.Result)
+			if len(instance.Plan.StartupDetails) > 0 {
+				summaryCtx, cancel := context.WithCancel(ctx)
+				joined := make(chan struct{})
+				go func() {
+					defer close(joined)
+					select {
+					case <-signals:
+						cancel()
+					case <-summaryCtx.Done():
+					}
+				}()
+				response.Result.StartupDetails = startupSummary(summaryCtx, cli, *response.Result)
+				cancel()
+				<-joined
+			}
 			if err := sceneOutput(c, response, nil); err != nil {
 				return err
 			}

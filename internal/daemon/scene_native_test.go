@@ -462,7 +462,7 @@ func TestStartupDetailsCLI(t *testing.T) {
 	h.write()
 	out, err := execute("restart", id, "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
 	var failed v1.InstanceResponse
-	if err == nil || json.Unmarshal(out, &failed) != nil || failed.StartupDetails != nil {
+	if err == nil || json.Unmarshal(out, &failed) != nil || failed.Instance.ID != id || failed.Instance.Status != v1.Failed || failed.Instance.Execution == nil || failed.Instance.Execution.Failure == "" || failed.StartupDetails != nil {
 		t.Fatal("failed readiness emitted startup summary")
 	}
 }

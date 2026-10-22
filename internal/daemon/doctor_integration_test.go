@@ -33,12 +33,8 @@ func TestDoctorRuntime(t *testing.T) {
 		t.Skip("requires explicit owned Caddy/Docker grant and preexisting shell/getent/timeout/OpenSSL diagnostic image")
 	}
 	build := t.TempDir()
-	binary, app := filepath.Join(build, "backlot"), filepath.Join(build, "app")
-	for _, target := range []struct{ out, source string }{{binary, "../../cmd/backlot"}, {app, "../gateway/testdata/fixture"}} {
-		if data, err := exec.Command("go", "build", "-race", "-o", target.out, target.source).CombinedOutput(); err != nil {
-			t.Fatal(err, string(data))
-		}
-	}
+	binary := buildFixtureBinary(t, build, "../../cmd/backlot")
+	app := buildFixtureBinary(t, build, "../gateway/testdata/fixture")
 	trust := filepath.Join(build, "trust.pem")
 	t.Setenv("SSL_CERT_FILE", trust)
 	t.Setenv("SSL_CERT_DIR", build)

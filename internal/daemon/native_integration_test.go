@@ -359,8 +359,7 @@ func (h *nativeHarness) close() {
 	h.t.Helper()
 	if !h.waited && h.process != nil && h.process.Process != nil {
 		if h.ownerDone == nil {
-			h.ownerDone = make(chan error, 1)
-			go func() { h.ownerDone <- h.process.Wait() }()
+			h.ownerDone = waitFixtureChild(h.process)
 		}
 		result := finishNativeHarnessOwner(func(ctx context.Context) error { _, err := h.cli.Stop(ctx); return err }, h.ownerDone, h.process.Process.Kill, 40*time.Second, 40*time.Second, 2*time.Second)
 		h.waited = result.joined
@@ -397,37 +396,6 @@ func (h *nativeHarness) close() {
 	h.absent()
 }
 
-type nativeHarnessShutdown struct {
-	stopErr, ownerErr error
-	joined, killed    bool
-}
-
-// The retained Wait owner is reused on a later close after timeout. No second
-// Wait, unbounded receive, or observed-PID actuation is permitted here.
-func finishNativeHarnessOwner(stop func(context.Context) error, done <-chan error, kill func() error, stopBudget, joinBudget, killBudget time.Duration) nativeHarnessShutdown {
-	ctx, cancel := context.WithTimeout(context.Background(), stopBudget)
-	result := nativeHarnessShutdown{stopErr: stop(ctx)}
-	cancel()
-	timer := time.NewTimer(joinBudget)
-	defer timer.Stop()
-	select {
-	case result.ownerErr = <-done:
-		result.joined = true
-	case <-timer.C:
-		result.killed = true
-		result.ownerErr = errors.Join(errors.New("daemon shutdown join exceeded budget"), kill())
-		timer.Reset(killBudget)
-		select {
-		case err := <-done:
-			result.ownerErr = errors.Join(result.ownerErr, err)
-			result.joined = true
-		case <-timer.C:
-			result.ownerErr = errors.Join(result.ownerErr, errors.New("retained daemon did not join after kill; preserve owner and state"))
-		}
-	}
-	return result
-}
-
 // This exception is selected only by intentional authority-corruption fixtures,
 // after their policy assertions. Every retained original authority must prove
 // authenticated cleanup again; absence of a PID file cannot satisfy it.
@@ -462,21 +430,8 @@ func newNativeHarnessConfigured(t *testing.T, binary, budget string, faults bool
 	if err != nil {
 		t.Fatal(err)
 	}
-	var h *nativeHarness
-	t.Cleanup(func() {
-		if h != nil && h.cleanupUnverified {
-			t.Log("preserved unverified fixture state", root)
-			return
-		}
-		if h != nil && h.preserveFailureEvidence {
-			t.Log("preserved fixture failure evidence after cleanup", root, "daemon joined", h.waited)
-			return
-		}
-		if err := os.RemoveAll(root); err != nil {
-			t.Error(err)
-		}
-	})
-	h = &nativeHarness{t: t, binary: binary, lease: budget, faultMode: faults, dir: filepath.Join(root, "state"), project: filepath.Join(root, "project"), pids: filepath.Join(root, "pids")}
+	h := &nativeHarness{t: t, binary: binary, lease: budget, faultMode: faults, dir: filepath.Join(root, "state"), project: filepath.Join(root, "project"), pids: filepath.Join(root, "pids")}
+	h.registerStateCleanup(root, false)
 	if err := os.Mkdir(h.project, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -506,11 +461,7 @@ func newNativeHarnessConfigured(t *testing.T, binary, budget string, faults bool
 }
 
 func TestNativeRuntime(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "backlot")
-	build := exec.Command("go", "build", "-race", "-o", binary, "../../cmd/backlot")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build: %v %s", err, output)
-	}
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	t.Run("uncertainty-cleanup-after-fatal", func(t *testing.T) {
 		record := filepath.Join(t.TempDir(), "record")
 		self, err := os.Executable()

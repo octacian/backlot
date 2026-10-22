@@ -94,6 +94,43 @@ capability checks precede self-fault. Capability data stays in private temporary
 state and is excluded from reports. Failure paths join owners and prove absence,
 or preserve diagnostic state and report residuals.
 
+## Daemon state migrations
+
+Follow the [retained migration decision](adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md).
+Before a real format change, capture a nonempty closed database with the unmodified
+predecessor producer; retain its pinned revision, build settings/hashes, fixture
+inputs and regeneration commands. The committed [v9 fixture](../internal/daemon/testdata/state/v9/README.md)
+is the forward baseline. Never recreate historical evidence using current structs.
+Pre-v9 formats are unsupported; retain fixture coverage from v9 onward.
+
+Add the smallest private Go step in `internal/daemon/state_upgrade.go` with explicit
+source/destination versions. Validate source layout/authority before converting;
+retain the historical readers required by that source, without imposing current
+buckets/fields first. Advance `api/v1.StateVersion` only for a real persisted change.
+Retain earlier steps and fixtures; removal requires a compatibility decision.
+Steps use the supplied transaction, never commit/open another transaction or touch
+providers, processes, registry or retained files. Do not normalize unrelated values.
+Current layout/authority checks and the final fence run after the complete path.
+
+First exercise a copy of the oldest retained fixture through the full path and
+reopen it, checking typed reads and unchanged bytes outside intended transforms.
+Reject altered unsupported/corrupt copies without changing database bytes or
+passive files; never run recovery on historical paths. Adapt expected transformed
+records with each real change. Reuse the transaction rollback, startup cancellation,
+controlled before/after-commit interruption and postcommit failure tests. The
+synthetic 100→101→102 tests exercise actual bucket/value transformations, later-step
+failure and cancellation after tentative writes through the production dispatcher.
+These are algorithm evidence, not additional supported production versions.
+
+```sh
+go test ./internal/daemon -run '^Test(State|RetainedStateNine|CanceledStartup)' -count=1 -v
+make check
+```
+
+The native-only fixture does not prove historical Docker/gateway compatibility.
+Run additional provider suites only when changes reach those boundaries; do not
+multiply lifecycle suites for every retained version.
+
 ## Docker/private-state integration
 
 Provider tests are explicit opt-in and require a local Docker Unix socket plus

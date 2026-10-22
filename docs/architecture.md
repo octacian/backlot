@@ -64,17 +64,17 @@ the UI or CLI. A separately published Go SDK is not required for V1.
 
 Recommended embedded storage is bbolt: only the daemon opens the database and
 mutations use transactions. Keep a versioned state format. The current format is
-9, with validated, one-way direct transitions from supported merged-main formats
-6 and 8. Under exclusive ownership, validate recovery-safe
-record shapes and authority before atomically advancing only the version fence;
-preserve all other record bytes. Reject unsupported formats, including 5, 7 and
-incompatible experimental format6 authority, unchanged. Keep this transition
-bounded to these supported predecessors. Store instance/resource IDs, allocation
-intent, ownership tokens,
-resolved plan snapshots, preparation completion, attempts, and results. See
-[state compatibility](containers.md#state-compatibility) and the
-[current native supervision and recovery decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md)
-for version fencing and durable force-stop histories.
+9. Retain each real Go migration from v9 onward so the newest binary can apply
+all required steps when users skip releases. Version 9 is the minimum supported
+baseline. Source-specific validation, transformations, final current-authority
+validation and the version fence share one startup write transaction under
+exclusive ownership; any precommit failure rolls back the chain. Preserve all
+records outside explicit transformations. Reject all pre-v9 and other unsupported
+formats unchanged. Store
+instance/resource IDs, allocation intent, ownership tokens, resolved plan snapshots,
+preparation completion, attempts, and results. See [state compatibility](containers.md#state-compatibility),
+the [migration decision](adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md) and the
+[native supervision decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md).
 
 Use protected per-user state directories and secret storage. Secrets may be
 persisted for resource reuse but never appear in ordinary snapshots/results.

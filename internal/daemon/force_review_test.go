@@ -153,7 +153,7 @@ func TestWaiverAfterWritesRollsBack(t *testing.T) {
 	}
 }
 
-func TestStateSixRejectsMalformedLifecycleUnchanged(t *testing.T) {
+func TestStateRejectsMalformedLifecycleUnchanged(t *testing.T) {
 	cases := []struct{ name, bucket, key, value string }{
 		{"managed syntax", "meta", "managed_gateway", "{"},
 		{"managed shape", "meta", "managed_gateway", "[]"},
@@ -173,9 +173,6 @@ func TestStateSixRejectsMalformedLifecycleUnchanged(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err := s.store.db.Update(func(tx *bolt.Tx) error {
-				if err := tx.Bucket([]byte("meta")).Put([]byte("version"), []byte("6")); err != nil {
-					return err
-				}
 				if err := tx.Bucket([]byte("meta")).Put([]byte("unknown_metadata"), []byte("opaque preserved")); err != nil {
 					return err
 				}
@@ -197,11 +194,11 @@ func TestStateSixRejectsMalformedLifecycleUnchanged(t *testing.T) {
 			opened, err := openStore(dir)
 			if err == nil {
 				_ = opened.db.Close()
-				t.Fatal("corrupt v6 advanced format")
+				t.Fatal("malformed lifecycle state accepted")
 			}
 			after, readErr := os.ReadFile(filepath.Join(dir, "state.db"))
 			if readErr != nil || !bytes.Equal(before, after) {
-				t.Fatal("rejected v6 bytes changed", readErr)
+				t.Fatal("rejected state bytes changed", readErr)
 			}
 			retained, err := os.ReadFile(sentinel)
 			if err != nil || string(retained) != "retained private state" {

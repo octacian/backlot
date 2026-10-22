@@ -412,7 +412,7 @@ cleanup categories in `execution.cleanup_details`, alongside readable failure
 strings. Gateway diagnostics distinguish scope/configuration, hostname conflict,
 concurrency exhaustion, unavailable API and uncertain ownership/effect.
 
-See [state compatibility](containers.md#state-compatibility) for the supported
-v9 format, direct in-place supported-main v6/v8 upgrade, retained saved configuration/CA guarantees
-and unchanged rejection of v5/v7 and other unsupported versions. [Testing](testing.md) separates isolated fixtures from managed
-macOS/browser and external real-domain acceptance gates.
+See [state compatibility](containers.md#state-compatibility) for the v9 minimum,
+retained saved configuration/CA guarantees and rejection of pre-v9 state without
+mutation. [Testing](testing.md) separates isolated fixtures from managed macOS/browser
+and external real-domain acceptance gates.

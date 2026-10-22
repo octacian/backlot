@@ -21,6 +21,7 @@ import (
 )
 
 type execution struct {
+	attachment    *attachment // guarded by service.mu; never persisted
 	caCertPath    string
 	kept          bool
 	cancel        context.CancelFunc
@@ -85,6 +86,10 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 
 func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset, persistentOnly bool) (v1.InstanceResponse, error) {
 	var empty v1.InstanceResponse
+	if request.Attached && (request.InstanceID != "" || reset || request.Options.KeepOnFailure || len(request.Plan.TerminalArgs) > 0) {
+		return empty, problem("invalid_request", "attached mode requires a persistent start without terminal arguments or keep-on-failure")
+	}
+	persistentOnly = persistentOnly || request.Attached
 	if err := validatePlanRequest(request.Plan); err != nil {
 		return empty, err
 	}
@@ -247,6 +252,9 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		s.executions = map[string]*execution{}
 	}
 	if existing := s.executions[id]; existing != nil && request.InstanceID == "" && response.Instance.Status != v1.Stopped {
+		if request.Attached {
+			return empty, problem("conflict", "attached start cannot adopt an existing execution; stop it first")
+		}
 		instance, err := s.store.inspect(id)
 		response.Instance = instance
 		return response, err
@@ -287,6 +295,10 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	entry := &execution{caCertPath: caCertPath, cancel: cancel, done: make(chan struct{}), jobs: map[string]workload{}, services: map[string]workload{}, components: map[string]workload{}, source: identity, grace: mustGrace(request.Options)}
+	if request.Attached {
+		entry.attachment = &attachment{owner: v1.AttachedOwner{DaemonGeneration: s.generation, Attempt: attempt, Token: newID()}, expires: time.Now().Add(s.lease)}
+		response.Attachment = &v1.Attachment{Owner: entry.attachment.owner, ExpiresAt: entry.attachment.expires.UTC().Format(time.RFC3339Nano), LeaseDuration: s.lease.String()}
+	}
 	s.executions[id] = entry
 	response.Instance, err = s.store.inspect(id)
 	if err != nil {
@@ -298,6 +310,11 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	return response, nil
 }
 func (s *service) stopExecution(id string) (v1.Instance, error) {
+	s.mu.Lock()
+	if entry := s.executions[id]; entry != nil && entry.attachment != nil {
+		entry.attachment.ended = true
+	}
+	s.mu.Unlock()
 	instance, err := s.joinExecution(id)
 	var typed *v1.PlanError
 	if errors.As(err, &typed) && typed.Code == "cleanup_failed" {
@@ -1009,7 +1026,7 @@ func (s *service) cancelRuntime(id string) (v1.Instance, error) {
 	defer s.mu.Unlock()
 	return s.store.cancel(id)
 }
-func (s *service) expireRuntime(id string) error {
+func (s *service) expireRuntime(id string, expected *execution) error {
 	unlock := s.lockMutation(id)
 	defer unlock()
 	s.mu.Lock()
@@ -1018,8 +1035,19 @@ func (s *service) expireRuntime(id string) error {
 		s.mu.Unlock()
 		return err
 	}
+	if s.executions[id] != expected {
+		s.mu.Unlock()
+		return nil
+	}
 	expiry, parseErr := time.Parse(time.RFC3339Nano, instance.LeaseExpiresAt)
-	expired := instance.LeaseExpiresAt != "" && parseErr == nil && !expiry.After(time.Now()) && active(instance.Status) && instance.Status != v1.Stopping
+	if a := expected.attachment; a != nil {
+		if a.ended {
+			s.mu.Unlock()
+			return nil
+		}
+		expiry, parseErr = a.expires, nil
+	}
+	expired := (instance.LeaseExpiresAt != "" || expected.attachment != nil) && parseErr == nil && !expiry.After(time.Now()) && active(instance.Status) && instance.Status != v1.Stopping
 	s.mu.Unlock()
 	if !expired {
 		return nil

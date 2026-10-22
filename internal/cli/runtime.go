@@ -22,7 +22,7 @@ import (
 func runtimeCommands() []*urfave.Command {
 	commands := []*urfave.Command{}
 	for _, name := range []string{"run", "restart", "reset"} {
-		commands = append(commands, &urfave.Command{Name: name, SkipFlagParsing: true, Usage: "Execute an isolated scene; restart retains data, reset replaces it", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "keep-on-failure"}, &urfave.StringFlag{Name: "project"}, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s"}), Action: runNative})
+		commands = append(commands, &urfave.Command{Name: name, SkipFlagParsing: true, Usage: "Execute an isolated scene; restart retains data, reset replaces it", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "attached", Usage: "Own a persistent attempt until this client ends"}, &urfave.BoolFlag{Name: "keep-on-failure"}, &urfave.StringFlag{Name: "project"}, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s"}), Action: runNative})
 	}
 	commands = append(commands, &urfave.Command{Name: "stop", Usage: "Stop runtime; --force acknowledges potentially live native survivors", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force", Usage: "Relinquish unresolved native claims; survivors may still run/write"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
@@ -79,19 +79,7 @@ func runtimeCommands() []*urfave.Command {
 				return output(c, nil, err)
 			}
 			for _, record := range response.Records {
-				if c.Bool("json") {
-					err = json.NewEncoder(c.Writer).Encode(record)
-				} else {
-					_, err = fmt.Fprintf(c.Writer, "%s %s %s %s/%s: %s", record.Time, record.InstanceID, record.Attempt, record.Component, record.Stream, record.Message)
-					if err == nil && len(record.Data) > 0 {
-						var data []byte
-						data, err = base64.StdEncoding.DecodeString(record.Data)
-						if err == nil {
-							_, err = c.Writer.Write(data)
-						}
-					}
-				}
-				if err != nil {
+				if err := writeLogRecord(c, record); err != nil {
 					return err
 				}
 			}
@@ -149,7 +137,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 		return output(c, nil, err)
 	}
 	defer cli.Close()
-	request := v1.RunRequest{APIVersion: v1.Version, Options: v1.ExecutionOptions{StartupTimeout: c.String("startup-timeout"), JobTimeout: c.String("job-timeout"), StopGrace: c.String("stop-grace"), KeepOnFailure: c.Bool("keep-on-failure")}}
+	request := v1.RunRequest{Attached: c.Bool("attached"), APIVersion: v1.Version, Options: v1.ExecutionOptions{StartupTimeout: c.String("startup-timeout"), JobTimeout: c.String("job-timeout"), StopGrace: c.String("stop-grace"), KeepOnFailure: c.Bool("keep-on-failure")}}
 	if c.Name == "restart" || c.Name == "reset" {
 		previous, err := cli.Inspect(ctx, args[0])
 		if err != nil {
@@ -173,6 +161,9 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 		if err != nil {
 			return output(c, nil, err)
 		}
+	}
+	if request.Attached {
+		return runAttached(ctx, c, cli, request.Options.StopGrace, func(start context.Context) (v1.InstanceResponse, error) { return cli.Run(start, request) })
 	}
 	signalCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -325,7 +316,7 @@ func parseRuntimeArgs(c *urfave.Command) (string, []string, error) {
 		}
 		seen[arg] = true
 		switch arg {
-		case "--json", "--keep-on-failure":
+		case "--json", "--keep-on-failure", "--attached":
 			if err := c.Set(strings.TrimPrefix(arg, "--"), "true"); err != nil {
 				return "", nil, err
 			}
@@ -347,5 +338,23 @@ func parseRuntimeArgs(c *urfave.Command) (string, []string, error) {
 	if (c.Name == "restart" || c.Name == "reset") && len(terminal) > 0 {
 		return "", nil, &v1.PlanError{Code: "invalid_arguments", Message: "persistent restart does not accept terminal arguments"}
 	}
+	if c.Bool("attached") && (c.Name != "run" || c.Bool("keep-on-failure") || len(terminal) != 0) {
+		return "", nil, &v1.PlanError{Code: "invalid_arguments", Message: "--attached requires run without terminal arguments or keep-on-failure"}
+	}
 	return target, terminal, nil
+}
+
+func writeLogRecord(c *urfave.Command, record v1.LogRecord) error {
+	if c.Bool("json") {
+		return json.NewEncoder(c.Writer).Encode(record)
+	}
+	_, err := fmt.Fprintf(c.Writer, "%s %s %s %s/%s: %s", record.Time, record.InstanceID, record.Attempt, record.Component, record.Stream, record.Message)
+	if err == nil && record.Data != "" {
+		var data []byte
+		data, err = base64.StdEncoding.DecodeString(record.Data)
+		if err == nil {
+			_, err = c.Writer.Write(data)
+		}
+	}
+	return err
 }

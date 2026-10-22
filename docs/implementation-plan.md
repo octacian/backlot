@@ -340,3 +340,13 @@ job exits and unresolved ownership fences. The [Air/Vite example](../examples/na
 uses ordinary application tooling. Initial target adapter CI is feasibility only;
 independent final Low/High, frozen runtime/provider/browser suites and exact final
 published-content CI remain delivery gates.
+
+## Attached persistent ownership (#50)
+
+Implemented for review: optional `scene start --attached`/`run --attached`, ephemeral
+attempt/generation-bound daemon authority, existing lease expiry/cleanup and
+aggregate log pages. Default background/disposable semantics remain unchanged.
+See the [decision](adr/20261022T194804759Z-bind-attached-persistent-execution-to-one-daemon-owned-attempt.md)
+and [command/API contract](daemon.md#attached-execution). Independent implementation
+reviews, frozen native/provider suites and published-head CI remain required;
+focused development evidence is not a release/adoption claim.

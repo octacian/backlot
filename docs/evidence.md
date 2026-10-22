@@ -26,6 +26,12 @@ Disposable clients renew a finite lease while waiting. Losing the client stops
 renewals; the daemon cancels after the configured lease expires, gathers available
 evidence, and cleans up. Execution deadlines of zero do not disable the lease.
 
+Attached persistent commands emit typed lifecycle/log NDJSON and aggregate only
+the accepted attempt. They retain the same log encoding, gaps and retention limits,
+without a replay or completeness guarantee. Their signal/loss cleanup preserves
+persistent data and paired credentials. See [attached execution](daemon.md#attached-execution)
+for leases, operator overrides and exit results.
+
 ## Declared artifacts and fixtures
 
 Components can declare named artifact sources and discoverable fixture identities:

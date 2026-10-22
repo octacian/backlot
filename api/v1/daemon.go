@@ -80,11 +80,12 @@ type Instance struct {
 // InstanceResponse returns redacted metadata and explicit snapshot drift.
 // LeaseToken appears only on initial disposable preparation, never inspection.
 type InstanceResponse struct {
-	APIVersion    string   `json:"api_version"`
-	Instance      Instance `json:"instance"`
-	ManifestDrift bool     `json:"manifest_drift,omitempty"`
-	ConfigDrift   bool     `json:"config_drift,omitempty"`
-	LeaseToken    string   `json:"lease_token,omitempty"`
+	Attachment    *Attachment `json:"attachment,omitempty"`
+	APIVersion    string      `json:"api_version"`
+	Instance      Instance    `json:"instance"`
+	ManifestDrift bool        `json:"manifest_drift,omitempty"`
+	ConfigDrift   bool        `json:"config_drift,omitempty"`
+	LeaseToken    string      `json:"lease_token,omitempty"`
 }
 
 // ListRequest selects a bounded identity-ordered page, including historical instances.

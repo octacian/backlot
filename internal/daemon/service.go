@@ -206,15 +206,21 @@ func (s *service) expireOwners() error {
 	if s.closing {
 		return nil
 	}
-	for id := range s.executions {
+	for id, entry := range s.executions {
 		instance, err := s.store.inspect(id)
 		if err != nil {
 			return err
 		}
-		if !active(instance.Status) || instance.Status == v1.Stopping || instance.LeaseExpiresAt == "" || s.expiryWorkers[id] != nil {
+		if !active(instance.Status) || instance.Status == v1.Stopping || (instance.LeaseExpiresAt == "" && entry.attachment == nil) || s.expiryWorkers[id] != nil {
 			continue
 		}
 		expiry, err := time.Parse(time.RFC3339Nano, instance.LeaseExpiresAt)
+		if a := entry.attachment; a != nil {
+			if a.ended {
+				continue
+			}
+			expiry, err = a.expires, nil
+		}
 		if err != nil {
 			return err
 		}
@@ -227,7 +233,7 @@ func (s *service) expireOwners() error {
 		done := make(chan struct{})
 		s.expiryWorkers[id] = done
 		go func() {
-			err := s.expireRuntime(id) // recheck lease/eligibility under instance authority
+			err := s.expireRuntime(id, entry) // recheck lease/eligibility under instance authority
 			s.mu.Lock()
 			s.expiryErr = errors.Join(s.expiryErr, err)
 			close(done)

@@ -687,11 +687,21 @@ func TestNativeRuntime(t *testing.T) {
 	})
 	t.Run("finite-original-status", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
+		assertJobExit := func(final v1.InstanceResponse, want int) {
+			t.Helper()
+			if result := final.Instance.Execution; result != nil {
+				for _, component := range result.Components {
+					if component.Name == "job" && component.ExitCode != nil && *component.ExitCode == want {
+						return
+					}
+				}
+			}
+			diagnostic, err := json.Marshal(final.Instance.Execution)
+			t.Fatalf("wanted job exit %d, status=%s execution=%s (marshal error=%v)", want, final.Instance.Status, diagnostic, err)
+		}
 		r := h.run("test")
 		final := h.state(r.Instance.ID, v1.Succeeded)
-		if code := final.Instance.Execution.Components[1].ExitCode; code == nil || *code != 0 {
-			t.Fatal("missing job exit")
-		}
+		assertJobExit(final, 0)
 		h.absent()
 		job := h.manifest.Components["job"]
 		job.Command.Args[len(job.Command.Args)-1] = "job-fail"
@@ -699,9 +709,7 @@ func TestNativeRuntime(t *testing.T) {
 		h.write()
 		r = h.run("test")
 		final = h.state(r.Instance.ID, v1.Failed)
-		if code := final.Instance.Execution.Components[1].ExitCode; code == nil || *code != 17 {
-			t.Fatal("original failure status lost")
-		}
+		assertJobExit(final, 17)
 		h.absent()
 	})
 	t.Run("startup-interruption-unlimited-command-probe", func(t *testing.T) {
@@ -1295,13 +1303,32 @@ func TestNativeRuntime(t *testing.T) {
 	})
 	t.Run("daemon-crash-during-startup", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
+		marker := filepath.Join(h.project, "probe-started")
+		h.manifest.Tools["sh"] = "/bin/sh"
 		c := h.manifest.Components["server"]
-		c.Readiness = &v1.Probe{Kind: "command", Timeout: "0s", Command: &v1.Command{Tool: "fixture", Args: []string{"-test.run=TestNativeFixtureProcess", "--", "never"}}}
+		c.Readiness = &v1.Probe{Kind: "command", Timeout: "0s", Command: &v1.Command{Tool: "sh", Args: []string{"-c", `: > "$1"; exec "$2" -test.run=TestNativeFixtureProcess -- never`, "probe", marker, h.manifest.Tools["fixture"]}}}
 		h.manifest.Components["server"] = c
 		h.write()
-		r := h.run("dev")
-		time.Sleep(150 * time.Millisecond)
-		_ = h.process.Process.Kill()
+		request := h.request("dev")
+		request.Options.StartupTimeout = "0s"
+		r, err := h.cli.Run(context.Background(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			if _, err := os.Stat(marker); err == nil {
+				break
+			} else if !os.IsNotExist(err) || time.Now().After(deadline) {
+				t.Fatal("blocked readiness probe did not start", err)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		// Activation follows the saved ownership effect; the blocked probe cannot relaunch before the fault.
+		h.retainGuardianCleanup(r.Instance.ID)
+		if err := h.process.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
 		_ = h.process.Wait()
 		h.waited = true
 		h.start()

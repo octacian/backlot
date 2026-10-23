@@ -20,6 +20,8 @@ Run these from the repository root:
 | --- | --- |
 | `make build` | Build `bin/backlot` |
 | `make release-build` | Reproducible binary (defaults macOS ARM64; explicit RELEASE_GOOS/RELEASE_GOARCH for Linux) |
+| `make release-snapshot` | Both unpublished GoReleaser archives and checksums under `dist/` |
+| `make release-package` | Clean exact stable-tag archives, without publication |
 | `make notices`, `make notices-check` | Generate/verify linked dependency license notices |
 | `bin/backlot daemon start --state-dir /absolute/private/path --json` | Start an explicit local metadata daemon after building |
 | `bin/backlot doctor --state-dir /absolute/private/path --json` | Check local daemon access and paths; select scene/instance for providers |
@@ -127,6 +129,54 @@ workload activation environment cannot enable it. Full receiver identity and
 capability checks precede self-fault. Capability data stays in private temporary
 state and is excluded from reports. Failure paths join owners and prove absence,
 or preserve diagnostic state and report residuals.
+
+## Release packaging and publication
+
+[The release decision](adr/20261023T212448687Z-publish-immutable-versioned-releases-with-goreleaser.md)
+defines policy. Pinned GoReleaser OSS v2.19.0 owns target builds, deterministic
+archives and SHA-256 files. Make installs it under `.tools/bin`; its source build
+may download its required Go toolchain (currently Go 1.27.3), while Backlot builds
+continue using `go.mod`'s toolchain. GoReleaser configuration validation and the
+existing notice drift check run before packaging. Snapshot names start `dev-` and
+can include working changes; retain the dirty patch with evidence.
+
+The [Release archives workflow](../.github/workflows/release.yml) validates relevant
+PR/main changes without publication permission. It extracts the exact archives on
+macOS ARM64 and Ubuntu amd64, checks file lists/checksums/version and invokes the
+existing `TestInstalledBinary` native harness for private daemon startup, restart,
+startup failure and cleanup. Set `BACKLOT_INSTALLED_TEST_BINARY` to an absolute
+extracted binary to run that same fixture locally or on actual Debian; this is
+not evidence of the broader HTTPS/runtime gates. Only the final tag job receives
+`contents: write`; no fork PR receives release credentials.
+
+For reproducibility, prepare independent source trees and build caches at the
+same revision/dirty patch with the same Go/GoReleaser versions, run
+`make release-snapshot` in each, compare both archives and checksum files with
+`cmp`, and inspect `go version -m` and extracted file modes. Real-tag packaging
+uses source commit time and normalized archive ownership/modes/time, not wall clock.
+Metadata unit checks cover Go-install module fallback and linked/local identity;
+publication guard tests cover invalid tags, existing draft refusal and lookup
+failure using read-only boundary stubs. They do not simulate or prove publication.
+
+Preparation PR readiness requires independent reviews, packaging checks, frozen
+full repository and provider regressions, actual Debian installation and HTTPS
+evidence, and required CI on the exact published HEAD. Before an actual release
+tag or V1 declaration, also finish [release acceptance](release-acceptance/README.md),
+including all four public workflows and browser/system-trust/operator adoption.
+Those adoption gates remain mandatory and unverified until executed with
+revision-bound evidence.
+Review `docs/releases/v0.x.y.md`, record known limitations, and remove preparation
+wording. This delivery does not create a tag or release. Later, a maintainer may
+push a canonical stable `v0.x.y` tag at that reviewed source. Tag automation checks
+event/local/remote commit equality, runs fresh `make check` on both native targets,
+builds both archives without publication, smokes those exact files on both targets,
+and creates/verifies/publishes a complete draft. It never rebuilds after smoke,
+creates/moves a tag or replaces an asset. Any existing release/draft or failed API
+lookup aborts; a failed upload may leave a draft. Inspect it manually and explicitly
+discard only an unpublished failed draft before retrying the unchanged tag;
+published corrections need a new patch version. Optional repository tag/release
+protections are separate operator decisions. Verify public `go install @tag` only
+after actual publication.
 
 ## Daemon state migrations
 
@@ -402,7 +452,7 @@ First build/install the static release binary and run its IPC/native lifecycle g
 make release-build RELEASE_GOOS=linux RELEASE_GOARCH=amd64
 install -m 0755 bin/backlot-linux-amd64 /your/user/bin/backlot
 BACKLOT_INSTALLED_TEST_BINARY=/your/user/bin/backlot \
-  go test -race ./internal/daemon -run '^TestLinuxInstallation$' -count=1 -v
+  go test -race ./internal/daemon -run '^TestInstalledBinary$' -count=1 -v
 ```
 
 This verifies the installed executable's private IPC/state permissions, resource-free

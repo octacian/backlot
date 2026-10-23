@@ -439,4 +439,4 @@ The initial declaration requires explicit `manager: mariadb`, nonempty `image`,
 `storage: volume`, `admin: generated`, `port: 3306` and a positive
 `readiness_timeout` up to 24h. Unknown fields remain errors. Native and
 container environments resolve the actual consumer's connection context, described
-in [shared runtime operation](containers.md#project-scoped-shared-services-gate-1).
+in [shared runtime operation](containers.md#project-scoped-shared-services).

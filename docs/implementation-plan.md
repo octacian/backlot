@@ -367,17 +367,14 @@ focused development evidence is not a release/adoption claim.
 
 ## Shared services (issue 43)
 
-[PR 45](https://github.com/octacian/backlot/pull/45) delivers the MariaDB 11.4 slice:
-project identity, separate state-10 server/allocation journals, native/container
-connections, lifecycle/concurrency/recovery and explicit bounded force cleanup.
-[The decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md),
-[runtime](containers.md#project-scoped-shared-services-gate-1) and
-[validation guide](testing.md#shared-mariadb-integration) define its contracts.
-The runnable [MariaDB example](../examples/shared-mariadb/README.md) covers separate
-scene/worktree allocations, persistence/reset and cleanup. See PR 45 for current
-delivery status.
-[Issue 43](https://github.com/octacian/backlot/issues/43) retains the umbrella:
-a later PR adds PostgreSQL 17, then another adds custom execution and a non-Go
-non-database fixture. Neither runtime path is implemented by PR 45; private
-per-instance containers remain available. No overall issue/V1 readiness, native
-Windows support or broader MySQL compatibility is claimed.
+[PR 45](https://github.com/octacian/backlot/pull/45) implements the MariaDB 11.4 slice:
+project-scoped servers and private instance allocations, native/container
+connections, lifecycle/concurrency/recovery and bounded force cleanup. See the
+[decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md),
+[runtime guide](containers.md#project-scoped-shared-services),
+[MariaDB example](../examples/shared-mariadb/README.md) and
+[validation commands](testing.md#shared-mariadb-integration).
+
+[Issue 43](https://github.com/octacian/backlot/issues/43) remains the umbrella:
+PR 2 adds PostgreSQL 17; PR 3 adds custom execution and a non-Go/non-database fixture.
+Those paths and overall issue/V1 acceptance remain follow-ups.

@@ -334,13 +334,10 @@ another OS, unit tests, or migration of one application are insufficient evidenc
 
 ## Project-scoped shared services
 
-Project-owned shared servers provide empty, isolated per-instance allocations.
-Linked worktrees share only with matching common-directory filesystem identity,
-relative project location and project ID; clones do not. Non-Git sharing requires
-the same canonical directory/identity. Moved/replaced identities and conflicting
-retained configuration fail conservatively. The [accepted decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
-defines identity and ownership; the [runtime guide](containers.md#project-scoped-shared-services-gate-1)
-defines operations.
+Project-owned shared servers provide empty, isolated per-instance allocations
+across linked worktrees. The [decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md#decision)
+defines exact project identity, clone separation and retained-configuration fences;
+the [runtime guide](containers.md#project-scoped-shared-services) defines operations.
 
 | Lifecycle | Required behavior |
 | --- | --- |
@@ -359,11 +356,9 @@ and runtime never pulls/builds images. Unavailable providers/cleanup code retain
 obligations. Shared failure/performance remains common; private containers remain
 available for privileged workloads and stronger separation.
 
-Explicit instance/shared `destroy --force` may waive ownership proof only for
-recorded targets, retaining peer/consumer fences and verified absence. Authority
-is invocation-only. Both recorded server and volume absent can reconcile selected
-allocations; unreadable state requires the [manual procedure](containers.md#explicit-operator-force-cleanup).
-[Issue 43](https://github.com/octacian/backlot/issues/43) retains MariaDB/PostgreSQL,
-custom protocol/non-database, full lifecycle and real provider/platform acceptance;
-[implementation status](implementation-plan.md#shared-services-issue-43) separates
-PR 45's MariaDB slice from those remaining requirements.
+Explicit instance/shared `destroy --force` provides bounded recorded-target recovery
+with invocation-only authority, peer/consumer fences and verified absence. Follow
+the [operator procedure](containers.md#explicit-operator-force-cleanup), including
+missing storage or unreadable state. [Issue 43](https://github.com/octacian/backlot/issues/43)
+and [implementation status](implementation-plan.md#shared-services-issue-43) track
+remaining PostgreSQL/custom protocol, non-database and provider/platform acceptance.

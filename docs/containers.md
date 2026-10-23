@@ -44,7 +44,7 @@ only recorded ownership, so a missing or changed checkout cannot redirect cleanu
 
 The fixture image owns database initialization through `MARIADB_*` environment
 settings. This private-container path remains available alongside the optional
-[shared-service manager](#project-scoped-shared-services-gate-1). Backlot does not
+[shared-service manager](#project-scoped-shared-services). Backlot does not
 own application migrations or seed logic. Applications own those operations and any application-level readiness
 probe. A TCP probe observes connectivity, which may precede application setup;
 use a declared native command probe when connectivity is insufficient.
@@ -201,24 +201,23 @@ requests and strict API-version/ID rules. Logs retain their typed paged/NDJSON
 contracts; capabilities and credentials stay private. [Testing](testing.md)
 defines provider commands; local milestone evidence is separate from V1 acceptance.
 
-## Project-scoped shared services (Gate 1)
+<a id="project-scoped-shared-services-gate-1"></a>
 
-[PR 45](https://github.com/octacian/backlot/pull/45) implements local MariaDB 11.4
-allocation, lifecycle, concurrency and recovery, including bounded force cleanup.
-See PR 45 for current delivery status and the [implementation plan](implementation-plan.md#shared-services-issue-43)
-for the deferred PostgreSQL/custom execution boundary; no full-feature or platform
-readiness is implied.
+## Project-scoped shared services
 
-Declare `shared_services` and select `kind: allocation` resources as documented in
-[manifest references](manifest.md#shared-service-declarations). The runnable
-[MariaDB example](../examples/shared-mariadb/README.md) demonstrates independent
-allocations, linked worktrees, retention/reset and scoped cleanup. Generated root
-credentials stay only in private provisioning state and the owned server's Engine
-configuration. The public API has no administrative-secret reference. Application
-passwords are automatically sensitive; use named fixtures and existing explicit
-`secret` access if inspection is needed. Selected persistent startup details also
-authorize application-credential display under the [startup consent contract](daemon.md#declared-startup-details). Database/user names contain no grant
-wildcards. Fresh databases have no application schema; project jobs perform it.
+Shared MariaDB 11.4 servers retain independent instance allocations. See the
+[implementation plan](implementation-plan.md#shared-services-issue-43) for delivery
+status and PostgreSQL/custom execution follow-ups.
+
+Declare `shared_services` and select `kind: allocation` resources per the
+[manifest guide](manifest.md#shared-service-declarations); follow the runnable
+[MariaDB example](../examples/shared-mariadb/README.md) for worktrees and lifecycle.
+Root credentials stay in private provisioning state and the owned server's Engine
+configuration, with no public API reference. Application passwords are sensitive:
+inspect through named fixtures and explicit `secret` access, or select persistent
+[startup details](daemon.md#declared-startup-details) to authorize their display.
+Database/user names have no grant wildcards. Databases start empty; project jobs
+own application schema.
 
 The first selected start pins the existing local image ID, records volume/network/
 server intent, then ensures readiness before allocating. Native connection values
@@ -249,13 +248,13 @@ Server declarations/endpoint must match retained configuration exactly; use dist
 names for incompatible servers. No automatic upgrades, relinking or external
 adoption occur. Separate daemon state roots do not pool resources.
 
-The [accepted decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
-defines durable intent, SQL ownership checks and recovery. Missing acknowledged
-allocations are never silently recreated; interrupted release cannot reopen as
-provisioning. Uncertain effects/unavailable SQL retain obligations: restore access
-and retry explicit reset/destroy. Never delete resources by name. Allocation release
-preserves shared storage; shutdown/recovery joins consumers before stopping servers,
-preserves data/credentials and requires explicit execution restart.
+The [decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
+defines durable intent, SQL ownership and recovery. Missing acknowledged allocations
+are never silently recreated; interrupted release cannot reopen as provisioning.
+For uncertain effects/unavailable SQL, restore access and retry explicit reset/destroy.
+Release preserves shared storage; shutdown/recovery joins consumers before servers,
+retains data/credentials and requires explicit execution restart. Ordinary cleanup
+requires ownership proof; the bounded force exception follows.
 
 ### Explicit operator force cleanup
 
@@ -323,13 +322,7 @@ PIDs. A fresh state directory requires explicit accounting for old leftovers and
 cannot truthfully mark unknown old obligations released. Never publish credentials,
 capabilities, SQL statements or raw private state in recovery reports.
 
-See the [force-cleanup decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
-for the bounded exception and retained guarantees.
-
-The provisional private [`backlot.manager/v1` types](../api/v1/manager.go) and
-[validated-result contract](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md#decision)
-separate ownership from effect; documents are bounded to 64 KiB. The bundled
-MariaDB path validates these messages; custom command execution and the non-Go
-non-database fixture remain later work. Release-only `force` is passed transiently,
-never persisted: managers must honor it or explicitly fail as unsupported, never
-silently fall back. Exit success alone cannot prove absence.
+The bundled path validates the provisional private [`backlot.manager/v1` messages](../api/v1/manager.go),
+bounded to 64 KiB. The [manager contract](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md#decision)
+separates ownership/effect from exit status and requires transient release-only
+force or explicit unsupported failure. Custom execution remains later work.

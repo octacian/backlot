@@ -9,16 +9,19 @@ Before planning or editing, read:
 
 - [Contribution workflow](contributing.md).
 - [Go practices](go-practices.md).
-- [Testing and tooling](testing.md).
+- Testing and tooling: [Setup](testing.md#setup), [Commands](testing.md#commands)
+  and [CI and platform evidence](testing.md#ci-and-platform-evidence), including
+  uncached runtime tests and crash-fixture ownership/cleanup safety.
 - [Architecture decisions](adr/README.md), then relevant records.
 
 ## By task
 
 | Task | Read |
 | --- | --- |
-| Product or runtime implementation | [V1 PRD](prd.md), [architecture](architecture.md), [implementation plan](implementation-plan.md) |
+| Product or runtime implementation | Relevant sections of the [V1 PRD](prd.md) and [architecture](architecture.md), applicable [ADRs](adr/README.md), and relevant integration sections in [Testing and tooling](testing.md) |
 | CLI or API contracts | [Architecture: shared API](architecture.md#shared-api), [Go practices](go-practices.md) |
 | Commits and pull requests | [Git workflow](git-workflow.md) |
+| Delivery scope or status | [Implementation plan](implementation-plan.md) and linked issues/PRs |
 | ADR creation or changes | [ADR guide](adr/README.md), [template](adr/template.md) |
 
 ## Guides

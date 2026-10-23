@@ -166,5 +166,5 @@ owns MariaDB create/inspect/release SQL effects. Server volume/network/container
 effects reuse the official Docker adapter. Named `api/v1` types serve CLI/client/
 daemon control; [manager messages](../api/v1/manager.go) remain private.
 The [accepted decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
-defines architecture and bounded transient force; the [runtime guide](containers.md#project-scoped-shared-services-gate-1)
+defines architecture and bounded transient force; the [runtime guide](containers.md#project-scoped-shared-services)
 defines connection semantics and [operator recovery](containers.md#explicit-operator-force-cleanup).

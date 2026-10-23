@@ -516,21 +516,24 @@ BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
   go test -race ./internal/daemon -run '^(TestSharedMariaDB.*|TestSharedUnselectedOfflinePrivacy)$' -count=1 -v -timeout=30m
 ```
 
-For focused CLI/permission/configuration coverage, select `^TestSharedMariaDBGate1$`
-with `-timeout=6m`. The complete selection also covers live native/container
-persistence, target reset, concurrent worktrees/disposable runs, terminal keep
-policies, cancellation/client loss, consumer joins, shutdown/crash, SQL/Docker
-effect/acknowledgment gaps, ownership/configuration drift, outage/restoration,
-multiple allocations and offline/privacy behavior. Force cases add actual deletion,
-manual/missing-storage absence, peer fences and partial DROP/crash/explicit retry
-without durable or automatic force. Capability drift keeps actual Engine IDs.
+Focused CLI/permission/configuration coverage:
 
-Parent-written random SQL witnesses cannot be recreated by application initialization.
-Cleanup is registered before effects/faults; private barriers observe successful
-real effects before retained-child fault/reap and diagnostic checks. Recovery retains
-the five-second API expectation; the aggregate timeout accommodates serial fixtures.
-Cleanup proves SQL database/user and owned runtime/image absence, retaining cached
-base images and uncertain diagnostics.
+```sh
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^TestSharedMariaDBGate1$' -count=1 -v -timeout=6m
+```
+
+See [CLI/permissions](../internal/daemon/shared_integration_test.go),
+[lifecycle/concurrency](../internal/daemon/shared_lifecycle_test.go),
+[ownership/privacy](../internal/daemon/shared_ownership_test.go),
+[effect/acknowledgment faults](../internal/daemon/shared_faults_test.go) and
+[force recovery](../internal/daemon/shared_force_integration_test.go) for scenarios;
+[checkpoint helpers](../internal/daemon/shared_checkpoint_test.go) own private barriers. Parent-written random SQL witnesses must
+survive independently of application initialization. Register cleanup before effects
+or faults; fault/reap retained children only after observing real effects. Recovery
+retains the five-second API expectation; the aggregate timeout allows serial fixtures.
+Prove SQL database/user and owned runtime/image absence; retain cached base images
+and uncertain diagnostics.
 
 On the frozen candidate also run `make check`, complete [DockerRuntime](#dockerprivate-state-integration)
 and `TestDisposableEvidenceDocker` regressions serially. Record revision/input/image

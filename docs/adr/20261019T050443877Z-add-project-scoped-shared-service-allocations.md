@@ -16,11 +16,10 @@ credentials. Backlot owns identity, durable intent, serialization and lifecycle;
 a focused MariaDB manager verifies and reclaims engine-specific effects. Existing
 private containers remain available for stronger separation.
 
-Implement this MariaDB slice through existing planning, storage and execution
-boundaries. Preserve merged decisions for private project configuration, attached
-execution, cooperative native supervision, selected startup disclosure and
-cumulative state migration. Implementation and evidence status belong in the
-[implementation plan](../implementation-plan.md#shared-services-issue-43).
+Use existing planning, storage and execution boundaries. The referenced private
+configuration, attached execution, native supervision and startup-disclosure
+contracts remain in force; this decision adds only shared-service behavior.
+Delivery status belongs in the [implementation plan](../implementation-plan.md#shared-services-issue-43).
 
 ## Context
 
@@ -33,8 +32,6 @@ ordinary container initialization does not address.
 The owner also requires an explicit cleanup escape for readable recorded targets
 whose ownership proof has drifted or whose server/storage has disappeared.
 Permanent refusal can otherwise trap allocations and prevent service destruction.
-Main now provides the supported v9 migration baseline and settled configuration,
-native, attachment and startup-presentation contracts; integration extends them.
 
 ## Decision
 
@@ -70,24 +67,20 @@ propagation. Administration is never an application reference or display value.
 Ordinary plans, status, durable results, diagnostics and exports retain redaction.
 Explicitly selected persistent startup details may display application credentials
 under the settled [startup consent decision](20261022T195459793Z-authorize-declared-sensitive-startup-details-for-persistent-scenes.md),
-using its retained ready-attempt selection and coherent private fixture retrieval.
-No additional reveal flag, consent prompt or blanket startup-redaction rule is added.
+including retained ready-attempt selection and coherent private fixture retrieval;
+selection is consent, without another reveal flag or prompt.
 
 ### Persistence and lifecycle
 
-Use the [cumulative migration policy](20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md).
-Advance format 9 to 10 for four new buckets: `shared_projects`, `shared_paths`,
-`shared_services`, `shared_allocations`. Retain one private 9-to-10 step in the
-existing dispatcher and supplied bbolt write transaction. Validate source-v9
-layout/authority before requiring the new buckets; reject any target-namespace
-collision. Create four empty buckets without resaving existing records. Preserve
-all unrelated key/value bytes, unknown passive data and existing authority checks.
-Run final current layout/authority validation and fence in that same transaction;
-precommit failure/cancellation rolls back, and a committed fence is one-way.
-Fresh state initializes directly at 10. Reject every pre-v9 format, including
-experimental shared format 7, unchanged with matching-binary preservation guidance.
-Migration performs no provider, process, registry, Git/filesystem or retained-file
-effects, provisioning, reset, seeding or reconciliation.
+Under the [cumulative migration policy](20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md),
+the private transactional 9-to-10 step creates four empty buckets:
+`shared_projects`, `shared_paths`, `shared_services`, `shared_allocations`.
+Validate source-v9 authority before requiring them, reject target-namespace
+collisions and never resave existing records. Fresh state initializes at 10;
+pre-v9 formats, including experimental shared format 7, are rejected unchanged.
+The policy supplies all-step rollback, final validation/fence, passive-byte
+preservation, matching-binary guidance and the prohibition on external effects;
+migration does not provision, reset, seed or reconcile shared services.
 
 Validate shared authority-bearing journals and their concrete project, service and
 instance parent links before recovery, using transaction-local typed decoding.
@@ -100,26 +93,26 @@ shared services before releasing storage authority. Unjoined work retains fences
 No extra scheduler, timer, recovery daemon or general journal framework is added.
 
 Stop/start retains allocations; reset/destroy releases only the selected instance
-after consumers stop/join. Attached cancellation, lease expiry and operator/scene
-stop retain persistent data and shared allocations under existing attempt/generation
-fences. Replacement/recovery never automatically restarts workloads or reattaches
-clients. Idle shared services remain until explicit stop; service destruction
-refuses all retained allocations, including stopped ones. Native application
-cleanup retains main's `observed_empty` confidence and residual unseen-descendant
-risk, with known live members, incomplete cleanup or lost authority still fenced.
+after consumers stop/join. The [attached ownership contract](20261022T194804759Z-bind-attached-persistent-execution-to-one-daemon-owned-attempt.md)
+also retains shared allocations on cancellation, lease expiry and operator/scene
+stop, with its attempt/generation fences and no automatic reattachment.
+Recovery never restarts workloads. Idle services remain until explicit stop;
+service destruction refuses all retained allocations, including stopped ones.
+Native cleanup retains `observed_empty` confidence and accepted unseen-descendant
+risk; known live members, incomplete cleanup or lost authority remain fenced.
 
 ### Explicit operator cleanup
 
 Expose force only on instance/shared destroy and private manager release, through
-command-specific typed requests and transient release authorization. Main's native
-`StopRequest`, expected-attempt and scene/attachment contracts remain independent.
+command-specific typed requests and transient release authorization, independent
+of native `StopRequest`, expected-attempt and scene/attachment contracts.
 Reject unsupported force operations; no fallback endpoint or capability disclosure.
 The supplied flag is acknowledgement without another confirmation. Never infer
 force for startup, reset, disposable cleanup, recovery or a later retry; persist
 ordinary intent without the flag. Requests select recorded IDs, not caller-supplied
 SQL names, provider handles or credentials.
 
-Before release, preserve consumer joins, private resource checks and main's
+Before release, preserve consumer joins, private resource checks and the referenced
 abandoned-data guard, including under force. A native force-stop waiver is not
 absence proof or authority to delete shared data; shared force-destroy does not
 waive native/filesystem authority. Reject known overlap with retained allocations
@@ -141,18 +134,16 @@ External concurrent replacement cannot be locked by Backlot.
 Forced instance release may settle selected allocations without recreating SQL
 only when authoritative provider observation proves BOTH the exact server and
 backing volume absent. Container-only/network-only absence or provider failure is
-insufficient. A retained volume with missing server still holds data: restore the
-original service manually, or stop all affected consumers, deliberately remove exact
-server/storage outside Backlot, then retry forced destruction of each instance.
-Instance cleanup never deletes shared storage. Configuration/admin drift that
-prevents exact-server verification uses this same explicit maintenance boundary.
+insufficient. A retained volume with missing server still holds data; instance
+cleanup never deletes shared storage. Configuration/admin drift and whole-server
+retirement require the [explicit maintenance procedure](../containers.md#explicit-operator-force-cleanup),
+including joining all affected consumers before deliberate retirement.
 
-Unreadable/lost state cannot supply a bounded target. Stop through retained
-authenticated handles or the owning supervisor; retain a private diagnostic backup
-and use operator records/provider tools for exact cleanup and absence verification.
-A fresh directory does not reconcile old obligations. Never guess/import identity,
-scan/prune broadly or signal observed process IDs. Errors exclude driver statements,
-DSNs, administrative secrets, capabilities and raw provider payloads.
+Unreadable/lost state cannot supply a bounded target. Follow that same procedure
+using authenticated authorities and trusted operator inventory, never guessed or
+imported identity, broad scan/prune or observed-PID signaling. A fresh directory
+does not reconcile old obligations. Errors exclude driver statements, DSNs,
+administrative secrets, capabilities and raw provider payloads.
 
 The small language-neutral manager contract uses one bounded JSON stdin request
 and validated stdout result for allocate, inspect/reconcile and release. Ownership
@@ -167,17 +158,14 @@ are provisional contracts, not an implemented custom-provider subsystem.
 Worktrees share server overhead with separate data and credentials, at the cost
 of engine-specific permission/ownership checks, four private journals and finite
 accepted-mutation ownership. Uncertainty can require deliberate maintenance.
-Selected startup output intentionally contains selected application secrets under
-main's consent contract; administrative credentials stay private. Shared data has
-the accepted cooperative-native residual-process risk, without relaxing known
-survivor or abandonment fences. Force deliberately accepts recorded-target
-replacement risk while requiring actual absence and preserving known peers.
+Selected startup output contains application secrets; administration stays private.
+Shared data accepts cooperative-native residual-process risk while retaining
+survivor/abandonment fences. Force accepts recorded-target replacement risk while
+requiring actual absence and preserving known peers.
 
-The real v9 fixture and existing transaction failure/interruption tests cover the
-upgrade boundary; provider lifecycle tests cover current runtime behavior, without
-repeating a provider matrix per historical version. Steps and fixture provenance
-remain maintained under the cumulative policy. No new dependency, background
-service, machine-wide pool, automatic repair or state reconstruction is introduced.
+The cumulative policy owns migration/fixture verification; [shared integration](../testing.md#shared-mariadb-integration)
+covers current provider behavior. No new dependency, background service,
+machine-wide pool, automatic repair or state reconstruction is introduced.
 
 ## Alternatives considered
 
@@ -205,7 +193,7 @@ shared cleanup. No additional present implementation scope follows from these ca
 
 - [Issue 43](https://github.com/octacian/backlot/issues/43) and [PR 45](https://github.com/octacian/backlot/pull/45)
 - [Shared lifecycle](../../internal/daemon/shared.go) and [MariaDB manager](../../internal/manager/mariadb.go)
-- [Runtime contract](../containers.md#project-scoped-shared-services-gate-1)
+- [Runtime contract](../containers.md#project-scoped-shared-services)
 - [Private project configuration](20261021T001732173Z-register-private-project-configuration.md)
 - [Cooperative native sessions](20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md)
 - [Attached ownership](20261022T194804759Z-bind-attached-persistent-execution-to-one-daemon-owned-attempt.md)

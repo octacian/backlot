@@ -19,6 +19,7 @@ import (
 )
 
 type service struct {
+	generation            string
 	diagnosticRecoveryErr error
 	diagnosticOwners      map[string]*diagnosticOwner
 	mutationOwners        map[*mutationOwner]struct{}
@@ -40,11 +41,24 @@ type service struct {
 	resolve func(plan.Source, v1.PlanRequest) (plan.Snapshot, error)
 	// beforeExecution gates tests between prepare and serialized acceptance.
 	beforeExecution func(string)
+	// beforeSceneMutation is a test seam between recorded resolution and its mutation lock.
+	beforeSceneMutation func(string)
+}
+
+func validatePlanRequest(request v1.PlanRequest) error {
+	if request.Scene == "" || len(request.Scene) > 63 || !filepath.IsAbs(request.ProjectPath) || (request.ConfigPath != "" && !filepath.IsAbs(request.ConfigPath)) {
+		return problem("invalid_request", "scene and absolute project/config paths are required")
+	}
+	return nil
 }
 
 func (s *service) prepare(ctx context.Context, request v1.PrepareRequest) (v1.InstanceResponse, error) {
-	if request.Plan.Scene == "" || len(request.Plan.Scene) > 63 || !filepath.IsAbs(request.Plan.ProjectPath) || (request.Plan.ConfigPath != "" && !filepath.IsAbs(request.Plan.ConfigPath)) {
-		return v1.InstanceResponse{}, problem("invalid_request", "scene and absolute project/config paths are required")
+	return s.prepareSelected(ctx, request, false)
+}
+
+func (s *service) prepareSelected(ctx context.Context, request v1.PrepareRequest, persistentOnly bool) (v1.InstanceResponse, error) {
+	if err := validatePlanRequest(request.Plan); err != nil {
+		return v1.InstanceResponse{}, err
 	}
 	source, err := plan.Locate(request.Plan.ProjectPath)
 	if err != nil {
@@ -61,6 +75,17 @@ func (s *service) prepare(ctx context.Context, request v1.PrepareRequest) (v1.In
 	snapshot, err := resolve(source, request.Plan)
 	if err != nil {
 		return v1.InstanceResponse{}, err
+	}
+	return s.prepareCaptured(ctx, snapshot, original, request.Plan.Scene, persistentOnly)
+}
+
+// prepareCaptured accepts the exact generation resolved by preparation or launch.
+func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, original capturedSource, scene string, persistentOnly bool) (v1.InstanceResponse, error) {
+	if persistentOnly && snapshot.Plan.Lifetime != v1.Persistent {
+		return v1.InstanceResponse{}, problem("invalid_lifetime", "scene start requires a persistent scene; use run for disposable work")
+	}
+	if persistentOnly && (snapshot.Plan.ManifestPath != original.source.ManifestPath || snapshot.Plan.Checkout != original.checkout.Path || snapshot.Plan.Scene != scene) {
+		return v1.InstanceResponse{}, problem("invalid_request", "resolved scene location disagrees with captured source")
 	}
 	public, err := json.Marshal(snapshot.Plan)
 	if err != nil || len(public) > manifest.MaxBytes-8192 {
@@ -79,7 +104,7 @@ func (s *service) prepare(ctx context.Context, request v1.PrepareRequest) (v1.In
 		return v1.InstanceResponse{}, err
 	}
 	if len(snapshot.Plan.SharedServices) > 0 {
-		identity, err := identifyShared(source, snapshot.Plan.Project)
+		identity, err := identifyShared(original.source, snapshot.Plan.Project)
 		if err != nil {
 			return v1.InstanceResponse{}, err
 		}
@@ -87,7 +112,7 @@ func (s *service) prepare(ctx context.Context, request v1.PrepareRequest) (v1.In
 			return v1.InstanceResponse{}, err
 		}
 	}
-	response, created, err := s.store.begin(snapshot, original.checkout, s.lease)
+	response, created, err := s.store.beginSelected(snapshot, original.checkout, s.lease, persistentOnly)
 	if err != nil || !created {
 		return response, err
 	}
@@ -145,7 +170,7 @@ func (s *service) stop() error {
 	}
 	s.mu.Unlock()
 	var sharedErr error
-	if result == nil && s.ownersJoined() {
+	if s.ownersJoined() {
 		sharedErr = s.store.stopSharedServices(context.Background())
 	}
 	return errors.Join(result, expiryErr, gatewayErr, sharedErr, s.store.reconcile("daemon shutdown interrupted preparation", false), s.store.cleanupFailures())
@@ -196,15 +221,21 @@ func (s *service) expireOwners() error {
 	if s.closing {
 		return nil
 	}
-	for id := range s.executions {
+	for id, entry := range s.executions {
 		instance, err := s.store.inspect(id)
 		if err != nil {
 			return err
 		}
-		if !active(instance.Status) || instance.Status == v1.Stopping || instance.LeaseExpiresAt == "" || s.expiryWorkers[id] != nil {
+		if !active(instance.Status) || instance.Status == v1.Stopping || (instance.LeaseExpiresAt == "" && entry.attachment == nil) || s.expiryWorkers[id] != nil {
 			continue
 		}
 		expiry, err := time.Parse(time.RFC3339Nano, instance.LeaseExpiresAt)
+		if a := entry.attachment; a != nil {
+			if a.ended {
+				continue
+			}
+			expiry, err = a.expires, nil
+		}
 		if err != nil {
 			return err
 		}
@@ -217,7 +248,7 @@ func (s *service) expireOwners() error {
 		done := make(chan struct{})
 		s.expiryWorkers[id] = done
 		go func() {
-			err := s.expireRuntime(id) // recheck lease/eligibility under instance authority
+			err := s.expireRuntime(id, entry) // recheck lease/eligibility under instance authority
 			s.mu.Lock()
 			s.expiryErr = errors.Join(s.expiryErr, err)
 			close(done)

@@ -540,7 +540,41 @@
       "description": "HostMapping explicitly maps a published origin hostname to Docker's host gateway."
     },
     "Input": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "generate": {
+                "const": "random-hex-32"
+              }
+            },
+            "required": [
+              "generate"
+            ]
+          },
+          "then": {
+            "properties": {
+              "secret": {
+                "const": true
+              }
+            },
+            "required": [
+              "secret"
+            ]
+          }
+        }
+      ],
       "properties": {
+        "description": {
+          "type": "string"
+        },
+        "generate": {
+          "type": "string",
+          "enum": [
+            "",
+            "random-hex-32"
+          ]
+        },
         "secret": {
           "type": "boolean",
           "description": "Treat the value as sensitive in ordinary plan output."
@@ -1368,6 +1402,13 @@
               },
               {
                 "properties": {
+                  "startup_details": {
+                    "maxItems": 0
+                  }
+                }
+              },
+              {
+                "properties": {
                   "terminal_job": {
                     "minLength": 1
                   }
@@ -1397,6 +1438,13 @@
         }
       ],
       "properties": {
+        "startup_details": {
+          "items": {
+            "$ref": "#/$defs/StartupDetailSelection"
+          },
+          "type": "array",
+          "description": "Ordered fixtures automatically displayed after persistent startup, including selected sensitive values."
+        },
         "lifetime": {
           "type": "string",
           "enum": [
@@ -1512,6 +1560,31 @@
         "readiness_timeout"
       ],
       "description": "SharedService declares a retained project-owned MariaDB server independently of scene allocations."
+    },
+    "StartupDetailSelection": {
+      "properties": {
+        "component": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+        },
+        "fixture": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^\\x00\\r\\n]*\\S[^\\x00\\r\\n]*$"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "component",
+        "fixture",
+        "label"
+      ],
+      "description": "StartupDetailSelection authorizes displaying one selected component fixture."
     },
     "Value": {
       "oneOf": [

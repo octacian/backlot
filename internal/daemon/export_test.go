@@ -50,7 +50,41 @@ func exportFixture(t *testing.T) (*service, v1.Instance, v1.ExportRequest) {
 	if err := os.WriteFile(filepath.Join(s.directory, "logs", instance.ID+"-output.ndjson"), append(data, '\n'), 0600); err != nil {
 		t.Fatal(err)
 	}
-	return s, instance, v1.ExportRequest{APIVersion: v1.Version, InstanceID: instance.ID, Output: filepath.Join(t.TempDir(), "bundle")}
+	return s, instance, v1.ExportRequest{APIVersion: v1.Version, InstanceID: instance.ID, Output: filepath.Join(privateExportParent(t), "bundle")}
+}
+
+func privateExportParent(t *testing.T) string {
+	t.Helper()
+	outputParent := t.TempDir()
+	// Go's numbered TempDir leaf inherits the ambient umask. Export requires a
+	// caller-owned private parent, including on hosts whose umask is 0002.
+	if err := os.Chmod(outputParent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return outputParent
+}
+
+func TestExportRejectsUnsafeOutputParent(t *testing.T) {
+	for _, mode := range []os.FileMode{0770, 0702} {
+		t.Run(mode.String(), func(t *testing.T) {
+			s, _, request := exportFixture(t)
+			parent := filepath.Dir(request.Output)
+			if err := os.Chmod(parent, mode); err != nil {
+				t.Fatal(err)
+			}
+			if info, err := os.Stat(parent); err != nil || info.Mode().Perm() != mode {
+				t.Fatal("unsafe parent mode not established", err)
+			}
+			response, err := s.export(context.Background(), request)
+			code(t, err, "export_destination")
+			if response.Published {
+				t.Fatal("published through writable output parent")
+			}
+			if _, err := os.Lstat(request.Output); !os.IsNotExist(err) {
+				t.Fatal("unsafe output destination changed", err)
+			}
+		})
+	}
 }
 func addExportArtifact(t *testing.T, s *service, instance v1.Instance) string {
 	t.Helper()
@@ -486,7 +520,12 @@ func TestExportEvidenceFenceInterruption(t *testing.T) {
 			}
 			unlock()
 			// A later uncancelled caller can still acquire and publish a full snapshot.
-			if response, err := s.export(context.Background(), request); err != nil || !response.Complete {
+			// Its budget is independent of the interrupted request's short deadline.
+			retry := request
+			retry.WaitTimeout = ""
+			retryCtx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer retryCancel()
+			if response, err := s.export(retryCtx, retry); err != nil || !response.Complete {
 				t.Fatal(response, err)
 			}
 		})
@@ -583,7 +622,7 @@ func TestExportEvidenceFenceWaitsForUnrelatedSnapshot(t *testing.T) {
 	t.Cleanup(unlock)
 	copied := request
 	copied.InstanceID = other.ID
-	copied.Output = filepath.Join(t.TempDir(), "peer-bundle")
+	copied.Output = filepath.Join(privateExportParent(t), "peer-bundle")
 	if response, err := s.exportSnapshot(context.Background(), copied, other); err != nil || !response.Published {
 		t.Fatal(response, err)
 	}
@@ -683,5 +722,27 @@ func TestExportRejectsUnsafeLogSources(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestExportExcludesStartupFixtures(t *testing.T) {
+	s, instance, request := exportFixture(t)
+	result := *instance.Execution
+	result.Fixtures = []v1.FixtureRecord{{Component: "test", Name: "account", Value: "fixture-export-canary"}, {Component: "test", Name: "password", Sensitive: true}}
+	if _, err := s.store.execution(instance.ID, instance.Status, &result); err != nil {
+		t.Fatal(err)
+	}
+	response, err := s.export(context.Background(), request)
+	if err != nil || !response.Published {
+		t.Fatal("export failed", err)
+	}
+	for _, name := range []string{"report.json", "index.html"} {
+		data, err := os.ReadFile(filepath.Join(request.Output, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "fixture-export-canary") || strings.Contains(string(data), "startup_details") {
+			t.Fatal("export serialized startup fixture values", name)
+		}
 	}
 }

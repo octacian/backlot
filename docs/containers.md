@@ -49,15 +49,38 @@ own application migrations or seed logic. Applications own those operations and 
 probe. A TCP probe observes connectivity, which may precede application setup;
 use a declared native command probe when connectivity is insufficient.
 
-### State compatibility
+## State compatibility
 
-The durable state format is version 7. Older formats, including version 6, are
-rejected without modification or migration because older binaries cannot
-interpret the separate shared-service/allocation recovery journals. Use the matching older
-binary to clean up owned instances and stop its gateway/daemon before selecting
-a fresh `--state-dir` with the new binary. Preserve old state until cleanup is
-verified; a new directory does not clean up resources from the old one. Backlot
-never automatically deletes incompatible state.
+The durable state format is version 10; version 9 is the minimum supported baseline. Pre-v9
+formats, including 6 and 8, are rejected unchanged; no migration from those
+preproduction formats is provided. From v9 onward, retain every real Go migration
+so the newest binary can apply the complete path when users skip releases,
+without intermediate binaries or reset. The 9-to-10 step adds four empty shared
+project/path/service/allocation buckets without rewriting retained records.
+
+Source validation, transformations, current authority validation and the final
+version fence share one write transaction. Any precommit error, cancellation or
+interruption rolls back the complete path. Preserve records and passive metadata
+outside each step's explicit transformation; opening state does not touch retained
+data, saved gateway configuration or CA identity. Recovery follows a committed
+upgrade separately and never restarts workloads automatically.
+
+Stop the old daemon normally before upgrading, wait for its exit and lock release,
+then explicitly start the new binary with `daemon start --state-dir PATH` on the
+same directory. Client status and shutdown responses require matching API/state
+versions; use the matching binary for an incompatible daemon's lifecycle. A stopping
+acknowledgment does not prove process exit or lock release. Startup keeps its normal
+locking, without automatic retry/start or live process handover. Cleanup and
+transport failures remain errors. Supported upgrades require no wipe or fresh directory.
+
+Existing snapshots remain readable for recorded cleanup without becoming a current
+input source or acquiring invented provenance. Eligible prepared/stopped starts use
+current captured configuration after retained-resource/sensitive-value checks;
+unsafe drift fails before effects. Failed/interrupted instances need explicit restart.
+
+Preserve unsupported state for diagnosis and its matching binary's lifecycle.
+A different directory does not clean its resources. Backlot never automatically
+deletes incompatible state. See the [migration decision](adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md).
 
 ## Generations, jobs and drift
 
@@ -191,7 +214,8 @@ Declare `shared_services` and select `kind: allocation` resources as documented 
 credentials stay only in private provisioning state and the owned server's Engine
 configuration. The public API has no administrative-secret reference. Application
 passwords are automatically sensitive; use named fixtures and existing explicit
-`secret` access if inspection is needed. Database/user names contain no grant
+`secret` access if inspection is needed. Selected persistent startup details also
+authorize application-credential display under the [startup consent contract](daemon.md#declared-startup-details). Database/user names contain no grant
 wildcards. Fresh databases have no application schema; project jobs perform it.
 
 The first selected start pins the existing local image ID, records volume/network/
@@ -223,7 +247,7 @@ Server declarations/endpoint must match retained configuration exactly; use dist
 names for incompatible servers. No automatic upgrades, relinking or external
 adoption occur. Separate daemon state roots do not pool resources.
 
-The [accepted decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md)
+The [accepted decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
 defines durable intent, SQL ownership checks and recovery. Missing acknowledged
 allocations are never silently recreated; interrupted release cannot reopen as
 provisioning. Uncertain effects/unavailable SQL retain obligations: restore access
@@ -297,7 +321,7 @@ PIDs. A fresh state directory requires explicit accounting for old leftovers and
 cannot truthfully mark unknown old obligations released. Never publish credentials,
 capabilities, SQL statements or raw private state in recovery reports.
 
-See the [force-cleanup decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md)
+See the [force-cleanup decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
 for the bounded exception and retained guarantees.
 
 The provisional private [`backlot.manager/v1` types](../api/v1/manager.go) and

@@ -138,14 +138,17 @@ route registration so server-side rendering through the public origin does not
 introduce a startup cycle. Readiness means observed availability, not proof that
 a native watcher compiled the latest source successfully.
 
-Launch native work with verified ownership and cancellation within a dedicated
-supervised process group. Native commands and all descendants (including
-readiness commands) must stay in that group: detachment through setsid/group
-changes and delegation to unrelated supervisors are unsupported. This is a
-cooperative command contract, not kernel containment; detecting or cleaning up
-deliberately escaped descendants is not guaranteed. Successful stop verifies the
-complete supervised group is empty; uncertain ownership remains untouched and
-returns failure. See the [native supervision decision](adr/20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md). Create
+Launch application native work, including readiness commands, in a live
+authenticated guardian-owned Unix session. Descendants may create process groups
+inside that session; `setsid`, privilege changes and unrelated supervisors remain
+unsupported. This is cooperative supervision, not containment. Bounded individual
+kernel-identity signals and two complete empty observations yield `observed_empty`,
+which deliberately cannot rule out unseen compliant forks or escaped descendants.
+Under the accepted risk, success may release stop/restart/output/data-deletion
+fences. Known live members, denied checks, exhausted budgets, missing joins and
+lost authority remain nonzero and fenced. Managed Caddy/system helpers retain
+strict pinned-group supervision and stronger group-absence proof. See the
+[native supervision decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md). Create
 generic containers, networks, and volumes directly through Docker, using existing
 images or project Dockerfiles/build commands. Delegate image building to existing
 Docker tooling; do not implement a build engine. Record actual engine IDs and
@@ -205,6 +208,12 @@ URL where applicable, and status. Closing the CLI leaves it running. Concurrent
 or repeated starts of the same scene join the existing start or return the ready
 instance. An unhealthy instance reports failure and requires explicit restart.
 
+Optional `scene start --attached` and `run --attached` exclusively own a newly
+accepted persistent attempt, keep aggregate logs visible and stop runtime on client
+cancellation/loss while retaining data and paired credentials. Existing runtime
+cannot be adopted. Operator lifecycle commands override attachment; stale owner
+requests cannot affect replacement attempts. See [attached execution](daemon.md#attached-execution).
+
 `run` for a disposable scene creates a new instance, waits for its designated
 terminal job, gathers evidence, and tears down owned resources. Forward arguments
 after `--` to that terminal job only. Keep the original test exit status in the
@@ -240,6 +249,12 @@ when ownership can be verified. Mark affected instances interrupted and require
 explicit restart. Leave uncertain resources untouched with diagnostics. Persist
 allocation intent and completion so crashes between external mutations and local
 recording do not silently erase ownership or create false success.
+
+Explicit `stop --force INSTANCE` and `gateway stop --force` may relinquish selected
+unresolved native claims after normal cleanup is attempted. Operators acknowledge
+that unknown survivors may still run/write; no observed IDs are signaled. Keep
+private waiver history, public warnings and truthful evidence across replacement.
+Other ownership fences and later destructive-cleanup proof remain required.
 
 Cleanup is ownership-scoped and idempotent. Names or PIDs alone are insufficient.
 Do not delete resources while an owned consumer may still be running. Report
@@ -323,7 +338,7 @@ Project-owned shared servers provide empty, isolated per-instance allocations.
 Linked worktrees share only with matching common-directory filesystem identity,
 relative project location and project ID; clones do not. Non-Git sharing requires
 the same canonical directory/identity. Moved/replaced identities and conflicting
-retained configuration fail conservatively. The [accepted decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md)
+retained configuration fail conservatively. The [accepted decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
 defines identity and ownership; the [runtime guide](containers.md#project-scoped-shared-services-gate-1)
 defines operations.
 

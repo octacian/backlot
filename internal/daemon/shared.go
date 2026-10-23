@@ -102,15 +102,23 @@ func (s *store) sharedService(id string) (sharedServiceRecord, error) {
 		if data == nil {
 			return problem("not_found", "shared service not found; use shared list")
 		}
-		if err := json.Unmarshal(data, &record); err != nil {
-			return problem("state_corrupt", "shared service cannot be decoded; preserved")
-		}
-		if record.ID != id || !validID(id) || !validID(record.Project.ID) || !validID(record.AdminPassword) || !validID(record.Server.Token) || !validID(record.Network.Token) || !validID(record.Volume.Token) || record.Configuration != sharedDigest(record.Declaration, record.Endpoint) {
-			return problem("state_corrupt", "shared service contract incomplete; preserved")
-		}
-		return nil
+		var err error
+		record, err = decodeSharedService(data, id)
+		return err
 	})
 	return record, err
+}
+
+// decodeSharedService is shared by ordinary reads and transaction-local preflight.
+func decodeSharedService(data []byte, id string) (sharedServiceRecord, error) {
+	var record sharedServiceRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return record, problem("state_corrupt", "shared service cannot be decoded; preserved")
+	}
+	if record.ID != id || !validID(id) || !validID(record.Project.ID) || !validID(record.AdminPassword) || !validID(record.Server.Token) || !validID(record.Network.Token) || !validID(record.Volume.Token) || record.Configuration != sharedDigest(record.Declaration, record.Endpoint) {
+		return record, problem("state_corrupt", "shared service contract incomplete; preserved")
+	}
+	return record, nil
 }
 func (s *store) saveShared(record sharedServiceRecord) error {
 	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, "shared_services", record.ID, record) })

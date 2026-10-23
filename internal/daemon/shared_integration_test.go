@@ -38,10 +38,7 @@ func newSharedMariaDBFixture(t *testing.T, freshOnly bool, endpoints ...string) 
 	if endpoint == "" {
 		t.Skip("requires explicit Docker endpoint and pre-pulled mariadb:11.4/alpine:3.21; skip is not provider evidence")
 	}
-	binary := filepath.Join(t.TempDir(), "backlot")
-	if out, err := exec.Command("go", "build", "-race", "-o", binary, "../../cmd/backlot").CombinedOutput(); err != nil {
-		t.Fatalf("build CLI: %v %s", err, out)
-	}
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	h := newNativeHarness(t, binary, "30s")
 	d, err := newDocker(endpoint)
 	if err != nil {

@@ -250,12 +250,18 @@ func testIndependentNativeExpiry(t *testing.T, binary, action string) {
 	} else {
 		h.state(short.Instance.ID, v1.Stopping, v1.Cancelled)
 	}
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) && syscall.Kill(shortServer[1], 0) != syscall.ESRCH {
+	started := time.Now()
+	deadline := started.Add(time.Second)
+	serverErr, jobErr := syscall.Kill(shortServer[1], 0), syscall.Kill(shortJob[0], 0)
+	// The two component owners stop independently; observing one exit does not
+	// imply the other has exited within this same observation budget.
+	for time.Now().Before(deadline) && (serverErr != syscall.ESRCH || jobErr != syscall.ESRCH) {
 		time.Sleep(20 * time.Millisecond)
+		serverErr, jobErr = syscall.Kill(shortServer[1], 0), syscall.Kill(shortJob[0], 0)
 	}
-	if syscall.Kill(shortServer[1], 0) != syscall.ESRCH || syscall.Kill(shortJob[0], 0) != syscall.ESRCH {
-		t.Fatal("independent short owner still running behind long cleanup")
+	if serverErr != syscall.ESRCH || jobErr != syscall.ESRCH {
+		h.preserveFailureEvidence = true
+		t.Fatalf("independent short owner still running behind long cleanup: server=%v job=%v elapsed=%s deadline=%s remaining=%s", serverErr, jobErr, time.Since(started), deadline.UTC().Format(time.RFC3339Nano), time.Until(deadline))
 	}
 	if syscall.Kill(longServer[1], 0) != nil {
 		t.Fatal("long grace finished before independence assertion")

@@ -1,0 +1,12 @@
+root = "."
+tmp_dir = "tmp"
+[build]
+cmd = "go build -o ./tmp/app ."
+entrypoint = ["./tmp/app"]
+include_ext = ["go"]
+exclude_dir = ["tmp"]
+delay = 100
+send_interrupt = true
+kill_delay = "500ms"
+[proxy]
+enabled = false

@@ -23,6 +23,10 @@ Run these from the repository root:
 | `make notices`, `make notices-check` | Generate/verify linked dependency license notices |
 | `bin/backlot daemon start --state-dir /absolute/private/path --json` | Start an explicit local metadata daemon after building |
 | `bin/backlot doctor --state-dir /absolute/private/path --json` | Check local daemon access and paths; select scene/instance for providers |
+| `bin/backlot scene start --json dev` | Start a persistent scene in the current checkout and wait for readiness |
+| `bin/backlot scene status --follow --duration 30m --json dev` | Observe bounded sampled persistent-scene snapshots without lifecycle ownership |
+| `bin/backlot status --follow --json INSTANCE_ID` | Observe one persistent, disposable or historical ID without checkout discovery |
+| `bin/backlot scene stop --json dev` | Stop a recorded scene even with a broken or deleted manifest |
 | `go run ./cmd/backlot version --json` | Inspect the typed version result |
 | `go run ./cmd/backlot plan test --project examples/adoption --json -- -run TestExample` | Validate an offline fixture plan and forward terminal arguments |
 | `make fmt` | Format Go source |
@@ -37,7 +41,9 @@ Run these from the repository root:
 | `make adr-test` | Run ADR tooling tests |
 | `make schema-generate` | Regenerate committed editor schemas from `api/v1` |
 | `make schema-check` | Reject stale generated schemas without writing |
-| `make check` | Run schema drift checks, formatting, vet, lint, race tests, ADR verification, and build |
+| `make check-implementation` | Run schema/notice drift checks, formatting, vet, lint, Go race tests, and build |
+| `make check-docs` | Run ADR tooling tests and verify ADR records |
+| `make check` | Run both implementation and documentation checks |
 
 Before committing scaffold or Go/tooling changes, run `make check`. Documentation
 changes require ADR verification when records change and manual checking of
@@ -54,8 +60,40 @@ native Windows runtime CI is planned in #37/#38 and is not implemented here.
 The [Windows acceptance matrix](windows-design.md#epic-acceptance-and-evidence-matrix)
 separates future runtime CI from required Windows 11 desktop adoption evidence.
 Debian 13.4 amd64 requires actual-host runtime evidence; WSL is configuration guidance only. See [platform policy](platforms.md).
-The workflow runs on every PR and push to `main`, without path filters that
-could leave required checks missing.
+Workflows start on every PR and push to `main` (the independent consumer
+is manual-only). A shared
+[changed-paths workflow](../.github/workflows/changes.yml) uses pinned
+[dorny/paths-filter](https://github.com/dorny/paths-filter) to skip irrelevant jobs.
+Selection happens at job level; workflow-level path filters can leave required
+checks pending. Detection failures run the gates rather than
+silently skipping validation. PR detection uses Git to compare the checked-out
+merge commit with the event's base SHA, including fork PRs, avoiding the PR files
+API's 3,000-file limit. Main pushes compare with the pre-push commit, including
+multi-commit pushes.
+
+| Changed files | Jobs that run |
+| --- | --- |
+| `docs/` files or Markdown anywhere, including ADR additions/deletions | Docs workflow: ADR tooling tests and record verification |
+| Go/runtime sources, schemas, non-CI examples, module/build/lint configuration | macOS/Ubuntu repository checks, Linux runtime, current-head scenes and project inputs |
+| `THIRD_PARTY_NOTICES.md` | Repository and Linux installation checks, plus Docs |
+| `actions/` implementation | Current-head scenes and project inputs |
+| `examples/ci-scenes/` implementation | Scenes |
+| `examples/ci-inputs/` implementation | Project inputs |
+| An automatic workflow | Its own gates; shared change-detection edits run all automatic gates |
+
+Markdown inside implementation/example directories stays documentation-only.
+The [Docs workflow](../.github/workflows/docs.yml) always owns documentation
+validation: it runs `make check-docs` whenever documentation or its tooling,
+module dependencies or Makefile change. Mixed implementation/documentation PRs
+run both workflows independently. The Check workflow runs
+`make check-implementation` and does not validate ADR records. Its Go test suite
+still tests ADR tooling code as part of the complete Go suite. The independent consumer is a manual
+[current-commit packaging smoke test](ci.md#independent-action-consumer), without
+browser shards or repeated lifecycle checks. It does not use path detection.
+Go package tests remain together: shared packages and separately built subprocesses
+make narrower package selection unreliable. Keep new executable inputs covered
+by the filters when adding directories or build configuration. Local `make check`
+continues to run the complete contributor gate.
 
 Schema tests use a maintained JSON Schema validator on the real YAML examples
 and negative/variant cases, in addition to checking deterministic generated output.
@@ -89,6 +127,43 @@ workload activation environment cannot enable it. Full receiver identity and
 capability checks precede self-fault. Capability data stays in private temporary
 state and is excluded from reports. Failure paths join owners and prove absence,
 or preserve diagnostic state and report residuals.
+
+## Daemon state migrations
+
+Follow the [retained migration decision](adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md).
+Before a real format change, capture a nonempty closed database with the unmodified
+predecessor producer; retain its pinned revision, build settings/hashes, fixture
+inputs and regeneration commands. The committed [v9 fixture](../internal/daemon/testdata/state/v9/README.md)
+is the forward baseline. Never recreate historical evidence using current structs.
+Pre-v9 formats are unsupported; retain fixture coverage from v9 onward.
+
+Add the smallest private Go step in `internal/daemon/state_upgrade.go` with explicit
+source/destination versions. Validate source layout/authority before converting;
+retain the historical readers required by that source, without imposing current
+buckets/fields first. Advance `api/v1.StateVersion` only for a real persisted change.
+Retain earlier steps and fixtures; removal requires a compatibility decision.
+Steps use the supplied transaction, never commit/open another transaction or touch
+providers, processes, registry or retained files. Do not normalize unrelated values.
+Current layout/authority checks and the final fence run after the complete path.
+
+First exercise a copy of the oldest retained fixture through the full path and
+reopen it, checking typed reads and unchanged bytes outside intended transforms.
+Reject altered unsupported/corrupt copies without changing database bytes or
+passive files; never run recovery on historical paths. Adapt expected transformed
+records with each real change. Reuse the transaction rollback, startup cancellation,
+controlled before/after-commit interruption and postcommit failure tests. The
+synthetic 100→101→102 tests exercise actual bucket/value transformations, later-step
+failure and cancellation after tentative writes through the production dispatcher.
+These are algorithm evidence, not additional supported production versions.
+
+```sh
+go test ./internal/daemon -run '^Test(State|RetainedStateNine|CanceledStartup)' -count=1 -v
+make check
+```
+
+The native-only fixture does not prove historical Docker/gateway compatibility.
+Run additional provider suites only when changes reach those boundaries; do not
+multiply lifecycle suites for every retained version.
 
 ## Docker/private-state integration
 
@@ -193,7 +268,7 @@ Run the native managed suite with the same exclusive owned fixture grant:
 
 ```sh
 BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
-  go test -race ./internal/daemon -run '^TestManagedHTTPSRuntime$' -count=1 -v
+  go test -race ./internal/daemon -run '^(TestManagedHTTPSRuntime|TestManagedForceRestart)$' -count=1 -v
 ```
 
 This is required on the frozen candidate alongside the complete gateway,
@@ -301,10 +376,13 @@ then run:
 
 ```sh
 BACKLOT_ACCEPTANCE_CONFIG=/absolute/private/machine.yaml \
+BACKLOT_ACCEPTANCE_PROJECT_INPUTS=/absolute/private/inputs.yaml \
   go test -race ./internal/acceptance -run '^TestReleaseWorkflows$' -count=1 -v
 ```
 
-The machine file must select explicitly built fixture/browser image tags. This
+The separate private inputs document must select explicitly built fixture/browser
+image tags; the machine file supplies providers only. Each temporary fixture
+repository is explicitly enrolled under its owned private root. This
 suite mutates only its owned instance routes/resources, never gateway bootstrap,
 DNS or trust. An unset variable skips; a skip is not acceptance. This supplements
 the complete Docker/gateway/HTTPS suites above, which remain separate required
@@ -380,7 +458,13 @@ admin stays loopback. It never changes existing gateways, machine/browser trust
 or DNS. The fixture bound listener is joined on cleanup. These tests include
 nonzero missing-trust failure/recovery, provenance drift, deferred unavailable
 runtime, retained data, cancellation after creation/start, shutdown joins,
-lost-create-effect recovery and mismatched-authority preservation. Missing opt-in
+lost-create-effect recovery and mismatched-authority preservation. The public-CA
+probe verifies a certificate-only 0444 file bind under a private 0700 parent while
+retaining capless root, read-only rootfs, no-new-privileges and the five-second TLS
+deadline. Source CA/key bytes and modes remain private and unchanged. Focused
+`TestDoctorPublicCA*` tests cover bounded pinned-certificate validation, partial
+allocation, tampering, consumer uncertainty and inspection/absent-file recovery.
+Missing opt-in
 settings skip and do not establish provider evidence. The ownership suite also
 requires Docker CLI's classic builder (`DOCKER_BUILDKIT=0`) to build a uniquely
 labeled healthcheck fixture from the exact inspected local diagnostic base ID,
@@ -389,6 +473,32 @@ healthcheck executes; the actual probe's effective Engine config disables it
 and has no healthcheck execution state. Consumers stop before the exact created
 image is removed and its absence verified. Production doctor never pulls/builds
 images; production/default gateway exposure stays unchanged.
+
+## Native watcher example and browser HMR
+
+Prepare a private copy of `examples/native-watchers` with Go 1.27.1, Air 1.67.4,
+Node 26.8.1 and `npm ci --ignore-scripts` (Vite 8.3.4). Put those tools on the
+fixture daemon PATH. The test mutates the private copy's `main.js`; never point it
+at a working checkout. Select an existing private empty fixture root on a short
+path, explicit stock Caddy, and Linux Chromium/certutil:
+
+```sh
+BACKLOT_WATCHER_TEST_PROJECT=/absolute/private/native-watchers \
+BACKLOT_WATCHER_TEST_ROOT=/tmp/private-watcher-fixture \
+BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
+BACKLOT_BROWSER_TEST_BINARY=/absolute/path/to/chromium \
+BACKLOT_CERTUTIL_TEST_BINARY=/usr/bin/certutil \
+  go test ./internal/daemon -run '^TestNativeWatchers$' -count=1 -v -timeout=9m
+```
+
+This builds the real race CLI, launches ordinary Air/npm through the daemon,
+uses default canonical hostname resolution and verified TLS, rejects missing
+browser trust, imports only the fixture public root into disposable HOME/NSS,
+and checks an HMR edit in the same browser document. Authenticated teardown and
+browser joins precede fixture removal. A failed cleanup preserves private state;
+no TLS bypass, resolver override, user/system trust mutation or Docker is used.
+This bounded browser gate does not establish macOS system/browser adoption or
+replace frozen native/provider/regression and exact published-content CI gates.
 
 <a id="early-shared-mariadb-checkpoint-43-gate-1"></a>
 <a id="shared-mariadb-lifecycle-and-recovery-43-gate-2"></a>

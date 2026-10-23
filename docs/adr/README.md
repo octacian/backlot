@@ -49,9 +49,12 @@ required even when their answer is explicitly "None".
 
 Create as proposed; accept when the decision is agreed through review. Reject a
 declined proposal. Deprecate a decision that ceases to apply without a replacement.
-For a material change to an accepted choice, create a superseding ADR and preserve
-the old rationale. Once the replacement is accepted, mark the old record superseded
-and update reciprocal links in the same change. Only superseded records have
+Revise an ADR introduced in the same unmerged PR in place as the design evolves;
+replace redundant draft records and update their references rather than preserving
+a supersession chain for PR iterations. For a material change to an accepted
+choice already merged into the target branch, create a superseding ADR and
+preserve the old rationale. Once the replacement is accepted, mark the old record
+superseded and update reciprocal links in the same change. Only superseded records have
 nonempty `superseded_by`; a proposal cannot supersede an existing decision.
 
 Validation checks filenames/timestamps, typed frontmatter, required prose sections,
@@ -59,5 +62,7 @@ unfinished prompts, reciprocal existing references, and supersession cycles.
 Markdown examples cannot satisfy required headings. Validation cannot determine
 decision quality, approval, or implementation completion; those require review.
 
-GitHub Actions runs ADR tests and verification with the repository checks on every
-PR and push to `main`, including record deletions.
+GitHub Actions runs ADR tests and verification for Markdown and ADR tooling
+changes, including record deletions, in the dedicated Docs workflow on PRs and
+pushes to `main`. It runs independently of implementation checks. See
+[CI selection](../testing.md#ci-and-platform-evidence) for the shared path filters.

@@ -24,12 +24,28 @@ import (
 	"github.com/octacian/backlot/internal/manager"
 )
 
+// Reuse the harness's sole Wait owner, including failure-path cleanup.
+func joinSharedDaemon(t *testing.T, h *nativeHarness) error {
+	t.Helper()
+	if h.ownerDone == nil {
+		h.ownerDone = waitFixtureChild(h.process)
+	}
+	owner := &fixtureOwnerJoin{done: h.ownerDone}
+	if err := owner.join(5*time.Second, 2*time.Second, h.process.Process.Kill); err != nil {
+		h.waited = owner.joined
+		h.cleanupUnverified = true
+		t.Fatal(err)
+	}
+	h.waited = true
+	return owner.waitErr
+}
+
 func sharedCrash(t *testing.T, h *nativeHarness) {
 	t.Helper()
 	if err := h.process.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.process.Wait(); err == nil {
+	if err := joinSharedDaemon(t, h); err == nil {
 		t.Fatal("retained daemon did not fault")
 	}
 	h.waited = true
@@ -43,7 +59,7 @@ func sharedStop(t *testing.T, h *nativeHarness) {
 	if _, err := h.cli.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.process.Wait(); err != nil {
+	if err := joinSharedDaemon(t, h); err != nil {
 		t.Fatal(err)
 	}
 	h.waited = true

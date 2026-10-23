@@ -55,6 +55,11 @@ func exportCommand() *urfave.Command {
 			if err != nil {
 				return output(c, nil, err)
 			}
+			for _, warning := range response.Result.NativeOwnershipWarnings {
+				if _, err := fmt.Fprintln(c.ErrWriter, "Warning:", warning.Message); err != nil {
+					return err
+				}
+			}
 			_, err = fmt.Fprintf(c.Writer, "Exported %s\nOpen %s\nEvidence complete: %t\n", response.Output, filepath.Join(response.Output, response.HTML), response.Complete)
 			return err
 		}}

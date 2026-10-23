@@ -23,17 +23,8 @@ import (
 	"github.com/octacian/backlot/internal/native"
 )
 
-func reviewFixBinary(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "backlot")
-	if out, err := exec.Command("go", "build", "-race", "-o", binary, "../../cmd/backlot").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v %s", err, out)
-	}
-	return binary
-}
-
 func TestDestroyActiveKeptNative(t *testing.T) {
-	binary := reviewFixBinary(t)
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	for _, complete := range []bool{false, true} {
 		t.Run(fmt.Sprintf("completion-race-%v", complete), func(t *testing.T) {
 			h := newNativeHarness(t, binary, "20s")
@@ -105,7 +96,7 @@ func TestDestroyActiveKeptNative(t *testing.T) {
 }
 
 func TestLeaseCollectionFailureIsInstanceLocal(t *testing.T) {
-	binary := reviewFixBinary(t)
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	h := newNativeHarness(t, binary, "500ms")
 	// Separate witnesses/control paths keep cleanup attribution exact for both owners.
 	other := h.manifest.Components["server"]
@@ -163,6 +154,8 @@ func TestLeaseCollectionFailureIsInstanceLocal(t *testing.T) {
 			t.Fatal("daemon or unrelated owner lost", err)
 		}
 	}
+	authorities := append(h.guardianCapabilities(r.Instance.ID), h.guardianCapabilities(unrelated.Instance.ID)...)
+	h.expectShutdownFailureAfterCleanup("collection_failed", authorities)
 	for _, id := range []string{r.Instance.ID, unrelated.Instance.ID} {
 		got, err := h.cli.Inspect(context.Background(), id)
 		if err != nil {
@@ -185,7 +178,7 @@ func TestDestroyActiveKeptDocker(t *testing.T) {
 	if endpoint == "" {
 		t.Skip("requires explicit owned Docker fixture endpoint")
 	}
-	binary := reviewFixBinary(t)
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	for _, complete := range []bool{false, true} {
 		t.Run(fmt.Sprintf("completion-race-%v", complete), func(t *testing.T) {
 			h := newDockerHarness(t, binary, endpoint)
@@ -241,7 +234,7 @@ func TestPublicationReadinessSignals(t *testing.T) {
 	if os.Getenv("BACKLOT_CADDY_TEST_BINARY") == "" {
 		t.Skip("requires explicit owned Caddy fixture binary")
 	}
-	binary := reviewFixBinary(t)
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGTERM} {
 		t.Run(sig.String(), func(t *testing.T) {
 			f := gatewaytest.Start(t, "fixture.localhost")
@@ -374,7 +367,7 @@ func TestLeaseCollectorOutcomeDoesNotPoisonSweeper(t *testing.T) {
 }
 
 func TestKeptGuardianLossReportsEvidenceGap(t *testing.T) {
-	binary := reviewFixBinary(t)
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	h := newNativeFaultHarness(t, binary)
 	job := h.manifest.Components["job"]
 	job.Command.Args[len(job.Command.Args)-1] = "job-fail"
@@ -390,20 +383,30 @@ func TestKeptGuardianLossReportsEvidenceGap(t *testing.T) {
 	if !final.Kept || final.TerminalExitCode == nil || *final.TerminalExitCode != 17 {
 		t.Fatal("kept job result missing")
 	}
-	identity := h.guardianCapability(r.Instance.ID)
-	h.retainFixtureCleanup()
+	authorities := h.guardianCapabilities(r.Instance.ID)
+	identity := authorities[0]
+	pgid := h.retainFixtureCleanup()
+	h.expectShutdownFailureAfterFixtureExit("collection_failed", pgid, identity, authorities...)
 	if err := native.CrashForTest(identity); err != nil {
 		t.Fatal(err)
 	}
+	h.absent()
 	if _, err := h.cli.Destroy(context.Background(), r.Instance.ID); err == nil {
-		t.Fatal("uncertain native cleanup succeeded")
+		t.Fatal("unknown native authority authorized destroy")
+	}
+	forced, err := h.cli.StopExecutionWithRequest(context.Background(), v1.StopRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID, Force: true, ExpectedAttempt: r.Instance.Execution.Attempt})
+	if err != nil || len(forced.Instance.NativeOwnershipWarnings) != 1 {
+		t.Fatal("kept force waiver failed", err)
+	}
+	if _, err := h.cli.Destroy(context.Background(), r.Instance.ID); err == nil {
+		t.Fatal("kept waiver authorized later destruction")
 	}
 	got, err := h.cli.Inspect(context.Background(), r.Instance.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	result := got.Instance.Execution
-	if result.CollectionFailure == "" || result.CleanupFailure == "" || result.TerminalExitCode == nil || *result.TerminalExitCode != 17 {
+	if result.CollectionFailure == "" || result.CleanupFailure != "" || result.TerminalExitCode == nil || *result.TerminalExitCode != 17 {
 		t.Fatal("kept collection gap or original job result lost")
 	}
 	logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: r.Instance.ID})

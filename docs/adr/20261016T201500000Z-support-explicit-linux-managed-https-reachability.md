@@ -1,11 +1,11 @@
 ---
 title: 'Support explicit Linux managed HTTPS reachability'
 date: '2026-10-16'
-status: accepted
+status: superseded
 summary: 'Extend managed HTTPS to bounded rootful Linux bridges with an explicit IPv4 HTTPS bind setting while retaining loopback defaults and private administration.'
 tags: [linux, gateway, https, trust, networking, platforms]
 supersedes: [20261014T215536946Z-extend-managed-https-to-explicit-container-consumers.md]
-superseded_by: []
+superseded_by: [20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md]
 ---
 
 # Support explicit Linux managed HTTPS reachability

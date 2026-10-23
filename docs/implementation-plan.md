@@ -49,9 +49,9 @@ daemon shutdown. Prove allocation-intent recovery before external resources arri
 Implemented for independent review: shared native run/restart/stop/log contracts,
 daemon-owned guardian activation, TCP/HTTP/command readiness, finite dependency
 jobs, deadlines including zero/unlimited, lease cancellation, durable logs and
-crash reconciliation. Commands and descendants must remain in their supervised
-group; see the [native guide](daemon.md#native-execution) and
-[supervision decision](adr/20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md).
+crash reconciliation. Application descendants may create groups within their guardian-owned
+session; see the [native guide](daemon.md#native-execution) and
+[supervision decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md).
 This milestone does not implement containers, publication, non-port resources,
 fresh-only jobs, artifact extraction, keep-on-failure or retention policy.
 Independent reviews and required final acceptance/CI remain gates.
@@ -60,7 +60,10 @@ Run a native persistent fixture and finite test job end to end. Add probe deadli
 port-conflict handling, explicit restart, process-tree cancellation, serialized
 lifecycle operations, and owned log capture with historical/follow APIs.
 
-Prove child processes cannot outlive an acknowledged successful stop. Exercise
+For strict system helpers prove group absence after acknowledged stop. For
+application sessions require bounded identity-safe cleanup and truthful observed-empty
+confidence under the accepted missed-process risk; known live/incomplete/lost
+authority must remain fenced. Exercise
 startup interruption, unexpected exits, parent/daemon crashes, and uncertain
 ownership. Implement clear interrupted/failed states rather than auto-restart.
 
@@ -136,6 +139,10 @@ reviews, complete frozen regression suites and exact-HEAD CI remain gates. Trust
 browser/clean-machine macOS evidence is blocked pending a disposable environment;
 no browser-warning bypass or persistent trust mutation can replace it.
 
+The [recovery decision](adr/20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md)
+adds boot provenance, explicit force-stop waivers and guardian-liveness cleanup;
+[operations](https.md#managed-gateway-recovery) retain CA/configuration and truthful
+collection gaps.
 The managed origin also exposes `ca_cert_path` for explicit native environment
 assignments, with symbolic offline planning and validated existing public-root
 resolution. See [application trust](https.md#explicit-application-trust). The
@@ -270,10 +277,9 @@ See [contracts and image requirements](daemon.md#scoped-provider-diagnostics).
 Early real CLI/API/daemon/native/Docker/Caddy/data success, missing container trust
 failure/recovery and preserved-data cleanup were exercised before broad regressions;
 revision-bound private delivery evidence records fixture/tool/image dependencies.
-Private state advances to version 5 without migration: v4 and older are rejected
-without modification so incompatible binaries cannot ignore probe ownership.
-See the [state compatibility guidance](containers.md). Independent
-reviews, frozen provider/browser/macOS suites and published-HEAD CI remain required
+See [state compatibility](containers.md#state-compatibility) for the v9 baseline
+and unchanged rejection of pre-v9 formats. Independent reviews,
+frozen provider/browser/macOS suites and published-HEAD CI remain required
 before delivery readiness; no browser/application trust adoption is claimed.
 
 ## Portable run export (#41)
@@ -293,17 +299,81 @@ The early real Ubuntu ci-scenes success/failure/recovery, teardown/relocation an
 browser preview precede broader feature regression development. Independent Low
 and fresh High reviews, final frozen complete provider/browser/action gates and
 published-revision CI remain required; this paragraph does not claim readiness.
-Binary distribution/version tags remain #25, with no legacy storage migration.
+Binary distribution/version tags remain #25; the minimum supported state and
+retained upgrade path are defined by the migration decision.
+
+## Registered project configuration (#48)
+
+Implemented for independent review: explicit local project setup, external private
+registry/generations shared by Git common-directory identity and manifest path,
+private-only input values and strict tools composition, atomic edits/removal repair, hidden terminal input,
+local explicit reveal, private launch/current provenance and effective drift.
+Daemon state uses the v9 baseline with typed validation, retained ownership/data
+and current-only snapshot activation; old private generations require
+explicit operator retention/erasure decisions. See the [setup guide](manifest.md#registered-private-project-configuration)
+and [configuration decision and inherited contracts](adr/20261021T001732173Z-register-private-project-configuration.md).
+Independent implementation reviews, frozen full validation and published-HEAD CI
+remain gates; this section does not claim final feature readiness.
+
+## Recorded persistent-scene targeting (#47)
+
+Implemented for independent review: daemon-owned `scene start/status/stop`,
+recorded canonical checkout/project/scene selection without current-manifest
+parsing for status/stop, nearest recorded project without outer fallback, typed
+absence/idempotent stop and bounded sampled observation via `status ID --follow`.
+Follow observes the named scene through absence/recreation, fences initial
+checkout/daemon continuity; ID follow stays pinned for either lifetime and history.
+Neither acquires lifecycle ownership. The accepted [targeting decision](adr/20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md)
+and [command contract](daemon.md#named-persistent-scenes) define the behavior.
+Early real CLI/daemon/native failure/recovery and peer preservation precede focused
+regressions; independent implementation reviews, frozen complete applicable suites
+and exact published-revision CI remain delivery gates. Attached owner #50 and
+streaming/history #54 remain separate; no schema or dependency change is needed.
+
+## Native development watchers (#49)
+
+General application-session supervision integrates bounded identity handles into
+authenticated guardian membership/cleanup, application/readiness launches and
+private state v9. Stock system helpers retain strict pinned-group proof. Shared
+per-component cleanup confidence reaches status/doctor/exports, retaining original
+job exits and unresolved ownership fences. The [Air/Vite example](../examples/native-watchers/README.md)
+uses ordinary application tooling. Initial target adapter CI is feasibility only;
+independent final Low/High, frozen runtime/provider/browser suites and exact final
+published-content CI remain delivery gates.
+
+## Cumulative daemon state upgrades (#66)
+
+Implemented for independent review: private transaction dispatch retains each real
+migration from the v9 baseline; pre-v9 state is rejected without a format bump or
+new dependency. Source checks precede conversion; current authority validation and the
+final fence stay in the same existing write transaction. Recovery remains separate.
+The [migration decision](adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md)
+defines the compatibility obligation. A pinned, real nonempty v9 fixture and
+[regeneration procedure](../internal/daemon/testdata/state/v9/README.md) accompany
+focused multi-step, rollback/cancellation and copied-fixture checks. Follow the
+[next-change procedure](testing.md#daemon-state-migrations) for real format changes.
+Independent Low/High reviews, frozen `make check` and exact published-revision CI
+remain delivery gates; no publication or final readiness is claimed here.
+
+## Attached persistent ownership (#50)
+
+Implemented for review: optional `scene start --attached`/`run --attached`, ephemeral
+attempt/generation-bound daemon authority, existing lease expiry/cleanup and
+aggregate log pages. Default background/disposable semantics remain unchanged.
+See the [decision](adr/20261022T194804759Z-bind-attached-persistent-execution-to-one-daemon-owned-attempt.md)
+and [command/API contract](daemon.md#attached-execution). Independent implementation
+reviews, frozen native/provider suites and published-head CI remain required;
+focused development evidence is not a release/adoption claim.
 
 ## Shared services (issue 43)
 
 [PR 45](https://github.com/octacian/backlot/pull/45) delivers the MariaDB 11.4 slice:
-project identity, separate state-7 server/allocation journals, native/container
+project identity, separate state-10 server/allocation journals, native/container
 connections, lifecycle/concurrency/recovery and explicit bounded force cleanup.
-[The decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md),
+[The decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md),
 [runtime](containers.md#project-scoped-shared-services-gate-1) and
 [validation guide](testing.md#shared-mariadb-integration) define its contracts.
-Prior unchanged-input technical verification is complete; owner confirmation and
+Prior pre-integration verification is provenance only; merged-candidate verification, owner confirmation and
 first-slice examples/docs/review disposition, applicable final verification, fresh
 High review and published-revision CI remain separate closeout obligations.
 [Issue 43](https://github.com/octacian/backlot/issues/43) retains the umbrella:

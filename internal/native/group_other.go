@@ -3,14 +3,17 @@
 package native
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"syscall"
 )
 
-func supported() bool       { return false }
-func configure(_ *exec.Cmd) {}
+func supported() bool               { return false }
+func anchorOwnGroup() bool          { return false }
+func bootIdentity() (string, error) { return "", errors.New("native boot identity unsupported") }
+func configure(_ *exec.Cmd)         {}
 func identify(_ int) (Identity, error) {
 	return Identity{}, errors.New("native execution unsupported on this platform")
 }
@@ -27,3 +30,7 @@ func configureAnchor(_ *exec.Cmd)      {}
 func configureRoot(_ *exec.Cmd, _ int) {}
 
 func controlInput() (*os.File, error) { return nil, errors.New("native execution unsupported") }
+
+func groupMembersContext(_ context.Context, _ int) ([]int, error) {
+	return nil, errors.New("native execution unsupported")
+}

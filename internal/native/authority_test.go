@@ -171,3 +171,16 @@ func TestKernelAbsenceRejectsIncompleteEnumeration(t *testing.T) {
 		t.Fatal("kernel proof failure allowed post-release signals", err)
 	}
 }
+
+func TestStrictCompletionRejectsLateCensus(t *testing.T) {
+	anchor := ownedSleep(t)
+	done := make(chan struct{})
+	close(done)
+	w := &ownedWorkload{anchor: anchor, statusDone: done, collected: make(chan error, 2), publish: func(Exit) {}}
+	w.collected <- nil
+	w.collected <- nil
+	w.scan = func(pgid int) ([]int, error) { time.Sleep(2100 * time.Millisecond); return []int{pgid}, nil }
+	if err := w.stop(0); err == nil || w.released {
+		t.Fatal("late strict census released retained child", err)
+	}
+}

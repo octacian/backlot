@@ -1,8 +1,9 @@
 # Editor schemas
 
 The committed [project Manifest](manifest-v1.schema.json) and
-[MachineConfig](machine-config-v1.schema.json) artifacts use JSON Schema
-**Draft 2020-12**. Both describe `version: backlot/v1`. They are self-contained:
+[MachineConfig](machine-config-v1.schema.json) and
+[PrivateConfig](private-config-v1.schema.json) artifacts use JSON Schema
+**Draft 2020-12**. All describe `version: backlot/v1`. They are self-contained:
 all references are internal, so editors can use local copies without fetching a
 runtime schema. Their stable `$id` values reserve the eventual `main` raw-file
 locations; those URLs are **not verified live before this branch merges**.
@@ -60,7 +61,7 @@ rejects. VSCode has [built-in JSON schema associations](https://code.visualstudi
 
 ## Generation and validation boundaries
 
-Run `make schema-generate` at the repository root and commit the two resulting
+Run `make schema-generate` at the repository root and commit the three resulting
 JSON files. `make schema-check` compares deterministic output without writing;
 `make check` and both CI platforms run this drift check. The field inventory,
 required fields and fixed-object unknown-field rejection come from the named
@@ -112,3 +113,7 @@ cost before adding dependencies:
 
 Versions are pinned in `go.mod`. JSON and YAML share the generated artifacts;
 no Node toolchain, custom schema parser, or runtime download is required.
+
+`private-config-v1.schema.json` describes inputs/tools-only setup imports. The
+[setup guide](../docs/manifest.md#registered-private-project-configuration) covers
+registration, atomic edits, linked worktrees and private-generation retention.

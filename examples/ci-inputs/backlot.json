@@ -1,0 +1,27 @@
+{
+  "version": "backlot/v1",
+  "project": "ci-inputs",
+  "tools": {"node": "node"},
+  "inputs": {
+    "credential": {"secret": true},
+    "token": {"secret": true, "generate": "random-hex-32"},
+    "region": {}
+  },
+  "outputs": {"reports": {"path": "reports", "concurrency_group": "reports"}},
+  "environments": {"private": {
+    "pass_through": ["HOME", "XDG_CONFIG_HOME", "EXPECTED_HOME", "EXPECTED_XDG"],
+    "assign": {
+      "CREDENTIAL": {"ref": {"kind": "input", "name": "credential"}},
+      "TOKEN": {"ref": {"kind": "input", "name": "token"}},
+      "REGION": {"ref": {"kind": "input", "name": "region"}}
+    }
+  }},
+  "components": {
+    "check": {"kind": "job", "runtime": "native", "policy": "each-start", "command": {"tool": "node", "args": ["scene.mjs"]}, "environment_sets": ["private"], "outputs": ["reports"], "artifacts": {"report": {"path": "reports/result.json"}}},
+    "fail": {"kind": "job", "runtime": "native", "policy": "each-start", "command": {"tool": "node", "args": ["scene.mjs", "fail"]}, "environment_sets": ["private"], "outputs": ["reports"], "artifacts": {"report": {"path": "reports/result.json"}}}
+  },
+  "scenes": {
+    "test": {"lifetime": "disposable", "components": ["check"], "terminal_job": "check"},
+    "failure": {"lifetime": "disposable", "components": ["fail"], "terminal_job": "fail"}
+  }
+}

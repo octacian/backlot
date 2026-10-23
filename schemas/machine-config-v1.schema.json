@@ -162,16 +162,6 @@
           "type": "object",
           "description": "Named executables; planning checks availability without running them."
         },
-        "inputs": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "propertyNames": {
-            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
-          },
-          "type": "object",
-          "description": "Explicit external inputs; keep machine credentials out of projects."
-        },
         "docker": {
           "$ref": "#/$defs/DockerConfig",
           "description": "Local engine configuration; planning does not contact Docker."
@@ -190,7 +180,7 @@
       "required": [
         "version"
       ],
-      "description": "MachineConfig contains local provider settings and executable/input overrides."
+      "description": "MachineConfig contains local provider settings and executable overrides."
     },
     "StorageConfig": {
       "properties": {

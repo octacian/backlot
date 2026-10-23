@@ -1,19 +1,14 @@
 # Install and operate Backlot
 
-Native Windows installation/operations are planned, not supported by this change.
-Use the [Windows implementation handoff](windows-design.md) for prerequisites and
-future #37/#38 gates; the commands below remain for existing macOS/Linux targets.
+For macOS/Linux targets, prerequisites, WSL guidance and planned Windows work,
+see [platforms](platforms.md). Install Go 1.27.1 or a compatible newer patch, Git
+for worktrees, and `lsof` (included with macOS); Make is needed only for source
+builds. Native commands must stay in their supervised process group.
 
-Runtime targets are macOS ARM64, Ubuntu 24.04 amd64 and Debian 13.4 amd64; see
-[platform prerequisites and WSL guidance](platforms.md). Install Go 1.27.1 or a
-compatible newer patch, Git for project worktrees, and `lsof` (included with macOS). Make is needed only for the source-build
-alternative below. Native commands must cooperate with
-Backlot's supervised process-group contract; do not detach or delegate to another
-supervisor. Install Docker only for container scenes. For published scenes choose
-[managed local HTTPS or external Caddy](https.md). Managed mode needs a configured
-stock native Caddy executable and a separate explicit trust command; Backlot never
-installs system/browser trust. External DNS/public certificates, toolchain
-installation and system services remain operator tasks.
+Install Docker only for container scenes. Published scenes require
+[managed local HTTPS or external Caddy](https.md). Trust, external DNS/public
+certificates, toolchains and system services remain explicit operator setup;
+Backlot never installs system/browser trust.
 
 ## Go installation
 
@@ -102,7 +97,7 @@ all four application workflows and explicit image setup commands.
 backlot daemon start --state-dir /private/backlot --json
 backlot doctor --state-dir /private/backlot --json
 backlot plan dev --project /absolute/project --config /private/machine.yaml --json
-backlot run dev --project /absolute/project --config /private/machine.yaml --state-dir /private/backlot --json
+backlot scene start dev --project /absolute/project --config /private/machine.yaml --state-dir /private/backlot --json
 backlot list --state-dir /private/backlot --limit 100 --json
 backlot status --state-dir /private/backlot --json INSTANCE_ID
 backlot daemon stop --state-dir /private/backlot --json
@@ -110,8 +105,9 @@ backlot daemon stop --state-dir /private/backlot --json
 
 `list` emits one bounded identity-ordered page, including historical/destroyed
 instances. Continue with `--after NEXT_AFTER_ID`; concurrent additions with earlier
-random IDs may require a fresh traversal. `status` aliases recorded-instance
-inspection; `daemon status` reports daemon connectivity and `gateway status`
+random IDs may require a fresh traversal. `status ID` inspects one recorded instance;
+add `--follow` for bounded sampled observation. Use [named scenes](daemon.md#named-persistent-scenes) for checkout-based
+start/status/stop; `daemon status` reports daemon connectivity and `gateway status`
 reports managed process/listener readiness independently of TLS trust. Neither ordinary command
 reveals private ownership authority or fixture secrets. bare `doctor` checks local
 access/compatibility and shows state/socket/log paths plus an unloaded default
@@ -144,7 +140,8 @@ A zero test exit cannot override failed collection/cleanup.
 | Kept disposable failure | Inspect status/logs/artifacts/fixtures, then explicitly destroy by ID. Successful runs still clean up. |
 | Cleanup uncertain or foreign consumer present | Preserve journal/resources; restore provider access or remove only your verified consumer, then retry stop/destroy. Never prune by name, PID or hostname. |
 | Daemon crash | Start the same binary/state directory; recovery stops verifiably owned survivors and marks interrupted, retains data/managed CA and reports evidence gaps. Inspect, explicitly start the managed gateway, then restart scenes. Unavailable gateway retains exact route cleanup uncertainty for retry. |
-| Unsupported state version | Version 5 is required; v4 and older are rejected without migration or deletion. Use the matching older binary for owned cleanup and gateway/daemon shutdown, then select a fresh `--state-dir`; preserve old state until cleanup is verified. |
+| Managed gateway uncertain after temporary control loss | Retry `gateway stop` in the same state directory. If still fenced, choose restored authority, controlled reboot or explicit survivor-risk acknowledgement with force; follow [managed recovery](https.md#managed-gateway-recovery). Retain configuration and CA. |
+| State upgrade or unsupported version | Follow [state compatibility](containers.md#state-compatibility): stop the old daemon with its matching binary before upgrading, wait for exit/lock release, then explicitly start the newest binary in the same directory. Version 9 is the minimum supported baseline; retained steps from v9 support skipped releases without reset. Pre-v9 and other unsupported formats are rejected unchanged; preserve them for matching-binary diagnosis and lifecycle. |
 | Evidence expired | Status retains `evidence_expired`; expired logs/artifacts cannot be recovered from deleted containers. Configure daemon age/size retention before runs. |
 
 Never remove retained data while a consumer may still run. A cleanup failure is a

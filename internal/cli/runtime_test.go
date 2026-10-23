@@ -9,7 +9,7 @@ import (
 )
 
 func TestRuntimeRequiresTerminalSeparator(t *testing.T) {
-	for _, args := range [][]string{{"backlot", "run", "test", "unseparated"}, {"backlot", "run", "dev", "--job-timeout"}, {"backlot", "run", "dev", "--unknown"}, {"backlot", "restart", "id", "--", "extra"}} {
+	for _, args := range [][]string{{"backlot", "run", "test", "unseparated"}, {"backlot", "run", "dev", "--job-timeout"}, {"backlot", "run", "dev", "--unknown"}, {"backlot", "restart", "id", "--", "extra"}, {"backlot", "restart", "id", "--attached"}, {"backlot", "reset", "id", "--attached"}, {"backlot", "run", "dev", "--attached", "--keep-on-failure"}, {"backlot", "run", "dev", "--attached", "--", "arg"}} {
 		var stdout, stderr bytes.Buffer
 		command := NewCommand(v1.VersionResponse{APIVersion: v1.Version}, &stdout, &stderr)
 		if err := command.Run(context.Background(), args); err == nil {
@@ -25,7 +25,7 @@ func TestRuntimeRequiresTerminalSeparator(t *testing.T) {
 }
 
 func TestForceUnsupportedActions(t *testing.T) {
-	for _, action := range []string{"run", "restart", "reset", "stop", "shared list", "shared inspect", "shared start", "shared stop", "shared restart"} {
+	for _, action := range []string{"run", "restart", "reset", "shared list", "shared inspect", "shared start", "shared stop", "shared restart"} {
 		var stdout, stderr bytes.Buffer
 		command := NewCommand(v1.VersionResponse{APIVersion: v1.Version}, &stdout, &stderr)
 		args := append([]string{"backlot"}, strings.Fields(action)...)

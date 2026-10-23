@@ -22,6 +22,12 @@ inputs:
   artifact-name:
     description: Artifact name prefix (invocation identity is always appended)
     default: backlot
+  project-inputs:
+    description: Strict JSON object of nonempty string input values; private CLI stdin transport
+    required: false
+  project-generate-inputs:
+    description: Explicit JSON array of eligible secret input names to generate
+    required: false
 outputs:
   evidence-path:
     description: Audited evidence outside private runtime state; survives cleanup

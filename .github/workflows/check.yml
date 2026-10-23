@@ -13,7 +13,14 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+
   check:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.check == 'true') }}
     name: Check (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -27,13 +34,17 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Verify repository
-        run: make check
+        run: make check-implementation
+      - name: Verify native identity adapter without cgo
+        run: CGO_ENABLED=0 go test ./internal/native ./internal/native/procidentity -count=1 -v
       - name: Verify module metadata
         run: |
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
   linux-runtime:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.check == 'true') }}
     name: Linux runtime (Ubuntu 24.04 amd64)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -75,4 +86,4 @@ jobs:
         run: |
           export BACKLOT_CADDY_TEST_BINARY="$RUNNER_TEMP/backlot-tools/caddy"
           go test -race ./internal/gateway -count=1 -v -timeout=15m
-          go test -race ./internal/daemon -run '^(TestDockerRuntime|TestDisposableEvidenceDocker|TestHTTPSRuntime|TestManagedHTTPSRuntime|TestContainerManagedHTTPSRuntime)$' -count=1 -v -timeout=40m
+          go test -race ./internal/daemon -run '^(TestDockerRuntime|TestDisposableEvidenceDocker|TestHTTPSRuntime|TestManagedHTTPSRuntime|TestManagedForceRestart|TestContainerManagedHTTPSRuntime)$' -count=1 -v -timeout=40m

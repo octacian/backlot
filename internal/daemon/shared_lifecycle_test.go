@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -770,4 +772,119 @@ func (f *sharedMariaDBFixture) keepLease(t *testing.T, response v1.InstanceRespo
 	}
 	t.Cleanup(stop)
 	return stop
+}
+
+// Exercise the joins with main's private composition, startup presentation and
+// attached owners through the real CLI/API and shared SQL, without a new harness.
+func TestSharedMariaDBMainContracts(t *testing.T) {
+	t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", filepath.Join(shortTemp(t), "registry"))
+	f := newSharedMariaDBFixture(t, false)
+	sharedStop(t, f.h)
+	f.h.lease = "10s"
+	f.h.start()
+	proof := f.addLive(t)
+	f.h.manifest.Inputs = map[string]v1.Input{"token": {Secret: true}}
+	for _, name := range []string{"live-native", "live-container"} {
+		component := f.h.manifest.Components[name]
+		component.Environment.Assign["PRIVATE_TOKEN"] = fixtureRef("input", "token", "")
+		component.Fixtures["input"] = v1.Fixture{Value: fixtureRef("input", "token", "")}
+		f.h.manifest.Components[name] = component
+		scene := f.h.manifest.Scenes[name]
+		scene.StartupDetails = []v1.StartupDetailSelection{{Component: name, Fixture: "password", Label: "Application password"}, {Component: name, Fixture: "input", Label: "Project token"}}
+		f.h.manifest.Scenes[name] = scene
+	}
+	f.writeBoth(t)
+	configure := func(value string) {
+		t.Helper()
+		payload, err := json.Marshal(v1.PrivateConfig{Version: v1.ManifestVersion, Inputs: map[string]string{"token": value}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(f.binary, "project", "setup", "--project", f.h.project, "--config", f.configuration, "--from", "-", "--json")
+		cmd.Stdin = bytes.NewReader(payload)
+		if _, err := cmd.CombinedOutput(); err != nil {
+			t.Fatal("private shared setup failed", err)
+		}
+	}
+	configure("configured-shared-token")
+	started := f.run("live-native", f.h.project)
+	id := started.Instance.ID
+	credential := f.credential(t, id, "live-native")
+	if started.Instance.Plan.EffectiveConfigDigest == "" || started.StartupDetails == nil || started.StartupDetails.Warning != nil || len(started.StartupDetails.Details) != 2 || started.StartupDetails.Attempt != started.Instance.Execution.Attempt {
+		t.Fatal("shared startup lost captured provenance or selected summary")
+	}
+	if started.StartupDetails.Details[0].Value != credential.password || !started.StartupDetails.Details[0].Sensitive || started.StartupDetails.Details[1].Value != "configured-shared-token" {
+		t.Fatal("selected shared application secrets were not displayed")
+	}
+	admin := f.liveAdminRecord(t).AdminPassword
+	inspect, err := f.h.cli.Inspect(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinary, _ := json.Marshal(inspect)
+	startup, _ := json.Marshal(started)
+	for _, secret := range []string{admin, credential.password, "configured-shared-token"} {
+		if bytes.Contains(ordinary, []byte(secret)) {
+			t.Fatal("ordinary shared observation leaked a secret")
+		}
+	}
+	if bytes.Contains(startup, []byte(admin)) {
+		t.Fatal("administration entered startup presentation")
+	}
+	url := f.http(t, id)
+	configure("changed-shared-token")
+	request := f.request("live-native", f.h.project)
+	request.InstanceID = id
+	_, err = f.h.cli.Restart(context.Background(), request)
+	code(t, err, "unsafe_drift")
+	f.http(t, id)
+	if f.credential(t, id, "live-native") != credential {
+		t.Fatal("rejected private drift mutated allocation")
+	}
+	configure("configured-shared-token")
+	if _, err := f.h.cli.StopExecution(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	requireSharedHTTPAbsent(t, url)
+
+	for _, name := range []string{"live-native", "live-container"} {
+		path := f.h.project
+		if name == "live-container" {
+			path = f.linked
+		}
+		request := f.request(name, path)
+		request.Attached = true
+		accepted := f.accept(t, request)
+		if accepted.Attachment == nil {
+			t.Fatal("shared start omitted attached authority")
+		}
+		f.wait(t, accepted.Instance.ID, v1.RuntimeReady)
+		credential := f.credential(t, accepted.Instance.ID, name)
+		witness := independentSharedWitness(t, f.db(t, credential))
+		url := f.http(t, accepted.Instance.ID)
+		owner := v1.AttachedRequest{APIVersion: v1.Version, InstanceID: accepted.Instance.ID, Owner: accepted.Attachment.Owner}
+		if name == "live-native" {
+			if _, err := f.h.cli.Attached(context.Background(), owner, true); err != nil {
+				t.Fatal(err)
+			}
+		} // No renewal for the container owner: client loss expires its lease.
+		f.wait(t, accepted.Instance.ID, v1.Stopped)
+		requireSharedHTTPAbsent(t, url)
+		if name == "live-native" {
+			verifySharedStopProof(t, proof, credential.database)
+		}
+		if f.credential(t, accepted.Instance.ID, name) != credential {
+			t.Fatal("attached cleanup released persistent credentials")
+		}
+		verifySharedWitness(t, f.db(t, credential), witness)
+		f.accept(t, f.request(name, path))
+		f.wait(t, accepted.Instance.ID, v1.RuntimeReady)
+		_, err := f.h.cli.Attached(context.Background(), owner, true)
+		code(t, err, "conflict")
+		f.http(t, accepted.Instance.ID)
+		verifySharedWitness(t, f.db(t, credential), witness)
+		if _, err := f.h.cli.StopExecution(context.Background(), accepted.Instance.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
 }

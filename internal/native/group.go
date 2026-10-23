@@ -1,4 +1,4 @@
-// Package native supervises cooperative commands in a pinned process group.
+// Package native supervises cooperative applications in an owned session and strict system helpers in a pinned group.
 package native
 
 import (
@@ -19,10 +19,17 @@ import (
 
 // Identity identifies a private guardian authority, never a signal target.
 type Identity struct {
-	PID     int    `json:"pid"`
-	Birth   string `json:"birth"`
-	Control string `json:"control"`
-	Token   string `json:"token"`
+	// Preserve the merged-main tuple order and omit absent new discriminators, so
+	// legacy managed-claim serialization remains exact without a second JSON pass.
+	PID       int    `json:"pid"`
+	Birth     string `json:"birth"`
+	Control   string `json:"control"`
+	Token     string `json:"token"`
+	Boot      string `json:"boot,omitempty"`
+	Protocol  int    `json:"protocol,omitempty"`
+	Purpose   string `json:"purpose,omitempty"`
+	Component string `json:"component,omitempty"`
+	Attempt   string `json:"attempt,omitempty"`
 }
 
 // Spec is the private activation payload after ownership journaling.
@@ -51,6 +58,7 @@ type Exit struct {
 type Group struct {
 	Identity          Identity
 	control           *os.File
+	events            *os.File
 	done              chan struct{}
 	statusDone        chan struct{}
 	ready             chan struct{}
@@ -58,11 +66,32 @@ type Group struct {
 	mu                sync.Mutex
 	exit              *Exit
 	collectionFailure string
+	cleanup           *v1.NativeCleanupResult
 	pgid              int
 }
 
 // Start creates an inactive authority; no application starts before Activate.
 func Start(executable string, stdout, stderr *os.File) (*Group, error) {
+	return start(executable, stdout, stderr, "strict", "", "")
+}
+
+// StartApplication creates an inactive session authority for one application attempt.
+func StartApplication(executable string, stdout, stderr *os.File, component, attempt string) (*Group, error) {
+	if component == "" || attempt == "" {
+		return nil, errors.New("application attempt identity missing")
+	}
+	group, err := start(executable, stdout, stderr, "application", component, attempt)
+	if err != nil {
+		err = &authorityError{message: "native application guardian could not start; preserve uncertain launch ownership", cause: err}
+	}
+	return group, err
+}
+
+func start(executable string, stdout, stderr *os.File, purpose, component, attempt string) (*Group, error) {
+	boot, err := CurrentBoot()
+	if err != nil {
+		return nil, err
+	}
 	dir, err := os.MkdirTemp("/tmp", "blctl-")
 	if err != nil {
 		return nil, err
@@ -99,9 +128,11 @@ func Start(executable string, stdout, stderr *os.File) (*Group, error) {
 	if identityErr != nil {
 		id.PID = cmd.Process.Pid
 	}
+	id.Protocol, id.Purpose, id.Component, id.Attempt = 1, purpose, component, attempt
 	id.Control = filepath.Join(dir, "control.sock")
 	id.Token = hex.EncodeToString(token)
-	g := &Group{Identity: id, control: control, done: make(chan struct{}), statusDone: make(chan struct{}), ready: make(chan struct{}), anchorReady: make(chan struct{})}
+	id.Boot = boot
+	g := &Group{Identity: id, control: control, events: events, done: make(chan struct{}), statusDone: make(chan struct{}), ready: make(chan struct{}), anchorReady: make(chan struct{})}
 	go func() { _ = cmd.Wait(); close(g.done) }()
 	go func() {
 		defer close(g.statusDone)
@@ -209,8 +240,16 @@ func (g *Group) Alive() bool {
 
 // Stop obtains verified cleanup and joins this daemon's guardian descriptors.
 func (g *Group) Stop(grace time.Duration) (err error) {
+	collected := false
 	defer func() {
-		if err != nil {
+		if err != nil || !collected {
+			if g.Identity.Purpose == "application" {
+				g.mu.Lock()
+				if g.cleanup == nil || g.cleanup.Confidence == v1.ObservedEmpty {
+					g.cleanup = sessionResult(g.Identity, v1.CleanupIncomplete)
+				}
+				g.mu.Unlock()
+			}
 			// A failed authority/collector join cannot attest complete evidence.
 			// Keep this sticky even if a late root status later becomes available.
 			g.mu.Lock()
@@ -219,8 +258,15 @@ func (g *Group) Stop(grace time.Duration) (err error) {
 		}
 	}()
 	_ = g.control.Close()
-	if err := Stop(g.Identity, grace); err != nil {
-		return err
+	result, proved, stopErr := stopResultCollected(g.Identity, grace)
+	collected = proved
+	g.mu.Lock()
+	if g.cleanup == nil || g.cleanup.Confidence == v1.ObservedEmpty {
+		g.cleanup = result
+	}
+	g.mu.Unlock()
+	if stopErr != nil {
+		return stopErr
 	}
 	_ = g.control.Close()
 	select {
@@ -234,6 +280,31 @@ func (g *Group) Stop(grace time.Duration) (err error) {
 		return errors.New("status collection did not join")
 	}
 	return nil
+}
+
+// CleanupResult returns the last session cleanup result; strict helpers return nil.
+func (g *Group) CleanupResult() *v1.NativeCleanupResult {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.cleanup == nil {
+		return nil
+	}
+	r := *g.cleanup
+	return &r
+}
+
+// Relinquish closes and joins this daemon's local status reader after a durable
+// force waiver. It never signals or waits for the potentially live guardian.
+// The existing direct-child Wait owner continues reaping it when it exits.
+func (g *Group) Relinquish() {
+	_ = g.control.Close()
+	g.mu.Lock()
+	g.collectionFailure = "native output/status collection could not be verified"
+	g.mu.Unlock()
+	if g.events != nil {
+		_ = g.events.Close()
+	}
+	<-g.statusDone
 }
 
 // Wait observes root completion under the caller's execution deadline.

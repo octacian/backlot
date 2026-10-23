@@ -282,3 +282,45 @@ func TestUnlimitedReadinessDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Legacy machine input presence is rejected regardless of value or selected work.
+func TestMachineInputsRejected(t *testing.T) {
+	for _, format := range []string{".json", ".yaml"} {
+		for _, value := range []string{`{}`, `null`, `{"unused":"sensitive-canary"}`} {
+			data := []byte(`{"version":"backlot/v1","inputs":` + value + `}`)
+			var machine v1.MachineConfig
+			err := Decode(data, format, &machine)
+			if err == nil || strings.Contains(err.Error(), "sensitive-canary") {
+				t.Fatal("legacy machine inputs accepted or disclosed", err)
+			}
+		}
+	}
+}
+
+func TestStartupDetailSelections(t *testing.T) {
+	for _, tc := range []struct {
+		name, component, fixture, label string
+		disposable                      bool
+		valid                           bool
+	}{
+		{"valid", "tests", "account", "Account", false, true},
+		{"unknown component", "missing", "account", "Account", false, false},
+		{"unknown fixture", "tests", "missing", "Account", false, false},
+		{"blank label", "tests", "account", "  ", false, false},
+		{"multiline label", "tests", "account", "Account\nPassword", false, false},
+		{"disposable", "tests", "account", "Account", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := v1.Manifest{Version: v1.ManifestVersion, Project: "details", Tools: map[string]string{"go": "go"}, Components: map[string]v1.Component{"tests": {Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "go"}, Fixtures: map[string]v1.Fixture{"account": {Value: v1.Value{Literal: func() *string { s := "demo"; return &s }()}}}}}, Scenes: map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"tests"}, StartupDetails: []v1.StartupDetailSelection{{Component: tc.component, Fixture: tc.fixture, Label: tc.label}}}}}
+			if tc.disposable {
+				scene := m.Scenes["dev"]
+				scene.Lifetime = v1.Disposable
+				scene.TerminalJob = "tests"
+				m.Scenes["dev"] = scene
+			}
+			if err := Validate(m); (err == nil) != tc.valid {
+				t.Fatalf("valid=%t: %v", tc.valid, err)
+			}
+		})
+	}
+}

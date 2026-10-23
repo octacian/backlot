@@ -12,7 +12,12 @@ the original terminal status remains in `execution.terminal_exit_code` and the
 component result. Unknown job exit status remains absent; observation or collector
 failures never substitute an application exit code. Later verified status recovery
 preserves the observed code alongside the separate failure. `failure`, `collection_failure`, `cleanup_failure` and
-`cancelled` describe separate outcomes. Finite JSON commands emit one typed result;
+`cancelled` describe separate outcomes. Application native cleanup also records
+`native_cleanup` per component/attempt with `observed_empty`, `incomplete` or
+`authority_lost` confidence and stable reason/detail. Observed empty deliberately
+permits lifecycle/data fence release despite possible unseen descendants; it is
+not universal absence. Known incomplete/lost authority remains a cleanup failure.
+Strict system helpers keep stronger group proof and omit session results. Finite JSON commands emit one typed result;
 application output is available through `logs`. Backlot captures application
 stdout/stderr as emitted, including any secrets the application prints. Backlot's
 own diagnostic messages redact resolved sensitive values.
@@ -20,6 +25,12 @@ own diagnostic messages redact resolved sensitive values.
 Disposable clients renew a finite lease while waiting. Losing the client stops
 renewals; the daemon cancels after the configured lease expires, gathers available
 evidence, and cleans up. Execution deadlines of zero do not disable the lease.
+
+Attached persistent commands emit typed lifecycle/log NDJSON and aggregate only
+the accepted attempt. They retain the same log encoding, gaps and retention limits,
+without a replay or completeness guarantee. Their signal/loss cleanup preserves
+persistent data and paired credentials. See [attached execution](daemon.md#attached-execution)
+for leases, operator overrides and exit results.
 
 ## Declared artifacts and fixtures
 
@@ -69,10 +80,12 @@ backlot fixtures --state-dir /private/backlot --component tests INSTANCE_ID
 backlot secret --state-dir /private/backlot --component tests --json INSTANCE_ID password
 ```
 
-Only `secret` and its dedicated `/v1/fixtures/secret` endpoint return a named
-sensitive fixture's value. `/v1/fixtures` returns ordinary metadata. The local
-permissioned administration socket is the authorization boundary; do not share
-sensitive command output or private daemon state.
+`secret` retrieves a named sensitive fixture through `/v1/fixtures/secret`;
+`/v1/fixtures` returns ordinary metadata. Persistent startup uses the sensitive
+endpoint for [declared selections](manifest.md#components-and-scenes), without
+adding their values to execution results, status, diagnostics or exports. The
+permissioned local socket is the authorization boundary; protect sensitive output
+and private daemon state.
 
 ## Investigation and destruction
 
@@ -93,7 +106,12 @@ Explicit stop or daemon shutdown stops verified kept runtime while retaining dat
 Explicit destroy removes owned runtime/data after verified stop. Both preserve
 historical results and evidence. Daemon crash recovery stops only verifiably owned
 survivors, retains data/evidence, reports interruption/collection gaps and requires
-an explicit restart. Unknown ownership remains untouched with a cleanup failure.
+an explicit restart. Unknown ownership remains untouched with a cleanup failure unless a targeted
+`stop --force` explicitly relinquishes the native claim. That acknowledgement
+retains private history, known exits, a collection gap and safe public warnings;
+unknown survivors may still run/write. Replacement attempts retain the warning but
+do not inherit an old attempt's collection gap. Latest-attempt export can therefore
+be complete for a fully collected replacement while reporting prior waivers.
 
 ## Logs and retention
 

@@ -65,7 +65,7 @@ func startSharedCheckpointDaemon(t *testing.T, h *nativeHarness, point string, w
 		if _, err := h.cli.Stop(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.process.Wait(); err != nil {
+		if err := joinSharedDaemon(t, h); err != nil {
 			t.Fatal(err)
 		}
 		h.waited = true
@@ -86,6 +86,7 @@ func startSharedCheckpointDaemon(t *testing.T, h *nativeHarness, point string, w
 	if err = h.process.Start(); err != nil {
 		t.Fatal(err)
 	}
+	h.ownerDone = nil
 	h.waited = false
 	if len(waitAPI) > 0 && !waitAPI[0] {
 		return
@@ -135,6 +136,7 @@ func startSharedRecoveryDaemon(t *testing.T, h *nativeHarness, serverRunning fun
 	if err := h.process.Start(); err != nil {
 		t.Fatal(err)
 	}
+	h.ownerDone = nil
 	h.waited = false
 	started := time.Now()
 	observedRunning := false
@@ -158,7 +160,7 @@ func startSharedRecoveryDaemon(t *testing.T, h *nativeHarness, serverRunning fun
 		time.Sleep(20 * time.Millisecond)
 	}
 	_ = h.process.Process.Kill()
-	_ = h.process.Wait()
+	_ = joinSharedDaemon(t, h)
 	h.waited = true
 	t.Fatal("shared recovery did not expose API within original five-second expectation", h.daemonLog.String())
 }

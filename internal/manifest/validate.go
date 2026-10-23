@@ -60,6 +60,11 @@ func Validate(m v1.Manifest) error {
 			return err
 		}
 	}
+	for name, input := range m.Inputs {
+		if strings.ContainsRune(input.Description, 0) || (input.Generate != "" && (input.Generate != "random-hex-32" || !input.Secret)) {
+			return invalid("inputs."+name, "generation requires a secret input and random-hex-32; descriptions must not contain NUL")
+		}
+	}
 	for name, tool := range m.Tools {
 		if tool == "" || strings.ContainsRune(tool, 0) {
 			return invalid("tools."+name, "provide an executable name or path")
@@ -463,6 +468,18 @@ func scene(m v1.Manifest, name string, s v1.Scene) error {
 			return invalid(f+".resources", "unknown resource")
 		}
 	}
+	if len(s.StartupDetails) > 0 && s.Lifetime != v1.Persistent {
+		return invalid(f+".startup_details", "startup details require a persistent scene")
+	}
+	for _, detail := range s.StartupDetails {
+		component, ok := m.Components[detail.Component]
+		if !ok || !slices.Contains(s.Components, detail.Component) {
+			return invalid(f+".startup_details", "select a fixture on a selected component")
+		}
+		if _, ok := component.Fixtures[detail.Fixture]; !ok || strings.TrimSpace(detail.Label) == "" || strings.ContainsAny(detail.Label, "\x00\r\n") {
+			return invalid(f+".startup_details", "select an existing fixture and a nonempty single-line label")
+		}
+	}
 	ports := map[string]bool{}
 	initializers := map[string]bool{}
 	for _, name := range s.Components {
@@ -653,21 +670,8 @@ func ValidateMachine(c v1.MachineConfig) error {
 	if c.Version != v1.ManifestVersion {
 		return invalid("config.version", "unsupported version; use backlot/v1")
 	}
-	if err := names(c.Tools, "config.tools"); err != nil {
+	if err := validateTools(c.Tools); err != nil {
 		return err
-	}
-	if err := names(c.Inputs, "config.inputs"); err != nil {
-		return err
-	}
-	for _, tool := range c.Tools {
-		if tool == "" || strings.ContainsRune(tool, 0) {
-			return invalid("config.tools", "provide executable names or paths")
-		}
-	}
-	for _, input := range c.Inputs {
-		if strings.ContainsRune(input, 0) {
-			return invalid("config.inputs", "NUL is not permitted")
-		}
 	}
 	if c.Docker != nil {
 		if c.Docker.HostAddress != "" && !validHostAddress(c.Docker.HostAddress) {
@@ -785,4 +789,67 @@ func validURLPort(u *url.URL) bool {
 
 func caCertPath(v v1.Value) bool {
 	return v.Ref != nil && v.Ref.Kind == "resource" && v.Ref.Field == "ca_cert_path"
+}
+
+// ValidatePrivate validates structure and optionally membership for staged retirement repair.
+func ValidatePrivate(c v1.PrivateConfig, m v1.Manifest, membership bool) error {
+	if c.Version != v1.ManifestVersion {
+		return invalid("version", "unsupported version; use backlot/v1")
+	}
+	if err := names(c.Inputs, "inputs"); err != nil {
+		return err
+	}
+	for _, input := range c.Inputs {
+		if strings.ContainsRune(input, 0) {
+			return invalid("inputs", "NUL is not permitted")
+		}
+	}
+	if err := validateTools(c.Tools); err != nil {
+		return err
+	}
+	if !membership {
+		return nil
+	}
+	return validateMembership(m, c.Inputs, c.Tools, true)
+}
+
+// ValidateMembership rejects all undeclared values, including unused or overridden entries.
+func ValidateMembership(m v1.Manifest, inputs, tools map[string]string) error {
+	return validateMembership(m, inputs, tools, false)
+}
+
+func validateMembership(m v1.Manifest, inputs, tools map[string]string, private bool) error {
+	repair := func(kind string) string {
+		if private {
+			return "; use project setup --remove-" + kind + " NAME with an explicit edit to repair private declarations"
+		}
+		return ""
+	}
+	for name := range inputs {
+		if _, ok := m.Inputs[name]; !ok {
+			return invalid("inputs."+name, "undeclared input"+repair("input"))
+		}
+	}
+	for name := range tools {
+		if _, ok := m.Tools[name]; !ok {
+			return invalid("tools."+name, "undeclared tool"+repair("tool"))
+		}
+	}
+	return nil
+}
+
+// ValidIdentifier checks names accepted by declaration and explicit removal contracts.
+func ValidIdentifier(name string) bool { return identifier.MatchString(name) }
+
+// validateTools applies scalar/name rules shared by independent config layers.
+func validateTools(tools map[string]string) error {
+	if err := names(tools, "tools"); err != nil {
+		return err
+	}
+	for _, tool := range tools {
+		if tool == "" || strings.ContainsRune(tool, 0) {
+			return invalid("tools", "provide executable names or paths")
+		}
+	}
+	return nil
 }

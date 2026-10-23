@@ -22,6 +22,7 @@ import (
 
 type execution struct {
 	shared        map[string]sharedConnection
+	attachment    *attachment // guarded by service.mu; never persisted
 	caCertPath    string
 	kept          bool
 	cancel        context.CancelFunc
@@ -81,18 +82,34 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 	return s.runMode(ctx, request, false)
 }
 func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool) (v1.InstanceResponse, error) {
+	return s.runSelected(ctx, request, reset, false)
+}
+
+func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset, persistentOnly bool) (v1.InstanceResponse, error) {
 	ctx, finish, admissionErr := s.beginMutation(ctx)
 	if admissionErr != nil {
 		return v1.InstanceResponse{}, admissionErr
 	}
 	defer finish()
 	var empty v1.InstanceResponse
+	if request.Attached && (request.InstanceID != "" || reset || request.Options.KeepOnFailure || len(request.Plan.TerminalArgs) > 0) {
+		return empty, problem("invalid_request", "attached mode requires a persistent start without terminal arguments or keep-on-failure")
+	}
+	persistentOnly = persistentOnly || request.Attached
+	if err := validatePlanRequest(request.Plan); err != nil {
+		return empty, err
+	}
+	// An omitted machine path on restart retains the recorded selection. Validate
+	// that selection too, before locating or reading any current source.
 	if request.InstanceID != "" && request.Plan.ConfigPath == "" {
 		previous, err := s.store.runtime(request.InstanceID)
 		if err != nil {
 			return empty, err
 		}
 		request.Plan.ConfigPath = previous.ConfigPath
+	}
+	if err := validatePlanRequest(request.Plan); err != nil {
+		return empty, err
 	}
 	if _, err := executionDeadlines(request.Options); err != nil {
 		return empty, err
@@ -105,9 +122,16 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 	if err != nil {
 		return empty, err
 	}
-	snapshot, err := plan.Prepare(source, request.Plan)
+	resolve := plan.Prepare
+	if s.resolve != nil {
+		resolve = s.resolve
+	}
+	snapshot, err := resolve(source, request.Plan)
 	if err != nil {
 		return empty, err
+	}
+	if persistentOnly && snapshot.Plan.Lifetime != v1.Persistent {
+		return empty, problem("invalid_lifetime", "scene start requires a persistent scene; use run for disposable work")
 	}
 	if err := executablePlan(snapshot.Plan); err != nil {
 		return empty, err
@@ -124,7 +148,7 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 			return empty, problem("conflict", "restart must address the same persistent project, checkout and scene")
 		}
 	}
-	response, err := s.prepare(ctx, v1.PrepareRequest{APIVersion: v1.Version, Plan: request.Plan})
+	response, err := s.prepareCaptured(ctx, snapshot, identity, request.Plan.Scene, persistentOnly)
 	if err != nil {
 		return empty, err
 	}
@@ -141,16 +165,38 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 	if response.Instance.Status == v1.Destroyed {
 		return empty, problem("destroyed", "instance was destroyed during start acceptance; run the scene again for a fresh identity")
 	}
-
-	if request.InstanceID == "" {
-		snapshot, err = s.store.snapshot(id)
-		if err != nil {
+	if persistentOnly {
+		if err := requireSceneLocation(response.Instance, identity.source.ProjectPath); err != nil {
 			return empty, err
+		}
+	}
+
+	var legacyActivation *plan.Snapshot
+	if request.InstanceID == "" {
+		previous, loadErr := s.store.snapshot(id)
+		if loadErr != nil {
+			return empty, loadErr
+		}
+		// Only a predecessor snapshot lacks both provenance additions. Ordinary
+		// state9 stop/start retains its immutable snapshot, even after edits.
+		if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" &&
+			response.Instance.Plan.Lifetime == v1.Persistent &&
+			(response.Instance.Status == v1.Prepared || response.Instance.Status == v1.Stopped) {
+			if err := safeRestart(previous, snapshot); err != nil {
+				return empty, err
+			}
+			legacyActivation = &snapshot
+		} else {
+			if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" {
+				return empty, problem("restart_required", "historical instance requires explicit restart with current project configuration")
+			}
+			snapshot = previous
 		}
 		if err := executablePlan(snapshot.Plan); err != nil {
 			return empty, err
 		}
 	}
+
 	if request.InstanceID != "" {
 		if request.InstanceID != id || response.Instance.Plan.Lifetime != v1.Persistent {
 			return empty, problem("conflict", "restart must address the same persistent checkout and scene")
@@ -161,6 +207,9 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 		previous, err := s.store.snapshot(id)
 		if err != nil {
 			return empty, err
+		}
+		if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" {
+			legacyActivation = &snapshot
 		}
 		if snapshot.Plan.Publish != nil && snapshot.Caddy != nil && response.Instance.Execution != nil && response.Instance.Execution.Origin != "" {
 			origin, err := url.Parse(response.Instance.Execution.Origin)
@@ -209,6 +258,9 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 		s.executions = map[string]*execution{}
 	}
 	if existing := s.executions[id]; existing != nil && request.InstanceID == "" && response.Instance.Status != v1.Stopped {
+		if request.Attached {
+			return empty, problem("conflict", "attached start cannot adopt an existing execution; stop it first")
+		}
 		instance, err := s.store.inspect(id)
 		response.Instance = instance
 		return response, err
@@ -217,8 +269,10 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 		return empty, err
 	}
 	if request.InstanceID != "" {
-		if err := s.store.replaceSnapshot(id, snapshot); err != nil {
-			return empty, err
+		if legacyActivation == nil {
+			if err := s.store.replaceSnapshot(id, snapshot); err != nil {
+				return empty, err
+			}
 		}
 		response.ManifestDrift = false
 		response.ConfigDrift = false
@@ -237,13 +291,20 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 			result.Origin += ":" + strconv.Itoa(*snapshot.Caddy.HTTPSPort)
 		}
 	}
-	r := runtimeRecord{ExportSource: &v1.ExportSource{Project: snapshot.Plan.Project, Scene: snapshot.Plan.Scene, Lifetime: snapshot.Plan.Lifetime, CheckoutID: identity.checkout.ID, GitHead: launchGitCommit(ctx, identity.checkout), ManifestDigest: snapshot.Plan.ManifestDigest, ConfigDigest: snapshot.Plan.ConfigDigest}, StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Attempt: attempt, Groups: []native.Identity{}, Options: request.Options, ConfigPath: request.Plan.ConfigPath}
-	response.Instance, err = s.store.acceptExecution(id, r, result, request.InstanceID != "" || response.Instance.Status == v1.Stopped)
+	r := runtimeRecord{ExportSource: &v1.ExportSource{Project: snapshot.Plan.Project, Scene: snapshot.Plan.Scene, Lifetime: snapshot.Plan.Lifetime, CheckoutID: identity.checkout.ID, GitHead: launchGitCommit(ctx, identity.checkout), ManifestDigest: snapshot.Plan.ManifestDigest, ConfigDigest: snapshot.Plan.ConfigDigest, EffectiveConfigDigest: snapshot.Plan.EffectiveConfigDigest}, StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Attempt: attempt, Groups: []native.Identity{}, Options: request.Options, ConfigPath: request.Plan.ConfigPath}
+	response.Instance, err = s.store.acceptExecutionSnapshot(id, r, result, request.InstanceID != "" || response.Instance.Status == v1.Stopped, legacyActivation)
 	if err != nil {
 		return empty, err
 	}
+	if legacyActivation != nil {
+		response.ManifestDrift, response.ConfigDrift = false, false
+	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	entry := &execution{caCertPath: caCertPath, cancel: cancel, done: make(chan struct{}), jobs: map[string]workload{}, services: map[string]workload{}, components: map[string]workload{}, source: identity, grace: mustGrace(request.Options)}
+	if request.Attached {
+		entry.attachment = &attachment{owner: v1.AttachedOwner{DaemonGeneration: s.generation, Attempt: attempt, Token: newID()}, expires: time.Now().Add(s.lease)}
+		response.Attachment = &v1.Attachment{Owner: entry.attachment.owner, ExpiresAt: entry.attachment.expires.UTC().Format(time.RFC3339Nano), LeaseDuration: s.lease.String()}
+	}
 	s.executions[id] = entry
 	response.Instance, err = s.store.inspect(id)
 	if err != nil {
@@ -255,6 +316,11 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 	return response, nil
 }
 func (s *service) stopExecution(id string) (v1.Instance, error) {
+	s.mu.Lock()
+	if entry := s.executions[id]; entry != nil && entry.attachment != nil {
+		entry.attachment.ended = true
+	}
+	s.mu.Unlock()
 	instance, err := s.joinExecution(id)
 	var typed *v1.PlanError
 	if errors.As(err, &typed) && typed.Code == "cleanup_failed" {
@@ -416,6 +482,9 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 				cleanupMu.Lock()
 				defer cleanupMu.Unlock()
 				cleanup = errors.Join(cleanup, err)
+				if group, ok := work.(*native.Group); ok {
+					mergeNativeCleanup(result, group.CleanupResult())
+				}
 				if exit != nil && exit.CollectionFailure != "" {
 					result.CollectionFailure = "application output collection failed"
 				}
@@ -440,6 +509,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		keep := potentialKeep && (failure != nil || result.Cancelled || result.TerminalExitCode != nil && *result.TerminalExitCode != 0 || result.CollectionFailure != "" || cleanup != nil) && !shuttingDown
 		result.Kept = keep
 		entry.kept = keep
+		omitActiveNativeSuccess(result, entry)
 		_ = save(v1.Stopping)
 		var joined sync.WaitGroup
 		joined.Go(func() {
@@ -462,6 +532,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 				cleanupMu.Lock()
 				defer cleanupMu.Unlock()
 				cleanup = errors.Join(cleanup, err)
+				mergeNativeCleanup(result, group.CleanupResult())
 				if exit := group.Result(); exit != nil && exit.CollectionFailure != "" {
 					result.CollectionFailure = exit.CollectionFailure
 					status = v1.Failed
@@ -486,6 +557,10 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		}
 
 		joined.Wait()
+		omitActiveNativeSuccess(result, entry)
+		if cleanup == nil && result.CleanupFailure != "" {
+			cleanup = errors.New(result.CleanupFailure)
+		}
 
 		if entry.resources != nil && cleanup == nil && !keep {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -754,6 +829,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		status = v1.Succeeded
 		return
 	}
+	s.refreshStartupFixtures(id, snapshot, result, entry)
 	status = v1.RuntimeReady
 	if failure = save(v1.RuntimeReady); failure != nil {
 		return
@@ -844,15 +920,24 @@ func (s *service) launch(ctx context.Context, id, name, executable string, args 
 		_ = file.Close()
 		return nil, err
 	}
-	journal.LaunchPending = true
+	boot, err := native.CurrentBoot()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	journal.LaunchPurpose = "application"
+	journal.LaunchPending, journal.PendingBoot = true, boot
 	if err := s.store.saveRuntime(id, *journal); err != nil {
 		_ = file.Close()
 		return nil, err
 	}
-	group, startErr := native.Start(self, file, file)
-	journal.LaunchPending = false
+	group, startErr := native.StartApplication(self, file, file, name, result.Attempt)
+	journal.LaunchPending, journal.PendingBoot = false, ""
 	closeErr := file.Close()
 	if group != nil {
+		if group.Identity.Boot != boot {
+			return nil, errors.New("native launch boot provenance mismatch; preserve intent")
+		}
 		entry.groups = append(entry.groups, group)
 		journal.Groups = append(journal.Groups, group.Identity)
 		if err := s.store.saveRuntime(id, *journal); err != nil {
@@ -933,17 +1018,6 @@ func (s *service) lockMutation(id string) func() {
 	lock.Lock()
 	return lock.Unlock
 }
-func (s *service) stopRuntime(id string) (v1.Instance, error) {
-	_, finish, err := s.beginMutation(context.Background())
-	if err != nil {
-		return v1.Instance{}, err
-	}
-	defer finish()
-	unlock := s.lockMutation(id)
-	defer unlock()
-	return s.stopExecution(id)
-}
-
 func mustGrace(options v1.ExecutionOptions) time.Duration {
 	d, _ := executionDeadlines(options)
 	return d.grace
@@ -967,7 +1041,7 @@ func (s *service) cancelRuntime(id string) (v1.Instance, error) {
 	defer s.mu.Unlock()
 	return s.store.cancel(id)
 }
-func (s *service) expireRuntime(id string) error {
+func (s *service) expireRuntime(id string, expected *execution) error {
 	unlock := s.lockMutation(id)
 	defer unlock()
 	s.mu.Lock()
@@ -976,8 +1050,19 @@ func (s *service) expireRuntime(id string) error {
 		s.mu.Unlock()
 		return err
 	}
+	if s.executions[id] != expected {
+		s.mu.Unlock()
+		return nil
+	}
 	expiry, parseErr := time.Parse(time.RFC3339Nano, instance.LeaseExpiresAt)
-	expired := instance.LeaseExpiresAt != "" && parseErr == nil && !expiry.After(time.Now()) && active(instance.Status) && instance.Status != v1.Stopping
+	if a := expected.attachment; a != nil {
+		if a.ended {
+			s.mu.Unlock()
+			return nil
+		}
+		expiry, parseErr = a.expires, nil
+	}
+	expired := (instance.LeaseExpiresAt != "" || expected.attachment != nil) && parseErr == nil && !expiry.After(time.Now()) && active(instance.Status) && instance.Status != v1.Stopping
 	s.mu.Unlock()
 	if !expired {
 		return nil

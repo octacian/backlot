@@ -11,12 +11,19 @@ experimental. Native Windows is a planned expansion under independent epic #34,
 not a supported target yet; see the [accepted Windows design](windows-design.md). WSL
 guidance below is configuration guidance only, with no WSL QA or support guarantee.
 
-macOS keeps the existing native/process-group/Unix-socket and Docker Desktop
-contracts. Linux uses the same permissioned local Unix API, private retained state,
-authenticated guardian and cooperative process groups. Native commands and all
-descendants must remain in their assigned group; Linux support adds no containment
-for detached or hostile workloads. Host-only selected scenes remain independent
-of Docker. See [installation](operations.md) and [daemon operations](daemon.md).
+macOS and Linux use permissioned Unix sockets and authenticated guardians.
+Application native work may create process groups inside its guardian's session,
+with bounded identity-safe cleanup and explicit observed-empty confidence. New
+sessions, privilege changes, hostile workloads and unrelated supervisors remain
+unsupported. Managed Caddy/system helpers retain strict process groups. See the
+[session supervision contract](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md) for missed-process risk and guardian-loss
+uncertainty. Host-only selected scenes remain independent of Docker, and offline
+or container-only work does not scan processes or load the Darwin identity FFI.
+Linux uses pidfds; Darwin ARM64 uses pinned purego bindings to system task audit
+tokens, without requiring cgo. Restricted process visibility, denied task/pidfd
+APIs or syscall filters fail application activation/cleanup explicitly; there is
+no numeric-PID signal fallback. See [installation](operations.md) and
+[daemon operations](daemon.md).
 
 ## Linux prerequisites and installation
 

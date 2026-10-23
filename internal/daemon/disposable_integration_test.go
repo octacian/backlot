@@ -164,6 +164,9 @@ func TestDisposableEvidenceNative(t *testing.T) {
 			if strings.Contains(string(encoded), secret.Fixtures[0].Value) {
 				t.Fatal("ordinary result leaked fixture secret")
 			}
+			if mode == "collection-failure" {
+				h.expectShutdownFailureAfterCleanup("collection_failed", h.guardianCapabilities(id))
+			}
 			if _, err := h.cli.Destroy(context.Background(), id); err != nil {
 				t.Fatal(err)
 			}

@@ -1,4 +1,6 @@
 import http from 'node:http';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import https from 'node:https';
 import { WebSocketServer } from 'ws';
 
@@ -40,12 +42,33 @@ document.querySelector('#echo').onclick = () => {
 </script></html>`;
 }
 
+if (process.argv[2] === 'seed') {
+  writeFileSync(join(process.env.APP_DATA, 'account.json'), JSON.stringify({
+    email: process.env.LOGIN_EMAIL, password: process.env.LOGIN_PASSWORD
+  }), { mode: 0o600 });
+  console.log('application account seeded');
+}
+
 if (process.argv[2] === 'api' || process.argv[2] === 'web') {
   const role = process.argv[2];
   const server = http.createServer(async (request, response) => {
     try {
       if (request.url === '/health') return response.end('ready');
       if (role === 'api') {
+        if (request.url === '/login' && request.method === 'POST') {
+          let body = '';
+          for await (const chunk of request) {
+            body += chunk;
+            if (Buffer.byteLength(body) > 1024) { response.writeHead(413).end(); return; }
+          }
+          let supplied;
+          try { supplied = JSON.parse(body); }
+          catch { response.writeHead(400).end(); return; }
+          const account = JSON.parse(readFileSync(join(process.env.APP_DATA, 'account.json'), 'utf8'));
+          const authenticated = supplied?.email === account.email && supplied?.password === account.password;
+          response.writeHead(authenticated ? 200 : 401, { 'Content-Type': 'application/json' });
+          return response.end(JSON.stringify({ authenticated }));
+        }
         if (request.url === '/value') {
           response.setHeader('Content-Type', 'application/json');
           return response.end(JSON.stringify({ value: 'hello from API', origin: process.env.APP_ORIGIN,

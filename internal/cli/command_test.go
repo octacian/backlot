@@ -14,7 +14,7 @@ import (
 
 func TestVersionJSONUsesSharedContract(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	want := apiv1.VersionResponse{Version: "0.1.0", APIVersion: apiv1.Version, Commit: "abc123"}
+	want := apiv1.VersionResponse{StateVersion: apiv1.StateVersion, Version: "0.1.0", APIVersion: apiv1.Version, Commit: "abc123"}
 	command := NewCommand(want, &stdout, &stderr)
 	if err := command.Run(context.Background(), []string{"backlot", "version", "--json"}); err != nil {
 		t.Fatal(err)

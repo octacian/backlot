@@ -13,6 +13,7 @@ import (
 
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	moby "github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/plan"
@@ -42,7 +43,7 @@ func TestDoctorOwnedProbeCancellationAndRecovery(t *testing.T) {
 		var failures error
 		for key, record := range records {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			e := cleanupDiagnosticProbe(ctx, d, record)
+			e := state.cleanupDiagnosticProbe(ctx, d, key, record)
 			cancel()
 			if e == nil {
 				e = state.forgetDiagnosticProbe(key)
@@ -57,9 +58,9 @@ func TestDoctorOwnedProbeCancellationAndRecovery(t *testing.T) {
 		}
 	})
 	svc := service{store: state, directory: root}
-	snap := plan.Snapshot{Docker: &v1.DockerConfig{Endpoint: endpoint}}
+	snap := plan.Snapshot{Docker: &v1.DockerConfig{Endpoint: endpoint}, Caddy: doctorCopyManagedFixture(t, state)}
 	instance := v1.Instance{Execution: &v1.ExecutionResult{Origin: "https://unavailable.example.invalid:443"}}
-	request := v1.DoctorRequest{ContainerProbeImage: image}
+	request := v1.DoctorRequest{ContainerProbeImage: image, ProbePublicCA: true}
 	for _, fault := range []string{"build-failure", "iidfile-failure", "positive-control-failure"} {
 		t.Run("fixture-cleanup/"+fault, func(t *testing.T) {
 			fixture := newDoctorImageFixture(t, d, &svc, image)
@@ -146,6 +147,9 @@ func TestDoctorOwnedProbeCancellationAndRecovery(t *testing.T) {
 		}
 		inspected := false
 		svc.checkpoint = func(point string) error {
+			if point == "doctor-effect" {
+				assertDoctorCopyMount(t, state, d)
+			}
 			if point != "doctor-started" {
 				return nil
 			}
@@ -184,7 +188,7 @@ func TestDoctorOwnedProbeCancellationAndRecovery(t *testing.T) {
 		}
 		defer func() { svc.checkpoint = nil }()
 		r := v1.DoctorResponse{Healthy: true, Checks: []v1.DoctorCheck{}}
-		svc.doctorContainer(ctx, &r, v1.DoctorRequest{ContainerProbeImage: fixtureImage}, snap, instance)
+		svc.doctorContainer(ctx, &r, v1.DoctorRequest{ContainerProbeImage: fixtureImage, ProbePublicCA: true}, snap, instance)
 		if !inspected || !svc.ownersJoined() {
 			t.Fatal("running diagnostic was not inspected/joined")
 		}
@@ -202,6 +206,7 @@ func TestDoctorOwnedProbeCancellationAndRecovery(t *testing.T) {
 			defer cancel()
 			svc.checkpoint = func(point string) error {
 				if point == stage {
+					assertDoctorCopyMount(t, state, d)
 					cancel()
 					return ctx.Err()
 				}
@@ -225,6 +230,7 @@ func TestDoctorOwnedProbeCancellationAndRecovery(t *testing.T) {
 		finished := make(chan struct{})
 		svc.checkpoint = func(point string) error {
 			if point == "doctor-started" {
+				assertDoctorCopyMount(t, state, d)
 				close(entered)
 				<-release
 				return context.Canceled
@@ -265,17 +271,26 @@ func TestDoctorOwnedProbeCancellationAndRecovery(t *testing.T) {
 			resource := ownedResource{Kind: "container", Name: "backlot-doctor-" + key, Token: newID()}
 			network := ownedResource{Kind: "network", Name: "backlot-doctor-network-" + key, Token: newID()}
 			record := diagnosticProbeRecord{Endpoint: endpoint, Resource: resource, Network: network}
+			data, ca, err := state.planDiagnosticCACopy(snap)
+			if err != nil {
+				t.Fatal(err)
+			}
+			record.CA = ca
 			records[key] = record
 			if err := state.saveDiagnosticProbe(key, record); err != nil {
 				t.Fatal(err)
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
+			if err := state.allocateDiagnosticCACopy(key, &record, data); err != nil {
+				t.Fatal(err)
+			}
+			records[key] = record
 			networkID, err := createDockerResource(ctx, d, network)
 			if err != nil {
 				t.Fatal(err)
 			}
-			created, err := d.ContainerCreate(ctx, moby.ContainerCreateOptions{Name: resource.Name, Config: &container.Config{Image: image, Entrypoint: []string{"/bin/sh"}, Cmd: []string{"-c", "sleep 30"}, Labels: resourceLabels(resource)}, HostConfig: &container.HostConfig{NetworkMode: container.NetworkMode(networkID)}})
+			created, err := d.ContainerCreate(ctx, moby.ContainerCreateOptions{Name: resource.Name, Config: &container.Config{Image: image, Entrypoint: []string{"/bin/sh"}, Cmd: []string{"-c", "sleep 30"}, Labels: resourceLabels(resource)}, HostConfig: &container.HostConfig{NetworkMode: container.NetworkMode(networkID), Mounts: []mount.Mount{{Type: mount.TypeBind, Source: diagnosticCACopyPath(root, key), Target: "/backlot-public-ca.crt", ReadOnly: true}}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -294,6 +309,9 @@ func TestDoctorOwnedProbeCancellationAndRecovery(t *testing.T) {
 				if _, err := d.ContainerInspect(ctx, created.ID, moby.ContainerInspectOptions{}); err != nil {
 					t.Fatal("uncertain container was changed", err)
 				}
+				if err := state.verifyDiagnosticCACopy(key, record.CA); err != nil {
+					t.Fatal("uncertain consumer lost its copy", err)
+				}
 				// Restore this fixture's original known authority for its own cleanup only.
 				if err := state.saveDiagnosticProbe(key, record); err != nil {
 					t.Fatal(err)
@@ -309,9 +327,13 @@ func TestDoctorOwnedProbeCancellationAndRecovery(t *testing.T) {
 			if _, err := d.NetworkInspect(ctx, networkID, moby.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
 				t.Fatal("network removal unverified", err)
 			}
+			if _, err := os.Lstat(diagnosticCACopyPath(root, key)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("recovered copy removal unverified", err)
+			}
 			delete(records, key)
 		})
 	}
+	assertDoctorCopiesAbsent(t, root)
 	// Existing images, gateways, DNS/trust settings and foreign resources
 	// are preserved by these fault/recovery controls.
 }

@@ -4,7 +4,7 @@ RELEASE_GOARCH ?= arm64
 
 LINT := .tools/bin/golangci-lint-$(GOLANGCI_LINT_VERSION)
 
-.PHONY: build release-build notices notices-check fmt fmt-check vet test race tools lint adr-create adr-verify adr-test schema-generate schema-check check
+.PHONY: build release-build notices notices-check fmt fmt-check vet test race tools lint adr-create adr-verify adr-test schema-generate schema-check check-implementation check-docs check
 
 build:
 	go build -o bin/backlot ./cmd/backlot
@@ -63,4 +63,8 @@ schema-generate:
 schema-check:
 	go run ./cmd/schema -check
 
-check: schema-check notices-check fmt-check vet lint race adr-verify build
+check-implementation: schema-check notices-check fmt-check vet lint race build
+
+check-docs: adr-test adr-verify
+
+check: check-implementation check-docs

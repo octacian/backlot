@@ -170,7 +170,72 @@ retain private state locally for authenticated diagnosis; never prune unrelated
 resources or upload the private root.
 
 [The scenes workflow](../.github/workflows/scenes.yml) exercises sequential setup/run
-and existing browser/trust/fault/lifecycle checks. [The independent consumer](../.github/workflows/setup-consumer.yml)
-exercises remote quickrun and custom upload after private cleanup from a separate
-application Git root. New revision-bound evidence and remaining gates are recorded
+and existing browser/trust/fault/lifecycle checks. The
+[independent consumer](#independent-action-consumer) checks action packaging.
+New revision-bound evidence and remaining gates are recorded
 with the delivery; these examples make no broader release/provider readiness claim.
+
+
+## Private project inputs in setup and quickrun
+
+Both actions accept `project` (default `.`), `project-inputs` (strict JSON object
+of nonempty string values) and `project-generate-inputs` (explicit JSON array of
+eligible secret names). They invoke existing atomic `project setup` directly over
+stdin; values never become shell text or CLI arguments. For example:
+
+```yaml
+- uses: ./actions/quickrun
+  with:
+    backlot-ref: ${{ github.sha }}
+    project: application
+    project-inputs: ${{ format('{{"region":"west","credential":{0}}}', toJSON(secrets.APP_CREDENTIAL)) }}
+    project-generate-inputs: '["session-token"]'
+    scene: test
+```
+
+Construct JSON with an expression such as `toJSON` when values can contain quotes
+or newlines; do not interpolate unescaped secret text into JSON. Both options
+unset skip enrollment and manifest discovery; explicit `{}` or `[]` requests
+input-free enrollment. Invalid/duplicate/unknown names, invalid shapes, empty
+values and incomplete candidates fail atomically. Supplied values are masked
+before potentially revealing work; generated secrets are captured through local
+explicit inspection and masked before runtime activation. Sensitive failures use
+bounded captures and fixed diagnostics. The action suppresses raw setup/inspection
+transport even when masks exist.
+
+Every Backlot child, including daemon, direct run, export and post cleanup, selects
+an authenticated external job registry using `BACKLOT_PROJECT_CONFIG_DIR`.
+HOME/XDG and unrelated tool configuration stay unchanged; raw structured payload
+environment keys are removed from children. Existing `version --json` API/state
+metadata must advertise v1/state8 before any configuration resolution, even when
+project setup was not requested. Older runtime pins fail rather than silently
+ignoring these options or consulting default storage.
+
+Successful cleanup stops consumers then removes the owned private registry,
+generations and snapshots with the job root. Never upload/cache these private
+files or the input payload. Public evidence survives cleanup. Existing declared
+secret redaction remains in force; public inputs may appear as public plan values.
+Applications remain responsible for secret values they print or write to logs,
+reports and artifacts. Workflow masks are a log backstop and do not sanitize
+arbitrary artifact bytes. The current-head project-inputs workflow exercises the
+new setup/run/quickrun contract. The independent consumer checks packaging only;
+it does not repeat this input/failure/lifecycle suite.
+
+
+## Independent action consumer
+
+[Setup action consumer](../.github/workflows/setup-consumer.yml) is a manual-only
+packaging smoke test. Dispatch it on the branch being verified. GitHub's
+[`$/` action reference](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#example-using-an-action-in-the-same-repository-as-the-workflow-at-the-running-commit-recommended)
+downloads `actions/quickrun` at the workflow's running commit without checking out
+Backlot into the application workspace. `backlot-ref: ${{ github.sha }}` selects
+the same runtime revision. There are no historical action/runtime pins.
+
+The workspace contains a separate minimal application Git repository with no
+Backlot sources or actions. One native Node job writes an artifact; the workflow
+requires successful action outputs and the expected artifact in the exported
+bundle. This catches missing packaged sibling modules and accidental dependencies
+on the application's checkout. The regular scenes and project-inputs workflows
+own browser, trust, failure/cancellation, reuse, cleanup, upload and input coverage;
+the consumer does not repeat those suites. External adopters should continue to
+pin reviewed SHAs as described above.

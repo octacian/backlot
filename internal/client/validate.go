@@ -23,6 +23,9 @@ func validID(id string) bool {
 }
 func validateInstance(response v1.InstanceResponse) error {
 	instance := response.Instance
+	if response.StartupDetails != nil {
+		return responseError()
+	}
 	if !validID(instance.ID) || !validID(instance.Checkout.ID) || !validID(instance.Operation.ID) || !filepath.IsAbs(instance.Checkout.Path) || instance.Plan.APIVersion != v1.Version || instance.Plan.Project == "" || instance.Plan.Scene == "" {
 		return responseError()
 	}
@@ -88,6 +91,9 @@ func validateExecution(instance v1.Instance) error {
 			}
 		}
 	}
+	if err := validateNativeCleanup(result.NativeCleanup, result.Attempt, result.Components, result.CleanupFailure, instance.NativeOwnershipWarnings); err != nil {
+		return err
+	}
 	if !validID(result.Attempt) {
 		return responseError()
 	}
@@ -104,6 +110,14 @@ func validateExecution(instance v1.Instance) error {
 		if detail.Code == "" || detail.Message == "" || result.CleanupFailure == "" {
 			return responseError()
 		}
+	}
+	seenFixtures := map[string]bool{}
+	for _, fixture := range result.Fixtures {
+		key := fixture.Component + "/" + fixture.Name
+		if fixture.Component == "" || fixture.Name == "" || seenFixtures[key] || fixture.Sensitive && fixture.Value != "" {
+			return responseError()
+		}
+		seenFixtures[key] = true
 	}
 	for _, port := range result.Ports {
 		if port < 1 || port > 65535 {
@@ -165,5 +179,23 @@ func validateExportResult(result v1.ExportResult) error {
 	default:
 		return responseError()
 	}
+	if err := validateNativeCleanup(result.NativeCleanup, result.Attempt, result.Components, result.CleanupFailure, result.NativeOwnershipWarnings); err != nil {
+		return err
+	}
 	return validateOutcome(result.Status, result.TerminalExitCode, result.Cancelled, result.Failure, result.CollectionFailure, result.CleanupFailure, result.Components)
+}
+
+func validateNativeCleanup(results []v1.NativeCleanupResult, attempt string, components []v1.ComponentResult, failure string, warnings []v1.NativeOwnershipWarning) error {
+	seen := map[string]bool{}
+	names := map[string]bool{}
+	for _, c := range components {
+		names[c.Name] = true
+	}
+	for _, r := range results {
+		if r.Validate() != nil || r.Attempt != attempt || !names[r.Component] || seen[r.Component] || r.FencesResources(warnings) && failure == "" {
+			return responseError()
+		}
+		seen[r.Component] = true
+	}
+	return nil
 }

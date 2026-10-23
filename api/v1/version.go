@@ -7,6 +7,8 @@ const Version = "v1"
 // VersionResponse describes the executable and its supported API contract.
 // The CLI and future daemon use this same type for version discovery.
 type VersionResponse struct {
+	// StateVersion identifies the supported durable state and configuration semantics.
+	StateVersion int `json:"state_version"`
 	// Version is the binary release identifier, or dev for a local build.
 	Version string `json:"version"`
 	// APIVersion is the wire contract namespace supported by the executable.

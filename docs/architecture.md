@@ -24,9 +24,13 @@ It owns idempotency, instance mutation locking, dependency gates, initialization
 records, cancellation, evidence, and teardown ordering. It calls narrow adapters
 for native work, containers, gateway mutations, storage, and probes.
 
-Native adapters own complete cooperative process groups, including descendants,
-not only launcher PIDs. Commands must not detach or delegate work outside that
-group; see the [native supervision decision](adr/20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md). Docker adapters
+Native application adapters own a cooperative session through its live authenticated
+guardian, retaining acquired kernel identities during bounded individual cleanup.
+Application descendants may change groups within that session. Two complete empty
+observations report observed-empty confidence, with accepted missed-process risk;
+known incomplete or lost authority remains fenced. Stock managed Caddy and system
+helpers keep strict pinned-group cleanup and its stronger proof. See the
+[native supervision decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md). Docker adapters
 use the official Go client for lifecycle/inspection and established Docker tooling
 for image builds. Gateway adapters use Caddy's HTTP API and owned route IDs/scope,
 including concurrency preconditions rather than whole-config replacement.
@@ -59,13 +63,24 @@ the UI or CLI. A separately published Go SDK is not required for V1.
 ## State and recovery
 
 Recommended embedded storage is bbolt: only the daemon opens the database and
-mutations use transactions. Keep a versioned state format; reject newer unsupported
-formats. Store instance/resource IDs, allocation intent, ownership tokens,
-resolved plan snapshots, preparation completion, attempts, and results.
+mutations use transactions. Keep a versioned state format. The current format is
+9. Retain each real Go migration from v9 onward so the newest binary can apply
+all required steps when users skip releases. Version 9 is the minimum supported
+baseline. Source-specific validation, transformations, final current-authority
+validation and the version fence share one startup write transaction under
+exclusive ownership; any precommit failure rolls back the chain. Preserve all
+records outside explicit transformations. Reject all pre-v9 and other unsupported
+formats unchanged. Store
+instance/resource IDs, allocation intent, ownership tokens, resolved plan snapshots,
+preparation completion, attempts, and results. See [state compatibility](containers.md#state-compatibility),
+the [migration decision](adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md) and the
+[native supervision decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md).
 
 Use protected per-user state directories and secret storage. Secrets may be
 persisted for resource reuse but never appear in ordinary snapshots/results.
 Keep logs/artifacts in separately retained files with restrictive permissions.
+[Declared startup disclosure](adr/20261022T195459793Z-authorize-declared-sensitive-startup-details-for-persistent-scenes.md)
+uses dedicated sensitive retrieval and transient output, never persisted public results.
 
 An external engine call and a database transaction are not atomic together.
 Record intent before allocation, label/identify engine resources, then record the
@@ -150,6 +165,6 @@ credentials, exact configuration, locking and consumer ordering; `internal/manag
 owns MariaDB create/inspect/release SQL effects. Server volume/network/container
 effects reuse the official Docker adapter. Named `api/v1` types serve CLI/client/
 daemon control; [manager messages](../api/v1/manager.go) remain private.
-The [accepted decision](adr/20261020T233406000Z-allow-explicit-force-cleanup-of-recorded-shared-targets.md)
+The [accepted decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
 defines architecture and bounded transient force; the [runtime guide](containers.md#project-scoped-shared-services-gate-1)
 defines connection semantics and [operator recovery](containers.md#explicit-operator-force-cleanup).

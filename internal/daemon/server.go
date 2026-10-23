@@ -21,11 +21,11 @@ import (
 
 // Options selects private state placement and the bounded disposable client lease.
 type Options struct {
+	sharedCheckpoint func(string) error
 	Directory        string
 	LeaseDuration    time.Duration
 	RetentionAge     time.Duration
 	RetentionBytes   int64
-	sharedCheckpoint func(string) error
 }
 
 // DefaultLeaseDuration is the disposable disconnect grace period.
@@ -68,7 +68,7 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	if !acquired {
 		return problem("already_running", "a daemon already owns this state directory")
 	}
-	state, err := openStore(options.Directory)
+	state, err := openStoreContext(ctx, options.Directory)
 	if err != nil {
 		return err
 	}
@@ -77,6 +77,11 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 			resultErr = errors.Join(resultErr, state.db.Close())
 		}
 	}()
+	// Cancellation after a committed fence is a forward-recoverable startup
+	// failure, never permission to recover resources or roll the version back.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	path := SocketPath(options.Directory)
 	if staleInfo, err := os.Lstat(path); err == nil {
 		if err := localipc.File(path, true); err != nil {
@@ -152,7 +157,7 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	if err := os.Chmod(path, 0600); err != nil {
 		return problem("permissions", "cannot protect daemon socket")
 	}
-	svc := &service{diagnosticRecoveryErr: diagnosticRecoveryErr, store: state, lease: options.LeaseDuration, directory: options.Directory, evidence: evidencePolicy{age: options.RetentionAge, bytes: options.RetentionBytes}}
+	svc := &service{generation: newID(), diagnosticRecoveryErr: diagnosticRecoveryErr, store: state, lease: options.LeaseDuration, directory: options.Directory, evidence: evidencePolicy{age: options.RetentionAge, bytes: options.RetentionBytes}}
 	stopping := make(chan struct{})
 	var once sync.Once
 	status := v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, Status: "running", PID: os.Getpid(), LeaseDuration: options.LeaseDuration.String()}
@@ -227,6 +232,29 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/scenes/start":
+			var request v1.SceneStartRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.startScene(r.Context(), request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+		case "/v1/scenes/status", "/v1/scenes/stop":
+			var request v1.SceneRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.scene(request.Target, r.URL.Path == "/v1/scenes/stop")
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+
 		case "/v1/shared/destroy":
 			var request v1.SharedDestroyRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
@@ -329,6 +357,32 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				return
 			}
 			writeJSON(w, response)
+		case "/v1/attached/renew", "/v1/attached/cancel":
+			var request v1.AttachedRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.attached(request, r.URL.Path == "/v1/attached/cancel")
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+		case "/v1/runtime/stop":
+			var request v1.StopRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			if !validID(request.InstanceID) {
+				writeError(w, problem("invalid_request", "recorded instance_id required"))
+				return
+			}
+			instance, err := s.stopRuntimeRequest(r.Context(), request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, v1.InstanceResponse{APIVersion: v1.Version, Instance: instance})
 		case "/v1/destroy":
 			var request v1.DestroyRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
@@ -339,23 +393,6 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				return
 			}
 			instance, err := s.destroyWithForce(r.Context(), request.InstanceID, request.Force)
-			if err != nil {
-				writeError(w, err)
-				return
-			}
-			writeJSON(w, v1.InstanceResponse{APIVersion: v1.Version, Instance: instance})
-		case "/v1/runtime/stop":
-			var request v1.InstanceRequest
-			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
-				return
-			}
-			if !validID(request.InstanceID) {
-				writeError(w, problem("invalid_request", "recorded instance_id required"))
-				return
-			}
-			var instance v1.Instance
-			var err error
-			instance, err = s.stopRuntime(request.InstanceID)
 			if err != nil {
 				writeError(w, err)
 				return
@@ -480,6 +517,13 @@ func writeJSON(w http.ResponseWriter, value any) {
 	// this single response boundary, including prepare/run/cancel/recovery views.
 	if response, ok := value.(v1.InstanceResponse); ok {
 		response.Instance = publicInstance(response.Instance)
+		value = response
+	}
+	if response, ok := value.(v1.SceneResponse); ok && response.Result != nil {
+		result := *response.Result
+		result.Instance = publicInstance(result.Instance)
+		result.LeaseToken = ""
+		response.Result = &result
 		value = response
 	}
 	if err := json.NewEncoder(w).Encode(value); err != nil {

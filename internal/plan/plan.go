@@ -3,6 +3,7 @@ package plan
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,17 +28,18 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 	var result v1.PlanResponse
 	file, project := source.ManifestPath, source.ProjectPath
 
-	data, err := readFile(file)
+	layers, err := loadLayers(source, request.ConfigPath, false, false)
+	if snapshot != nil {
+		snapshot.ConfigProvenance = &ConfigProvenance{Path: layers.machinePath, Present: layers.machinePresent}
+		provenance := layers.private.Provenance
+		snapshot.PrivateProvenance = &provenance
+		snapshot.PrivateSourceState = layers.private.State
+	}
 	if err != nil {
 		return result, err
 	}
-	var m v1.Manifest
-	if err := manifest.Decode(data, filepath.Ext(file), &m); err != nil {
-		return result, err
-	}
-	if err := manifest.Validate(m); err != nil {
-		return result, err
-	}
+	m, config := layers.manifest, layers.effective
+
 	scene, ok := m.Scenes[request.Scene]
 	if !ok {
 		return result, problem("unknown_scene", "scene", "scene is not declared; choose a name from scenes")
@@ -50,59 +52,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 			return result, problem("invalid_arguments", "terminal_args", "NUL is not permitted")
 		}
 	}
-	var config v1.MachineConfig
-	configFile := request.ConfigPath
-	if configFile == "" {
-		dir, err := os.UserConfigDir()
-		candidate := ""
-		if err == nil {
-			candidate = filepath.Join(dir, "backlot", "config.yaml")
-		}
-		if candidate != "" {
-			if _, err := os.Stat(candidate); err == nil {
-				configFile = candidate
-			} else if !os.IsNotExist(err) {
-				return result, problem("config", "config", "cannot inspect default config; use --config PATH")
-			}
-		}
-	}
-	if snapshot != nil {
-		snapshot.ConfigProvenance = &ConfigProvenance{Path: configFile, Present: configFile != ""}
-		if configFile == "" {
-			if dir, err := os.UserConfigDir(); err == nil {
-				snapshot.ConfigProvenance.Path = filepath.Join(dir, "backlot", "config.yaml")
-			}
-		}
-	}
-	var configDigest string
-	if configFile != "" {
-		data, err := readFile(configFile)
-		if err != nil {
-			return result, err
-		}
-		if err := manifest.Decode(data, filepath.Ext(configFile), &config); err != nil {
-			return result, err
-		}
-		if err := manifest.ValidateMachine(config); err != nil {
-			return result, err
-		}
-		if config.Caddy != nil {
-			value := manifest.CaddyDefaults(*config.Caddy)
-			config.Caddy = &value
-		}
-		configDigest = digest(data)
-	}
-	for name := range config.Tools {
-		if _, ok := m.Tools[name]; !ok {
-			return result, problem("config", "config.tools."+name, "override names an undeclared project tool")
-		}
-	}
-	for name := range config.Inputs {
-		if _, ok := m.Inputs[name]; !ok {
-			return result, problem("config", "config.inputs."+name, "value names an undeclared project input")
-		}
-	}
-	result = v1.PlanResponse{APIVersion: v1.Version, Project: m.Project, Checkout: source.CheckoutPath, ManifestPath: file, ManifestDigest: digest(data), ConfigDigest: configDigest, Scene: request.Scene, Lifetime: scene.Lifetime, TerminalJob: scene.TerminalJob, Resources: map[string]v1.Resource{}, Outputs: map[string]v1.Output{}, Publish: scene.Publish}
+	result = v1.PlanResponse{APIVersion: v1.Version, Project: m.Project, Checkout: source.CheckoutPath, ManifestPath: file, ManifestDigest: layers.manifestDigest, ConfigDigest: layers.machineDigest, Scene: request.Scene, Lifetime: scene.Lifetime, StartupDetails: scene.StartupDetails, TerminalJob: scene.TerminalJob, Resources: map[string]v1.Resource{}, Outputs: map[string]v1.Output{}, Publish: scene.Publish}
 	for _, name := range scene.Resources {
 		result.Resources[name] = m.Resources[name]
 		if r := m.Resources[name]; r.Kind == "allocation" {
@@ -244,6 +194,24 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 		}
 		result.Components = append(result.Components, planned)
 	}
+	if layers.private.Provenance.Present {
+		// Selected bare PATH tools contribute their actual resolved executables.
+		// Unselected tools retain syntax-only validation and never require availability.
+		effective := config
+		effective.Tools = maps.Clone(config.Tools)
+		if effective.Tools == nil {
+			effective.Tools = map[string]string{}
+		}
+		for _, component := range result.Components {
+			if component.Command != nil {
+				effective.Tools[component.Command.Tool] = component.Executable
+			}
+			if component.Readiness != nil && component.Readiness.Command != nil {
+				effective.Tools[component.Readiness.Command.Tool] = component.Readiness.Executable
+			}
+		}
+		result.EffectiveConfigDigest = effectiveDigest(m, effective, project)
+	}
 	if snapshot != nil {
 		snapshot.Docker = config.Docker
 		snapshot.Caddy = config.Caddy
@@ -255,7 +223,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 
 func digest(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
 
-func tool(m v1.Manifest, c v1.MachineConfig, name, project string) (string, error) {
+func tool(m v1.Manifest, c resolvedConfig, name, project string) (string, error) {
 	executable := m.Tools[name]
 	if override, ok := c.Tools[name]; ok {
 		executable = override
@@ -265,7 +233,7 @@ func tool(m v1.Manifest, c v1.MachineConfig, name, project string) (string, erro
 	}
 	resolved, err := exec.LookPath(executable)
 	if err != nil {
-		return "", problem("missing_tool", "tools."+name, "executable is unavailable; install it or set config.tools override")
+		return "", problem("missing_tool", "tools."+name, "executable is unavailable; install it or run backlot project setup --edit to set a tools override")
 	}
 	if !filepath.IsAbs(resolved) {
 		resolved, err = filepath.Abs(resolved)
@@ -294,7 +262,7 @@ func (v resolvedValue) wire() v1.PlannedValue {
 	return v1.PlannedValue{Literal: v.literal, Symbolic: v.symbolic}
 }
 
-func resolveValue(m v1.Manifest, c v1.MachineConfig, v v1.Value, project string, p v1.PlanResponse) (resolvedValue, error) {
+func resolveValue(m v1.Manifest, c resolvedConfig, v v1.Value, project string, p v1.PlanResponse) (resolvedValue, error) {
 	result := resolvedValue{literal: v.Literal, secret: v.Secret}
 	if v.Ref == nil {
 		return result, nil
@@ -304,7 +272,7 @@ func resolveValue(m v1.Manifest, c v1.MachineConfig, v v1.Value, project string,
 	case "input":
 		literal, ok := c.Inputs[r.Name]
 		if !ok || literal == "" {
-			return result, problem("missing_input", "inputs."+r.Name, "required value is missing; set config.inputs in --config PATH")
+			return result, problem("missing_input", "inputs."+r.Name, "required value is missing; run backlot project setup --edit")
 		}
 		result.literal = &literal
 		result.secret = result.secret || m.Inputs[r.Name].Secret

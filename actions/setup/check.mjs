@@ -28,7 +28,7 @@ test('real setup failure after daemon start is cleaned by native post hook', {
     await mkdir(join(owner.root, 'tools'));
     await symlink(process.env.BACKLOT_BINARY, join(owner.root, 'tools/backlot'));
     await writeFile(join(owner.root, 'daemon-attempted'), '');
-    await assert.rejects(prepare({ root: owner.root, binary: process.env.BACKLOT_BINARY,
+    await assert.rejects(prepare({ owner, root: owner.root, binary: process.env.BACKLOT_BINARY,
       caddy: join(owner.root, 'missing-caddy'), node: process.execPath }), /gateway.*failed/s);
     const cli = (...args) => command(process.env.BACKLOT_BINARY,
       [...args, '--state-dir', join(owner.root, 'd'), '--json']);

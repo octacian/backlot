@@ -50,32 +50,41 @@ func (s *store) resources(id string) (resourceGeneration, error) {
 		if data == nil {
 			return nil
 		}
-		if err := json.Unmarshal(data, &g); err != nil {
-			return problem("state_corrupt", "private resource generation cannot be decoded; preserved")
-		}
-		if g.ID == "" {
-			if g.Endpoint != "" || len(g.Resources) > 0 || len(g.Containers) > 0 || len(g.Initialized) > 0 {
-				return problem("state_corrupt", "resource generation identity missing; resources preserved")
-			}
-			return nil
-		}
-		if !validID(g.ID) || g.Resources == nil || g.Initialized == nil {
-			return problem("state_corrupt", "resource generation incomplete; resources preserved")
-		}
-		for _, r := range g.Resources {
-			if !validID(r.Token) || r.Name == "" {
-				return problem("state_corrupt", "resource ownership incomplete; resources preserved")
-			}
-		}
-		for _, r := range g.Containers {
-			if r.Kind != "container" || !validID(r.Token) || r.Name == "" || !validID(r.Attempt) {
-				return problem("state_corrupt", "container ownership incomplete; resources preserved")
-			}
-		}
-		return nil
+		var decodeErr error
+		g, decodeErr = decodeResources(data)
+		return decodeErr
 	})
 	return g, err
 }
+func decodeResources(data []byte) (g resourceGeneration, err error) {
+	if !jsonObject(data) {
+		return g, problem("state_corrupt", "invalid resource record shape; preserved")
+	}
+	if err := json.Unmarshal(data, &g); err != nil {
+		return g, problem("state_corrupt", "private resource generation cannot be decoded; preserved")
+	}
+	if g.ID == "" {
+		if g.Endpoint != "" || len(g.Resources) > 0 || len(g.Containers) > 0 || len(g.Initialized) > 0 {
+			return g, problem("state_corrupt", "resource generation identity missing; resources preserved")
+		}
+		return g, nil
+	}
+	if !validID(g.ID) || g.Resources == nil || g.Initialized == nil {
+		return g, problem("state_corrupt", "resource generation incomplete; resources preserved")
+	}
+	for _, r := range g.Resources {
+		if !validID(r.Token) || r.Name == "" {
+			return g, problem("state_corrupt", "resource ownership incomplete; resources preserved")
+		}
+	}
+	for _, r := range g.Containers {
+		if r.Kind != "container" || !validID(r.Token) || r.Name == "" || !validID(r.Attempt) {
+			return g, problem("state_corrupt", "container ownership incomplete; resources preserved")
+		}
+	}
+	return g, nil
+}
+
 func (s *store) saveResources(id string, g resourceGeneration) error {
 	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, "resources", id, g) })
 }
@@ -355,6 +364,9 @@ func (s *store) removeResources(ctx context.Context, id string) error {
 	return s.removeResourcesWithForce(ctx, id, false)
 }
 func (s *store) removeResourcesWithForce(ctx context.Context, id string, force bool) error {
+	if err := s.guardAbandonedData(id); err != nil {
+		return err
+	}
 	g, err := s.resources(id)
 	if err != nil {
 		return err
@@ -485,9 +497,8 @@ func (s *service) destroyWithForce(ctx context.Context, id string, force bool) (
 		}
 		return nil
 	})
-	// Successful destruction has joined this owner and settled its data. Do not
-	// replay its historical collection diagnostic as active shutdown work.
-	if err == nil {
+	// Keep the owner of a sticky collection gap for truthful shutdown reporting.
+	if err == nil && instance.Execution.CollectionFailure == "" {
 		s.mu.Lock()
 		delete(s.executions, id)
 		s.mu.Unlock()
@@ -561,6 +572,10 @@ func recoverResourceEffect(ctx context.Context, d *dockerEngine, r ownedResource
 // Record explicit cleanup failures separately from the preserved execution
 // outcome. Allocation release intent independently survives later consumer recovery.
 func (s *store) recordCleanupFailure(id string, cause error) error {
+	var detail *v1.PlanError
+	if errors.As(cause, &detail) && detail.Code == "native_ownership_relinquished" {
+		return cause // Independent deletion refusal does not change cleanup facts.
+	}
 	instance, err := s.inspect(id)
 	if err != nil {
 		return errors.Join(cause, err)

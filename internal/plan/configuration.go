@@ -12,6 +12,16 @@ import (
 	"github.com/octacian/backlot/internal/projectconfig"
 )
 
+// DefaultConfigPath returns the absolute per-user machine configuration candidate.
+// It does not inspect or load the file.
+func DefaultConfigPath() (string, error) {
+	root, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(filepath.Join(root, "backlot", "config.yaml"))
+}
+
 type layers struct {
 	manifest                                   v1.Manifest
 	machine                                    v1.MachineConfig
@@ -45,8 +55,8 @@ func loadLayers(source Source, configPath string, staged, reassociate bool) (l l
 	layer, path = "machine", configPath
 	l.machine.Version = v1.ManifestVersion
 	if configPath == "" {
-		if root, err := os.UserConfigDir(); err == nil {
-			l.machinePath = filepath.Join(root, "backlot", "config.yaml")
+		if candidate, err := DefaultConfigPath(); err == nil {
+			l.machinePath = candidate
 			path = l.machinePath
 			if _, err := os.Stat(l.machinePath); err == nil {
 				configPath = l.machinePath

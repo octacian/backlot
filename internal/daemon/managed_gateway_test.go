@@ -45,6 +45,9 @@ func TestManagedGatewayUncertainty(t *testing.T) {
 	if err := state.saveManaged(r); err != nil {
 		t.Fatal(err)
 	}
+	if status := svc.gatewayStatus(context.Background(), r); status.ConfigSource != "" {
+		t.Fatal("unconfigured gateway reported a selected source", status)
+	}
 	sentinel := filepath.Join(dir, "unrelated")
 	if err := os.WriteFile(sentinel, []byte("preserve"), 0600); err != nil {
 		t.Fatal(err)
@@ -227,6 +230,24 @@ func TestManagedPendingBootRecovery(t *testing.T) {
 			if !tc.recover && (!got.Pending || got.PendingBoot != tc.boot) {
 				t.Fatal("uncertain intent changed")
 			}
+		})
+	}
+}
+
+func TestGatewayDefaultRequestValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name, action string
+		request      v1.GatewayRequest
+	}{
+		{"relative", "start", v1.GatewayRequest{DefaultConfigPath: "relative.yaml"}},
+		{"conflicting", "restart", v1.GatewayRequest{ConfigPath: "/explicit.yaml", DefaultConfigPath: "/default.yaml"}},
+		{"stop", "stop", v1.GatewayRequest{DefaultConfigPath: "/default.yaml"}},
+		{"status", "status", v1.GatewayRequest{DefaultConfigPath: "/default.yaml"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Invalid candidates must fail before any store access or lifecycle effect.
+			_, err := (&service{}).gatewayControl(context.Background(), tc.action, tc.request)
+			code(t, err, "invalid_request")
 		})
 	}
 }

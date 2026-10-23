@@ -20,7 +20,11 @@ For Linux prerequisites, resolver setup and explicit bridge reachability, follow
 Install stock native Caddy separately through your package manager; for Homebrew,
 `brew install caddy`. Configure its absolute executable path explicitly, such as
 `/opt/homebrew/bin/caddy`. Backlot does not install dependencies or custom modules.
-Use a private machine file outside the checkout:
+Use the default private machine file outside the checkout:
+`~/Library/Application Support/backlot/config.yaml` on macOS or
+`${XDG_CONFIG_HOME:-$HOME/.config}/backlot/config.yaml` on Linux. Daemon state
+defaults to `backlot/daemon` under the same OS configuration root. `--config` and
+`--state-dir` select other paths.
 
 ```yaml
 version: backlot/v1
@@ -46,10 +50,10 @@ Start the daemon and gateway explicitly, then install trust as a separate operat
 action using the configured stock executable and **owned managed admin endpoint**:
 
 ```sh
-backlot daemon start --state-dir /absolute/private/daemon --json
-backlot gateway start --state-dir /absolute/private/daemon --config /absolute/private/machine.yaml --json
+backlot daemon start --json
+backlot gateway start --json
 /opt/homebrew/bin/caddy trust --address 127.0.0.1:2020 --ca local
-backlot gateway status --state-dir /absolute/private/daemon --json
+backlot gateway status --json
 ```
 
 [Caddy trust](https://caddyserver.com/docs/command-line#caddy-trust) fetches the CA
@@ -83,15 +87,21 @@ ownership. Inspect the protected `gateway/gateway.log` within the daemon directo
 for stock Caddy startup errors. Caddy manages certificate issuance and renewal.
 
 ```sh
-backlot stop --state-dir /absolute/private/daemon --json INSTANCE_ID
-backlot gateway stop --state-dir /absolute/private/daemon --json
-backlot gateway start --state-dir /absolute/private/daemon --json
-backlot gateway restart --state-dir /absolute/private/daemon --json
+backlot stop --json INSTANCE_ID
+backlot gateway stop --json
+backlot gateway start --json
+backlot gateway restart --json
 ```
 
-The first start requires `--config`; subsequent starts/restarts can reuse the
-retained configuration. A supplied configuration must match retained gateway
-settings. Stop/restart refuse while any published scene is active or kept. Stop
+The first start or restart loads the default machine file when `--config` is
+omitted. A missing default names the checked path and asks you to create it or
+supply `--config`; unreadable, invalid and non-managed files fail explicitly.
+Once configured, omitted `--config` reuses retained gateway settings without
+reading the default, even if it changes or disappears. A supplied configuration
+must match retained gateway settings. Operation JSON reports `config_source` as
+`explicit`, `default` or `retained` for the current selection; later status reports
+`retained`. No historical source is stored, and unconfigured status has no source.
+Stop/restart refuse while any published scene is active or kept. Stop
 those scenes by ID first. Scene stop/start preserves retained data and logical
 origins; gateway stop/start preserves CA identity and effective configuration.
 Stopping an individual scene never stops the gateway.

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -213,6 +214,12 @@ func (s *store) stopManaged(r *managedRecord, group *native.Group) error {
 }
 
 func (s *service) gatewayControl(ctx context.Context, action string, request v1.GatewayRequest) (v1.GatewayResponse, error) {
+	if request.ConfigPath != "" && request.DefaultConfigPath != "" {
+		return v1.GatewayResponse{}, problem("invalid_request", "select either explicit or default gateway configuration")
+	}
+	if request.DefaultConfigPath != "" && (!filepath.IsAbs(request.DefaultConfigPath) || (action != "start" && action != "restart")) {
+		return v1.GatewayResponse{}, problem("invalid_request", "default gateway configuration requires an absolute candidate for start/restart")
+	}
 	if request.Force && action != "stop" {
 		return v1.GatewayResponse{}, problem("invalid_request", "force is supported only by gateway stop")
 	}
@@ -231,16 +238,25 @@ func (s *service) gatewayControl(ctx context.Context, action string, request v1.
 	if s.closing {
 		return v1.GatewayResponse{}, problem("shutting_down", "daemon is shutting down")
 	}
-	if request.ConfigPath != "" {
-		if !filepath.IsAbs(request.ConfigPath) {
+	configPath, source := request.ConfigPath, "retained"
+	if configPath != "" {
+		source = "explicit"
+	} else if r.Status == "unconfigured" && (action == "start" || action == "restart") {
+		configPath, source = request.DefaultConfigPath, "default"
+	}
+	if configPath != "" {
+		if !filepath.IsAbs(configPath) {
 			return v1.GatewayResponse{}, problem("invalid_request", "gateway configuration path must be absolute")
 		}
-		data, err := os.ReadFile(request.ConfigPath)
+		data, err := os.ReadFile(configPath)
 		if err != nil {
-			return v1.GatewayResponse{}, problem("gateway_config", "cannot read machine configuration")
+			if source == "default" && os.IsNotExist(err) {
+				return v1.GatewayResponse{}, problem("gateway_config", fmt.Sprintf("first gateway start requires managed machine configuration; default %q not found; create it with explicit managed mode and native executable or supply --config", configPath))
+			}
+			return v1.GatewayResponse{}, problem("gateway_config", fmt.Sprintf("cannot read machine configuration %q: %v", configPath, err))
 		}
 		var config v1.MachineConfig
-		if err := manifest.Decode(data, filepath.Ext(request.ConfigPath), &config); err != nil {
+		if err := manifest.Decode(data, filepath.Ext(configPath), &config); err != nil {
 			return v1.GatewayResponse{}, err
 		}
 		if err := manifest.ValidateMachine(config); err != nil {
@@ -256,6 +272,13 @@ func (s *service) gatewayControl(ctx context.Context, action string, request v1.
 		r.Config = c
 	} else if r.Status == "unconfigured" && action != "stop" {
 		return v1.GatewayResponse{}, problem("gateway_config", "first gateway start requires --config with explicit managed mode and native executable")
+	}
+	operationStatus := func() v1.GatewayResponse {
+		response := s.gatewayStatus(ctx, r)
+		if response.ConfigSource != "" {
+			response.ConfigSource = source
+		}
+		return response
 	}
 	if action == "stop" || action == "restart" {
 		if err := s.store.publishedActive(); err != nil {
@@ -279,7 +302,7 @@ func (s *service) gatewayControl(ctx context.Context, action string, request v1.
 		}
 		s.gatewayGroup = nil
 		if action == "stop" {
-			return s.gatewayStatus(ctx, r), nil
+			return operationStatus(), nil
 		}
 	}
 	if r.Pending || r.Status == "uncertain" {
@@ -287,14 +310,14 @@ func (s *service) gatewayControl(ctx context.Context, action string, request v1.
 	}
 	if r.Identity != nil {
 		if s.gatewayStatus(ctx, r).Status == "running" {
-			return s.gatewayStatus(ctx, r), nil
+			return operationStatus(), nil
 		}
 		return v1.GatewayResponse{}, problem("gateway_unavailable", "managed gateway lost readiness; use explicit gateway restart after stopping published scenes")
 	}
 	if err := s.startManaged(ctx, &r); err != nil {
 		return v1.GatewayResponse{}, err
 	}
-	return s.gatewayStatus(ctx, r), nil
+	return operationStatus(), nil
 }
 
 func (s *store) publishedActive() error {
@@ -315,6 +338,9 @@ func (s *store) publishedActive() error {
 
 func (s *service) gatewayStatus(ctx context.Context, r managedRecord) v1.GatewayResponse {
 	response := v1.GatewayResponse{ClaimRevision: r.ClaimRevision, NativeOwnershipWarnings: abandonmentWarnings(r.NativeAbandonments), APIVersion: v1.Version, Mode: "managed", Status: r.Status, Endpoint: r.Config.Endpoint, Message: r.Failure}
+	if r.Status != "unconfigured" {
+		response.ConfigSource = "retained"
+	}
 	if r.Config.HTTPSPort != nil {
 		response.HTTPSPort = *r.Config.HTTPSPort
 	}

@@ -7,6 +7,7 @@ import (
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/client"
 	"github.com/octacian/backlot/internal/daemon"
+	"github.com/octacian/backlot/internal/plan"
 	urfave "github.com/urfave/cli/v3"
 )
 
@@ -41,6 +42,12 @@ func gatewayCommand() *urfave.Command {
 			cli := client.New(daemon.SocketPath(dir))
 			defer cli.Close()
 			request := v1.GatewayRequest{APIVersion: v1.Version, ConfigPath: config, Force: c.Bool("force")}
+			if config == "" && (c.Name == "start" || c.Name == "restart") {
+				request.DefaultConfigPath, err = plan.DefaultConfigPath()
+				if err != nil {
+					return output(c, nil, err)
+				}
+			}
 			if request.Force {
 				selected, err := cli.Gateway(ctx, "status", v1.GatewayRequest{APIVersion: v1.Version})
 				if err != nil {

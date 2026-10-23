@@ -59,10 +59,17 @@ func TestSharedMariaDBForceEarly(t *testing.T) {
 	if f.shared(t).PendingReleases != 1 {
 		t.Fatal("default failure lost durable obligation")
 	}
+	completed, inspectErr := f.h.cli.Inspect(context.Background(), a.Instance.ID)
+	if inspectErr != nil || completed.Instance.Execution == nil || completed.Instance.Execution.CompletedAt == "" || completed.Instance.Execution.CollectionFailure != "" {
+		t.Fatal("resource refusal lost collected runtime completion", inspectErr)
+	}
 	var destroyed v1.InstanceResponse
 	out = f.cli("destroy", "--force", "--state-dir", f.h.dir, "--json", a.Instance.ID)
 	if json.Unmarshal(out, &destroyed) != nil || destroyed.Instance.Status != v1.Destroyed {
 		t.Fatal("force CLI did not report actual destruction")
+	}
+	if destroyed.Instance.Execution == nil || destroyed.Instance.Execution.CollectionFailure != "" || destroyed.Instance.Execution.CompletedAt != completed.Instance.Execution.CompletedAt || destroyed.Instance.Execution.Outcome != completed.Instance.Execution.Outcome {
+		t.Fatal("forced resource retry fabricated interruption or replaced completion")
 	}
 	released = true
 	for _, secret := range []string{ca.password, cb.password, original, f.liveAdminRecord(t).AdminPassword} {

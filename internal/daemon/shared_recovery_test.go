@@ -497,3 +497,35 @@ func TestSharedShutdownAfterJoinedCollectionFailure(t *testing.T) {
 		t.Fatal("known consumer fence contacted provider")
 	}
 }
+
+func TestSharedCompletedResourceCleanupRetainsExecution(t *testing.T) {
+	for _, gap := range []string{"", "previous verified collection gap"} {
+		t.Run(map[bool]string{false: "collected", true: "existing-gap"}[gap != ""], func(t *testing.T) {
+			svc, instance, _ := exportFixture(t)
+			original := *instance.Execution
+			original.CollectionFailure = gap
+			original.Failure = "original application failure"
+			original.FailureDetail = &v1.PlanError{Code: "job_failed", Message: original.Failure}
+			if _, err := svc.store.execution(instance.ID, instance.Status, &original); err != nil {
+				t.Fatal(err)
+			}
+			if err := svc.store.saveRuntime(instance.ID, runtimeRecord{Attempt: original.Attempt}); err != nil {
+				t.Fatal(err)
+			}
+			if err := svc.store.recordCleanupFailure(instance.ID, errors.New("owned resource release failed")); err == nil {
+				t.Fatal("resource failure lost")
+			}
+			pending, err := svc.store.inspect(instance.ID)
+			if err != nil || pending.Execution.CleanupFailure == "" {
+				t.Fatal("resource cleanup diagnostic not retained", err)
+			}
+			if err := svc.store.recoverExecution(instance.ID); err != nil {
+				t.Fatal(err)
+			}
+			got, err := svc.store.inspect(instance.ID)
+			if err != nil || got.Status != instance.Status || !reflect.DeepEqual(got.Execution, &original) {
+				t.Fatal("resource retry replaced completed execution facts", err)
+			}
+		})
+	}
+}

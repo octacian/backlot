@@ -59,6 +59,8 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	trust := filepath.Join(buildDir, "trust.pem")
 	t.Setenv("SSL_CERT_FILE", trust)
 	t.Setenv("SSL_CERT_DIR", buildDir)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	h := newNativeHarness(t, binary, "30s")
 	configPath := filepath.Join(filepath.Dir(h.dir), "machine.json")
 	port, admin := managedFixturePort(t), managedFixturePort(t)
@@ -96,8 +98,8 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 			t.Error("managed fixture cleanup uncertain", h.dir, err)
 		}
 	})
-	if !strings.Contains(string(command(false, "gateway", "start")), "gateway_config") {
-		t.Fatal("missing managed config diagnostic")
+	if output := command(false, "gateway", "start"); !strings.Contains(string(output), "gateway_config") {
+		t.Fatalf("missing managed config diagnostic: %s", output)
 	}
 	blocker, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
 	if err != nil {

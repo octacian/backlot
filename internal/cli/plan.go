@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 
@@ -46,8 +47,26 @@ func planCommand() *urfave.Command {
 				return err
 			}
 		}
-		return nil
+		return executableOutput(c.Writer, result, "caller/offline selection")
 	}}
+}
+
+func executableOutput(w io.Writer, result v1.PlanResponse, context string) error {
+	for _, component := range result.Components {
+		readiness := ""
+		if component.Readiness != nil {
+			readiness = component.Readiness.Executable
+		}
+		for _, selection := range []struct{ role, path string }{{"command", component.Executable}, {"readiness", readiness}} {
+			if selection.path == "" {
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "  %s %s (%s): %q\n", component.Name, selection.role, context, selection.path); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func parsePlanArgs(args []string) (v1.PlanRequest, bool, error) {

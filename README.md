@@ -29,8 +29,12 @@ your project; replace the executable with the absolute `command -v caddy` path:
 
 ```sh
 umask 077
-mkdir -p "$HOME/.config/backlot"
-cat > "$HOME/.config/backlot/machine.yaml" <<'YAML'
+case "$(uname -s)" in
+  Darwin) backlot_config_dir="$HOME/Library/Application Support/backlot" ;;
+  Linux) backlot_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/backlot" ;;
+esac
+mkdir -p "$backlot_config_dir"
+cat > "$backlot_config_dir/config.yaml" <<'YAML'
 version: backlot/v1
 caddy:
   mode: managed
@@ -38,16 +42,23 @@ caddy:
   endpoint: http://127.0.0.1:2020
   https_port: 8443
 YAML
-backlot daemon start --state-dir "$HOME/.backlot" --json
-backlot gateway start --state-dir "$HOME/.backlot" --config "$HOME/.config/backlot/machine.yaml" --json
+backlot daemon start --json
+backlot gateway start --json
 /opt/homebrew/bin/caddy trust --address 127.0.0.1:2020 --ca local
 ```
+
+The default machine file is `~/Library/Application Support/backlot/config.yaml`
+on macOS and `${XDG_CONFIG_HOME:-$HOME/.config}/backlot/config.yaml` on Linux.
+Daemon state defaults to `daemon/` in that same Backlot directory. Use `--config`
+and `--state-dir` to select other paths. First gateway start/restart loads the
+default; later commands with no `--config` reuse retained gateway settings even if
+the file changes or disappears. An explicit file must match those retained settings.
 
 Use free ports 2020/8443; if occupied, select other unprivileged ports in the file
 and trust command. Run the stock trust command yourself against **your owned
 gateway**; it may ask for administrator authorization. Backlot never changes
 system/browser trust. If your browser uses a separate store, import the public
-`$HOME/.backlot/gateway/data/pki/authorities/local/root.crt` as a trusted authority.
+`$backlot_config_dir/daemon/gateway/data/pki/authorities/local/root.crt` as a trusted authority.
 If you tried HTTPS before installing trust, stop/start the daemon and start the
 gateway again to refresh cached roots. [Trust and recovery](examples/macos-quickstart/README.md#prepare-once).
 
@@ -55,7 +66,7 @@ Install your project's declared application dependencies using its own setup
 instructions. From that project's checkout, daily use is:
 
 ```sh
-backlot scene start dev --state-dir "$HOME/.backlot" --config "$HOME/.config/backlot/machine.yaml" --json
+backlot scene start dev --json
 ```
 
 Open `result.instance.execution.origin` from the result:
@@ -66,7 +77,7 @@ it is not named `dev`. Application trust must already be configured in its manif
 No public domain, Certbot, router DNS or resolver file is needed.
 
 ```sh
-backlot scene stop --state-dir "$HOME/.backlot" --json dev
+backlot scene stop --json dev
 ```
 
 Repeat `scene start dev` to resume with the same logical origin. After a daemon stop or
@@ -87,8 +98,8 @@ For more: [manifest reference](docs/manifest.md), [HTTPS and application trust](
 and the advanced [four-workflow/container fixture](examples/release-acceptance/README.md).
 For separate worktree databases on one retained server, try the minimal
 [shared MariaDB example](examples/shared-mariadb/README.md).
-Use `backlot list --state-dir "$HOME/.backlot" --json` to discover recorded IDs,
-and `backlot status --state-dir "$HOME/.backlot" --json INSTANCE_ID` to inspect one.
+Use `backlot list --json` to discover recorded IDs,
+and `backlot status --json INSTANCE_ID` to inspect one.
 Add `--follow` to observe it, or use `scene status dev --follow` to watch the named
 scene through recreation. See [targeting and follow](docs/daemon.md#named-persistent-scenes).
 

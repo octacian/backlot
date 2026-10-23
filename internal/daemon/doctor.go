@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -113,7 +114,7 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 		r.Paths = append(r.Paths, v1.DoctorPath{Name: "selected_manifest", Path: source.ManifestPath, State: "present"})
 		snap, err = plan.Prepare(source, v1.PlanRequest{Scene: request.Scene, ProjectPath: request.ProjectPath, ConfigPath: request.ConfigPath})
 		if err != nil {
-			diagnosticAdd(&r, "runtime_inputs", "daemon/host", v1.DoctorFailed, "selected scene inputs are invalid or unavailable; run plan for field-specific guidance and check tools, seeds and required inputs")
+			diagnosticAdd(&r, "runtime_inputs", "daemon/host", v1.DoctorFailed, toolFailureMessage(err, "selected scene inputs are invalid or unavailable; run plan for field-specific guidance and check tools, seeds and required inputs"))
 			path := request.ConfigPath
 			if path == "" {
 				if dir, e := os.UserConfigDir(); e == nil {
@@ -123,6 +124,7 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 			addPath(&r, "effective_machine_config", path, "")
 			return r, nil
 		}
+		currentToolSelections(&r, snap)
 		addConfigPath(&r, "effective_machine_config", snap)
 		addPrivatePath(&r, "effective_private_config", snap)
 		diagnosticAdd(&r, "runtime_inputs", "daemon/host", v1.DoctorOK, "selected manifest, tools, seeds and required inputs validated without executing application work")
@@ -419,14 +421,20 @@ func doctorUpstreams(ctx context.Context, r *v1.DoctorResponse, snap plan.Snapsh
 // commands or replacing snapshot declarations with a changed current manifest.
 func validateRecordedTools(r *v1.DoctorResponse, snap plan.Snapshot) {
 	for _, c := range snap.Plan.Components {
-		for _, executable := range []string{c.Executable, probeExecutable(c)} {
+		for _, selection := range []struct{ role, executable string }{{"command", c.Executable}, {"readiness", probeExecutable(c)}} {
+			role, executable := selection.role, selection.executable
 			if executable == "" {
 				continue
 			}
+			addPath(r, "recorded_tool_"+c.Name+"_"+role, executable, "")
+			status := v1.DoctorOK
+			message := "recorded selection; original source/candidate/lookup context unrecorded; current file is executable, selection does not prove execution"
 			info, err := os.Stat(executable)
 			if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
-				diagnosticAdd(r, "runtime_input_"+c.Name, "daemon/host", v1.DoctorFailed, "recorded executable is unavailable or not executable; restore configured tool and restart explicitly")
+				status = v1.DoctorFailed
+				message = "recorded selection; original source/candidate/lookup context unrecorded; current file is unavailable or not executable; restore configured tool and restart explicitly"
 			}
+			diagnosticAdd(r, "runtime_input_"+c.Name, "daemon/host", status, fmt.Sprintf("%s %s %q: %s", c.Name, role, executable, message))
 		}
 	}
 }
@@ -435,6 +443,20 @@ func probeExecutable(c v1.PlannedComponent) string {
 		return c.Readiness.Executable
 	}
 	return ""
+}
+func currentToolSelections(r *v1.DoctorResponse, snap plan.Snapshot) {
+	for _, selection := range snap.ToolSelections {
+		name := "current_tool_" + selection.Component + "_" + selection.Role
+		addPath(r, name, selection.Executable, "")
+		diagnosticAdd(r, name, "daemon/host", v1.DoctorOK, fmt.Sprintf("current daemon lookup %s %s tool %q: candidate %q, %s source %q, selected %q; selection does not prove execution", selection.Component, selection.Role, selection.Tool, selection.Candidate, selection.SourceLayer, selection.SourcePath, selection.Executable))
+	}
+}
+func toolFailureMessage(err error, fallback string) string {
+	var detail *v1.PlanError
+	if errors.As(err, &detail) && detail.Code == "missing_tool" {
+		return detail.Error()
+	}
+	return fallback
 }
 
 func addPrivatePath(r *v1.DoctorResponse, name string, snap plan.Snapshot) {
@@ -478,7 +500,7 @@ func checkCurrentComposition(r *v1.DoctorResponse, launch plan.Snapshot) {
 	}
 
 	if err != nil {
-		diagnosticAdd(r, "current_configuration", "daemon/host", v1.DoctorFailed, "current configuration cannot be computed; run project setup and plan; launch snapshot remains unchanged")
+		diagnosticAdd(r, "current_configuration", "daemon/host", v1.DoctorFailed, toolFailureMessage(err, "current configuration cannot be computed; run project setup and plan; launch snapshot remains unchanged"))
 		r.Paths = append(r.Paths, v1.DoctorPath{Name: "current_effective_configuration", State: "uncomputable"})
 		return
 	}
@@ -490,5 +512,6 @@ func checkCurrentComposition(r *v1.DoctorResponse, launch plan.Snapshot) {
 		state = "changed"
 	}
 	r.Paths = append(r.Paths, v1.DoctorPath{Name: "current_effective_configuration", State: state, Digest: current.Plan.EffectiveConfigDigest})
+	currentToolSelections(r, current)
 	diagnosticAdd(r, "current_configuration", "daemon/host", v1.DoctorOK, "current configuration observed independently; launch snapshot and cleanup remain unchanged")
 }

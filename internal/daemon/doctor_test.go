@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/manifest"
 	"github.com/octacian/backlot/internal/plan"
 )
 
@@ -259,4 +261,50 @@ func TestDoctorExternalListener(t *testing.T) {
 		v1.Instance{Execution: &v1.ExecutionResult{Origin: "https://" + listener.Addr().String()}})
 	assertDoctorCheck(t, r, "gateway_listener", v1.DoctorOK)
 	assertDoctorCheck(t, r, "gateway_api_scope", v1.DoctorFailed)
+}
+
+func TestDoctorToolObservationsAreCurrent(t *testing.T) {
+	executable := "/usr/bin/true"
+	snapshot := plan.Snapshot{ToolSelections: []plan.ToolSelection{{Component: "job", Role: "command", Tool: "runner", Candidate: "runner", Executable: executable, SourceLayer: "private", SourcePath: "/private/selected\nsource.json"}}}
+	response := v1.DoctorResponse{APIVersion: v1.Version, Scope: "scene", Healthy: true, Checks: []v1.DoctorCheck{}, Paths: []v1.DoctorPath{}}
+	currentToolSelections(&response, snapshot)
+	if response.Validate() != nil || len(response.Checks) != 1 || response.Checks[0].Context != "daemon/host" || !strings.Contains(response.Checks[0].Message, "private source") || strings.Contains(response.Checks[0].Message, "\n") {
+		t.Fatal("invalid current diagnostic", response)
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded v1.DoctorResponse
+	if err := manifest.Decode(encoded, ".json", &decoded); err != nil || decoded.Validate() != nil {
+		t.Fatal("existing strict doctor shape rejected", err)
+	}
+	recorded := filepath.Join(t.TempDir(), "gone\nexecutable")
+	snapshot.Plan.Components = []v1.PlannedComponent{{Name: "job", Executable: recorded, Readiness: &v1.PlannedProbe{Executable: executable}}}
+	validateRecordedTools(&response, snapshot)
+	if response.Healthy || response.Validate() != nil {
+		t.Fatal("missing recorded path failed consistency")
+	}
+	found := false
+	for _, path := range response.Paths {
+		if path.Name == "recorded_tool_job_command" && path.Path == recorded && path.State == "absent" {
+			found = true
+		}
+	}
+	if !found || !strings.Contains(response.Checks[1].Message, "original source/candidate/lookup context unrecorded") || strings.Contains(response.Checks[1].Message, "\n") {
+		t.Fatal("recorded path or absence lost", response)
+	}
+	// Absent original provenance alone is not a failed check.
+	response.Healthy = true
+	response.Checks = nil
+	snapshot.Plan.Components = snapshot.Plan.Components[:0]
+	snapshot.Plan.Components = append(snapshot.Plan.Components, v1.PlannedComponent{Name: "job", Executable: executable})
+	validateRecordedTools(&response, snapshot)
+	if !response.Healthy || response.Checks[0].Status != v1.DoctorOK {
+		t.Fatal("missing historical source failed health")
+	}
+	raw := fmt.Errorf("raw-error-canary")
+	if toolFailureMessage(raw, "safe fallback") != "safe fallback" {
+		t.Fatal("raw lookup error forwarded")
+	}
 }

@@ -3,6 +3,7 @@ package plan
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"maps"
 	"os"
 	"os/exec"
@@ -109,7 +110,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 		}
 		planned := v1.PlannedComponent{Artifacts: c.Artifacts, Name: name, Kind: c.Kind, Runtime: c.Runtime, Command: c.Command, Args: slices.Clone(c.Args), Policy: c.Policy, Initializes: c.Initializes, DependsOn: c.DependsOn, Resources: c.Resources, Outputs: c.Outputs, Ports: c.Ports, Mounts: c.Mounts, HostMappings: c.HostMappings}
 		if c.Command != nil {
-			executable, err := tool(m, config, c.Command.Tool, project)
+			executable, err := tool(layers, c.Command.Tool, project, name, "command", snapshot)
 			if err != nil {
 				return v1.PlanResponse{}, err
 			}
@@ -174,7 +175,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 			p := c.Readiness
 			planned.Readiness = &v1.PlannedProbe{Kind: p.Kind, Command: p.Command, Timeout: p.Timeout}
 			if p.Command != nil {
-				executable, err := tool(m, config, p.Command.Tool, project)
+				executable, err := tool(layers, p.Command.Tool, project, name, "readiness", snapshot)
 				if err != nil {
 					return v1.PlanResponse{}, err
 				}
@@ -223,27 +224,43 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 
 func digest(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
 
-func tool(m v1.Manifest, c resolvedConfig, name, project string) (string, error) {
-	executable := m.Tools[name]
-	if override, ok := c.Tools[name]; ok {
-		executable = override
+func tool(l layers, name, project, component, role string, snapshot *Snapshot) (string, error) {
+	selection := ToolSelection{Component: component, Role: role, Tool: name, Candidate: l.manifest.Tools[name], SourceLayer: "manifest", SourcePath: l.manifestPath}
+	if override, ok := l.machine.Tools[name]; ok {
+		selection.Candidate, selection.SourceLayer, selection.SourcePath = override, "machine", l.machinePath
 	}
+	if override, ok := l.private.Config.Tools[name]; ok {
+		selection.Candidate, selection.SourceLayer, selection.SourcePath = override, "private", l.private.Provenance.Path
+	}
+	executable := selection.Candidate
 	if strings.ContainsAny(executable, "/\\") && !filepath.IsAbs(executable) {
 		executable = filepath.Join(project, executable)
 	}
+	lookupContext := "caller/offline"
+	if snapshot != nil {
+		lookupContext = "daemon/runtime"
+	}
+	unavailable := func(reason string) error {
+		return &v1.PlanError{Code: "missing_tool", Field: "tools." + name, SourceLayer: selection.SourceLayer, SourcePath: selection.SourcePath,
+			Message: fmt.Sprintf("%s %s %s: attempted executable %q %s; install it or run backlot project setup --edit to set a tools override", lookupContext, component, role, executable, reason)}
+	}
 	resolved, err := exec.LookPath(executable)
 	if err != nil {
-		return "", problem("missing_tool", "tools."+name, "executable is unavailable; install it or run backlot project setup --edit to set a tools override")
+		return "", unavailable("is unavailable")
 	}
 	if !filepath.IsAbs(resolved) {
 		resolved, err = filepath.Abs(resolved)
 		if err != nil {
-			return "", problem("missing_tool", "tools."+name, "cannot resolve executable path")
+			return "", unavailable("cannot be resolved to an absolute path")
 		}
 	}
 	info, err := os.Stat(resolved)
 	if err != nil || !info.Mode().IsRegular() {
-		return "", problem("missing_tool", "tools."+name, "executable must be a regular file")
+		return "", unavailable("must be a regular file")
+	}
+	if snapshot != nil {
+		selection.Executable = resolved
+		snapshot.ToolSelections = append(snapshot.ToolSelections, selection)
 	}
 	return resolved, nil
 }

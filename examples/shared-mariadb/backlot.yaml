@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=../../schemas/manifest-v1.schema.json
+version: backlot/v1
+project: shared-mariadb-example
+shared_services:
+  sql:
+    manager: mariadb
+    image: mariadb:11.4
+    storage: volume
+    admin: generated
+    port: 3306
+    readiness_timeout: 60s
+resources:
+  database: {kind: allocation, shared_service: sql}
+components:
+  visit:
+    kind: job
+    runtime: container
+    policy: each-start
+    image: {literal: "mariadb:11.4"}
+    resources: [database]
+    environment:
+      assign:
+        DB_HOST: {ref: {kind: resource, name: database, field: host}}
+        DB_PORT: {ref: {kind: resource, name: database, field: port}}
+        DB_DATABASE: {ref: {kind: resource, name: database, field: database}}
+        DB_USERNAME: {ref: {kind: resource, name: database, field: username}}
+        MYSQL_PWD: {ref: {kind: resource, name: database, field: password}}
+    args:
+      - sh
+      - -ec
+      - |
+        exec mariadb --protocol=tcp --host="$DB_HOST" --port="$DB_PORT" \
+          --user="$DB_USERNAME" --database="$DB_DATABASE" --batch \
+          --execute='CREATE TABLE IF NOT EXISTS visits (id INT AUTO_INCREMENT PRIMARY KEY); INSERT INTO visits VALUES (); SELECT COUNT(*) AS visits FROM visits;'
+scenes:
+  dev:
+    lifetime: persistent
+    components: [visit]
+    resources: [database]
+  preview:
+    lifetime: persistent
+    components: [visit]
+    resources: [database]

@@ -85,6 +85,8 @@ example application dependencies, not Backlot contributor requirements.
 For more: [manifest reference](docs/manifest.md), [HTTPS and application trust](docs/https.md),
 [logs and evidence](docs/evidence.md), [operations and diagnosis](docs/operations.md),
 and the advanced [four-workflow/container fixture](examples/release-acceptance/README.md).
+For separate worktree databases on one retained server, try the minimal
+[shared MariaDB example](examples/shared-mariadb/README.md).
 Use `backlot list --state-dir "$HOME/.backlot" --json` to discover recorded IDs,
 and `backlot status --state-dir "$HOME/.backlot" --json INSTANCE_ID` to inspect one.
 Add `--follow` to observe it, or use `scene status dev --follow` to watch the named

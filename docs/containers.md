@@ -210,7 +210,9 @@ prior technical verification from pending owner/first-slice closeout and later
 PostgreSQL/custom execution; no full-feature or platform readiness is implied.
 
 Declare `shared_services` and select `kind: allocation` resources as documented in
-[manifest references](manifest.md#shared-service-declarations). Generated root
+[manifest references](manifest.md#shared-service-declarations). The runnable
+[MariaDB example](../examples/shared-mariadb/README.md) demonstrates independent
+allocations, linked worktrees, retention/reset and scoped cleanup. Generated root
 credentials stay only in private provisioning state and the owned server's Engine
 configuration. The public API has no administrative-secret reference. Application
 passwords are automatically sensitive; use named fixtures and existing explicit

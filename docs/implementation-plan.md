@@ -373,9 +373,11 @@ connections, lifecycle/concurrency/recovery and explicit bounded force cleanup.
 [The decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md),
 [runtime](containers.md#project-scoped-shared-services-gate-1) and
 [validation guide](testing.md#shared-mariadb-integration) define its contracts.
-Prior pre-integration verification is provenance only; merged-candidate verification, owner confirmation and
-first-slice examples/docs/review disposition, applicable final verification, fresh
-High review and published-revision CI remain separate closeout obligations.
+The runnable [MariaDB example](../examples/shared-mariadb/README.md) covers separate
+scene/worktree allocations, persistence/reset and cleanup. The prior merged
+candidate completed local verification and published-revision CI; those receipts
+remain bound to that revision. Independent example review, fresh High review,
+applicable final verification/CI and owner confirmation remain closeout obligations.
 [Issue 43](https://github.com/octacian/backlot/issues/43) retains the umbrella:
 a later PR adds PostgreSQL 17, then another adds custom execution and a non-Go
 non-database fixture. Neither runtime path is implemented by PR 45; private

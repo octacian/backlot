@@ -1,7 +1,7 @@
 package v1
 
 // StateVersion identifies the supported durable database format.
-const StateVersion = 9
+const StateVersion = 10
 
 // InstanceStatus distinguishes metadata preparation from observed execution.
 type InstanceStatus string
@@ -122,4 +122,12 @@ type DaemonStatusResponse struct {
 	Status        string `json:"status"`
 	PID           int    `json:"pid"`
 	LeaseDuration string `json:"lease_duration"`
+}
+
+// DestroyRequest authorizes explicit cleanup of one recorded instance.
+// Force waives shared-resource ownership proof only for this invocation.
+type DestroyRequest struct {
+	APIVersion string `json:"api_version"`
+	InstanceID string `json:"instance_id"`
+	Force      bool   `json:"force,omitempty"`
 }

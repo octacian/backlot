@@ -225,6 +225,11 @@ func (s *store) recoverExecution(id string) error {
 		result.CleanupFailure = cleanup.Error()
 		result.CleanupDetails = cleanupDetails(cleanup)
 	}
+	// Retrying resource cleanup does not interrupt an already completed execution.
+	if cleanup == nil && result.CompletedAt != "" && !active(instance.Status) && !result.Kept {
+		_, err := s.execution(id, instance.Status, &result)
+		return err
+	}
 	for i := range result.Components {
 		result.Components[i].Status = "stopped"
 		if cleanup != nil {

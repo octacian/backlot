@@ -364,3 +364,17 @@ See the [decision](adr/20261022T194804759Z-bind-attached-persistent-execution-to
 and [command/API contract](daemon.md#attached-execution). Independent implementation
 reviews, frozen native/provider suites and published-head CI remain required;
 focused development evidence is not a release/adoption claim.
+
+## Shared services (issue 43)
+
+[PR 45](https://github.com/octacian/backlot/pull/45) implements the MariaDB slice:
+project-scoped servers and private instance allocations, native/container
+connections, lifecycle/concurrency/recovery and bounded force cleanup. See the
+[decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md),
+[runtime guide](containers.md#project-scoped-shared-services),
+[MariaDB example](../examples/shared-mariadb/README.md) and
+[validation commands](testing.md#shared-mariadb-integration).
+
+[Issue 43](https://github.com/octacian/backlot/issues/43) remains the umbrella:
+PR 2 adds PostgreSQL 17; PR 3 adds custom execution and a non-Go/non-database fixture.
+Those paths and overall issue/V1 acceptance remain follow-ups.

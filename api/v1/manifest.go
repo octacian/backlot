@@ -50,15 +50,16 @@ const (
 
 // Manifest declares reusable components and independently selected scenes.
 type Manifest struct {
-	Version      string                 `json:"version" yaml:"version" jsonschema_description:"Contract version; use backlot/v1."`
-	Project      string                 `json:"project" yaml:"project" jsonschema_description:"Stable project identifier, independent of branch names."`
-	Tools        map[string]string      `json:"tools,omitempty" yaml:"tools,omitempty" jsonschema_description:"Named executables; planning checks availability without running them."`
-	Inputs       map[string]Input       `json:"inputs,omitempty" yaml:"inputs,omitempty" jsonschema_description:"Explicit external inputs; keep machine credentials out of projects."`
-	Environments map[string]Environment `json:"environments,omitempty" yaml:"environments,omitempty" jsonschema_description:"Reusable environment layers; include them explicitly."`
-	Resources    map[string]Resource    `json:"resources,omitempty" yaml:"resources,omitempty" jsonschema_description:"Instance-owned allocations selected explicitly; planning does not provision them."`
-	Outputs      map[string]Output      `json:"outputs,omitempty" yaml:"outputs,omitempty" jsonschema_description:"Checkout output paths and serialization groups."`
-	Components   map[string]Component   `json:"components" yaml:"components" jsonschema_description:"Reusable native or container services and jobs."`
-	Scenes       map[string]Scene       `json:"scenes" yaml:"scenes" jsonschema_description:"Named workflows with explicit selection and lifetime."`
+	SharedServices map[string]SharedService `json:"shared_services,omitempty" yaml:"shared_services,omitempty"`
+	Version        string                   `json:"version" yaml:"version" jsonschema_description:"Contract version; use backlot/v1."`
+	Project        string                   `json:"project" yaml:"project" jsonschema_description:"Stable project identifier, independent of branch names."`
+	Tools          map[string]string        `json:"tools,omitempty" yaml:"tools,omitempty" jsonschema_description:"Named executables; planning checks availability without running them."`
+	Inputs         map[string]Input         `json:"inputs,omitempty" yaml:"inputs,omitempty" jsonschema_description:"Explicit external inputs; keep machine credentials out of projects."`
+	Environments   map[string]Environment   `json:"environments,omitempty" yaml:"environments,omitempty" jsonschema_description:"Reusable environment layers; include them explicitly."`
+	Resources      map[string]Resource      `json:"resources,omitempty" yaml:"resources,omitempty" jsonschema_description:"Instance-owned allocations selected explicitly; planning does not provision them."`
+	Outputs        map[string]Output        `json:"outputs,omitempty" yaml:"outputs,omitempty" jsonschema_description:"Checkout output paths and serialization groups."`
+	Components     map[string]Component     `json:"components" yaml:"components" jsonschema_description:"Reusable native or container services and jobs."`
+	Scenes         map[string]Scene         `json:"scenes" yaml:"scenes" jsonschema_description:"Named workflows with explicit selection and lifetime."`
 }
 
 // Input declares a required externally supplied value and its sensitivity.
@@ -96,7 +97,8 @@ type Reference struct {
 
 // Resource declares an instance-owned allocation; planning never provisions it.
 type Resource struct {
-	Kind string `json:"kind" yaml:"kind" jsonschema_description:"Explicit discriminator; see the supported values and conditional fields."`
+	SharedService string `json:"shared_service,omitempty" yaml:"shared_service,omitempty"`
+	Kind          string `json:"kind" yaml:"kind" jsonschema_description:"Explicit discriminator; see the supported values and conditional fields."`
 }
 
 // Output declares a checkout-relative mutable path and serialization group.
@@ -157,7 +159,7 @@ type Component struct {
 	Image           *Value                    `json:"image,omitempty" yaml:"image,omitempty" jsonschema_description:"Container image literal or declared input reference."`
 	Args            []string                  `json:"args,omitempty" yaml:"args,omitempty" jsonschema_description:"Direct argument vector; shell expansion requires an explicit shell command."`
 	Policy          JobPolicy                 `json:"policy,omitempty" yaml:"policy,omitempty" jsonschema_description:"Job scheduling policy; services omit this field."`
-	Initializes     []string                  `json:"initializes,omitempty" yaml:"initializes,omitempty" jsonschema_description:"Attached volume/directory generations initialized by a fresh-only job."`
+	Initializes     []string                  `json:"initializes,omitempty" yaml:"initializes,omitempty" jsonschema_description:"Attached volume/directory/allocation generations initialized by a fresh-only job."`
 	DependsOn       []Dependency              `json:"depends_on,omitempty" yaml:"depends_on,omitempty" jsonschema_description:"Explicit ready-service or completed-job dependencies."`
 	EnvironmentSets []string                  `json:"environment_sets,omitempty" yaml:"environment_sets,omitempty" jsonschema_description:"Reusable environment sets included in this order."`
 	Environment     Environment               `json:"environment,omitempty" yaml:"environment,omitempty" jsonschema_description:"Component environment layers applied after included sets."`

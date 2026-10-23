@@ -115,7 +115,7 @@ func (Reference) JSONSchemaExtend(s *jsonschema.Schema) {
 	s.OneOf = []*jsonschema.Schema{
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "input"}}), named(), schemaEmpty("field", "port")}},
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "instance"}, "field": schemaEnum("id", "checkout", "project", "scene")}), schemaRequire("field"), schemaEmpty("name", "port")}},
-		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "resource"}, "field": schemaEnum("port", "path", "name", "value", "url", "ca_cert_path")}), named("field"), schemaEmpty("port")}},
+		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "resource"}, "field": schemaEnum("port", "path", "name", "value", "url", "ca_cert_path", "host", "database", "username", "password")}), named("field"), schemaEmpty("port")}},
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "output"}, "field": {Const: "path"}}), named("field"), schemaEmpty("port")}},
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "service"}, "field": {Const: "host"}}), named("field"), schemaEmpty("port")}},
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "service"}, "field": {Const: "port"}, "port": {Pattern: schemaIdentifier}}), named("field", "port")}},
@@ -124,7 +124,8 @@ func (Reference) JSONSchemaExtend(s *jsonschema.Schema) {
 
 // JSONSchemaExtend constrains supported resource kinds.
 func (Resource) JSONSchemaExtend(s *jsonschema.Schema) {
-	schemaProperty(s, "kind").Enum = schemaEnum("port", "volume", "directory", "secret", "network", "origin").Enum
+	schemaProperty(s, "kind").Enum = schemaEnum("port", "volume", "directory", "secret", "network", "origin", "allocation").Enum
+	s.AllOf = append(s.AllOf, schemaWhen("kind", "allocation", schemaRequire("shared_service")))
 }
 
 // JSONSchemaExtend constrains output serialization identifiers.

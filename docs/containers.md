@@ -43,18 +43,20 @@ paths by default; explicit `--config` may select a new machine file. Destroy use
 only recorded ownership, so a missing or changed checkout cannot redirect cleanup.
 
 The fixture image owns database initialization through `MARIADB_*` environment
-settings. Backlot has no SQL provisioning, shared database, migrations or seed
-logic. Applications own those operations and any application-level readiness
+settings. This private-container path remains available alongside the optional
+[shared-service manager](#project-scoped-shared-services). Backlot does not
+own application migrations or seed logic. Applications own those operations and any application-level readiness
 probe. A TCP probe observes connectivity, which may precede application setup;
 use a declared native command probe when connectivity is insufficient.
 
 ## State compatibility
 
-The durable state format is version 9, the minimum supported baseline. Pre-v9
+The durable state format is version 10; version 9 is the minimum supported baseline. Pre-v9
 formats, including 6 and 8, are rejected unchanged; no migration from those
 preproduction formats is provided. From v9 onward, retain every real Go migration
 so the newest binary can apply the complete path when users skip releases,
-without intermediate binaries or reset.
+without intermediate binaries or reset. The 9-to-10 step adds four empty shared
+project/path/service/allocation buckets without rewriting retained records.
 
 Source validation, transformations, current authority validation and the final
 version fence share one write transaction. Any precommit error, cancellation or
@@ -193,13 +195,134 @@ secret-access endpoints and age/size retention.
 
 ## Shared API
 
-The existing named `RunRequest`/`InstanceResponse` contracts serve `/v1/run`,
-`/v1/restart` and `/v1/reset`; restart/reset require `instance_id`. Named
-`StopRequest`/`InstanceResponse` serve `/v1/runtime/stop`; force requires the
-selected `expected_attempt`. `InstanceRequest`/`InstanceResponse` remain the
-contracts for `/v1/destroy`.
-The CLI/client and server share these Go types. Logs use the existing typed
-paged/NDJSON contracts. Resource capabilities and credential values stay private.
+The CLI/client and daemon use the same named Go contracts; see the canonical
+[endpoint/type table](daemon.md#local-api-and-doctor), including command-specific destroy
+requests and strict API-version/ID rules. Logs retain their typed paged/NDJSON
+contracts; capabilities and credentials stay private. [Testing](testing.md)
+defines provider commands; local milestone evidence is separate from V1 acceptance.
 
-See [testing/tooling](testing.md) for the provider integration command and resource
-requirements. A passing local suite is milestone evidence, not all-V1 acceptance.
+<a id="project-scoped-shared-services-gate-1"></a>
+
+## Project-scoped shared services
+
+Shared MariaDB servers retain independent instance allocations. See the
+[implementation plan](implementation-plan.md#shared-services-issue-43) for delivery
+status and PostgreSQL/custom execution follow-ups.
+
+Declare `shared_services` and select `kind: allocation` resources per the
+[manifest guide](manifest.md#shared-service-declarations); follow the runnable
+[MariaDB example](../examples/shared-mariadb/README.md) for worktrees and lifecycle.
+Root credentials stay in private provisioning state and the owned server's Engine
+configuration, with no public API reference. Application passwords are sensitive:
+inspect through named fixtures and explicit `secret` access, or select persistent
+[startup details](daemon.md#declared-startup-details) to authorize their display.
+Database/user names have no grant wildcards. Databases start empty; project jobs
+own application schema.
+
+The first selected start pins the existing local image ID, records volume/network/
+server intent, then ensures readiness before allocating. Native connection values
+use 127.0.0.1 and a dynamically published loopback port. Containers attach to a
+separate owned shared network and receive its alias and port 3306. No host DNS,
+extra gateway, runtime pull/build or widened bind is needed. The administrative
+password never enters consumer environment. Engine access is trusted administration.
+The bundled path checks MariaDB identity and enabled grant enforcement before allocating.
+Only MariaDB 11.4 has been validated so far.
+
+List recorded services, then control the recorded service ID through the daemon:
+
+```sh
+backlot shared list --state-dir /absolute/private/daemon --json
+backlot shared inspect --state-dir /absolute/private/daemon --json SERVICE_ID
+backlot shared stop --state-dir /absolute/private/daemon --json SERVICE_ID
+backlot shared start --state-dir /absolute/private/daemon --json SERVICE_ID
+backlot shared restart --state-dir /absolute/private/daemon --json SERVICE_ID
+backlot shared destroy --state-dir /absolute/private/daemon --json SERVICE_ID
+```
+
+List/inspect report durable lifecycle state, retained allocation counts and pending
+release counts with bounded control-failure diagnostics; they are not SQL health
+probes. Instance inspect also retains failed explicit cleanup diagnostics. Start also happens for selected scene dependencies.
+Stop/restart refuse active/kept dependents. Destroy refuses every retained allocation;
+explicitly destroy those instances first. Scene stop never stops the shared server.
+Server declarations/endpoint must match retained configuration exactly; use distinct
+names for incompatible servers. No automatic upgrades, relinking or external
+adoption occur. Separate daemon state roots do not pool resources.
+
+The [decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
+defines durable intent, SQL ownership and recovery. Missing acknowledged allocations
+are never silently recreated; interrupted release cannot reopen as provisioning.
+For uncertain effects/unavailable SQL, restore access and retry explicit reset/destroy.
+Release preserves shared storage; shutdown/recovery joins consumers before servers,
+retains data/credentials and requires explicit execution restart. Ordinary cleanup
+requires ownership proof; the bounded force exception follows.
+
+### Explicit operator force cleanup
+
+Ownership uncertainty is preserved by default, including automatic disposable
+cleanup and daemon recovery. To authorize deletion of the selected recorded shared
+target despite uncertain proof, use the existing destroy command with `--force`:
+
+```sh
+backlot destroy --force --state-dir /absolute/private/daemon --json INSTANCE_ID
+backlot shared destroy --force --state-dir /absolute/private/daemon --json SERVICE_ID
+```
+
+The flag is the acknowledgment; no second prompt is required. Instance force may
+drop its recorded database and exact application user even when the database comment,
+user authentication or grants no longer match. Shared force may remove its recorded
+server/container, volume and network despite capability-label mismatch. This can
+delete an externally replaced object at a recorded handle; Docker volume identities
+are names. Neither command accepts caller-selected SQL names or provider handles.
+Container/network effects with no acknowledged immutable ID still require original
+capability recovery or manual exact removal, not adoption of a same-name replacement.
+
+Both commands verify actual absence before settling durable cleanup obligations.
+Unavailable provider/SQL access, failed deletion or unverified absence returns
+failure and retains an inspectable obligation. Partial completion permits another
+explicit attempt on the same recorded targets. Force authority is invocation-only:
+it is not persisted or reused by recovery after a crash. An older daemon that
+rejects the flag is an error, never a reason to retry silently without it.
+
+Consumers must stop/join first. Native guardian and private directory/container
+ownership checks remain enforced; force does not authorize PID/name-only signaling
+or deletion beneath known consumers. Known overlapping retained SQL allocations
+block deletion. Shared destruction still refuses **every retained allocation**,
+including stopped instances and pending cleanup; explicitly destroy each instance
+first. Force does not remove foreign consumers, force volume/network removal, or
+implicitly remove volumes from drifted server mounts. Before SQL access, Backlot
+still verifies the exact existing server's image/configuration, storage/network,
+administration environment and current loopback binding. It creates no replacements
+on this path. Restore original topology/admin access if those checks cannot pass.
+
+A missing acknowledged server is not proof that SQL data is gone: its retained
+volume may still hold every allocation. When both the exact recorded server container
+and backing volume are authoritatively absent at the recorded provider, instance
+force can reconcile that instance's SQL effects as absent without SQL access. Missing
+network alone, missing server alone, a live server with missing volume, or provider
+contact failure cannot establish this proof. Unselected peer obligations remain.
+
+If missing infrastructure prevents SQL cleanup, either restore original topology
+and administration manually, or deliberately retire that server's data. For retirement,
+stop/join **all affected consumers** first; with trusted private operator inventory,
+use provider tools to delete only that exact server container and backing volume,
+and verify both absent. Then force-destroy each affected recorded instance ID
+individually, followed by shared-destroy of the service ID to remove its remaining
+recorded network and metadata. This is destructive whole-server retirement decided
+by the operator, not an implicit instance-cleanup cascade. If consumers cannot be
+joined, resolve that first or restore access. Manual deletion of only an exact SQL
+database/user can also be reconciled by force while the original server is usable.
+
+An unreadable, lost or corrupt state DB cannot supply a validated CLI target. Force
+does not repair/reconstruct it. Retain a private backup and diagnostic inventory;
+stop the daemon/consumers through retained authenticated authorities or their owning
+supervisor; identify exact effects from trustworthy operator records, delete only
+selected effects through provider/SQL administration and verify absence. If target
+inventory is unavailable, investigate manually; do not scan/prune or signal observed
+PIDs. A fresh state directory requires explicit accounting for old leftovers and
+cannot truthfully mark unknown old obligations released. Never publish credentials,
+capabilities, SQL statements or raw private state in recovery reports.
+
+The bundled path validates the provisional private [`backlot.manager/v1` messages](../api/v1/manager.go),
+bounded to 64 KiB. The [manager contract](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md#decision)
+separates ownership/effect from exit status and requires transient release-only
+force or explicit unsupported failure. Custom execution remains later work.

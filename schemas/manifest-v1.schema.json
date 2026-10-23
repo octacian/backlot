@@ -352,7 +352,7 @@
           },
           "type": "array",
           "uniqueItems": true,
-          "description": "Attached volume/directory generations initialized by a fresh-only job."
+          "description": "Attached volume/directory/allocation generations initialized by a fresh-only job."
         },
         "depends_on": {
           "items": {
@@ -586,6 +586,15 @@
     },
     "Manifest": {
       "properties": {
+        "shared_services": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SharedService"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object"
+        },
         "version": {
           "type": "string",
           "const": "backlot/v1",
@@ -1131,7 +1140,11 @@
                     "name",
                     "value",
                     "url",
-                    "ca_cert_path"
+                    "ca_cert_path",
+                    "host",
+                    "database",
+                    "username",
+                    "password"
                   ]
                 },
                 "kind": {
@@ -1286,7 +1299,29 @@
       "description": "Reference identifies a value without expression evaluation or interpolation."
     },
     "Resource": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "allocation"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "shared_service"
+            ]
+          }
+        }
+      ],
       "properties": {
+        "shared_service": {
+          "type": "string"
+        },
         "kind": {
           "type": "string",
           "enum": [
@@ -1295,7 +1330,8 @@
             "directory",
             "secret",
             "network",
-            "origin"
+            "origin",
+            "allocation"
           ],
           "description": "Explicit discriminator; see the supported values and conditional fields."
         }
@@ -1472,6 +1508,58 @@
         "resource"
       ],
       "description": "ServicePort maps an allocated host port to an explicit container listener when needed."
+    },
+    "SharedService": {
+      "properties": {
+        "manager": {
+          "type": "string",
+          "enum": [
+            "mariadb"
+          ]
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "storage": {
+          "type": "string",
+          "enum": [
+            "volume"
+          ]
+        },
+        "admin": {
+          "type": "string",
+          "enum": [
+            "generated"
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "maximum": 3306,
+          "minimum": 3306
+        },
+        "readiness_timeout": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "manager",
+        "image",
+        "storage",
+        "admin",
+        "port",
+        "readiness_timeout"
+      ],
+      "description": "SharedService declares a retained project-owned MariaDB server independently of scene allocations."
     },
     "StartupDetailSelection": {
       "properties": {

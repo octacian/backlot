@@ -64,6 +64,11 @@ func (s *store) guardAbandonedData(id string) error {
 }
 
 func (s *service) stopRuntimeRequest(ctx context.Context, request v1.StopRequest) (v1.Instance, error) {
+	ctx, finish, err := s.beginMutation(ctx)
+	if err != nil {
+		return v1.Instance{}, err
+	}
+	defer finish()
 	unlock := s.lockMutation(request.InstanceID)
 	defer unlock()
 	before, err := s.store.inspect(request.InstanceID)

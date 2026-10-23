@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -17,7 +18,9 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-var bucketNames = []string{"meta", "instances", "checkouts", "paths", "persistent", "snapshots", "secrets", "runtime", "resources"}
+var stateNineBuckets = []string{"meta", "instances", "checkouts", "paths", "persistent", "snapshots", "secrets", "runtime", "resources"}
+var sharedBuckets = []string{"shared_projects", "shared_paths", "shared_services", "shared_allocations"}
+var bucketNames = append(append([]string{}, stateNineBuckets...), sharedBuckets...)
 
 type record struct {
 	Instance           v1.Instance         `json:"instance"`
@@ -26,6 +29,9 @@ type record struct {
 }
 
 type store struct {
+	sharedLocks sync.Map
+	// sharedCheckpoint is an internal fixture seam, never activated by project input.
+	sharedCheckpoint func(string) error
 	// waiverCheckpoint is a test-only failure seam after transactional writes.
 	waiverCheckpoint func() error
 	db               *bolt.DB

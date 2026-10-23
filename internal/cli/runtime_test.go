@@ -23,3 +23,16 @@ func TestRuntimeRequiresTerminalSeparator(t *testing.T) {
 		t.Fatal("runtime parser lost JSON flag or interpreted forwarded flag", stdout.String(), err)
 	}
 }
+
+func TestForceUnsupportedActions(t *testing.T) {
+	for _, action := range []string{"run", "restart", "reset", "shared list", "shared inspect", "shared start", "shared stop", "shared restart"} {
+		var stdout, stderr bytes.Buffer
+		command := NewCommand(v1.VersionResponse{APIVersion: v1.Version}, &stdout, &stderr)
+		args := append([]string{"backlot"}, strings.Fields(action)...)
+		args = append(args, "--force")
+		err := command.Run(context.Background(), args)
+		if err == nil || !strings.Contains(err.Error(), "flag") {
+			t.Fatal("unsupported action accepted force", action, err)
+		}
+	}
+}

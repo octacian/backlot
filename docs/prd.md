@@ -61,8 +61,9 @@ framework, database engine, or test-runner conventions on adopting projects.
 - **Service:** a long-running native process or generic container.
 - **Job:** finite native or container work, such as build, migrate, seed, or test.
 - **Resource:** an instance-owned volume, directory, generated secret, network,
-  port allocation, or published origin. A database is a generic container with
-  explicit image/environment/storage/probes, not a specialized V1 resource.
+  port allocation, published origin, or per-instance shared-service allocation.
+  Private databases remain generic containers; optional project shared servers
+  provision empty databases and restricted application users through managers.
 - **Machine configuration:** executable overrides, local Docker access, Caddy
   endpoint and route scope, upstream reachability, domain suffix, and daemon
   storage settings. Machine credentials never belong in a project manifest.
@@ -293,7 +294,7 @@ must not serialize secret values; application stdout/stderr is captured as emitt
 
 Frontend UI; remote/multi-host orchestration; WSL QA/support guarantees;
 toolchain/version-manager installation; automatic watch/build/restart; arbitrary
-job retriggering; shared-database provisioning; Compose import/export; CI scene
+job retriggering; machine-wide automatic shared-server pooling; Compose import/export; CI scene
 execution guarantees; DNS/router management; public certificate provisioning; automatic trust installation;
 raw Caddyfiles; generated application config; atomic multi-service rollouts;
 transparent continuation across daemon crashes.
@@ -330,3 +331,34 @@ Demonstrate these behaviors using generic fixtures on macOS ARM64:
 
 Run the complete acceptance set before declaring V1 shipped. Compilation on
 another OS, unit tests, or migration of one application are insufficient evidence.
+
+## Project-scoped shared services
+
+Project-owned shared servers provide empty, isolated per-instance allocations
+across linked worktrees. The [decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md#decision)
+defines exact project identity, clone separation and retained-configuration fences;
+the [runtime guide](containers.md#project-scoped-shared-services) defines operations.
+
+| Lifecycle | Required behavior |
+| --- | --- |
+| Selected start | Ensure server, allocate, then start consumers |
+| Stop/start/restart | Preserve paired data/credentials; scene stop leaves server running |
+| Reset/destroy | Join consumers, replace/release only target allocations |
+| Disposable completion | Release on success; existing failure/cancellation keep policy applies |
+| Shared control | Idle servers remain until explicit stop; stop/restart fence active/kept dependents; destroy fences every retained allocation |
+| Shutdown/recovery | Join consumers before servers, preserve data/obligations, require explicit execution restart |
+
+Application users have useful local permissions and no peer-data/admin access.
+Native/container connection references are explicit and context-correct; admin
+credentials stay private and ordinary output redacts secrets. Project jobs own
+migrations/fixtures. Planning stays offline, unselected services stay untouched,
+and runtime never pulls/builds images. Unavailable providers/cleanup code retain
+obligations. Shared failure/performance remains common; private containers remain
+available for privileged workloads and stronger separation.
+
+Explicit instance/shared `destroy --force` provides bounded recorded-target recovery
+with invocation-only authority, peer/consumer fences and verified absence. Follow
+the [operator procedure](containers.md#explicit-operator-force-cleanup), including
+missing storage or unreadable state. [Issue 43](https://github.com/octacian/backlot/issues/43)
+and [implementation status](implementation-plan.md#shared-services-issue-43) track
+remaining PostgreSQL/custom protocol, non-database and provider/platform acceptance.

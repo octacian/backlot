@@ -567,6 +567,11 @@ func (s *service) launchContainer(ctx context.Context, id string, c v1.PlannedCo
 			networking.EndpointsConfig[allocation.Name] = &network.EndpointSettings{NetworkID: allocation.ID, Aliases: []string{c.Name}}
 		}
 	}
+	for name, connection := range entry.shared {
+		if contains(c.Resources, name) {
+			networking.EndpointsConfig[connection.Network.Name] = &network.EndpointSettings{NetworkID: connection.Network.ID}
+		}
+	}
 	entry.resources.Containers = append(entry.resources.Containers, r)
 	index := len(entry.resources.Containers) - 1
 	if err = s.store.saveResources(id, *entry.resources); err != nil {
@@ -696,6 +701,31 @@ func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, re
 		value = snap.Secrets[key]
 	}
 	r := value.Symbolic
+	if r != nil && r.Kind == "resource" && snap.Plan.Resources[r.Name].Kind == "allocation" {
+		connection, ok := entry.shared[r.Name]
+		if !ok {
+			return "", problem("allocation_unavailable", "shared allocation is not ready")
+		}
+		switch r.Field {
+		case "host":
+			if runtime == v1.Container {
+				return connection.Alias, nil
+			}
+			return "127.0.0.1", nil
+		case "port":
+			if runtime == v1.Container {
+				return "3306", nil
+			}
+			return strconv.Itoa(connection.Port), nil
+		case "database":
+			return connection.Request.Database, nil
+		case "username":
+			return connection.Request.Username, nil
+		case "password":
+			return connection.Request.Password, nil
+		}
+		return "", problem("invalid_contract", "unknown allocation field")
+	}
 	if r != nil && r.Kind == "resource" && r.Field == "ca_cert_path" {
 		if entry == nil || entry.caCertPath == "" || snap.Plan.Publish == nil || snap.Plan.Publish.Resource != r.Name || snap.Plan.Resources[r.Name].Kind != "origin" {
 			return "", problem("invalid_contract", "ca_cert_path requires a managed published origin and explicit environment assignment")

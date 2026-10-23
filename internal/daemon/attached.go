@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"crypto/subtle"
 	v1 "github.com/octacian/backlot/api/v1"
 	"time"
@@ -21,6 +22,11 @@ func (s *service) attached(request v1.AttachedRequest, cancel bool) (v1.SceneRes
 	// Renewal/status must remain readable while an operator holds the mutation
 	// lock joining cleanup. service.mu also serializes revocation and replacement.
 	if cancel {
+		_, finish, err := s.beginMutation(context.Background())
+		if err != nil {
+			return response, err
+		}
+		defer finish()
 		unlock := s.lockMutation(request.InstanceID)
 		defer unlock()
 	}

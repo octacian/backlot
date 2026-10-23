@@ -254,6 +254,8 @@ format and rejection/cleanup rules.
 | Endpoint | Named request | Named response |
 | --- | --- | --- |
 | `GET /v1/status` | None | `DaemonStatusResponse` |
+| `POST /v1/shared/list`, `/v1/shared/inspect`, `/v1/shared/start`, `/v1/shared/stop`, `/v1/shared/restart` | `SharedRequest` | `SharedResponse` (durable status; no credentials/ownership authority) |
+| `POST /v1/shared/destroy` | `SharedDestroyRequest` | `SharedResponse` |
 | `POST /v1/doctor` | `DoctorRequest` | `DoctorResponse` |
 | `POST /v1/instances` | `ListRequest` | `ListResponse` (at most 100 summaries) |
 | `POST /v1/stop` | `ControlRequest` | `DaemonStatusResponse` (`stopping`) |
@@ -263,9 +265,13 @@ format and rejection/cleanup rules.
 | `POST /v1/renew` | `LeaseRequest` | `InstanceResponse` |
 | `POST /v1/run`, `/v1/restart`, `/v1/reset` | `RunRequest` | `InstanceResponse` |
 | `POST /v1/runtime/stop` | `StopRequest` (force requires selected `expected_attempt`) | `InstanceResponse` |
-| `POST /v1/destroy` | `InstanceRequest` | `InstanceResponse` |
+| `POST /v1/destroy` | `DestroyRequest` | `InstanceResponse` |
 | `POST /v1/attached/renew`, `/v1/attached/cancel` | `AttachedRequest` | `SceneResponse` |
 | `POST /v1/logs` | `LogsRequest` | `LogsResponse` |
+
+Restart/reset require a recorded `instance_id`; run does not accept one.
+Destroy force uses command-specific destroy requests; native stop force retains its
+independent attempt-bound `StopRequest` contract.
 
 `list` uses `ListRequest` (`after_id`, `limit`; zero means default 100, maximum
 100) and returns identity-ordered summaries with a `next_after_id` continuation.

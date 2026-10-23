@@ -63,8 +63,16 @@ func (c *Client) Reset(ctx context.Context, request v1.RunRequest) (v1.InstanceR
 
 // Destroy removes owned runtime/data while preserving historical evidence.
 func (c *Client) Destroy(ctx context.Context, id string) (v1.InstanceResponse, error) {
+	return c.DestroyWithRequest(ctx, v1.DestroyRequest{APIVersion: v1.Version, InstanceID: id})
+}
+
+// DestroyWithRequest removes a recorded instance with explicit invocation authority.
+func (c *Client) DestroyWithRequest(ctx context.Context, request v1.DestroyRequest) (v1.InstanceResponse, error) {
 	var response v1.InstanceResponse
-	err := c.call(ctx, http.MethodPost, "/v1/destroy", v1.InstanceRequest{APIVersion: v1.Version, InstanceID: id}, &response)
+	if request.APIVersion != v1.Version || !validID(request.InstanceID) {
+		return response, &v1.PlanError{Code: "invalid_request", Message: "recorded instance_id and compatible API version required"}
+	}
+	err := c.call(ctx, http.MethodPost, "/v1/destroy", request, &response)
 	return response, err
 }
 

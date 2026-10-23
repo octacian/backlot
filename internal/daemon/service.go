@@ -15,12 +15,14 @@ import (
 	"github.com/octacian/backlot/internal/manifest"
 	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
+	bolt "go.etcd.io/bbolt"
 )
 
 type service struct {
 	generation            string
 	diagnosticRecoveryErr error
 	diagnosticOwners      map[string]*diagnosticOwner
+	mutationOwners        map[*mutationOwner]struct{}
 	gatewayGroup          *native.Group
 	evidence              evidencePolicy
 	store                 *store
@@ -101,6 +103,15 @@ func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, o
 	if err := original.verify(); err != nil {
 		return v1.InstanceResponse{}, err
 	}
+	if len(snapshot.Plan.SharedServices) > 0 {
+		identity, err := identifyShared(original.source, snapshot.Plan.Project)
+		if err != nil {
+			return v1.InstanceResponse{}, err
+		}
+		if err := s.store.db.Update(func(tx *bolt.Tx) error { return registerSharedProject(tx, identity) }); err != nil {
+			return v1.InstanceResponse{}, err
+		}
+	}
 	response, created, err := s.store.beginSelected(snapshot, original.checkout, s.lease, persistentOnly)
 	if err != nil || !created {
 		return response, err
@@ -142,7 +153,7 @@ func (s *service) stop() error {
 		ids = append(ids, id)
 	}
 	s.mu.Unlock()
-	result := errors.Join(s.stopDiagnostics(), s.stopExecutions(ids))
+	result := errors.Join(s.stopMutations(), s.stopDiagnostics(), s.stopExecutions(ids))
 	// Shutdown fences acceptance before joining. Expiry coordinators retain their
 	// own channels so storage cannot close while they finish durable results.
 	result = errors.Join(result, s.joinExpiryWorkers())
@@ -158,7 +169,11 @@ func (s *service) stop() error {
 		gatewayErr = s.store.stopManaged(&gatewayRecord, s.gatewayGroup)
 	}
 	s.mu.Unlock()
-	return errors.Join(result, expiryErr, gatewayErr, s.store.reconcile("daemon shutdown interrupted preparation", false), s.store.cleanupFailures())
+	var sharedErr error
+	if s.ownersJoined() {
+		sharedErr = s.store.stopSharedServices(context.Background())
+	}
+	return errors.Join(result, expiryErr, gatewayErr, sharedErr, s.store.reconcile("daemon shutdown interrupted preparation", false), s.store.cleanupFailures())
 }
 
 func (s *service) recoverUnownedExecutions() error {

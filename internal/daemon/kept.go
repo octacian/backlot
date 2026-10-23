@@ -96,6 +96,11 @@ func sanitizeResult(result *v1.ExecutionResult, snapshot plan.Snapshot, entry *e
 				}
 			}
 		}
+		for _, connection := range entry.shared {
+			if connection.Request.Password != "" {
+				text = strings.ReplaceAll(text, connection.Request.Password, "[redacted]")
+			}
+		}
 		return text
 	}
 	result.Failure = redact(result.Failure)

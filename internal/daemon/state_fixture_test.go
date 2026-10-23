@@ -29,8 +29,20 @@ func copyStateNine(t *testing.T) string {
 
 func TestRetainedStateNine(t *testing.T) {
 	dir := copyStateNine(t)
-	db, err := bolt.Open(filepath.Join(dir, "state.db"), 0600, &bolt.Options{ReadOnly: true})
+	db, err := bolt.Open(filepath.Join(dir, "state.db"), 0600, nil)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Update(func(tx *bolt.Tx) error {
+		if err := tx.Bucket([]byte("meta")).Put([]byte("unknown-passive"), []byte{0, 255, 1}); err != nil {
+			return err
+		}
+		b, err := tx.CreateBucket([]byte("unrelated-passive"))
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte("opaque"), []byte{255, 0, 2})
+	}); err != nil {
 		t.Fatal(err)
 	}
 	before := stateContents(t, &store{db: db})
@@ -41,6 +53,9 @@ func TestRetainedStateNine(t *testing.T) {
 		t.Fatal("fixture lost its historical record classes")
 	}
 	before["meta"]["version"] = strconv.Itoa(v1.StateVersion)
+	for _, name := range sharedBuckets {
+		before[name] = map[string]string{}
+	}
 	for range 2 {
 		s, err := openStore(dir)
 		if err != nil {
@@ -83,7 +98,7 @@ func TestRetainedStateNine(t *testing.T) {
 }
 
 func TestRetainedStateNineRejectedCopy(t *testing.T) {
-	for _, kind := range []string{"unsupported", "corrupt"} {
+	for _, kind := range []string{"unsupported", "corrupt", "pre9", "experimental7", "missing source", "collision"} {
 		t.Run(kind, func(t *testing.T) {
 			dir := copyStateNine(t)
 			path := filepath.Join(dir, "state.db")
@@ -94,6 +109,17 @@ func TestRetainedStateNineRejectedCopy(t *testing.T) {
 			err = db.Update(func(tx *bolt.Tx) error {
 				if kind == "unsupported" {
 					return tx.Bucket([]byte("meta")).Put([]byte("version"), []byte("999999"))
+				}
+				switch kind {
+				case "pre9":
+					return tx.Bucket([]byte("meta")).Put([]byte("version"), []byte("8"))
+				case "experimental7":
+					return tx.Bucket([]byte("meta")).Put([]byte("version"), []byte("7"))
+				case "missing source":
+					return tx.DeleteBucket([]byte("resources"))
+				case "collision":
+					_, err := tx.CreateBucket([]byte("shared_allocations"))
+					return err
 				}
 				return tx.Bucket([]byte("runtime")).Put([]byte("invalid-orphan"), []byte(`null`))
 			})

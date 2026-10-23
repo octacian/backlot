@@ -197,6 +197,11 @@ func (s *service) scene(target v1.SceneTarget, stop bool) (v1.SceneResponse, err
 	if err != nil || !stop || response.Result == nil {
 		return response, err
 	}
+	_, finish, admissionErr := s.beginMutation(context.Background())
+	if admissionErr != nil {
+		return response, admissionErr
+	}
+	defer finish()
 	id := response.Result.Instance.ID
 	if s.beforeSceneMutation != nil {
 		s.beforeSceneMutation(id)

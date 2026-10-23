@@ -499,3 +499,44 @@ browser joins precede fixture removal. A failed cleanup preserves private state;
 no TLS bypass, resolver override, user/system trust mutation or Docker is used.
 This bounded browser gate does not establish macOS system/browser adoption or
 replace frozen native/provider/regression and exact published-content CI gates.
+
+<a id="early-shared-mariadb-checkpoint-43-gate-1"></a>
+<a id="shared-mariadb-lifecycle-and-recovery-43-gate-2"></a>
+
+## Shared MariaDB integration
+
+Run serially with exclusive owned-fixture authority, an explicit local Docker Unix
+endpoint and existing MariaDB 11.4/Alpine 3.21 images. Fixtures build the static
+application image from the inspected Alpine ID with `--pull=false --network=none`;
+production never pulls/builds. An unset endpoint skips (incomplete evidence); an
+unavailable configured endpoint fails.
+
+```sh
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^(TestSharedMariaDB.*|TestSharedUnselectedOfflinePrivacy)$' -count=1 -v -timeout=30m
+```
+
+Focused CLI/permission/configuration coverage:
+
+```sh
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^TestSharedMariaDBGate1$' -count=1 -v -timeout=6m
+```
+
+See [CLI/permissions](../internal/daemon/shared_integration_test.go),
+[lifecycle/concurrency](../internal/daemon/shared_lifecycle_test.go),
+[ownership/privacy](../internal/daemon/shared_ownership_test.go),
+[effect/acknowledgment faults](../internal/daemon/shared_faults_test.go) and
+[force recovery](../internal/daemon/shared_force_integration_test.go) for scenarios;
+[checkpoint helpers](../internal/daemon/shared_checkpoint_test.go) own private barriers. Parent-written random SQL witnesses must
+survive independently of application initialization. Register cleanup before effects
+or faults; fault/reap retained children only after observing real effects. Recovery
+retains the five-second API expectation; the aggregate timeout allows serial fixtures.
+Prove SQL database/user and owned runtime/image absence; retain cached base images
+and uncertain diagnostics.
+
+On the frozen candidate also run `make check`, complete [DockerRuntime](#dockerprivate-state-integration)
+and `TestDisposableEvidenceDocker` regressions serially. Record revision/input/image
+provenance, failures/skips and cleanup externally per [release verification](release-acceptance/README.md).
+Prior MariaDB evidence does not establish PostgreSQL/custom execution, other-platform,
+full-feature or published-revision CI readiness.

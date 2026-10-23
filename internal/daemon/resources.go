@@ -89,6 +89,9 @@ func (s *store) saveResources(id string, g resourceGeneration) error {
 	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, "resources", id, g) })
 }
 func hasDocker(p v1.PlanResponse) bool {
+	if len(p.SharedServices) > 0 {
+		return true
+	}
 	for _, c := range p.Components {
 		if c.Runtime == v1.Container {
 			return true
@@ -119,6 +122,9 @@ func safeRestart(old, next plan.Snapshot) error {
 	}
 	// JSON omits empty resource maps; nil and allocated-empty mean the same
 	// resource-free contract. Nonempty declarations still require exact equality.
+	if !reflect.DeepEqual(old.Plan.SharedServices, next.Plan.SharedServices) && (len(old.Plan.SharedServices) > 0 || len(next.Plan.SharedServices) > 0) {
+		return unsafe()
+	}
 	if (len(old.Plan.Resources) != 0 || len(next.Plan.Resources) != 0) && !reflect.DeepEqual(old.Plan.Resources, next.Plan.Resources) {
 		return unsafe()
 	}
@@ -232,9 +238,12 @@ func (s *service) allocateResources(ctx context.Context, id string, snap plan.Sn
 			return err
 		}
 	}
+	if err := s.ensureSharedAllocations(ctx, id, snap, entry); err != nil {
+		return err
+	}
 	declarations := map[string]v1.Resource{}
 	for name, r := range snap.Plan.Resources {
-		if r.Kind != "port" && r.Kind != "origin" {
+		if r.Kind != "port" && r.Kind != "origin" && r.Kind != "allocation" {
 			declarations[name] = r
 		}
 	}
@@ -352,12 +361,21 @@ func verifyResource(ctx context.Context, d *dockerEngine, r ownedResource) error
 	}
 }
 func (s *store) removeResources(ctx context.Context, id string) error {
+	return s.removeResourcesWithForce(ctx, id, false)
+}
+func (s *store) removeResourcesWithForce(ctx context.Context, id string, force bool) error {
 	if err := s.guardAbandonedData(id); err != nil {
 		return err
 	}
 	g, err := s.resources(id)
-	if err != nil || g.ID == "" {
+	if err != nil {
 		return err
+	}
+	if err = s.markSharedRelease(ctx, id); err != nil {
+		return err
+	}
+	if g.ID == "" {
+		return s.releaseSharedAllocationsWithForce(ctx, id, force)
 	}
 	var d *dockerEngine
 	needsEngine := false
@@ -388,6 +406,9 @@ func (s *store) removeResources(ctx context.Context, id string) error {
 		if err = d.noConsumers(ctx, g); err != nil {
 			return err
 		}
+	}
+	if err = s.releaseSharedAllocationsWithForce(ctx, id, force); err != nil {
+		return err
 	}
 	names := make([]string, 0, len(g.Resources))
 	for name := range g.Resources {
@@ -424,6 +445,14 @@ func (s *store) removeResources(ctx context.Context, id string) error {
 	return s.saveResources(id, resourceGeneration{})
 }
 func (s *service) destroy(ctx context.Context, id string) (v1.Instance, error) {
+	return s.destroyWithForce(ctx, id, false)
+}
+func (s *service) destroyWithForce(ctx context.Context, id string, force bool) (v1.Instance, error) {
+	ctx, finish, admissionErr := s.beginMutation(ctx)
+	if admissionErr != nil {
+		return v1.Instance{}, admissionErr
+	}
+	defer finish()
 	unlock := s.lockMutation(id)
 	defer unlock()
 	instance, err := s.stopExecution(id)
@@ -449,7 +478,8 @@ func (s *service) destroy(ctx context.Context, id string) (v1.Instance, error) {
 	}
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	if err = s.store.removeResources(cleanup, id); err != nil {
+	if err = s.store.removeResourcesWithForce(cleanup, id, force); err != nil {
+		err = s.store.recordCleanupFailure(id, err)
 		return instance, problem("cleanup_failed", fmt.Sprintf("destroy preserved remaining resources: %v", err))
 	}
 	if instance.Execution == nil {
@@ -467,6 +497,12 @@ func (s *service) destroy(ctx context.Context, id string) (v1.Instance, error) {
 		}
 		return nil
 	})
+	// Keep the owner of a sticky collection gap for truthful shutdown reporting.
+	if err == nil && instance.Execution.CollectionFailure == "" {
+		s.mu.Lock()
+		delete(s.executions, id)
+		s.mu.Unlock()
+	}
 	return instance, err
 }
 
@@ -499,6 +535,24 @@ func recoverResourceEffect(ctx context.Context, d *dockerEngine, r ownedResource
 			return "", err
 		}
 		return out.Volume.Name, nil
+	case "container":
+		if d == nil {
+			return "", problem("missing_provider", "recorded Docker engine required")
+		}
+		out, err := d.ContainerInspect(ctx, r.Name, client.ContainerInspectOptions{})
+		if err != nil {
+			return "", err
+		}
+		if out.Container.Config == nil {
+			return "", problem("cleanup_failed", "pending container configuration unavailable; preserved")
+		}
+		if err = owned(out.Container.Config.Labels, r); err != nil {
+			return "", err
+		}
+		if !validID(out.Container.ID) {
+			return "", problem("cleanup_failed", "pending container immutable identity unavailable; preserved")
+		}
+		return out.Container.ID, nil
 	case "network":
 		if d == nil {
 			return "", problem("missing_provider", "recorded Docker engine required")
@@ -510,7 +564,31 @@ func recoverResourceEffect(ctx context.Context, d *dockerEngine, r ownedResource
 		if err = owned(out.Network.Labels, r); err != nil {
 			return "", err
 		}
+		if !validID(out.Network.ID) {
+			return "", problem("cleanup_failed", "pending network immutable identity unavailable; preserved")
+		}
 		return out.Network.ID, nil
 	}
 	return "", problem("state_corrupt", "unknown retained allocation kind")
+}
+
+// Record explicit cleanup failures separately from the preserved execution
+// outcome. Allocation release intent independently survives later consumer recovery.
+func (s *store) recordCleanupFailure(id string, cause error) error {
+	var detail *v1.PlanError
+	if errors.As(cause, &detail) && detail.Code == "native_ownership_relinquished" {
+		return cause // Independent deletion refusal does not change cleanup facts.
+	}
+	instance, err := s.inspect(id)
+	if err != nil {
+		return errors.Join(cause, err)
+	}
+	result := instance.Execution
+	if result == nil {
+		result = &v1.ExecutionResult{Attempt: newID(), Components: []v1.ComponentResult{}}
+	}
+	result.CleanupFailure = "resource cleanup incomplete; remaining ownership retained; restore provider and retry explicit reset/destroy"
+	result.CleanupDetails = cleanupDetails(cause)
+	_, err = s.execution(id, instance.Status, result)
+	return errors.Join(cause, err)
 }

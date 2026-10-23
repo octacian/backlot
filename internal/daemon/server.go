@@ -21,10 +21,11 @@ import (
 
 // Options selects private state placement and the bounded disposable client lease.
 type Options struct {
-	Directory      string
-	LeaseDuration  time.Duration
-	RetentionAge   time.Duration
-	RetentionBytes int64
+	sharedCheckpoint func(string) error
+	Directory        string
+	LeaseDuration    time.Duration
+	RetentionAge     time.Duration
+	RetentionBytes   int64
 }
 
 // DefaultLeaseDuration is the disposable disconnect grace period.
@@ -105,6 +106,7 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	} else if !os.IsNotExist(err) {
 		return problem("permissions", "cannot inspect daemon socket")
 	}
+	state.sharedCheckpoint = options.sharedCheckpoint
 	diagnosticRecoveryErr := state.recoverDiagnosticProbes()
 	var diagnosticDetail *v1.PlanError
 	if errors.As(diagnosticRecoveryErr, &diagnosticDetail) && diagnosticDetail.Code == "state_corrupt" {
@@ -112,6 +114,12 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	}
 	if err := state.recoverRuntime(); err != nil {
 		return err
+	}
+	if recoveryErr := state.stopSharedServices(context.Background()); recoveryErr != nil {
+		var detail *v1.PlanError
+		if errors.As(recoveryErr, &detail) && detail.Code == "state_corrupt" {
+			return recoveryErr
+		}
 	}
 	if err := state.recoverManaged(); err != nil {
 		return err
@@ -247,6 +255,32 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			}
 			writeJSON(w, response)
 
+		case "/v1/shared/destroy":
+			var request v1.SharedDestroyRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+			defer cancel()
+			response, err := s.sharedDestroy(ctx, request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+		case "/v1/shared/list", "/v1/shared/inspect", "/v1/shared/start", "/v1/shared/stop", "/v1/shared/restart":
+			var request v1.SharedRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+			defer cancel()
+			response, err := s.sharedControl(ctx, strings.TrimPrefix(r.URL.Path, "/v1/shared/"), request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
 		case "/v1/gateway/start", "/v1/gateway/stop", "/v1/gateway/restart", "/v1/gateway/status":
 			var request v1.GatewayRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
@@ -350,7 +384,7 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			}
 			writeJSON(w, v1.InstanceResponse{APIVersion: v1.Version, Instance: instance})
 		case "/v1/destroy":
-			var request v1.InstanceRequest
+			var request v1.DestroyRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
 				return
 			}
@@ -358,7 +392,7 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				writeError(w, problem("invalid_request", "recorded instance_id required"))
 				return
 			}
-			instance, err := s.destroy(r.Context(), request.InstanceID)
+			instance, err := s.destroyWithForce(r.Context(), request.InstanceID, request.Force)
 			if err != nil {
 				writeError(w, err)
 				return

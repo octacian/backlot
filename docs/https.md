@@ -11,6 +11,8 @@ Only published scenes require a gateway; other scenes and metadata-only `prepare
 do not contact it. The [gateway decision](adr/20261016T201500000Z-support-explicit-linux-managed-https-reachability.md)
 records ownership and trust boundaries.
 
+<a id="managed-local-https-on-macos-arm64"></a>
+
 ## Managed local HTTPS
 
 For Linux prerequisites, resolver setup and explicit bridge reachability, follow

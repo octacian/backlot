@@ -367,7 +367,7 @@ focused development evidence is not a release/adoption claim.
 
 ## Shared services (issue 43)
 
-[PR 45](https://github.com/octacian/backlot/pull/45) implements the MariaDB 11.4 slice:
+[PR 45](https://github.com/octacian/backlot/pull/45) implements the MariaDB slice:
 project-scoped servers and private instance allocations, native/container
 connections, lifecycle/concurrency/recovery and bounded force cleanup. See the
 [decision](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md),

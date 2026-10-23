@@ -408,8 +408,8 @@ func (s *store) startSharedMode(ctx context.Context, record *sharedServiceRecord
 	if err = db.QueryRowContext(ctx, "SELECT VERSION(), @@skip_grant_tables").Scan(&version, &skipGrants); err != nil {
 		return problem("shared_unavailable", "cannot verify MariaDB server version/security mode")
 	}
-	if !strings.HasPrefix(version, "11.4.") || !strings.Contains(version, "MariaDB") || skipGrants != 0 {
-		return problem("shared_unsupported", "bundled manager requires MariaDB 11.4 with privilege enforcement enabled")
+	if !strings.Contains(version, "MariaDB") || skipGrants != 0 {
+		return problem("shared_unsupported", "bundled manager requires MariaDB with privilege enforcement enabled")
 	}
 	record.Status = "running"
 	record.Failure = ""

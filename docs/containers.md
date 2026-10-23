@@ -205,7 +205,7 @@ defines provider commands; local milestone evidence is separate from V1 acceptan
 
 ## Project-scoped shared services
 
-Shared MariaDB 11.4 servers retain independent instance allocations. See the
+Shared MariaDB servers retain independent instance allocations. See the
 [implementation plan](implementation-plan.md#shared-services-issue-43) for delivery
 status and PostgreSQL/custom execution follow-ups.
 
@@ -225,8 +225,8 @@ use 127.0.0.1 and a dynamically published loopback port. Containers attach to a
 separate owned shared network and receive its alias and port 3306. No host DNS,
 extra gateway, runtime pull/build or widened bind is needed. The administrative
 password never enters consumer environment. Engine access is trusted administration.
-The bundled path checks MariaDB 11.4 and enabled grant enforcement before allocating.
-Only the exercised MariaDB 11.4 image is evidence; this is not generic MySQL support.
+The bundled path checks MariaDB identity and enabled grant enforcement before allocating.
+Only MariaDB 11.4 has been validated so far.
 
 List recorded services, then control the recorded service ID through the daemon:
 

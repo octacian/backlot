@@ -52,9 +52,10 @@ attached containers use the shared network alias/internal port. Select shared
 services only through the offline scene dependency closure. Preserve startup
 selection metadata and effective configuration provenance alongside that selection.
 
-The bundled manager supports MariaDB 11.4 with explicit image/arguments, retained
-volume, generated private administration, port 3306 and bounded readiness. Allocate
-an empty database and restricted user/password per instance resource. Generate
+The bundled manager requires MariaDB identity and enabled grant enforcement, with
+explicit image/arguments, retained volume, generated private administration, port
+3306 and bounded readiness. Allocate an empty database and restricted user/password
+per instance resource. Generate
 grant identifiers without wildcard characters. Verify database ownership comments
 using one-way fingerprints and user authentication hashes before adopting or
 reclaiming interrupted effects. Unexpected grants, identity mismatch or unavailable

@@ -123,7 +123,7 @@ func inspect(ctx context.Context, db *sql.DB, request v1.ManagerRequest) (observ
 }
 
 // MariaDB implements the bounded allocation operations against a verified owned
-// MariaDB 11.4 server. Atomic database comments and the user's authentication hash
+// MariaDB server. Atomic database comments and the user's authentication hash
 // authenticate interrupted effects. Explicit release force waives these proofs only
 // for the caller's recorded targets; it still observes and verifies actual absence.
 // Generated names contain no SQL grant wildcard characters. All errors are safe:

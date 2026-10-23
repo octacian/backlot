@@ -66,6 +66,9 @@ func output(c *urfave.Command, value any, err error) error {
 			}
 		}
 		_, err = fmt.Fprintf(c.Writer, "Instance %s: %s\nOperation: %s\n", result.Instance.ID, result.Instance.Status, result.Instance.Operation.ID)
+		if err == nil {
+			err = executableOutput(c.Writer, result.Instance.Plan, "recorded selection; original source/context unrecorded")
+		}
 		if err == nil && result.Instance.Execution != nil && result.Instance.Execution.Origin != "" {
 			_, err = fmt.Fprintf(c.Writer, "URL: %s\n", result.Instance.Execution.Origin)
 		}
@@ -102,7 +105,7 @@ func output(c *urfave.Command, value any, err error) error {
 		}
 	case v1.DoctorResponse:
 		for _, path := range result.Paths {
-			if _, err = fmt.Fprintf(c.Writer, "%s: %s (%s)\n", path.Name, path.Path, path.State); err != nil {
+			if _, err = fmt.Fprintf(c.Writer, "%s: %q (%s)\n", path.Name, path.Path, path.State); err != nil {
 				return err
 			}
 		}

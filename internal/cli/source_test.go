@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -68,7 +69,7 @@ func TestSourceIdentitySurvivesHumanAndJSONErrors(t *testing.T) {
 			if detail.SourceLayer != layer || detail.SourcePath != path || code != "" && detail.Code != code || field != "" && detail.Field != field {
 				t.Fatalf("wrong source: %+v", detail)
 			}
-			if !strings.Contains(err.Error(), layer+" source "+path) {
+			if !strings.Contains(err.Error(), layer+" source "+strconv.Quote(path)) {
 				t.Fatalf("missing human identity: %v", err)
 			}
 			if jsonMode {

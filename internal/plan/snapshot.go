@@ -8,6 +8,7 @@ import (
 // Snapshot retains validated declarations and resolved sensitive values privately.
 // Allocation references stay symbolic; this is preparation, never execution.
 type Snapshot struct {
+	ToolSelections     []ToolSelection           `json:"-"` // Current lookup observations, never retained launch provenance.
 	PrivateSourceState string                    `json:"-"` // Safe partial current-source status; never persisted as launch fact.
 	PrivateProvenance  *projectconfig.Provenance `json:"private_provenance,omitempty"`
 	// ConfigProvenance records the effective launch file, including an absent default.
@@ -24,6 +25,7 @@ type Snapshot struct {
 
 // Prepare resolves a source returned by Locate without rediscovering its paths.
 // It reads snapshot inputs but does not require provider configuration.
+// Lookup diagnostics describe daemon/runtime preparation; Resolve is caller/offline.
 // The caller must protect the returned manifest and secrets, never serialize them publicly.
 func Prepare(source Source, request v1.PlanRequest) (Snapshot, error) {
 	snapshot := Snapshot{Secrets: map[string]v1.PlannedValue{}, ImplicitBaseline: map[string]bool{}}
@@ -39,4 +41,10 @@ func (v resolvedValue) private() v1.PlannedValue {
 type ConfigProvenance struct {
 	Path    string `json:"path,omitempty"`
 	Present bool   `json:"present"`
+}
+
+// ToolSelection describes one current lookup from the same captured source layers.
+// It is internal diagnostic data, excluded from snapshot persistence and digests.
+type ToolSelection struct {
+	Component, Role, Tool, Candidate, Executable, SourceLayer, SourcePath string
 }

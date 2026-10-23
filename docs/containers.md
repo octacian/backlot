@@ -205,9 +205,9 @@ defines provider commands; local milestone evidence is separate from V1 acceptan
 
 [PR 45](https://github.com/octacian/backlot/pull/45) implements local MariaDB 11.4
 allocation, lifecycle, concurrency and recovery, including bounded force cleanup.
-[Implementation status](implementation-plan.md#shared-services-issue-43) separates
-prior technical verification from pending owner/first-slice closeout and later
-PostgreSQL/custom execution; no full-feature or platform readiness is implied.
+See PR 45 for current delivery status and the [implementation plan](implementation-plan.md#shared-services-issue-43)
+for the deferred PostgreSQL/custom execution boundary; no full-feature or platform
+readiness is implied.
 
 Declare `shared_services` and select `kind: allocation` resources as documented in
 [manifest references](manifest.md#shared-service-declarations). The runnable

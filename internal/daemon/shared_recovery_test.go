@@ -263,7 +263,7 @@ func TestSharedCompletedDestroyClearsFailure(t *testing.T) {
 }
 
 func TestSharedStateAuthority(t *testing.T) {
-	for _, kind := range []string{"intent", "partial", "released", "settled-service-deleted", "tampered-release", "project", "path", "service", "orphan", "force", "nested"} {
+	for _, kind := range []string{"intent", "acknowledged", "container-name", "network-prefix", "volume-handle", "partial", "released", "settled-service-deleted", "tampered-release", "project", "path", "service", "orphan", "force", "nested"} {
 		t.Run(kind, func(t *testing.T) {
 			svc, instance, _ := exportFixture(t)
 			state := svc.store
@@ -277,6 +277,16 @@ func TestSharedStateAuthority(t *testing.T) {
 			r.Server = ownedResource{Kind: "container", Name: "server", Token: newID()}
 			r.Volume = ownedResource{Kind: "volume", Name: "volume", Token: newID()}
 			r.Network = ownedResource{Kind: "network", Name: "network", Token: newID()}
+			switch kind {
+			case "acknowledged":
+				r.Server.ID, r.Network.ID, r.Volume.ID = newID(), newID(), r.Volume.Name
+			case "container-name":
+				r.Server.ID = r.Server.Name
+			case "network-prefix":
+				r.Network.ID = newID()[:12]
+			case "volume-handle":
+				r.Volume.ID = "other-volume"
+			}
 			a := sharedAllocation{ServiceID: r.ID, Request: v1.ManagerRequest{Version: v1.ManagerProtocolVersion, Operation: "allocate", AllocationID: newID(), Ownership: newID(), Database: "bl" + newID()[:32], Username: "bl" + newID()[:32], Password: newID()}}
 			if kind == "partial" {
 				a.Result = v1.ManagerResult{Version: v1.ManagerProtocolVersion, AllocationID: a.Request.AllocationID, Ownership: "uncertain", Effect: "partial"}
@@ -379,7 +389,7 @@ func TestSharedStateAuthority(t *testing.T) {
 				t.Fatal(err)
 			}
 			reopened, err := openStore(state.directory)
-			if kind == "intent" || kind == "partial" || kind == "released" || kind == "settled-service-deleted" {
+			if kind == "intent" || kind == "acknowledged" || kind == "partial" || kind == "released" || kind == "settled-service-deleted" {
 				if err != nil {
 					t.Fatal("valid interrupted journal refused", err)
 				}

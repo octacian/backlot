@@ -14,15 +14,24 @@ import (
 // verifySharedResource waives only labels on an acknowledged recorded handle.
 // Unknown container/network identities still require their original capability.
 func verifySharedResource(ctx context.Context, d *dockerEngine, r ownedResource, force bool) error {
+	if err := validateSharedResourceHandle(r); err != nil {
+		return err
+	}
 	if !force || r.ID == "" {
 		return verifyDockerResource(ctx, d, r)
 	}
 	switch r.Kind {
 	case "container":
-		_, err := d.ContainerInspect(ctx, r.ID, client.ContainerInspectOptions{})
+		out, err := d.ContainerInspect(ctx, r.ID, client.ContainerInspectOptions{})
+		if err == nil && out.Container.ID != r.ID {
+			return problem("cleanup_failed", "shared container identity disagrees; preserved")
+		}
 		return err
 	case "network":
-		_, err := d.NetworkInspect(ctx, r.ID, client.NetworkInspectOptions{})
+		out, err := d.NetworkInspect(ctx, r.ID, client.NetworkInspectOptions{})
+		if err == nil && out.Network.ID != r.ID {
+			return problem("cleanup_failed", "shared network identity disagrees; preserved")
+		}
 		return err
 	case "volume":
 		_, err := d.VolumeInspect(ctx, r.ID, client.VolumeInspectOptions{})

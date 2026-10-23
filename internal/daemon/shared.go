@@ -118,7 +118,30 @@ func decodeSharedService(data []byte, id string) (sharedServiceRecord, error) {
 	if record.ID != id || !validID(id) || !validID(record.Project.ID) || !validID(record.AdminPassword) || !validID(record.Server.Token) || !validID(record.Network.Token) || !validID(record.Volume.Token) || record.Configuration != sharedDigest(record.Declaration, record.Endpoint) {
 		return record, problem("state_corrupt", "shared service contract incomplete; preserved")
 	}
+	for _, resource := range []ownedResource{record.Server, record.Network, record.Volume} {
+		if err := validateSharedResourceHandle(resource); err != nil {
+			return record, err
+		}
+	}
 	return record, nil
+}
+
+// Empty handles are pending intents; acknowledged Docker IDs cannot be aliases.
+func validateSharedResourceHandle(r ownedResource) error {
+	if r.ID == "" {
+		return nil
+	}
+	switch r.Kind {
+	case "container", "network":
+		if validID(r.ID) {
+			return nil
+		}
+	case "volume":
+		if r.ID == r.Name {
+			return nil
+		}
+	}
+	return problem("state_corrupt", "invalid acknowledged shared resource handle; preserved")
 }
 func (s *store) saveShared(record sharedServiceRecord) error {
 	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, "shared_services", record.ID, record) })

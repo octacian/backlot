@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/manifest"
@@ -53,5 +56,47 @@ func TestSharedNamedWireContract(t *testing.T) {
 	response.Services[0].ID = strings.Repeat("d", 64)
 	if _, err := c.Shared(context.Background(), "inspect", request); err == nil {
 		t.Fatal("wrong shared identity accepted")
+	}
+}
+
+func TestSharedLifecycleTransportBudget(t *testing.T) {
+	id := strings.Repeat("a", 64)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(80 * time.Millisecond):
+		case <-r.Context().Done():
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Backlot-API-Version", v1.Version)
+		_ = json.NewEncoder(w).Encode(v1.SharedResponse{APIVersion: v1.Version, Services: []v1.SharedStatus{{ID: id, ProjectID: id, Configuration: id, Name: "sql", Status: "stopped"}}})
+	}))
+	defer server.Close()
+	c := New("unused")
+	defer c.Close()
+	c.http.Timeout = 10 * time.Millisecond
+	c.http.Transport = &http.Transport{Proxy: func(_ *http.Request) (*url.URL, error) { return url.Parse(server.URL) }}
+	defer c.http.CloseIdleConnections()
+	for _, action := range []string{"start", "stop", "restart", "destroy", "inspect", "list"} {
+		t.Run(action, func(t *testing.T) {
+			request := v1.SharedRequest{APIVersion: v1.Version, ServiceID: id}
+			if action == "list" {
+				request.ServiceID = ""
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_, err := c.Shared(ctx, action, request)
+			read := action == "inspect" || action == "list"
+			if (err != nil) != read {
+				t.Fatalf("shared %s transport budget: %v", action, err)
+			}
+			if !read {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+				defer cancel()
+				if _, err := c.Shared(ctx, action, request); err == nil || ctx.Err() == nil {
+					t.Fatal("caller deadline ignored", err)
+				}
+			}
+		})
 	}
 }

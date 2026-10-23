@@ -239,7 +239,7 @@ func TestForceSharedTopology(t *testing.T) {
 					return
 				}
 				if r.Method == http.MethodGet && (strings.HasPrefix(r.URL.Path, "/volumes/") || strings.HasPrefix(r.URL.Path, "/networks/")) {
-					_, _ = io.WriteString(w, `{}`)
+					_ = json.NewEncoder(w).Encode(map[string]string{"Id": record.Network.ID, "Name": record.Volume.Name})
 					return
 				}
 				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/start") {
@@ -277,10 +277,13 @@ func TestForceSharedTopology(t *testing.T) {
 }
 
 func TestForceSharedRemovalBoundaries(t *testing.T) {
-	for _, scenario := range []string{"container-exact", "container-unacknowledged", "network-consumer", "volume-consumer"} {
+	for _, scenario := range []string{"container-exact", "container-unacknowledged", "container-wrong-id", "network-wrong-id", "network-consumer", "volume-consumer"} {
 		t.Run(scenario, func(t *testing.T) {
 			kind, _, _ := strings.Cut(scenario, "-")
 			resource := ownedResource{Kind: kind, ID: newID(), Name: "recorded-target", Token: newID()}
+			if kind == "volume" {
+				resource.ID = resource.Name
+			}
 			if scenario == "container-unacknowledged" {
 				resource.ID = ""
 			}
@@ -307,7 +310,11 @@ func TestForceSharedRemovalBoundaries(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(map[string]any{"Id": "foreign", "Mounts": []any{map[string]string{"Name": resource.Name}}, "NetworkSettings": map[string]any{"Networks": map[string]any{"foreign": map[string]string{"NetworkID": resource.ID}}}})
 					return
 				}
-				_ = json.NewEncoder(w).Encode(map[string]any{"Id": resource.ID, "Name": resource.Name, "Labels": map[string]string{"io.backlot.owner": "foreign"}, "Config": map[string]any{"Labels": map[string]string{"io.backlot.owner": "foreign"}}, "State": map[string]bool{"Running": false}})
+				id := resource.ID
+				if strings.HasSuffix(scenario, "-wrong-id") {
+					id = newID()
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"Id": id, "Name": resource.Name, "Labels": map[string]string{"io.backlot.owner": "foreign"}, "Config": map[string]any{"Labels": map[string]string{"io.backlot.owner": "foreign"}}, "State": map[string]bool{"Running": false}})
 			})
 			err := removeForcedSharedResource(context.Background(), d, resource)
 			if scenario == "container-exact" {
@@ -443,6 +450,62 @@ func TestForceSharedDestroyRecoversPendingContainer(t *testing.T) {
 				if loadErr != nil || saved.Server.ID != "" || saved.Server.Removed || !saved.Destroying {
 					t.Fatal("uncertain pending target lost obligation or adopted identity", loadErr)
 				}
+			}
+		})
+	}
+}
+
+func TestForceSharedMalformedHandleRefusedBeforeProvider(t *testing.T) {
+	for _, r := range []ownedResource{
+		{Kind: "container", Name: "server", ID: "server"},
+		{Kind: "network", Name: "network", ID: strings.Repeat("a", 12)},
+		{Kind: "volume", Name: "volume", ID: "other-volume"},
+	} {
+		t.Run(r.Kind, func(t *testing.T) {
+			var calls atomic.Int32
+			d := forceEngine(t, func(w http.ResponseWriter, _ *http.Request) { calls.Add(1); w.WriteHeader(http.StatusNotFound) })
+			code(t, removeForcedSharedResource(context.Background(), d, r), "state_corrupt")
+			if calls.Load() != 0 {
+				t.Fatal("malformed handle reached provider", calls.Load())
+			}
+		})
+	}
+}
+
+func TestForceSharedPendingNetworkIdentity(t *testing.T) {
+	for _, scenario := range []string{"owned", "invalid-id", "foreign"} {
+		t.Run(scenario, func(t *testing.T) {
+			resource := ownedResource{Kind: "network", Name: "pending-network", Token: newID()}
+			actualID := newID()
+			if scenario == "invalid-id" {
+				actualID = "network-prefix"
+			}
+			var deletes atomic.Int32
+			d := forceEngine(t, func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/networks/"+resource.Name:
+					token := resource.Token
+					if scenario == "foreign" {
+						token = newID()
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"Id": actualID, "Labels": map[string]string{"io.backlot.owner": token}})
+				case r.Method == http.MethodGet && r.URL.Path == "/containers/json":
+					_, _ = io.WriteString(w, `[]`)
+				case r.Method == http.MethodDelete && r.URL.Path == "/networks/"+actualID:
+					deletes.Add(1)
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Error("unexpected pending network operation", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusBadRequest)
+				}
+			})
+			err := removeForcedSharedResource(context.Background(), d, resource)
+			if scenario == "owned" {
+				if err != nil || deletes.Load() != 1 {
+					t.Fatal("owned full network ID not recovered", err, deletes.Load())
+				}
+			} else if err == nil || deletes.Load() != 0 {
+				t.Fatal("uncertain pending network obligation not preserved", err, deletes.Load())
 			}
 		})
 	}

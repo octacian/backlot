@@ -564,6 +564,9 @@ func recoverResourceEffect(ctx context.Context, d *dockerEngine, r ownedResource
 		if err = owned(out.Network.Labels, r); err != nil {
 			return "", err
 		}
+		if !validID(out.Network.ID) {
+			return "", problem("cleanup_failed", "pending network immutable identity unavailable; preserved")
+		}
 		return out.Network.ID, nil
 	}
 	return "", problem("state_corrupt", "unknown retained allocation kind")

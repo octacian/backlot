@@ -1,7 +1,7 @@
 ---
 title: "Explain native tool selection without probing runtimes"
 date: 2026-10-23
-status: proposed
+status: accepted
 summary: 'Explain selected executable paths and current daemon sources through existing diagnostics without adding wire or persisted fields.'
 tags: [planning, diagnostics, configuration, contracts]
 supersedes: []

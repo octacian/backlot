@@ -121,6 +121,9 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			if mode == "cleanup-failure" && (result.CleanupFailure == "" || *result.TerminalExitCode != 0) {
 				t.Fatalf("cleanup result %+v", result)
 			}
+			if mode == "cleanup-failure" && (result.CompletedAt == "" || result.CollectionFailure != "") {
+				t.Fatal("cleanup-only failure changed completed collection facts")
+			}
 			if mode == "cancellation" && !result.Cancelled {
 				t.Fatal("cancellation omitted")
 			}
@@ -185,7 +188,16 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			if err != nil || inspected.Instance.Status != v1.Destroyed || inspected.Instance.Execution.CleanupFailure != "" {
 				t.Fatal("destroy failed", inspected, err)
 			}
-			if proveObjectsAbsent != nil {
+			if mode == "cleanup-failure" {
+				expected := *result
+				expected.CleanupFailure, expected.CleanupDetails = "", nil
+				if !reflect.DeepEqual(inspected.Instance.Execution, &expected) {
+					t.Fatal("cleanup retry changed original execution result")
+				}
+				if err := proveObjectsAbsent(); err != nil {
+					t.Fatal(err)
+				}
+			} else if proveObjectsAbsent != nil {
 				h.expectDisposableDockerCollectionFailure(inspected.Instance, proveObjectsAbsent)
 			}
 		})

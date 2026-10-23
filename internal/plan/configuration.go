@@ -13,15 +13,16 @@ import (
 )
 
 type layers struct {
-	manifest                                   v1.Manifest
-	machine                                    v1.MachineConfig
-	effective                                  resolvedConfig
-	private                                    projectconfig.Selection
-	manifestDigest, machineDigest, machinePath string
-	machinePresent                             bool
+	manifest                                                 v1.Manifest
+	machine                                                  v1.MachineConfig
+	effective                                                resolvedConfig
+	private                                                  projectconfig.Selection
+	manifestDigest, machineDigest, manifestPath, machinePath string
+	machinePresent                                           bool
 }
 
 func loadLayers(source Source, configPath string, staged, reassociate bool) (l layers, loadErr error) {
+	l.manifestPath = source.ManifestPath
 	layer, path := "manifest", source.ManifestPath
 	defer func() { loadErr = manifest.SourceError(loadErr, layer, path) }()
 	// Capture source association independently of successful manifest/scene validation.

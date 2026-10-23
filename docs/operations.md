@@ -128,7 +128,7 @@ A zero test exit cannot override failed collection/cleanup.
 | Symptom | Diagnosis and next action |
 | --- | --- |
 | Cannot contact daemon | Use the same `--state-dir`; run `daemon status`/`doctor`, inspect the private startup log, then explicitly start. Never delete a live or uncertain socket/lock. |
-| Missing tool/input/seed | Run offline `plan`; configure the declared tool/input or existing static seed. Daemon baseline environment comes from startup, not a later shell. |
+| Missing tool/input/seed | Compare offline `plan` paths with `doctor --project PATH --scene NAME` in the daemon context; errors show the attempted tool and declaration source. For a local tool override use `project setup --edit`; configure required inputs/seeds explicitly. |
 | Image unavailable | Explicitly pull/build the declared image with Docker tooling, then restart the failed instance. Backlot never pulls implicitly. |
 | Database TCP ready but application unavailable | Use application preparation or a command probe that verifies credentials/schema; do not equate an open port with application readiness. |
 | Probe or preparation failed | Inspect component logs and failure detail; correct the application, then explicitly restart. Failed fresh-only initialization is not recorded as successful. |
@@ -143,6 +143,12 @@ A zero test exit cannot override failed collection/cleanup.
 | Managed gateway uncertain after temporary control loss | Retry `gateway stop` in the same state directory. If still fenced, choose restored authority, controlled reboot or explicit survivor-risk acknowledgement with force; follow [managed recovery](https.md#managed-gateway-recovery). Retain configuration and CA. |
 | State upgrade or unsupported version | Follow [state compatibility](containers.md#state-compatibility): stop the old daemon with its matching binary before upgrading, wait for exit/lock release, then explicitly start the newest binary in the same directory. Version 9 is the minimum supported baseline; retained steps from v9 support skipped releases without reset. Pre-v9 and other unsupported formats are rejected unchanged; preserve them for matching-binary diagnosis and lifecycle. |
 | Evidence expired | Status retains `evidence_expired`; expired logs/artifacts cannot be recovered from deleted containers. Configure daemon age/size retention before runs. |
+
+To refresh the daemon's startup PATH after changing shell/tool setup, stop it
+normally, wait for exit/lock release, then explicitly start it from the intended
+context with the same `--state-dir`. Keep the state directory and retained data.
+Recheck scoped doctor; apply changed selection to a scene only through its existing
+explicit start/restart lifecycle. See [daemon commands](daemon.md#commands).
 
 Never remove retained data while a consumer may still run. A cleanup failure is a
 failure, with remaining handles preserved for recovery. Private state and captured

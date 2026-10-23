@@ -1,5 +1,7 @@
 package v1
 
+import "strconv"
+
 // PlanRequest selects an offline scene and arguments for its terminal job.
 type PlanRequest struct {
 	Scene        string   `json:"scene"`
@@ -74,14 +76,14 @@ type PlanError struct {
 	Message     string `json:"message"`
 }
 
-// Error implements the error interface without including untrusted input values.
+// Error formats diagnostic fields and quotes the declaration path.
 func (e *PlanError) Error() string {
 	message := e.Message
 	if e.Field != "" {
 		message = e.Field + ": " + message
 	}
 	if e.SourceLayer != "" {
-		message = e.SourceLayer + " source " + e.SourcePath + ": " + message
+		message = e.SourceLayer + " source " + strconv.Quote(e.SourcePath) + ": " + message
 	}
 	return message
 }

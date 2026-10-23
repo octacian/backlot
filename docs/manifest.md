@@ -291,6 +291,12 @@ backend tests and UI tests. They exercise planning only: application commands
 are illustrative adoption inputs, and providers are not provisioned. Their
 machine example contains illustrative endpoints; its private example supplies the image name.
 
+Human `plan` output shows command/readiness executable paths as caller/offline
+selections; JSON uses their existing `executable` fields. Missing-tool errors name
+the attempted candidate and winning declaration file. Bare missing names remain
+bare; relative paths resolve from the project. These are launcher selections,
+not runtime version checks or proof of execution.
+
 ## Registered private project configuration
 
 Run `backlot project setup --project /path/to/project` once in a terminal. Setup
@@ -319,6 +325,11 @@ decoded as YAML/JSON; a file's extension selects its format. `--generate NAME`
 explicitly accepts generation in automation. Values are never accepted as raw
 command-line arguments. `--json` emits one named `ProjectSetupResponse` or
 `ErrorResponse`; interactive prompts go to the terminal on stderr.
+
+For a local tool override, run `backlot project setup --edit --project /path/to/project`
+and set the declared tool's executable. Private overrides win over machine tools,
+which win over manifest defaults, even when values match. Recheck the daemon's
+[current selection](daemon.md#scoped-provider-diagnostics) after editing.
 
 Completed setup is inspection: repeating the command reports the association,
 exact private file path, configured/missing input names and tool paths without

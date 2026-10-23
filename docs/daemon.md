@@ -478,6 +478,15 @@ then read only relevant providers. Host-only work does not contact Docker even
 when the machine file or unselected declarations contain Docker settings.
 Offline `plan` remains provider-free and mutation-free.
 
+Tool checks show current daemon command/readiness candidates, resolved paths and
+winning manifest/machine/private declaration sources from the same lookup.
+`current_tool_*` paths/checks describe this observation; `recorded_tool_*` paths
+retain original instance selections even when the file is now missing. Human
+instance/status output also shows recorded paths. Original successful candidate,
+source and lookup context are unrecorded; current checks cannot reconstruct them.
+A prepared path does not prove execution, and an absolute npm executable does not
+identify the child node selected through its own environment.
+
 The named `DoctorRequest`/`DoctorResponse` contract serves `POST /v1/doctor`.
 Decoded selections, enum outcomes and response consistency are validated. Each
 check carries a context and `ok`, `failed`, `unsupported`, or `deferred` status.

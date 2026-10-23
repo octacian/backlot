@@ -6,6 +6,8 @@ type GatewayRequest struct {
 	APIVersion            string `json:"api_version"`
 	ConfigPath            string `json:"config_path,omitempty"`
 	Force                 bool   `json:"force,omitempty"`
+	// DefaultConfigPath is a CLI-resolved candidate, used only while unconfigured.
+	DefaultConfigPath string `json:"default_config_path,omitempty"`
 }
 
 // GatewayResponse reports process/listener readiness, independently from client trust.
@@ -19,4 +21,6 @@ type GatewayResponse struct {
 	Endpoint                string                   `json:"endpoint,omitempty"`
 	HTTPSPort               int                      `json:"https_port,omitempty"`
 	Message                 string                   `json:"message,omitempty"`
+	// ConfigSource describes this selection: explicit, default, or retained.
+	ConfigSource string `json:"config_source,omitempty"`
 }

@@ -2,7 +2,7 @@
 title: "Explain native tool selection without probing runtimes"
 date: 2026-10-23
 status: proposed
-summary: 'Expose native executable selection and its source and context so users can diagnose tool mismatches without runtime probing.'
+summary: 'Explain selected executable paths and current daemon sources through existing diagnostics without adding wire or persisted fields.'
 tags: [planning, diagnostics, configuration, contracts]
 supersedes: []
 superseded_by: []
@@ -10,12 +10,11 @@ superseded_by: []
 
 # Explain native tool selection without probing runtimes
 
-Expose the attempted candidate, resolved executable, winning configuration layer
-and lookup context for selected native commands and command readiness checks.
-Carry recorded selection through existing plan, doctor and runtime diagnostics;
-report missing historical provenance as unrecorded. This explains launcher
-selection without claiming to identify the runtime launched indirectly by a script
-or package manager.
+Expose selected command/readiness paths, attempted candidates on lookup failure,
+and current daemon winning sources through existing plan, error, doctor and
+runtime contracts. Keep recorded paths distinct from current observations;
+original successful source/candidate/context remains unrecorded. This supports
+troubleshooting without new wire/state fields or runtime probing.
 
 ## Context
 
@@ -23,71 +22,84 @@ Offline planning uses the caller's environment; runtime planning uses the daemon
 startup environment. The planner already resolves executable paths, but loses
 the winning tool layer during composition and returns generic lookup errors.
 Private project overrides already exist through `project setup --edit`.
-[Issue #51](https://github.com/octacian/backlot/issues/51) is narrowed to explaining
-this existing selection, rather than managing tool versions.
+For [issue #51](https://github.com/octacian/backlot/issues/51), the owner accepts
+current troubleshooting and rechecking after edits; historical reasons for a
+successful selection and version/preflight recipes are deliberately deferred.
 
 ## Decision
 
-Use a small named `api/v1` selection value in existing results/errors, with tool
-name, attempted executable, optional resolved path, winning layer (manifest,
-machine or private project), and caller/offline or daemon/runtime context.
-Distinguish component command from readiness selection. Reuse the current
-composition and lookup path; preserve precedence and availability checks.
+Reuse `PlannedComponent.Executable` and `PlannedProbe.Executable` for resolved or
+recorded paths in existing plan/runtime JSON and human output. Label offline
+selection as caller-side and retained instance selection as recorded. A prepared
+selection does not prove execution; even an absolute npm path does not identify
+the child node runtime.
 
-On lookup failure, expose the attempted candidate in typed and human diagnostics.
-Relative paths retain existing project-relative resolution; unresolved bare names
-remain bare and have no resolved path. Scene doctor preserves this failure detail
-instead of directing users only to a possibly different caller-side plan.
+Keep `missing_tool` errors in existing `PlanError` fields: `Field` identifies
+`tools.NAME`, `SourceLayer` the winning manifest/machine/private layer and
+`SourcePath` its declaration file. Quote the attempted candidate and lookup
+context in the sanitized `Message`, distinguishing command from readiness.
+Preserve project-relative lookup; an unresolved bare name stays bare, with no
+invented absolute result. Scene/current-instance doctor preserves this safe
+failure detail instead of substituting generic caller-side plan guidance.
 
-Capture successful selection alongside the existing launch plan, retaining its
-executable fields as the execution inputs. Instance doctor and runtime status use
-recorded launch facts, even after files or PATH change; any current observations
-remain distinct. Never infer an older record's layer or context from current
-configuration. Its existing executable path remains usable with provenance
-unrecorded. New selection metadata must not affect drift digests, execution,
-cleanup authority or historical acceptance.
+For successful current daemon lookup, use bounded per-selected-tool
+`DoctorCheck` entries (`daemon/host`, existing statuses) for command/readiness,
+candidate, winning layer/source file and resolved path; use existing `DoctorPath`
+entries for absolute paths with existing filesystem states. Capture layer
+membership private → machine → manifest alongside the same composition and lookup,
+including equal-valued overrides. Carry observations internally on the prepared
+snapshot with explicit `json:"-"`; exclude them from persisted snapshot/plan JSON,
+resolved configuration and digests. Never reread sources to attribute an earlier
+lookup. Do not encode metadata in digest/association fields or add enums/scopes.
 
-Optional metadata is mechanically readable by current JSON state readers, but
-its classification under the [state migration policy](20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md)
-is an explicit review checkpoint before implementation. If it requires a format
-change, capture the unmodified predecessor and retain the migration/fixture path;
-do not silently add that obligation or rewrite historical records to invent facts.
+Instance doctor shows recorded paths even when missing, labels availability as a
+current observation, and keeps its independently prepared current selection
+separate. Preserve recorded paths after edits/restart inspection; never replace
+them with current lookup results or infer original source/candidate/context from
+current configuration. Missing original provenance does not itself fail health.
 
-Expose only selection metadata, never inherited PATH, environment values, private
-inputs or credentials. Do not add version execution/parsing, probes, recipes,
-constraints, installers, automatic environment import, or another settings system.
-Usage belongs in the [manifest](../manifest.md), [daemon](../daemon.md) and
-[operations](../operations.md) guides; improve override and recovery discoverability
-there and link to this rationale.
+Keep API/state versions, wire and persisted shapes, writers, execution,
+precedence, drift, cleanup authority and native implementation unchanged. This
+avoids strict predecessor readers rejecting unknown response fields after work
+acceptance; no migration, opt-in negotiation or compatibility exception is needed.
+Older daemons retain their existing diagnostic detail until explicitly restarted.
+
+Quote displayed candidates/paths to contain control characters. Expose only tool
+selection metadata, never inherited PATH/environment, private inputs, credentials
+or raw lookup errors. No version execution/parsing, extra probes, recipes,
+constraints, installers, environment import or new settings. Improve existing
+override and data-preserving recovery guidance later in the canonical
+[manifest](../manifest.md), [daemon](../daemon.md) and [operations](../operations.md)
+guides; keep this record as rationale.
 
 ## Consequences
 
-Users can distinguish caller/daemon mismatches and override sources without
-executing extra work. Shared typed results, error propagation, snapshot writers,
-client validation and CLI presentation need focused coverage. No background work,
-dependency or manifest/machine/private document schema change is expected.
-Historical gaps remain visible, and a selected launcher does not prove child
-runtime identity. Tool paths are public diagnostic metadata and must not contain
-secrets, as already required by the manifest guide.
+Users can compare paths and current override sources without executing extra
+work. The bounded implementation reaches planner capture/errors, doctor and common
+CLI presentation, with focused compatibility, privacy, nonserialization and
+recorded/current distinction tests. No dependency, background work or provider
+work is introduced. Successful plan/runtime JSON gains no structured source/context
+value; successful original source/candidate/context history remains deferred.
 
 ## Alternatives considered
 
-- **Documentation alone:** helps configure overrides but cannot explain a daemon's
-  actual selection or preserve launch facts.
-- **Re-resolve on inspection:** avoids recording metadata but can misattribute an
-  old launch after configuration or environment changes.
-- **Version/preflight recipes:** expand execution and configuration contracts
-  beyond the approved diagnostic outcome.
+- **Documentation alone:** explains overrides but cannot show actual current
+  daemon selection or attempted lookup candidates.
+- **Persist richer selection values:** preserves historical reasons but adds
+  wire compatibility and writer obligations beyond the approved need.
+- **Reconstruct historical source on inspection:** can falsely attribute a
+  recorded path after configuration changes; current observation is sufficient.
+- **Version/preflight recipes:** expand execution and configuration beyond scope.
 
 ## Revisit when
 
-Users need verified child runtime identity or version enforcement, or selection
-metadata starts influencing execution or cleanup authority. Reassess scope before
-adding either contract.
+Users need original successful selection reasons, machine-queryable successful
+source/context, verified child runtime identity or version enforcement. Reassess
+compatibility and persistence before adding those guarantees.
 
 ## References
 
 - [Planner and tool lookup](../../internal/plan/plan.go), [configuration composition](../../internal/plan/configuration.go)
-- [Snapshots](../../internal/plan/snapshot.go), [snapshot replacement and acceptance](../../internal/daemon/runtime_state.go)
-- [Scoped doctor](../../internal/daemon/doctor.go), [shared plan/error contracts](../../api/v1/plan.go)
-- [Private configuration rationale](20261021T001732173Z-register-private-project-configuration.md)
+- [Snapshots](../../internal/plan/snapshot.go), [shared plan/error contracts](../../api/v1/plan.go)
+- [Scoped doctor](../../internal/daemon/doctor.go), [existing doctor contracts](../../api/v1/doctor.go)
+- [Shared API rules](../architecture.md#shared-api), [private configuration rationale](20261021T001732173Z-register-private-project-configuration.md)

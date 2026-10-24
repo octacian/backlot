@@ -112,7 +112,7 @@ jobs:
           (cd dist && diff -u <(shasum -a 256 "backlot_${version}_darwin_arm64.tar.gz" "backlot_${version}_linux_amd64.tar.gz" | sort) <(sort "backlot_${version}_checksums.txt"))
           mkdir "$RUNNER_TEMP/backlot-extracted"
           archive="dist/backlot_${version}_${TARGET}.tar.gz"
-          diff -u <(printf '%s\n' LICENSE THIRD_PARTY_NOTICES.md backlot) <(tar -tzf "$archive" | sort)
+          diff -u <(printf '%s\n' LICENSE THIRD_PARTY_NOTICES.md backlot) <(tar -tzf "$archive" | LC_ALL=C sort)
           tar -xzf "$archive" -C "$RUNNER_TEMP/backlot-extracted"
           export BACKLOT_INSTALLED_TEST_BINARY="$RUNNER_TEMP/backlot-extracted/backlot"
           test -x "$BACKLOT_INSTALLED_TEST_BINARY"

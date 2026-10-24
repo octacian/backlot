@@ -365,6 +365,19 @@ and [command/API contract](daemon.md#attached-execution). Independent implementa
 reviews, frozen native/provider suites and published-head CI remain required;
 focused development evidence is not a release/adoption claim.
 
+## Versioned distribution (#25)
+
+Implemented for independent review: Go build-info fallback and linked identity,
+pinned GoReleaser OSS macOS ARM64/Linux amd64 archives with checksums/notices,
+native installed-binary smoke and a stable-tag workflow with fresh checks and
+complete draft publication. The [release decision](adr/20261023T212448687Z-publish-immutable-versioned-releases-with-goreleaser.md)
+sets compatibility and immutability policy; [operations](operations.md) covers
+installation/upgrade/removal and [tooling](testing.md#release-packaging-and-publication)
+covers preparation PR readiness, actual release gates and bounded failed-draft
+recovery. No tags/assets are published by this delivery. The preparation PR gates
+remain required; public tagged Go installation waits for an actual release.
+No Windows, installer, updater or runtime-state change is included.
+
 ## Shared services (issue 43)
 
 [PR 45](https://github.com/octacian/backlot/pull/45) implements the MariaDB slice:

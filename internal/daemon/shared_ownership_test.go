@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -400,7 +401,8 @@ func TestSharedMariaDBConsumerBeforeRelease(t *testing.T) {
 }
 
 func TestSharedUnselectedOfflinePrivacy(t *testing.T) {
-	f := newSharedMariaDBFixture(t, true)
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
+	h := newNativeHarness(t, binary, "30s")
 	ctx := context.Background()
 	listener, err := net.Listen("unix", filepath.Join(shortTemp(t), "reject.sock"))
 	if err != nil {
@@ -414,18 +416,33 @@ func TestSharedUnselectedOfflinePrivacy(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- reject.Serve(listener) }()
 	t.Cleanup(func() { _ = reject.Close(); _ = listener.Close(); <-done })
-	config := filepath.Join(filepath.Dir(f.h.dir), "reject.json")
+	config := filepath.Join(filepath.Dir(h.dir), "reject.json")
 	raw, _ := json.Marshal(v1.MachineConfig{Version: v1.ManifestVersion, Docker: &v1.DockerConfig{Endpoint: "unix://" + listener.Addr().String()}})
 	if err = os.WriteFile(config, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	f.h.manifest.Tools["true"] = "/usr/bin/true"
-	f.h.manifest.Resources["private"] = v1.Resource{Kind: "secret"}
-	f.h.manifest.Components["private"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Resources: []string{"private"}, Command: &v1.Command{Tool: "true"}, Environment: v1.Environment{Assign: map[string]v1.Value{"PRIVATE_VALUE": fixtureRef("resource", "private", "value")}}}
-	f.h.manifest.Scenes["private"] = v1.Scene{Lifetime: v1.Persistent, Components: []string{"private"}, Resources: []string{"private"}}
-	f.writeBoth(t)
+	h.manifest.Tools["true"] = "/usr/bin/true"
+	h.manifest.SharedServices = map[string]v1.SharedService{"sql": {Manager: "mariadb", Image: "unused-mariadb:fixture", Storage: "volume", Admin: "generated", Port: 3306, ReadinessTimeout: "60s"}}
+	h.manifest.Resources["database"] = v1.Resource{Kind: "allocation", SharedService: "sql"}
+	environment := v1.Environment{Assign: map[string]v1.Value{}}
+	for _, field := range []string{"host", "port", "database", "username", "password"} {
+		environment.Assign["DB_"+strings.ToUpper(field)] = fixtureRef("resource", "database", field)
+	}
+	h.manifest.Components["shared"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Resources: []string{"database"}, Command: &v1.Command{Tool: "true"}, Environment: environment}
+	container := h.manifest.Components["shared"]
+	container.Runtime, container.Command = v1.Container, nil
+	container.Image = ptrValue(fixtureLiteral("unused-consumer:fixture"))
+	h.manifest.Components["container"] = container
+	h.manifest.Scenes["host"] = v1.Scene{Lifetime: v1.Persistent, Components: []string{"shared"}, Resources: []string{"database"}}
+	h.manifest.Resources["private"] = v1.Resource{Kind: "secret"}
+	h.manifest.Components["private"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Resources: []string{"private"}, Command: &v1.Command{Tool: "true"}, Environment: v1.Environment{Assign: map[string]v1.Value{"PRIVATE_VALUE": fixtureRef("resource", "private", "value")}}}
+	h.manifest.Scenes["private"] = v1.Scene{Lifetime: v1.Persistent, Components: []string{"private"}, Resources: []string{"private"}}
+	h.write()
 	for _, scene := range []string{"private", "host"} {
-		output := f.cli("plan", scene, "--project", f.h.project, "--config", config, "--json")
+		output, err := exec.Command(binary, "plan", scene, "--project", h.project, "--config", config, "--json").CombinedOutput()
+		if err != nil {
+			t.Fatal("offline plan", err, string(output))
+		}
 		var planned v1.PlanResponse
 		if err = json.Unmarshal(output, &planned); err != nil {
 			t.Fatal(err)
@@ -443,16 +460,26 @@ func TestSharedUnselectedOfflinePrivacy(t *testing.T) {
 			}
 		}
 	}
-	r := f.request("private", f.h.project)
+	r := h.request("private")
 	r.Plan.ConfigPath = config
-	target := f.accept(t, r)
-	f.wait(t, target.Instance.ID, v1.RuntimeReady)
-	f.destroy(t, target.Instance.ID)
+	target, err := h.cli.Run(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.state(target.Instance.ID, v1.RuntimeReady)
+	if _, err := h.cli.Destroy(ctx, target.Instance.ID); err != nil {
+		t.Fatal(err)
+	}
 	if contacts.Load() != 0 {
 		t.Fatal("unselected declarations/offline planning contacted Docker")
 	}
-	// Selected real SQL ordinary status/results/fixtures/logs contain no secrets.
-	target = f.run("host", f.h.project)
+	t.Log("private native lifecycle and symbolic offline plans make zero rejecting-provider contacts")
+}
+
+func TestSharedMariaDBOutputPrivacy(t *testing.T) {
+	f := newSharedMariaDBFixture(t, true)
+	ctx := context.Background()
+	target := f.run("host", f.h.project)
 	credential := f.credential(t, target.Instance.ID, "native")
 	private := f.liveAdminRecord(t)
 	inspected, err := f.h.cli.Inspect(ctx, target.Instance.ID)
@@ -477,7 +504,7 @@ func TestSharedUnselectedOfflinePrivacy(t *testing.T) {
 
 	}
 	f.destroy(t, target.Instance.ID)
-	t.Log("private native lifecycle and symbolic offline plans make zero rejecting-provider contacts; ordinary selected output remains redacted")
+	t.Log("ordinary selected output remains redacted")
 }
 
 func TestSharedMariaDBMultipleAllocations(t *testing.T) {

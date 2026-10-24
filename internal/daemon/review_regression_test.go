@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/netip"
@@ -177,11 +178,46 @@ func TestReadinessIPv6WildcardFamilies(t *testing.T) {
 				}
 				return optionErr
 			}}
-			listener, err := lc.Listen(context.Background(), "tcp6", "[::]:0")
-			if err != nil {
-				t.Fatal(err)
+			var listener net.Listener
+			ipv4 := -1
+			t.Cleanup(func() {
+				if ipv4 >= 0 {
+					_ = syscall.Close(ipv4)
+				}
+				if listener != nil {
+					_ = listener.Close()
+				}
+			})
+			var err error
+			// Reserve both TCP families; an IPv6-only bind does not reserve IPv4.
+			for attempt := 0; attempt < 8; attempt++ {
+				listener, err = lc.Listen(context.Background(), "tcp6", "[::]:0")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if only == 0 {
+					break
+				}
+				ipv4, err = syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				syscall.CloseOnExec(ipv4)
+				err = syscall.Bind(ipv4, &syscall.SockaddrInet4{Port: listener.Addr().(*net.TCPAddr).Port, Addr: [4]byte{127, 0, 0, 1}})
+				if err == nil {
+					break
+				}
+				_ = syscall.Close(ipv4)
+				ipv4 = -1
+				_ = listener.Close()
+				listener = nil
+				if !errors.Is(err, syscall.EADDRINUSE) {
+					t.Fatal(err)
+				}
 			}
-			defer func() { _ = listener.Close() }()
+			if listener == nil {
+				t.Fatal("could not reserve both fixture TCP families", err)
+			}
 			port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
 			target := "127.0.0.1:" + port
 			// A TCP listener need not accept before family/ownership inspection.
@@ -201,11 +237,9 @@ func TestReadinessIPv6WildcardFamilies(t *testing.T) {
 				}
 				// A distinct IPv4 socket can coexist on this exact port. Deliberately
 				// ask for another group so its owner is unrelated; v6-only cannot mask it.
-				other, err := net.Listen("tcp4", target)
-				if err != nil {
+				if err := syscall.Listen(ipv4, 1); err != nil {
 					t.Fatal(err)
 				}
-				defer func() { _ = other.Close() }()
 				owned, conflict, err := native.ListenerEndpoint(context.Background(), syscall.Getpgrp()+1, target)
 				if err != nil || owned || !conflict {
 					t.Fatal("unrelated IPv4 endpoint accepted", owned, conflict, err)

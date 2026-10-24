@@ -213,8 +213,11 @@ func TestDoctorRecoveryArtifactDiagnostics(t *testing.T) {
 }
 
 func TestDoctorCleanupCausePrivacy(t *testing.T) {
-	state, key, r, _ := diagnosticCopyFixture(t)
-	_ = state
+	key := newID()
+	r := diagnosticProbeRecord{CA: &diagnosticCACopy{Parent: "1:2", SHA256: strings.Repeat("a", 64)}}
+	if !validDiagnosticCACopy(r) {
+		t.Fatal("invalid formatting fixture")
+	}
 	private := strings.Repeat("private-key-token-control-path-PEM\n", 1024)
 	for _, cause := range []diagnosticCleanupCause{diagnosticUnidentified, diagnosticCopyMismatch, diagnosticParentMismatch, diagnosticProviderUncertain, diagnosticRemovalFailed} {
 		response := v1.DoctorResponse{APIVersion: v1.Version, Scope: "daemon", Healthy: true, Checks: []v1.DoctorCheck{}, Paths: []v1.DoctorPath{}}

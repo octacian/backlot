@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -18,6 +19,12 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "check-http" {
+		if err := checkHTTP(os.Getenv("DB_CHECK_PORT")); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "shared consumer check failed")
 		os.Exit(1)
@@ -46,6 +53,21 @@ func main() {
 		}
 	}
 }
+
+func checkHTTP(port string) error {
+	client := &http.Client{Timeout: time.Second}
+	response, err := client.Get("http://" + net.JoinHostPort("127.0.0.1", port))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 8))
+	if err != nil || response.StatusCode != http.StatusOK || string(body) != "updated" {
+		return errors.New("application HTTP/SQL readiness failed")
+	}
+	return nil
+}
+
 func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -188,13 +189,15 @@ func (f *sharedMariaDBFixture) addLive(t *testing.T) string {
 		base.Environment.Assign["DB_PERSIST"] = fixtureLiteral("1")
 		base.Ports = map[string]v1.ServicePort{"http": {Resource: "http"}}
 		base.Environment.Assign["DB_LISTEN"] = fixtureRef("resource", "http", "port")
+		base.Environment.Assign["DB_CHECK_PORT"] = fixtureRef("resource", "http", "port")
 		if name == "live-container" {
 			base.Ports["http"] = v1.ServicePort{Resource: "http", ContainerPort: 8080}
 			base.Environment.Assign["DB_LISTEN"] = fixtureLiteral("8080")
 		} else {
 			base.Environment.Assign["DB_STOP_FILE"] = fixtureLiteral(proof)
 		}
-		base.Readiness = &v1.Probe{Kind: "tcp", Target: ptrValue(fixtureRef("resource", "http", "port")), Timeout: "30s"}
+		// Forwarded TCP can accept before application SQL initialization and HTTP serving.
+		base.Readiness = &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "consumer", Args: []string{"check-http"}}, Timeout: "30s"}
 		f.h.manifest.Components[name] = base
 		f.h.manifest.Scenes[name] = v1.Scene{Lifetime: v1.Persistent, Components: []string{name}, Resources: []string{"database", "http"}}
 	}
@@ -298,6 +301,13 @@ func (f *sharedMariaDBFixture) awaitJob(t *testing.T, response v1.InstanceRespon
 		}
 		if response.LeaseToken != "" {
 			if _, err := f.h.cli.Renew(context.Background(), response.Instance.ID, response.LeaseToken); err != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				current, inspectErr := f.h.cli.Inspect(ctx, response.Instance.ID)
+				data, _ := json.Marshal(current)
+				t.Logf("job barrier inspect: %s (error: %v)", data, inspectErr)
+				logs, logsErr := f.h.cli.Logs(ctx, v1.LogsRequest{APIVersion: v1.Version, InstanceID: response.Instance.ID})
+				t.Logf("job barrier logs: %+v (error: %v)", logs, logsErr)
+				cancel()
 				t.Fatal(err)
 			}
 		}
@@ -312,6 +322,44 @@ func (f *sharedMariaDBFixture) awaitJob(t *testing.T, response v1.InstanceRespon
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("terminal job did not reach owned barrier")
+}
+
+func TestSharedConsumerHTTPReadiness(t *testing.T) {
+	binary := buildFixtureBinary(t, t.TempDir(), "./testdata/shared-consumer")
+	for _, mode := range []string{"tcp-only", "unavailable", "wrong-body", "ready"} {
+		t.Run(mode, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if mode == "tcp-only" {
+					connection, _, err := w.(http.Hijacker).Hijack()
+					if err == nil {
+						_ = connection.Close()
+					}
+					return
+				}
+				if mode == "unavailable" {
+					w.WriteHeader(http.StatusServiceUnavailable)
+				}
+				if mode == "wrong-body" {
+					_, _ = io.WriteString(w, "uninitialized")
+					return
+				}
+				_, _ = io.WriteString(w, "updated")
+			}))
+			t.Cleanup(server.Close)
+			connection, err := net.DialTimeout("tcp", server.Listener.Addr().String(), time.Second)
+			if err != nil {
+				t.Fatal("TCP positive control failed", err)
+			}
+			_ = connection.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, binary, "check-http")
+			command.Env = []string{"DB_CHECK_PORT=" + strconv.Itoa(server.Listener.Addr().(*net.TCPAddr).Port)}
+			if output, err := command.CombinedOutput(); ctx.Err() != nil || (err == nil) != (mode == "ready") {
+				t.Fatalf("HTTP readiness: error=%v context=%v output=%s", err, ctx.Err(), output)
+			}
+		})
+	}
 }
 
 func TestSharedMariaDBLifecycle(t *testing.T) {

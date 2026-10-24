@@ -22,41 +22,59 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-func TestStateNinePreflightRejectsAuthorityBeforeFence(t *testing.T) {
-	for _, kind := range []string{"unknown protocol", "unknown nested protocol", "invalid copy", "unknown launch purpose"} {
-		t.Run(kind, func(t *testing.T) {
-			svc, i, _ := exportFixture(t)
-			err := svc.store.db.Update(func(tx *bolt.Tx) error {
-				switch kind {
-				case "unknown protocol":
-					return tx.Bucket([]byte("runtime")).Put([]byte(i.ID), []byte(`{"groups":[{"protocol":2,"purpose":"strict","pid":123,"birth":"x","control":"/must-not-contact","token":"`+strings.Repeat("a", 64)+`"}]}`))
-				case "unknown nested protocol":
-					var r map[string]any
-					if err := json.Unmarshal(tx.Bucket([]byte("instances")).Get([]byte(i.ID)), &r); err != nil {
-						return err
-					}
-					r["native_abandonments"] = []any{map[string]any{"groups": []any{map[string]any{"protocol": 7, "purpose": "application"}}}}
-					return put(tx, "instances", i.ID, r)
-				case "invalid copy":
-					return tx.Bucket([]byte("meta")).Put([]byte("doctor_probe/"+newID()), []byte(`{"resource":{"kind":"container","token":"bad"},"ca":{"ready":true}}`))
-				case "unknown launch purpose":
-					return put(tx, "runtime", i.ID, runtimeRecord{LaunchPurpose: "unknown"})
+func TestStatePreflightRejectsAuthorityBeforeFence(t *testing.T) {
+	for _, version := range []int{9, v1.StateVersion} {
+		for _, kind := range []string{"unknown protocol", "unknown nested protocol", "invalid copy", "unknown launch purpose"} {
+			t.Run(fmt.Sprintf("v%d/%s", version, kind), func(t *testing.T) {
+				dir := copyStateNine(t)
+				db, err := bolt.Open(filepath.Join(dir, "state.db"), 0600, nil)
+				if err != nil {
+					t.Fatal(err)
 				}
-				return nil
+				defer func() { _ = db.Close() }()
+				state := &store{db: db, directory: dir}
+				if version == v1.StateVersion {
+					if err := db.Update(openStateTransaction); err != nil {
+						t.Fatal(err)
+					}
+				}
+				instances, err := state.list(v1.ListRequest{APIVersion: v1.Version})
+				if err != nil || len(instances.Instances) == 0 {
+					t.Fatal("missing retained instance", err)
+				}
+				id := instances.Instances[0].ID
+				err = db.Update(func(tx *bolt.Tx) error {
+					switch kind {
+					case "unknown protocol":
+						return tx.Bucket([]byte("runtime")).Put([]byte(id), []byte(`{"groups":[{"protocol":2,"purpose":"strict","pid":123,"birth":"x","control":"/must-not-contact","token":"`+strings.Repeat("a", 64)+`"}]}`))
+					case "unknown nested protocol":
+						var r map[string]any
+						if err := json.Unmarshal(tx.Bucket([]byte("instances")).Get([]byte(id)), &r); err != nil {
+							return err
+						}
+						r["native_abandonments"] = []any{map[string]any{"groups": []any{map[string]any{"protocol": 7, "purpose": "application"}}}}
+						return put(tx, "instances", id, r)
+					case "invalid copy":
+						return tx.Bucket([]byte("meta")).Put([]byte("doctor_probe/"+newID()), []byte(`{"resource":{"kind":"container","token":"bad"},"ca":{"ready":true}}`))
+					case "unknown launch purpose":
+						return put(tx, "runtime", id, runtimeRecord{LaunchPurpose: "unknown"})
+					}
+					return nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				before := stateContents(t, state)
+				if err := state.db.Update(openStateTransaction); err == nil {
+					t.Fatal("unsafe authority accepted")
+				} else if !strings.Contains(err.Error(), "matching binary") {
+					t.Fatal("missing preservation/lifecycle guidance", err)
+				}
+				if !reflect.DeepEqual(before, stateContents(t, state)) {
+					t.Fatal("failed validation changed records")
+				}
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			before := stateContents(t, svc.store)
-			if err := svc.store.db.Update(openStateTransaction); err == nil {
-				t.Fatal("unsafe authority accepted")
-			} else if !strings.Contains(err.Error(), "matching binary") {
-				t.Fatal("missing preservation/lifecycle guidance", err)
-			}
-			if !reflect.DeepEqual(before, stateContents(t, svc.store)) {
-				t.Fatal("failed validation changed records")
-			}
-		})
+		}
 	}
 }
 

@@ -29,7 +29,7 @@ release-package: $(GORELEASER)
 
 $(GORELEASER):
 	mkdir -p .tools/bin
-	GOBIN="$(CURDIR)/.tools/bin" go install github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
+	GOTOOLCHAIN=auto GOBIN="$(CURDIR)/.tools/bin" go install github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
 	mv .tools/bin/goreleaser $(GORELEASER)
 
 notices:

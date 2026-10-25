@@ -1,4 +1,7 @@
-# Runnable release fixture
+# Runnable four-workflow diagnostic fixture
+
+This optional fixture supports [targeted diagnostics](../../docs/release-acceptance/README.md);
+it is not a mandatory PR/release or separate V1 qualification cycle.
 
 This is a small application: Go HTTP API/UI and SQL preparation/tests, MariaDB,
 and an optional Chromium test image. It contains no port allocator, ownership

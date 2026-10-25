@@ -21,8 +21,11 @@ does not authorize creating a tag or publishing a release.
 [Issue #25](https://github.com/octacian/backlot/issues/25) needs a small distribution
 path for early adopters. The Makefile already builds reproducible binaries and
 verifies notices; the CLI has a typed version response but defaults to `dev`.
-There is no archive/publication pipeline. Go-equipped users can already install
-the command. Preserve that path and existing runtime/state compatibility rather
+There was no archive/publication pipeline. The initial V1 plan also imposed a
+manual MVP adoption cycle beyond CI. The owner retires that blanket requirement
+for releases and development/PR acceptance; V1 described the initial product
+scope, not a separate qualification or a `1.0.0` stability promise. Go-equipped
+users can already install the command. Preserve that path and existing runtime/state compatibility rather
 than adding an installer, updater or release service.
 
 ## Decision
@@ -31,8 +34,10 @@ than adding an installer, updater or release service.
   `linux/amd64` (baseline amd64), producing
   `backlot_v0.x.y_GOOS_GOARCH.tar.gz` and a versioned SHA-256 checksum file.
   Each archive contains executable `backlot`, `LICENSE` and the verified
-  `THIRD_PARTY_NOTICES.md`. Retain `make release-build` as the plain binary path
-  with equivalent deterministic build settings. Do not introduce a packaging engine.
+  `THIRD_PARTY_NOTICES.md`. Every executable also embeds those canonical files,
+  including ordinary builds and Go installations; `backlot licenses` prints their
+  full text without adjacent files. Retain `make release-build` as the plain
+  binary path with equivalent deterministic build settings. Do not introduce a packaging engine.
 - Release identity is the exact tag, full commit and commit UTC time, supplied
   through the existing linker variables. Fix the Go toolchain, module inputs,
   build flags and archive metadata; disable cgo, local paths, automatic VCS
@@ -62,13 +67,21 @@ than adding an installer, updater or release service.
   the unchanged tag; published corrections require a new patch version. Repository
   immutable-release/tag protections are additional operator safeguards, not an
   assumed precondition or permission to change repository settings here.
-- Before pushing a release tag, the maintainer owns the applicable existing
-  [release acceptance gates](../release-acceptance/README.md), revision-bound
-  evidence, exact-revision required CI, platform limitations and reviewed notes.
-  Tag automation repeats build/check/native smoke; it does not substitute for
-  real Debian or operator DNS/trust evidence. Notes identify changes, supported
-  targets, known limits and upgrade/compatibility effects. Ship tagged docs and
-  schemas with the source; link their exact tag from release instructions.
+- Release readiness requires reviewed notes and applicable required CI passing
+  at the exact reviewed revision to be published. Tag automation repeats fresh
+  repository/build/native archive and embedded-attribution checks. Development,
+  PR acceptance and routine releases do not require a duplicate local full
+  provider, SSH, system-trust or four-workflow adoption cycle, nor a separate V1
+  qualification. Select manual checks only where a change introduces risk to a
+  guarantee without CI coverage; the [diagnostic fixtures](../release-acceptance/README.md)
+  remain available for that purpose. This retires the obsolete manual MVP gate;
+  it does not claim that unexecuted checks passed or expand platform evidence.
+  This policy governs release/PR readiness where older records prescribe blanket
+  validation cycles; their runtime/platform guarantees and historical evidence
+  remain unchanged.
+  Notes identify changes, supported targets, known issues, evidence limits and
+  upgrade/compatibility effects. Ship tagged docs and schemas with the source;
+  link their exact tag from release instructions.
 - `v0.1.x` patches preserve documented CLI invocation/exit behavior, JSON/local
   API contracts, manifest/machine configuration and retained-state upgrade
   handling; breaking changes require a new `0.x` minor with migration notes.
@@ -93,13 +106,21 @@ than adding an installer, updater or release service.
 This adds a build-time tool pin, declarative archive configuration and a small
 workflow boundary around existing checks and GitHub CLI. It adds no runtime
 dependency, persistence, API endpoint or background activity. Maintainers own
-tool updates, release notes, release timing, evidence and failed-draft decisions.
+tool updates, release notes, release timing, targeted manual checks for uncovered
+change risks, and failed-draft decisions. CI-led readiness avoids repeating a
+manual MVP ceremony, but CI establishes only the guarantees it exercises; report
+uncovered risks and historical failures honestly.
 GitHub publication is not a transaction: a failed upload can leave a private
 draft requiring inspection. Checksums detect corruption, not publisher identity;
 these archives are unsigned and unnotarized. Public tagged Go installation can
 only be verified once an actual tag exists; preparation must say so explicitly.
 
 ## Alternatives considered
+
+- **Repeat the initial manual MVP cycle for every release or V1 declaration.**
+  Adds operator/provider/trust setup and duplicate full-suite runs regardless of
+  the changed behavior. The owner instead chooses required CI with targeted
+  manual checks for uncovered change risks; product guarantees remain intact.
 
 - **Only Go installation.** Already sufficient for developer adoption but does
   not deliver the requested ordinary downloadable binaries/checksums.

@@ -4,6 +4,13 @@ The [PRD](prd.md) is the acceptance contract. Implement in vertical, reviewable
 steps, keeping each milestone usable and tested. This repository's initial commit
 is a scaffold, not the first completed runtime milestone.
 
+Current development/PR and release readiness follow the [CI-led release policy](preparing-a-release.md):
+applicable required CI at the exact reviewed published revision, reviewed release
+notes, and targeted manual checks only for changed guarantees lacking CI coverage.
+The owner retired the original manual MVP adoption cycle and separate V1
+qualification; this does not claim that historical unexecuted checks passed.
+Milestone notes retain their implementation scope and evidence limits.
+
 ## 1. Contracts and plan validation
 
 Implemented for independent review: offline `backlot plan`, shared versioned
@@ -54,7 +61,7 @@ session; see the [native guide](daemon.md#native-execution) and
 [supervision decision](adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md).
 This milestone does not implement containers, publication, non-port resources,
 fresh-only jobs, artifact extraction, keep-on-failure or retention policy.
-Independent reviews and required final acceptance/CI remain gates.
+Independent review and applicable required CI remain gates.
 
 Run a native persistent fixture and finite test job end to end. Add probe deadlines,
 port-conflict handling, explicit restart, process-tree cancellation, serialized
@@ -73,9 +80,9 @@ Implemented for independent review: official Docker Go client lifecycle, private
 networks/ports/storage/secrets, fresh-only completion records, persistent stop/run
 and restart, explicit reset/destroy, conservative pre-stop drift rejection, durable
 container logs and capability-based recovery. See the [runtime guide](containers.md).
-Provider integration is an explicit opt-in suite; final independent reviews and
-frozen-candidate checks remain gates. Publication and the broader milestone 6
-evidence/retention features remain deferred.
+Provider integration remains an explicit opt-in diagnostic suite; independent
+review and applicable required CI remain gates. Publication and the broader
+milestone 6 evidence/retention features remain deferred.
 
 Add the official Docker client adapter for containers, per-instance networks,
 ports, and volumes; delegate image building to existing Docker tooling. Implement
@@ -100,26 +107,26 @@ The early owned Docker stale declaration/native directory job checkpoint precede
 broader regression expansion. Focused unit/provider coverage exercises unknown
 classification, independent candidates, known consumers, disposable exits, empty
 reset generations, exact-ID retries and ownership/path preservation. Independent
-Low/High reviews, frozen complete provider gates, actual supported Linux host
-validation and exact published-revision CI remain required before readiness.
+reviews and applicable required CI remain required before readiness; select
+additional provider/platform checks for uncovered change risks.
 
 ## 5. Published HTTPS and mixed execution
 
 Implemented for independent review: configured existing Caddy JSON subroute
 publication with optimistic concurrency, private intent/effect recovery, stable
 hostnames and mixed upstream/client contexts. See the [HTTPS guide](https.md).
-Owned real-gateway fixture evidence and real-domain trusted-certificate acceptance
-are separate gates; independent reviews and final frozen-candidate checks remain
-required before readiness. External DNS/certificates/trust remain operator-owned.
+Owned real-gateway fixtures and real-domain trusted-certificate checks establish
+different evidence; select the latter for uncovered change risks. External
+DNS/certificates/trust remain operator-owned.
 
 Add the Caddy adapter for a bounded, owned route scope, unique stable hostnames,
 path routing, and concurrent configuration edits. Missing Caddy blocks only scenes
 that publish an origin. Add host-native and containerized consumers behind the
 same trusted origin, including SSR and WebSockets.
 
-Keep automated tests on owned fixture gateways. Separately validate the real
-owned-domain/trusted-certificate workflow on macOS ARM64. Record any manual DNS/TLS
-setup and evidence honestly; mocked HTTP tests do not satisfy this gate.
+Keep automated tests on owned fixture gateways. When real-domain trust needs
+manual validation, record DNS/TLS setup and evidence honestly; mocked HTTP tests
+do not establish that behavior.
 
 ### Managed native local HTTPS
 
@@ -135,8 +142,8 @@ Owned native fixtures cover CLI-to-daemon-to-Caddy, normal host DNS with private
 client trust, paths/SSR/WebSockets/redirects/cookies, lifecycle conflicts, retained
 origins/data, actual worktree isolation and surviving/unavailable gateway recovery.
 These are fixture evidence, not system/browser trust acceptance. Independent
-reviews, complete frozen regression suites and exact-HEAD CI remain gates. Trusted
-browser/clean-machine macOS evidence is blocked pending a disposable environment;
+reviews and applicable required CI remain gates. At this checkpoint, trusted
+browser/clean-machine macOS evidence was blocked pending a disposable environment;
 no browser-warning bypass or persistent trust mutation can replace it.
 
 The [recovery decision](adr/20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md)
@@ -166,8 +173,8 @@ Owned fixture coverage verifies correct/missing/wrong trust, native frontend/API
 and container SSR/test, variable WebSockets, redirects/cookies, peer isolation,
 no Docker access for unselected host-only work, mapping/mount drift, retained
 state, fresh creates across lifecycle and journaled crash recovery. This is
-provider fixture evidence; independent low and fresh high reviews, complete
-frozen regression suites and exact published-HEAD CI remain outstanding gates.
+provider fixture evidence; independent reviews and applicable required CI remain
+gates, with targeted manual checks for uncovered change risks.
 
 ## 6. Disposable results and evidence
 
@@ -176,8 +183,8 @@ separate execution/collection/cleanup/cancellation outcomes, signal and lease
 cancellation, native/container artifact collection, kept failures and explicit
 fixture secrets, retained historical/follow logs and daemon-wide evidence pruning.
 See the [evidence guide](evidence.md). Focused native and provider fixtures exercise
-failure and recovery. Independent reviews, frozen full suites and applicable
-real-domain acceptance remain gates; this is not final V1 readiness.
+failure and recovery. Independent review and applicable required CI remain gates;
+this does not claim unexecuted operator checks passed.
 
 Complete terminal-job selection, argument forwarding, exact exit-status capture,
 SIGINT/SIGTERM behavior, disconnect cancellation, failure-triggered cleanup,
@@ -188,18 +195,19 @@ Inject job, provider, collection, and cleanup failures. Verify independent resul
 fields and nonzero overall status. Retrieve logs after containers are deleted;
 destroy retained failures without deleting retained evidence prematurely.
 
-## 7. Release acceptance and polish
+## 7. Release preparation and polish
 
-Run every [release acceptance criterion](prd.md#release-acceptance) with generic
-fixtures on macOS ARM64. Cover the development, manual-update production preview,
-backend integration, and production UI integration workflows together.
+Preserve the [product guarantees](prd.md#release-acceptance) through automated
+coverage and targeted checks for changed guarantees lacking CI coverage. The
+four-workflow fixture remains available for optional diagnostics; no separate
+manual MVP/V1 qualification remains.
 
 Document installation, explicit setup, manifest/reference examples, CLI/API
 semantics, logs, reset/destroy, and crash recovery using verified commands.
 Provide a reproducible macOS ARM64 binary build and include required dependency
 license notices. Measure cold/warm startup and adoption configuration size without
-inventing unvalidated performance targets. Do not require any external project's
-migration or offer CI orchestration as a release gate.
+inventing unvalidated performance targets. Do not require an external project's
+migration as a release gate. Follow [release preparation](preparing-a-release.md).
 
 ## Handoff instructions
 
@@ -222,9 +230,10 @@ reproducible builds/notices, Ubuntu 24.04 runtime/provider/browser CI and
 [Linux/WSL operations](platforms.md). The
 [Linux gateway decision](adr/20261016T201500000Z-support-explicit-linux-managed-https-reachability.md)
 retains private administration and explicit host-gateway/public-root trust.
-Debian 13.4 amd64 actual-host evidence, complete frozen provider/native/macOS
-regressions, independent reviews and exact published-HEAD CI remain required
-before readiness. WSL is configuration guidance only, without WSL QA or guarantees;
+Debian 13.4 amd64 actual-host results remain distinct from Ubuntu CI. Independent
+reviews and applicable required CI remain gates; select additional platform checks
+for uncovered change risks. WSL is configuration guidance only, without WSL QA
+or guarantees;
 compile-only CI does not establish support. Native Windows is now planned separately
 under independent epic #34; it is not evidence delivered by the Linux expansion.
 
@@ -236,7 +245,7 @@ Caddy trust and an automatic two-shard matrix. The application owns test-worker
 data isolation; Backlot retains lifecycle, checkout output locking and evidence
 ownership. The initial Ubuntu Chromium checkpoint passed at `1fef82b`; see the
 example's revision-bound evidence link. Lifecycle/isolation acceptance, independent
-reviews and frozen published-HEAD gates remain required before readiness.
+reviews and applicable required CI remain required before readiness.
 
 ## Native Windows expansion (independent epic 34)
 
@@ -278,9 +287,8 @@ Early real CLI/API/daemon/native/Docker/Caddy/data success, missing container tr
 failure/recovery and preserved-data cleanup were exercised before broad regressions;
 revision-bound private delivery evidence records fixture/tool/image dependencies.
 See [state compatibility](containers.md#state-compatibility) for the v9 baseline
-and unchanged rejection of pre-v9 formats. Independent reviews,
-frozen provider/browser/macOS suites and published-HEAD CI remain required
-before delivery readiness; no browser/application trust adoption is claimed.
+and unchanged rejection of pre-v9 formats. Independent reviews and applicable required CI remain gates; no browser/application
+trust adoption is claimed.
 
 ## Portable run export (#41)
 
@@ -297,8 +305,8 @@ See [export semantics](evidence.md#portable-per-instance-export).
 
 The early real Ubuntu ci-scenes success/failure/recovery, teardown/relocation and
 browser preview precede broader feature regression development. Independent Low
-and fresh High reviews, final frozen complete provider/browser/action gates and
-published-revision CI remain required; this paragraph does not claim readiness.
+and fresh High reviews and applicable required CI remain gates; this paragraph
+does not claim readiness.
 Binary distribution/version tags remain #25; the minimum supported state and
 retained upgrade path are defined by the migration decision.
 
@@ -312,8 +320,8 @@ Daemon state uses the v9 baseline with typed validation, retained ownership/data
 and current-only snapshot activation; old private generations require
 explicit operator retention/erasure decisions. See the [setup guide](manifest.md#registered-private-project-configuration)
 and [configuration decision and inherited contracts](adr/20261021T001732173Z-register-private-project-configuration.md).
-Independent implementation reviews, frozen full validation and published-HEAD CI
-remain gates; this section does not claim final feature readiness.
+Independent implementation reviews and applicable required CI remain gates; this
+section does not claim final feature readiness.
 
 ## Recorded persistent-scene targeting (#47)
 
@@ -326,9 +334,8 @@ checkout/daemon continuity; ID follow stays pinned for either lifetime and histo
 Neither acquires lifecycle ownership. The accepted [targeting decision](adr/20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md)
 and [command contract](daemon.md#named-persistent-scenes) define the behavior.
 Early real CLI/daemon/native failure/recovery and peer preservation precede focused
-regressions; independent implementation reviews, frozen complete applicable suites
-and exact published-revision CI remain delivery gates. Attached owner #50 and
-streaming/history #54 remain separate; no schema or dependency change is needed.
+regressions; independent implementation reviews and applicable required CI remain
+delivery gates. Attached owner #50 and streaming/history #54 remain separate; no schema or dependency change is needed.
 
 ## Native development watchers (#49)
 
@@ -338,8 +345,7 @@ private state v9. Stock system helpers retain strict pinned-group proof. Shared
 per-component cleanup confidence reaches status/doctor/exports, retaining original
 job exits and unresolved ownership fences. The [Air/Vite example](../examples/native-watchers/README.md)
 uses ordinary application tooling. Initial target adapter CI is feasibility only;
-independent final Low/High, frozen runtime/provider/browser suites and exact final
-published-content CI remain delivery gates.
+independent final reviews and applicable required CI remain delivery gates.
 
 ## Cumulative daemon state upgrades (#66)
 
@@ -362,7 +368,7 @@ attempt/generation-bound daemon authority, existing lease expiry/cleanup and
 aggregate log pages. Default background/disposable semantics remain unchanged.
 See the [decision](adr/20261022T194804759Z-bind-attached-persistent-execution-to-one-daemon-owned-attempt.md)
 and [command/API contract](daemon.md#attached-execution). Independent implementation
-reviews, frozen native/provider suites and published-head CI remain required;
+reviews and applicable required CI remain required;
 focused development evidence is not a release/adoption claim.
 
 ## Versioned distribution (#25)
@@ -373,8 +379,8 @@ native installed-binary smoke and a stable-tag workflow with fresh checks and
 complete draft publication. The [release decision](adr/20261023T212448687Z-publish-immutable-versioned-releases-with-goreleaser.md)
 sets compatibility and immutability policy; [operations](operations.md) covers
 installation/upgrade/removal and [tooling](testing.md#release-packaging-and-publication)
-covers preparation PR readiness, actual release gates and bounded failed-draft
-recovery. No tags/assets are published by this delivery. The preparation PR gates
+covers packaging and bounded failed-draft recovery. The
+[release procedure](preparing-a-release.md) defines CI-led readiness. No tags/assets are published by this delivery. Applicable required CI and reviewed notes
 remain required; public tagged Go installation waits for an actual release.
 No Windows, installer, updater or runtime-state change is included.
 
@@ -390,4 +396,4 @@ connections, lifecycle/concurrency/recovery and bounded force cleanup. See the
 
 [Issue 43](https://github.com/octacian/backlot/issues/43) remains the umbrella:
 PR 2 adds PostgreSQL 17; PR 3 adds custom execution and a non-Go/non-database fixture.
-Those paths and overall issue/V1 acceptance remain follow-ups.
+Those paths and overall issue completion remain follow-ups.

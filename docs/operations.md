@@ -57,9 +57,8 @@ checksum=$(grep '  backlot_v0.1.0_darwin_arm64.tar.gz$' backlot_v0.1.0_checksums
 printf '%s\n' "$checksum" | shasum -a 256 -c - &&
 tar -xzf backlot_v0.1.0_darwin_arm64.tar.gz &&
 ./backlot version --json &&
-mkdir -p "$HOME/.local/bin" "$HOME/.local/share/backlot/v0.1.0" &&
-install -m 0755 backlot "$HOME/.local/bin/backlot" &&
-cp LICENSE THIRD_PARTY_NOTICES.md "$HOME/.local/share/backlot/v0.1.0/"
+mkdir -p "$HOME/.local/bin" &&
+install -m 0755 backlot "$HOME/.local/bin/backlot"
 ```
 
 On Linux substitute the Linux archive name and use `sha256sum -c -` for the
@@ -95,7 +94,7 @@ replaced; corrections get a new patch version.
 
 To remove, first stop the daemon with its matching binary, then delete only the
 installed executable at the path you selected (for example
-`rm "$HOME/.local/bin/backlot"`) and any copied notices you no longer need.
+`rm "$HOME/.local/bin/backlot"`).
 For Go installs use the actual `GOBIN`/`GOPATH/bin` path. State, logs, artifacts,
 databases and CA identity remain for explicit lifecycle/retention handling; removal
 does not revoke system/browser trust or clean provider resources implicitly.
@@ -136,8 +135,11 @@ real-tag form without publishing. Their declarative configuration is
 [.goreleaser.yaml](../.goreleaser.yaml). See [release automation](testing.md#release-packaging-and-publication)
 for checks and publication responsibilities.
 
-Ship [LICENSE](../LICENSE) and [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)
-with any copied binary. Notices include linked CLI/optional acceptance application
+Every binary, including ordinary source builds and `go install`, embeds the full
+[LICENSE](../LICENSE) and generated [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+Run `backlot licenses` to print both; copying the executable alone preserves
+attribution without adjacent files or a share directory. Archives also retain
+readable copies. Notices include linked CLI/optional acceptance application
 modules and the Go standard library. `make notices` regenerates from downloaded
 pinned source; `make notices-check` rejects drift. Inventories label macOS ARM64
 and Linux amd64 CLI dependencies separately from the optional macOS/container application. Reviewed
@@ -166,7 +168,10 @@ provider settings and daemon state flags are separate. Follow
 [manifest/configuration](manifest.md), [native daemon](daemon.md),
 [containers/private state](containers.md) and [HTTPS setup](https.md) for exact
 contracts. The [runnable fixture](../examples/release-acceptance/README.md) supplies
-all four application workflows and explicit image setup commands.
+all four application workflows and explicit image setup commands as optional
+diagnostics. [Release preparation](preparing-a-release.md) uses applicable required
+CI and targeted manual checks for uncovered change risks; no separate V1 adoption
+ceremony is required.
 
 ```sh
 backlot daemon start --state-dir /private/backlot --json

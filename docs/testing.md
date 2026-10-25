@@ -61,7 +61,8 @@ Docker, Caddy and disposable-browser gates. Windows cross-build CI is removed;
 native Windows runtime CI is planned in #37/#38 and is not implemented here.
 The [Windows acceptance matrix](windows-design.md#epic-acceptance-and-evidence-matrix)
 separates future runtime CI from required Windows 11 desktop adoption evidence.
-Debian 13.4 amd64 requires actual-host runtime evidence; WSL is configuration guidance only. See [platform policy](platforms.md).
+Debian actual-host results are distinct from Ubuntu CI; routine releases do not
+require a new Debian run. WSL is configuration guidance only. See [platform policy](platforms.md).
 Workflows start on every PR and push to `main` (the independent consumer
 is manual-only). A shared
 [changed-paths workflow](../.github/workflows/changes.yml) uses pinned
@@ -142,8 +143,9 @@ can include working changes; retain the dirty patch with evidence.
 
 The [Release archives workflow](../.github/workflows/release.yml) validates relevant
 PR/main changes without publication permission. It extracts the exact archives on
-macOS ARM64 and Ubuntu amd64, checks file lists/checksums/version and invokes the
-existing `TestInstalledBinary` native harness for private daemon startup, restart,
+macOS ARM64 and Ubuntu amd64, checks file lists/checksums/version and
+self-contained `licenses` output, then invokes the existing `TestInstalledBinary`
+native harness for private daemon startup, restart,
 startup failure and cleanup. Set `BACKLOT_INSTALLED_TEST_BINARY` to an absolute
 extracted binary to run that same fixture locally or on actual Debian; this is
 not evidence of the broader HTTPS/runtime gates. Only the final tag job receives
@@ -158,25 +160,11 @@ Metadata unit checks cover Go-install module fallback and linked/local identity;
 publication guard tests cover invalid tags, existing draft refusal and lookup
 failure using read-only boundary stubs. They do not simulate or prove publication.
 
-Preparation PR readiness requires independent reviews, packaging checks, frozen
-full repository and provider regressions, actual Debian installation and HTTPS
-evidence, and required CI on the exact published HEAD. Before an actual release
-tag or V1 declaration, also finish [release acceptance](release-acceptance/README.md),
-including all four public workflows and browser/system-trust/operator adoption.
-Those adoption gates remain mandatory and unverified until executed with
-revision-bound evidence.
-Review `docs/releases/v0.x.y.md`, record known limitations, and remove preparation
-wording. This delivery does not create a tag or release. Later, a maintainer may
-push a canonical stable `v0.x.y` tag at that reviewed source. Tag automation checks
-event/local/remote commit equality, runs fresh `make check` on both native targets,
-builds both archives without publication, smokes those exact files on both targets,
-and creates/verifies/publishes a complete draft. It never rebuilds after smoke,
-creates/moves a tag or replaces an asset. Any existing release/draft or failed API
-lookup aborts; a failed upload may leave a draft. Inspect it manually and explicitly
-discard only an unpublished failed draft before retrying the unchanged tag;
-published corrections need a new patch version. Optional repository tag/release
-protections are separate operator decisions. Verify public `go install @tag` only
-after actual publication.
+Follow [Preparing a release](preparing-a-release.md) for CI-led readiness, reviewed
+notes, the preparation PR, tag publication and failed-draft recovery. The opt-in
+suites below remain targeted diagnostics for changes whose guarantees lack CI
+coverage; they are not a mandatory duplicate local cycle for each PR or release.
+Report selected checks' actual coverage and limits without treating skips as passes.
 
 ## Daemon state migrations
 
@@ -237,11 +225,10 @@ owned daemon crash recovery; uncertain ownership; foreign consumer blocking and
 unrelated preservation. Faults use retained direct-child daemon handles, never
 observed PIDs. Cleanup is registered before faults and preserves uncertain residuals
 for diagnosis. Docker tests skip only when the explicit endpoint variable is absent;
-a configured but unavailable provider is a failure. The complete suite must pass on
-the frozen feature candidate after independent reviews; `make check` alone does not
-prove Docker integration. Logs and exact source/image/config provenance belong in
-the revision-bound external evidence described in the
-[release verification guide](release-acceptance/README.md).
+a configured but unavailable provider is a failure. `make check` alone does not
+prove Docker integration. When selecting this diagnostic, retain the tested
+revision, relevant inputs, failures/skips and cleanup as described in the
+[diagnostic guide](release-acceptance/README.md).
 
 Focused milestone 6 provider coverage (run serially with the same resource grant):
 
@@ -252,8 +239,8 @@ BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
 
 This exercises container artifacts before removal, historical logs after destroy,
 exact job results, kept failure/cancellation/collection errors and healthy services,
-and injected directory-ownership cleanup failure with explicit recovery. It is
-required alongside the complete Docker runtime suite on the frozen candidate.
+and injected directory-ownership cleanup failure with explicit recovery. Select
+it when changes affect these guarantees beyond existing CI coverage.
 The provider-independent `TestDisposableEvidenceNative` runs in `make check` and
 covers native artifacts, fixture metadata/secrets, kept cancellation and client
 loss, shutdown/crash retained data, and executable SIGINT/SIGTERM exit codes.
@@ -304,13 +291,11 @@ daemon/guardian execution, normal host `.localhost` DNS, origin-dependent termin
 container clients, explicit fixture-only container dialing with TLS hostname
 verification, mixed service references, stop/start/restart/reset/destroy and crash
 recovery. These development fixtures do not prove real operator DNS/certificate
-setup. Frozen-candidate acceptance also requires the complete Docker suite and
-real owned-domain trusted HTTPS from macOS ARM64 host, browser and containers,
-including SSR/API/WebSockets and relevant redirects/cookies. Record commands,
-candidate revision, fixtures/config/image provenance, logs, skips/failures and
-cleanup in revision-bound external evidence; follow the
-[release verification guide](release-acceptance/README.md) and never substitute
-mock success for missing evidence.
+setup. When changes introduce uncovered operator DNS/trust risks, select real
+host/browser/container checks for the affected paths. Record the tested revision,
+relevant inputs, failures/skips and cleanup; follow the
+[diagnostic guide](release-acceptance/README.md). Mock success cannot establish
+operator acceptance.
 
 ## Managed local-CA gateway integration
 
@@ -321,8 +306,7 @@ BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
   go test -race ./internal/daemon -run '^(TestManagedHTTPSRuntime|TestManagedForceRestart)$' -count=1 -v
 ```
 
-This is required on the frozen candidate alongside the complete gateway,
-HTTPS runtime, Docker runtime and disposable evidence suites above. It builds
+Select this suite for affected managed-HTTPS guarantees lacking CI coverage. It builds
 race-enabled CLI/native fixtures, uses dynamic IPv4/IPv6 loopback ports and a
 unique private daemon/CA state, and runs real CLI lifecycle and path traffic with
 normal host DNS. Private trust is explicit only in fixture clients/daemon process
@@ -339,13 +323,11 @@ set `BACKLOT_NODE_TEST_BINARY` to an explicit absolute Node executable (Node 26 
 verified). This optional check also verifies that an explicit wrong `ca` overrides
 `NODE_EXTRA_CA_CERTS`; Node is not required by contributor gates.
 
-These tests do not prove standard macOS/browser adoption setup. That gate requires
-an isolated disposable macOS environment, stock separate `caddy trust`, normal
-hostname resolution and a browser that accepts the certificate without a warning.
-Record it as blocked when isolated trust cannot be demonstrated; a TLS bypass,
-resolver override or browser proceed-anyway is never evidence. External mode's
-real-domain/container acceptance remains its own contract. Full release/epic
-walkthroughs remain outside this implementation slice.
+These tests do not prove standard macOS/browser adoption setup. If a change
+needs manual trust validation, use an isolated disposable macOS environment,
+stock separate `caddy trust`, normal hostname resolution and a browser accepting
+the certificate without a warning. Report unavailable validation honestly; a TLS
+bypass, resolver override or browser proceed-anyway is never trust evidence.
 
 ## Managed container trust integration
 
@@ -378,8 +360,7 @@ representation, bind type, configured/effective readonly flags, actual file byte
 and actual container resolution; it never accepts parent mounts or infers trust
 from a successful TCP connection. Cleanup is registered before faults and
 reconciles only owned resources, preserving uncertainty. Skips for absent opt-in
-settings are incomplete provider evidence. The complete new suite joins the
-existing frozen provider gates after independent reviews; it does not establish
+settings are incomplete provider evidence. This suite does not establish
 browser/system trust adoption or exact published-HEAD CI.
 
 ## Runnable macOS quickstart integration
@@ -407,13 +388,10 @@ Only explicit private fixture clients/daemon trust the generated root; it never
 changes system/browser trust or DNS. Missing opt-in tools skip; skips are not
 acceptance. Node/npm remain optional application dependencies, outside `make check`.
 
-For the managed quickstart slice, run this complete suite, the complete managed
-HTTPS suite above (including the explicit Node setting), gateway fixture contracts,
-`make check`, and the separate real macOS/browser adoption walkthrough on the frozen
-candidate. These demonstrate the bounded host/browser/native path; full external
-container/release gates below remain required before a broader release declaration.
-Published-HEAD CI is still required. Record real browser/system trust actions and
-baseline DNS/trust configuration separately; private fixture roots cannot prove them.
+Select this suite when quickstart changes need coverage beyond CI. Record any
+separately selected browser/system trust checks and baseline DNS/trust setup;
+private fixture roots cannot prove them. A full adoption walkthrough is not a
+routine PR or release requirement.
 
 ## Public release workflows
 
@@ -434,9 +412,9 @@ The separate private inputs document must select explicitly built fixture/browse
 image tags; the machine file supplies providers only. Each temporary fixture
 repository is explicitly enrolled under its owned private root. This
 suite mutates only its owned instance routes/resources, never gateway bootstrap,
-DNS or trust. An unset variable skips; a skip is not acceptance. This supplements
-the complete Docker/gateway/HTTPS suites above, which remain separate required
-frozen-candidate gates. For durable raw fixture state, set the test-only
+DNS or trust. An unset variable skips; a skip is not acceptance. This optional
+suite diagnoses the four application workflows when relevant to uncovered change
+risks. For durable raw fixture state, set the test-only
 `BACKLOT_ACCEPTANCE_TEMP_ROOT` to an existing short private absolute directory.
 The default remains `/tmp` to fit macOS Unix socket paths; an overlong explicit
 root fails instead of silently falling back. `TMPDIR` separately controls Go
@@ -479,13 +457,12 @@ with normal canonical DNS. Both browser variables are required together; CI sets
 both. No TLS ignore flags, resolver overrides or system/user trust mutation are
 used. A run without browser settings is incomplete browser evidence.
 
-The short gate does not replace `make check` or the complete gateway, Docker,
-HTTPS, managed HTTPS, container-managed HTTPS and disposable evidence suites.
-Run those serially on the frozen candidate and preserve exact revision/tool/image
-provenance, failures/skips, timings and authenticated cleanup. macOS regression
-requirements remain unchanged. An unavailable configured prerequisite fails;
-absent opt-in settings skip and are never passes. Exact published-HEAD CI remains
-required for readiness. Debian actual-host and Ubuntu fresh-runner results are
+This bounded suite does not prove every provider guarantee. Select additional
+suites only for affected risks lacking CI coverage, run mutating fixtures serially,
+and retain the tested revision, relevant inputs, failures/skips and cleanup.
+An unavailable configured prerequisite fails; absent opt-in settings skip and are
+never passes. Applicable required CI at the exact published revision establishes
+routine readiness. Debian actual-host and Ubuntu fresh-runner results remain
 separate evidence, and neither establishes WSL UX.
 
 
@@ -547,8 +524,8 @@ browser trust, imports only the fixture public root into disposable HOME/NSS,
 and checks an HMR edit in the same browser document. Authenticated teardown and
 browser joins precede fixture removal. A failed cleanup preserves private state;
 no TLS bypass, resolver override, user/system trust mutation or Docker is used.
-This bounded browser gate does not establish macOS system/browser adoption or
-replace frozen native/provider/regression and exact published-content CI gates.
+This bounded browser check does not establish macOS system/browser adoption or
+replace applicable required CI at the exact published revision.
 
 <a id="early-shared-mariadb-checkpoint-43-gate-1"></a>
 <a id="shared-mariadb-lifecycle-and-recovery-43-gate-2"></a>
@@ -585,8 +562,9 @@ retains the five-second API expectation; the aggregate timeout allows serial fix
 Prove SQL database/user and owned runtime/image absence; retain cached base images
 and uncertain diagnostics.
 
-On the frozen candidate also run `make check`, complete [DockerRuntime](#dockerprivate-state-integration)
-and `TestDisposableEvidenceDocker` regressions serially. Record revision/input/image
-provenance, failures/skips and cleanup externally per [release verification](release-acceptance/README.md).
+Select related [DockerRuntime](#dockerprivate-state-integration) and disposable
+evidence checks where changed guarantees lack CI coverage. Run mutating fixtures
+serially and record the tested revision, relevant inputs, failures/skips and cleanup
+per [targeted diagnostics](release-acceptance/README.md).
 Prior MariaDB evidence does not establish PostgreSQL/custom execution, other-platform,
 full-feature or published-revision CI readiness.

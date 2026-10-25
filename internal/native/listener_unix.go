@@ -236,7 +236,7 @@ func OwnsListenerAddresses(ctx context.Context, pgid, port int, addresses []stri
 // ListenerEndpoint verifies every relevant listener through this attempt's policy.
 // Application membership is observed by the live authenticated session guardian.
 func (g *Group) ListenerEndpoint(ctx context.Context, address string) (bool, bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	ctx, cancel := context.WithTimeout(ctx, listenerRequestBudget)
 	defer cancel()
 	if g.Identity.Purpose != "application" {
 		return ListenerEndpoint(ctx, g.PGID(), address)
@@ -253,14 +253,14 @@ func (g *Group) ListenerEndpoint(ctx context.Context, address string) (bool, boo
 }
 
 func (g *Group) sessionListenerRequest(ctx context.Context, address string) (bool, bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	ctx, cancel := context.WithTimeout(ctx, listenerRequestBudget)
 	defer cancel()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", g.Identity.Control)
 	if err != nil {
 		return false, false, errors.New("session listener authority unavailable")
 	}
 	defer func() { _ = conn.Close() }()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(listenerRequestBudget)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}

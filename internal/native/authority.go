@@ -49,13 +49,18 @@ func Stop(id Identity, grace time.Duration) error {
 	return err
 }
 
-// Cleanup budgets nest after the configured grace: guardian session cleanup
-// (sessionCleanupOverhead), group verification (2s) and joins (2s), then its
-// activation input join (1s) fit inside the reply deadline with 1s to spare.
-// Scans are cheap when idle but slow sharply on an oversubscribed host (#72).
+// Cleanup budgets nest after the configured grace. The guardian serves one
+// request at a time, so cleanup can first wait for an in-flight listener query
+// (listenerQueryBudget), then session cleanup (sessionCleanupOverhead), group
+// verification (2s), joins (2s) and the activation input join (1s); all fit
+// inside the reply deadline with 1s to spare. The daemon side adds dial (1s),
+// guardian exit (2s) and joins (3s), staying within the grace+20s owner join.
+// Scans are cheap when idle but slow sharply on an oversubscribed host (#72, #79).
 const (
+	listenerQueryBudget    = 2 * time.Second
+	listenerRequestBudget  = 3 * time.Second
 	sessionCleanupOverhead = 5 * time.Second
-	cleanupReplyOverhead   = 11 * time.Second
+	cleanupReplyOverhead   = 13 * time.Second
 )
 
 func validIdentity(id Identity) bool {
@@ -341,7 +346,7 @@ func Supervise() error {
 				if id.Purpose != "application" || workload == nil {
 					proof.Error = "session listener authority unavailable"
 				} else {
-					query, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+					query, cancel := context.WithTimeout(context.Background(), listenerQueryBudget)
 					proof.Owned, proof.Conflict, err = sessionListener(query, request.request.ListenerAddress, workload.anchor.Process.Pid)
 					cancel()
 					if err != nil {

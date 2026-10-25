@@ -1,15 +1,7 @@
 # Targeted runtime diagnostics and evidence
 
-[Preparing a release](../preparing-a-release.md) owns release readiness: reviewed
-notes and applicable required CI at the exact reviewed revision to be published,
-followed by fresh tag-workflow checks of the final archives. Development/PR
-acceptance and routine releases do not require a duplicate local full-provider,
-SSH, system-trust or four-workflow cycle, or a separate V1 qualification.
-
-The owner retired the original manual MVP adoption gate. This is a policy change,
-not evidence that earlier unexecuted checks passed or historical failures were
-resolved. V1 named the initial product scope; semver `1.0.0` remains a deliberate
-stability commitment, and current release automation accepts only stable `v0.x.y`.
+Follow [Preparing a release](../preparing-a-release.md) for CI-led release readiness.
+Use this guide for targeted manual checks and their evidence.
 
 ## Selecting additional checks
 
@@ -28,7 +20,7 @@ Existing isolation, cleanup, HTTPS, recovery and truthful-result guarantees rema
 in force. CI and selected fixtures establish only what they exercise: compilation
 is not runtime evidence, skipped tests are not passes, and fixture DNS/trust cannot
 prove operator/system/browser trust. A targeted check does not imply a complete
-regression cycle. No routine repeat of unrelated manual suites is required.
+regression cycle.
 
 ## Safe execution and useful evidence
 
@@ -42,8 +34,7 @@ relevant tool/config/image inputs, results including failures/skips, and cleanup
 or uncertain residuals. Sanitize shared evidence; exclude secrets, private state
 and ownership capabilities. Keep run-specific logs, screenshots and delivery
 accounting outside the source tree, with durable links where useful. Earlier
-results retain their original revision and limits; a policy change or later CI
-run does not rewrite their provenance.
+results retain their original revision and limits.
 
 The four-workflow fixture targets macOS ARM64. Ubuntu CI and Debian actual-host
 results remain distinct, with bounded Linux browser trust reported separately.

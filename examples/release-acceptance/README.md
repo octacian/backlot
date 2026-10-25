@@ -1,7 +1,6 @@
 # Runnable four-workflow diagnostic fixture
 
-This optional fixture supports [targeted diagnostics](../../docs/release-acceptance/README.md);
-it is not a mandatory PR/release or separate V1 qualification cycle.
+This optional fixture supports [targeted diagnostics](../../docs/release-acceptance/README.md).
 
 This is a small application: Go HTTP API/UI and SQL preparation/tests, MariaDB,
 and an optional Chromium test image. It contains no port allocator, ownership
@@ -105,8 +104,9 @@ BACKLOT_ACCEPTANCE_PROJECT_INPUTS=/private/inputs.yaml \
 ```
 
 This opt-in suite is macOS ARM64 runtime evidence. A skip is not acceptance.
-See the [release verification guide](../../docs/release-acceptance/README.md) for
-required provider/review/frozen-candidate gates and external evidence retention.
+See [release preparation](../../docs/preparing-a-release.md) for readiness and the
+[targeted diagnostics guide](../../docs/release-acceptance/README.md) for selecting
+checks and retaining evidence.
 
 The opt-in public acceptance suite adds owned negative scenarios to temporary
 fixture manifests: failed fresh initialization/retry, consumed-port conflict,

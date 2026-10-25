@@ -161,9 +161,8 @@ publication guard tests cover invalid tags, existing draft refusal and lookup
 failure using read-only boundary stubs. They do not simulate or prove publication.
 
 Follow [Preparing a release](preparing-a-release.md) for CI-led readiness, reviewed
-notes, the preparation PR, tag publication and failed-draft recovery. The opt-in
-suites below remain targeted diagnostics for changes whose guarantees lack CI
-coverage; they are not a mandatory duplicate local cycle for each PR or release.
+notes, tag publication and failed-draft recovery. The opt-in suites below provide
+[targeted diagnostics](release-acceptance/README.md) for risks lacking CI coverage.
 Report selected checks' actual coverage and limits without treating skips as passes.
 
 ## Daemon state migrations

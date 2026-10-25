@@ -40,7 +40,7 @@ including pseudo-versions. A full commit is reported when available; tagged Go
 module installations may carry only their exact module version. `go version -m
 "$(command -v backlot)"` additionally shows build settings. Local checkout builds
 report `dev`/`dev-dirty`, and unpublished archives use `dev-REVISION`; these are
-not official releases. This preparation does not claim that `v0.1.0` is published.
+not official releases.
 
 ## Release archive installation
 
@@ -169,9 +169,7 @@ provider settings and daemon state flags are separate. Follow
 [containers/private state](containers.md) and [HTTPS setup](https.md) for exact
 contracts. The [runnable fixture](../examples/release-acceptance/README.md) supplies
 all four application workflows and explicit image setup commands as optional
-diagnostics. [Release preparation](preparing-a-release.md) uses applicable required
-CI and targeted manual checks for uncovered change risks; no separate V1 adoption
-ceremony is required.
+diagnostics. Follow [release preparation](preparing-a-release.md) for readiness checks.
 
 ```sh
 backlot daemon start --state-dir /private/backlot --json

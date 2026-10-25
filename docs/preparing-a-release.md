@@ -6,21 +6,20 @@ automation accepts only canonical stable `v0.x.y` tags, without leading zeros,
 prerelease identifiers or build suffixes. It rejects `v1.x.y`; changing that policy
 requires a reviewed change before tagging.
 
-1. Author `docs/releases/<tag>.md` in a small preparation PR. Describe changes,
-   supported targets, compatibility and upgrade steps, known limitations, and
-   revision-bound evidence. Link the exact tag's installation guide and schemas.
-   While preparing, say publication is pending; local artifacts are not a release.
-2. Review the candidate and require applicable CI to pass at the exact revision
-   to be published. Select additional manual testing only for changed guarantees
-   whose risks lack CI coverage; record failures, skips and limits honestly.
-   [Targeted diagnostics](release-acceptance/README.md) remain available, without
-   a mandatory local provider/SSH/system-trust/four-workflow cycle or separate
-   V1 qualification.
-3. Finalize the notes and remove preparation-only wording through the small PR.
-   Merge it, then approve the exact `main` commit to release, with required CI and
-   evidence covering that source. Do not tag a local candidate or an unreviewed
-   follow-up. From the clean approved checkout, create and push an annotated tag
-   (substitute the approved tag and full commit):
+1. Finalize `docs/releases/<tag>.md` in the feature PR that introduces the release,
+   or a preparation PR when needed. Describe changes, supported targets,
+   compatibility and upgrade steps, known limitations, and revision-bound evidence
+   where available. Link the exact tag's installation guide and schemas. Remove
+   preparation-only instructions before review; do not claim publication or
+   evidence that does not yet exist.
+2. Review the candidate and require applicable PR CI to pass. Select additional
+   manual testing only for changed guarantees whose risks lack CI coverage;
+   record failures, skips and limits honestly. See [targeted diagnostics](release-acceptance/README.md).
+3. Squash-merge the reviewed PR, wait for applicable required CI on the resulting
+   `main` squash commit, then approve that exact full SHA for release. Notes
+   finalized in the feature PR need no separate preparation PR. Do not tag a local
+   candidate or an unreviewed follow-up. From the clean approved checkout, create
+   and push an annotated tag at that SHA (substitute the approved tag and full commit):
 
    ```sh
    git tag -a v0.1.0 <approved-main-commit> -m 'Backlot v0.1.0'

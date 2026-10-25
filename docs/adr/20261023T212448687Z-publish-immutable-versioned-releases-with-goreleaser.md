@@ -13,20 +13,18 @@ superseded_by: []
 Use pinned GoReleaser OSS for reproducible macOS ARM64 and Linux amd64 archives,
 with existing dependency notices and version discovery. Publish stable `v0.x.y`
 tags through fresh checks and native archive smoke tests, then expose a complete
-GitHub Release. Published tags and assets never change. Preparing this automation
-does not authorize creating a tag or publishing a release.
+GitHub Release. Published tags and assets never change.
 
 ## Context
 
 [Issue #25](https://github.com/octacian/backlot/issues/25) needs a small distribution
 path for early adopters. The Makefile already builds reproducible binaries and
 verifies notices; the CLI has a typed version response but defaults to `dev`.
-There was no archive/publication pipeline. The initial V1 plan also imposed a
-manual MVP adoption cycle beyond CI. The owner retires that blanket requirement
-for releases and development/PR acceptance; V1 described the initial product
-scope, not a separate qualification or a `1.0.0` stability promise. Go-equipped
-users can already install the command. Preserve that path and existing runtime/state compatibility rather
-than adding an installer, updater or release service.
+Go-equipped users can already install the command, but early adopters also need
+versioned downloads. Preserve Go installation and existing runtime/state
+compatibility rather than adding an installer, updater or release service.
+Readiness checks should cover changed guarantees without duplicating CI through
+blanket manual adoption cycles.
 
 ## Decision
 
@@ -69,16 +67,10 @@ than adding an installer, updater or release service.
   assumed precondition or permission to change repository settings here.
 - Release readiness requires reviewed notes and applicable required CI passing
   at the exact reviewed revision to be published. Tag automation repeats fresh
-  repository/build/native archive and embedded-attribution checks. Development,
-  PR acceptance and routine releases do not require a duplicate local full
-  provider, SSH, system-trust or four-workflow adoption cycle, nor a separate V1
-  qualification. Select manual checks only where a change introduces risk to a
-  guarantee without CI coverage; the [diagnostic fixtures](../release-acceptance/README.md)
-  remain available for that purpose. This retires the obsolete manual MVP gate;
-  it does not claim that unexecuted checks passed or expand platform evidence.
-  This policy governs release/PR readiness where older records prescribe blanket
-  validation cycles; their runtime/platform guarantees and historical evidence
-  remain unchanged.
+  repository/build/native archive and embedded-attribution checks. For development,
+  PR acceptance and releases, select manual checks only for changed guarantees
+  lacking CI coverage; use the [diagnostic fixtures](../release-acceptance/README.md).
+  See [release preparation](../preparing-a-release.md) for the review and tag sequence.
   Notes identify changes, supported targets, known issues, evidence limits and
   upgrade/compatibility effects. Ship tagged docs and schemas with the source;
   link their exact tag from release instructions.
@@ -107,20 +99,19 @@ This adds a build-time tool pin, declarative archive configuration and a small
 workflow boundary around existing checks and GitHub CLI. It adds no runtime
 dependency, persistence, API endpoint or background activity. Maintainers own
 tool updates, release notes, release timing, targeted manual checks for uncovered
-change risks, and failed-draft decisions. CI-led readiness avoids repeating a
-manual MVP ceremony, but CI establishes only the guarantees it exercises; report
-uncovered risks and historical failures honestly.
+change risks, and failed-draft decisions. CI establishes only the guarantees it
+exercises; report uncovered risks and historical failures honestly.
 GitHub publication is not a transaction: a failed upload can leave a private
 draft requiring inspection. Checksums detect corruption, not publisher identity;
 these archives are unsigned and unnotarized. Public tagged Go installation can
-only be verified once an actual tag exists; preparation must say so explicitly.
+only be verified once an actual tag exists.
 
 ## Alternatives considered
 
-- **Repeat the initial manual MVP cycle for every release or V1 declaration.**
-  Adds operator/provider/trust setup and duplicate full-suite runs regardless of
-  the changed behavior. The owner instead chooses required CI with targeted
-  manual checks for uncovered change risks; product guarantees remain intact.
+- **Require a full manual adoption cycle for every release.** Adds
+  operator/provider/trust setup and duplicate full-suite runs regardless of the
+  changed behavior. Required CI with targeted manual checks covers change risks
+  with less repeated setup.
 
 - **Only Go installation.** Already sufficient for developer adoption but does
   not deliver the requested ordinary downloadable binaries/checksums.

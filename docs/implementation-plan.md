@@ -4,11 +4,7 @@ The [PRD](prd.md) is the acceptance contract. Implement in vertical, reviewable
 steps, keeping each milestone usable and tested. This repository's initial commit
 is a scaffold, not the first completed runtime milestone.
 
-Current development/PR and release readiness follow the [CI-led release policy](preparing-a-release.md):
-applicable required CI at the exact reviewed published revision, reviewed release
-notes, and targeted manual checks only for changed guarantees lacking CI coverage.
-The owner retired the original manual MVP adoption cycle and separate V1
-qualification; this does not claim that historical unexecuted checks passed.
+Development/PR and release readiness follow [release preparation](preparing-a-release.md).
 Milestone notes retain their implementation scope and evidence limits.
 
 ## 1. Contracts and plan validation
@@ -199,8 +195,7 @@ destroy retained failures without deleting retained evidence prematurely.
 
 Preserve the [product guarantees](prd.md#release-acceptance) through automated
 coverage and targeted checks for changed guarantees lacking CI coverage. The
-four-workflow fixture remains available for optional diagnostics; no separate
-manual MVP/V1 qualification remains.
+four-workflow fixture remains available for [targeted diagnostics](release-acceptance/README.md).
 
 Document installation, explicit setup, manifest/reference examples, CLI/API
 semantics, logs, reset/destroy, and crash recovery using verified commands.

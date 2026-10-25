@@ -306,8 +306,7 @@ or require Docker-only scenes as a future CI boundary.
 ## Release acceptance
 
 Preserve these product guarantees through automated coverage and targeted
-checks for changed behavior lacking CI coverage. The original V1 scope meant the
-initial MVP; it is not a separate qualification milestone or semver `1.0.0`:
+checks for changed behavior lacking CI coverage:
 
 1. All four workflows run with one command, including focused test selectors.
 2. Two worktrees, development and production scenes, and concurrent disposable
@@ -332,7 +331,6 @@ initial MVP; it is not a separate qualification milestone or semver `1.0.0`:
     commands/preparation code, with no copied port/ownership/cleanup harness.
 
 Development/PR and release readiness follow the [CI-led release policy](preparing-a-release.md).
-There is no mandatory manual MVP adoption cycle or separate V1 declaration gate.
 Report only the behaviors and platforms actually exercised; compilation and
 fixture-only trust do not establish real operator/browser acceptance.
 

@@ -32,6 +32,8 @@ type cleanupProof struct {
 	Conflict bool                    `json:",omitempty"`
 	Identity Identity
 	Error    string
+	// Cause privately retains the initiating cleanup error behind a bounded Error.
+	Cause string `json:",omitempty"`
 }
 type authorityRequest struct {
 	request cleanupRequest
@@ -154,6 +156,9 @@ func stopAuthorityResult(id Identity, grace time.Duration) (*v1.NativeCleanupRes
 		return nil, false, errors.New("strict cleanup receipt policy mismatch")
 	}
 	if proof.Error != "" {
+		if proof.Cause != "" {
+			return proof.Result, false, &authorityError{message: proof.Error, cause: errors.New(proof.Cause)}
+		}
 		return proof.Result, false, errors.New(proof.Error)
 	}
 	// A receipt is emitted after anchor and collectors join, but success also requires
@@ -361,6 +366,7 @@ func Supervise() error {
 				proof.Error = cleanupErr.Error()
 				if id.Purpose == "application" {
 					proof.Error = "native session cleanup incomplete; preserve lifecycle fences"
+					proof.Cause = cleanupErr.Error()
 				}
 				proof.Result = sessionResult(id, v1.CleanupIncomplete)
 				request.reply <- proof

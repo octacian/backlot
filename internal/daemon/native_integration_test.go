@@ -207,6 +207,7 @@ func (h *nativeHarness) start() {
 	if strings.Contains(h.daemonLog.String(), "DATA RACE") {
 		h.t.Fatal("race-instrumented daemon reported a data race", h.daemonLog.String())
 	}
+	h.logNativeDiagnostics()
 	h.daemonLog.Reset()
 	h.process.Stderr = &h.daemonLog
 	if err := h.process.Start(); err != nil {
@@ -355,6 +356,17 @@ func (h *nativeHarness) absent() {
 
 // A shutdown error is never an absence witness. Intentional fault tests may
 // supply a separate authenticated cleanup proof for their exact original owners.
+// logNativeDiagnostics reports only bounded native cleanup causes from a joined
+// daemon's stderr; the rest of the private log can carry fixture state.
+func (h *nativeHarness) logNativeDiagnostics() {
+	h.t.Helper()
+	for _, line := range strings.Split(h.daemonLog.String(), "\n") {
+		if strings.HasPrefix(line, "native cleanup diagnostic: ") {
+			h.t.Log(line)
+		}
+	}
+}
+
 func (h *nativeHarness) close() {
 	h.t.Helper()
 	if !h.waited && h.process != nil && h.process.Process != nil {
@@ -389,6 +401,9 @@ func (h *nativeHarness) close() {
 	if h.waited && strings.Contains(h.daemonLog.String(), "DATA RACE") {
 		h.cleanupUnverified = true
 		h.t.Error("race-instrumented daemon reported a data race", h.daemonLog.String())
+	}
+	if h.waited {
+		h.logNativeDiagnostics()
 	}
 	if h.cli != nil {
 		h.cli.Close()

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	v1 "github.com/octacian/backlot/api/v1"
 	"os"
 	"os/exec"
@@ -241,7 +242,16 @@ func (g *Group) Alive() bool {
 // Stop obtains verified cleanup and joins this daemon's guardian descriptors.
 func (g *Group) Stop(grace time.Duration) (err error) {
 	collected := false
+	started := time.Now()
 	defer func() {
+		if err != nil {
+			// Public results keep bounded detail; the private daemon log keeps the cause.
+			causes := err.Error()
+			for cause := errors.Unwrap(err); cause != nil; cause = errors.Unwrap(cause) {
+				causes += ": " + cause.Error()
+			}
+			_, _ = fmt.Fprintf(os.Stderr, "native cleanup diagnostic: purpose=%s component=%s attempt=%s grace=%s elapsed=%s cause=%q\n", g.Identity.Purpose, g.Identity.Component, g.Identity.Attempt, grace, time.Since(started).Round(time.Millisecond), causes)
+		}
 		if err != nil || !collected {
 			if g.Identity.Purpose == "application" {
 				g.mu.Lock()

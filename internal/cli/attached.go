@@ -12,6 +12,7 @@ import (
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/client"
+	"github.com/octacian/backlot/internal/daemon"
 	urfave "github.com/urfave/cli/v3"
 )
 
@@ -54,6 +55,10 @@ func attachedRecord(c *urfave.Command, record v1.AttachedRecord) error {
 	return nil
 }
 
+// cleanupWait outlasts the daemon's owner join so its typed result, not a client
+// deadline, reports slow cleanup.
+func cleanupWait(grace time.Duration) time.Duration { return daemon.OwnerJoin(grace) + 10*time.Second }
+
 func runAttached(ctx context.Context, c *urfave.Command, cli *client.Client, graceText string, start func(context.Context) (v1.InstanceResponse, error)) (err error) {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
@@ -68,7 +73,7 @@ func runAttached(ctx context.Context, c *urfave.Command, cli *client.Client, gra
 	request := v1.AttachedRequest{APIVersion: v1.Version, InstanceID: response.Instance.ID, Owner: a.Owner}
 	grace, _ := time.ParseDuration(graceText)
 	cleanup := func() (v1.SceneResponse, error) {
-		bounded, cancel := context.WithTimeout(context.Background(), grace+30*time.Second)
+		bounded, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
 		defer cancel()
 		return cli.Attached(bounded, request, true)
 	}

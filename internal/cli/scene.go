@@ -217,7 +217,7 @@ func startScene(ctx context.Context, c *urfave.Command, cli *client.Client, targ
 	driftManifest, driftConfig := response.Result.ManifestDrift, response.Result.ConfigDrift
 	cancelStart := func(code int) error {
 		grace, _ := time.ParseDuration(request.Options.StopGrace)
-		cleanup, cancel := context.WithTimeout(context.Background(), grace+30*time.Second)
+		cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
 		defer cancel()
 		result, err := cli.StopExecution(cleanup, id)
 		if err != nil {

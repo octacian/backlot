@@ -348,6 +348,12 @@ func (s *service) stopExecution(id string) (v1.Instance, error) {
 	}
 	return instance, err
 }
+
+// OwnerJoin bounds joining one execution owner after cancellation. Cleanup runs
+// two rounds of native stops (each at most grace+21s, see internal/native) with
+// artifact collection between and gateway removal (20s) beside the second.
+func OwnerJoin(grace time.Duration) time.Duration { return 2*grace + 50*time.Second }
+
 func (s *service) joinExecution(id string) (v1.Instance, error) {
 	s.mu.Lock()
 	entry := s.executions[id]
@@ -382,7 +388,7 @@ func (s *service) joinExecution(id string) (v1.Instance, error) {
 	}
 	select {
 	case <-entry.done:
-	case <-time.After(time.Until(time.Now().Add(entry.grace).Add(20 * time.Second))):
+	case <-time.After(OwnerJoin(entry.grace)):
 		return v1.Instance{}, problem("cleanup_failed", "runtime cancellation did not join within shutdown budget")
 	}
 	entry.mu.Lock()

@@ -270,10 +270,9 @@ func (h *nativeHarness) state(id string, want ...v1.InstanceStatus) v1.InstanceR
 		startup, _ := time.ParseDuration(options.StartupTimeout)
 		job, _ := time.ParseDuration(options.JobTimeout)
 		grace, _ := time.ParseDuration(options.StopGrace)
-		// native.Stop permits dial (1s), proof (grace+13s), authority exit
-		// (2s); Group.Stop then joins the guardian (2s) and status (1s).
-		// Jobs clean up sequentially before the final concurrent group cleanup.
-		cleanup := grace + 19*time.Second
+		// Jobs clean up sequentially, each within one owner join, before the
+		// final service cleanup's owner join.
+		cleanup := OwnerJoin(grace)
 		budget = startup + cleanup
 		for _, component := range last.Instance.Plan.Components {
 			if component.Kind == v1.Job {
@@ -354,26 +353,27 @@ func (h *nativeHarness) absent() {
 	}
 }
 
-// A shutdown error is never an absence witness. Intentional fault tests may
-// supply a separate authenticated cleanup proof for their exact original owners.
-// logNativeDiagnostics reports only bounded native cleanup causes from a joined
-// daemon's stderr; the rest of the private log can carry fixture state.
+// logNativeDiagnostics reports native diagnostic lines from a joined daemon's
+// stderr; the rest of the private log can carry fixture state. These causes can
+// name fixture PIDs and temporary paths (never capability tokens) in test output.
 func (h *nativeHarness) logNativeDiagnostics() {
 	h.t.Helper()
 	for _, line := range strings.Split(h.daemonLog.String(), "\n") {
-		if strings.HasPrefix(line, "native cleanup diagnostic: ") {
+		if strings.HasPrefix(line, "native diagnostic: ") {
 			h.t.Log(line)
 		}
 	}
 }
 
+// A shutdown error is never an absence witness. Intentional fault tests may
+// supply a separate authenticated cleanup proof for their exact original owners.
 func (h *nativeHarness) close() {
 	h.t.Helper()
 	if !h.waited && h.process != nil && h.process.Process != nil {
 		if h.ownerDone == nil {
 			h.ownerDone = waitFixtureChild(h.process)
 		}
-		result := finishNativeHarnessOwner(func(ctx context.Context) error { _, err := h.cli.Stop(ctx); return err }, h.ownerDone, h.process.Process.Kill, 40*time.Second, 40*time.Second, 2*time.Second)
+		result := finishNativeHarnessOwner(func(ctx context.Context) error { _, err := h.cli.Stop(ctx); return err }, h.ownerDone, h.process.Process.Kill, OwnerJoin(h.stopGrace)+10*time.Second, OwnerJoin(h.stopGrace)+10*time.Second, 2*time.Second)
 		h.waited = result.joined
 		if result.stopErr != nil || result.ownerErr != nil || !result.joined || h.shutdownFailureProof != nil {
 			var detail *v1.PlanError

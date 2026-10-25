@@ -140,7 +140,9 @@ func TestDaemonUnavailableNamesRequestAndFailureClass(t *testing.T) {
 	}{
 		{context.DeadlineExceeded, "/v1/inspect: request deadline exceeded"},
 		{syscall.ECONNREFUSED, "/v1/inspect: socket refused or missing"},
+		{syscall.ENOENT, "/v1/inspect: socket refused or missing"},
 		{io.EOF, "/v1/inspect: connection closed"},
+		{context.Canceled, "/v1/inspect: request cancelled"},
 		{errors.New("other"), "/v1/inspect: transport failed"},
 	} {
 		cli.http.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, test.err })

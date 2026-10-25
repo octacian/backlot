@@ -93,6 +93,7 @@ func schemaOne() *uint64 { n := uint64(1); return &n }
 
 // JSONSchemaExtend constrains environment variable names and unique selections.
 func (Environment) JSONSchemaExtend(s *jsonschema.Schema) {
+	schemaProperty(s, "assign").AdditionalProperties.AllOf = append(schemaProperty(s, "assign").AdditionalProperties.AllOf, schemaProperties(map[string]*jsonschema.Schema{"ref": {AllOf: []*jsonschema.Schema{schemaWhen("kind", "build_image", schemaProperties(map[string]*jsonschema.Schema{"field": {Const: "tag"}}))}}}))
 	schemaProperty(s, "assign").PropertyNames = &jsonschema.Schema{Pattern: schemaEnvKey}
 	for _, name := range []string{"pass_through", "required", "seeds"} {
 		p := schemaProperty(s, name)
@@ -106,13 +107,14 @@ func (Environment) JSONSchemaExtend(s *jsonschema.Schema) {
 
 // JSONSchemaExtend adds bounded reference discriminator shapes, not graph lookup.
 func (Reference) JSONSchemaExtend(s *jsonschema.Schema) {
-	schemaProperty(s, "kind").Enum = schemaEnum("input", "instance", "resource", "output", "service").Enum
+	schemaProperty(s, "kind").Enum = schemaEnum("input", "instance", "resource", "output", "service", "build_image").Enum
 	named := func(fields ...string) *jsonschema.Schema {
 		p := schemaProperties(map[string]*jsonschema.Schema{"name": {Pattern: schemaIdentifier}})
 		p.Required = append([]string{"name"}, fields...)
 		return p
 	}
 	s.OneOf = []*jsonschema.Schema{
+		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "build_image"}, "field": schemaEnum("tag", "id")}), named("field"), schemaEmpty("port")}},
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "input"}}), named(), schemaEmpty("field", "port")}},
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "instance"}, "field": schemaEnum("id", "checkout", "project", "scene")}), schemaRequire("field"), schemaEmpty("name", "port")}},
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "resource"}, "field": schemaEnum("port", "path", "name", "value", "url", "ca_cert_path", "host", "database", "username", "password")}), named("field"), schemaEmpty("port")}},
@@ -189,7 +191,7 @@ func (Component) JSONSchemaExtend(s *jsonschema.Schema) {
 		schemaRequire("image"), schemaForbid("command"),
 		schemaProperties(map[string]*jsonschema.Schema{"image": schemaProperties(map[string]*jsonschema.Schema{
 			"literal": {MinLength: schemaOne()},
-			"ref":     schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "input"}}),
+			"ref":     {OneOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "input"}}), schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "build_image"}, "field": {Const: "id"}})}},
 		})}),
 		schemaProperties(map[string]*jsonschema.Schema{
 			"ports": {AdditionalProperties: &jsonschema.Schema{AllOf: []*jsonschema.Schema{

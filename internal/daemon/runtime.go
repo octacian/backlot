@@ -21,24 +21,26 @@ import (
 )
 
 type execution struct {
-	shared        map[string]sharedConnection
-	attachment    *attachment // guarded by service.mu; never persisted
-	caCertPath    string
-	kept          bool
-	cancel        context.CancelFunc
-	done          chan struct{}
-	mu            sync.Mutex
-	groups        []*native.Group
-	jobs          map[string]workload
-	services      map[string]workload
-	components    map[string]workload
-	containers    []*dockerWork
-	docker        *dockerEngine
-	resources     *resourceGeneration
-	outputRelease func()
-	err           error
-	source        capturedSource
-	grace         time.Duration
+	acceptImages     bool
+	allowImageChange bool
+	shared           map[string]sharedConnection
+	attachment       *attachment // guarded by service.mu; never persisted
+	caCertPath       string
+	kept             bool
+	cancel           context.CancelFunc
+	done             chan struct{}
+	mu               sync.Mutex
+	groups           []*native.Group
+	jobs             map[string]workload
+	services         map[string]workload
+	components       map[string]workload
+	containers       []*dockerWork
+	docker           *dockerEngine
+	resources        *resourceGeneration
+	outputRelease    func()
+	err              error
+	source           capturedSource
+	grace            time.Duration
 }
 type deadlines struct{ startup, job, grace time.Duration }
 
@@ -86,6 +88,9 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 }
 
 func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset, persistentOnly bool) (v1.InstanceResponse, error) {
+	if request.AllowImageChange && (request.InstanceID == "" || reset || request.Attached) {
+		return v1.InstanceResponse{}, problem("invalid_request", "allow_image_change is only supported by explicit restart")
+	}
 	ctx, finish, admissionErr := s.beginMutation(ctx)
 	if admissionErr != nil {
 		return v1.InstanceResponse{}, admissionErr
@@ -300,7 +305,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		response.ManifestDrift, response.ConfigDrift = false, false
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
-	entry := &execution{caCertPath: caCertPath, cancel: cancel, done: make(chan struct{}), jobs: map[string]workload{}, services: map[string]workload{}, components: map[string]workload{}, source: identity, grace: mustGrace(request.Options)}
+	entry := &execution{acceptImages: request.InstanceID != "", allowImageChange: request.AllowImageChange, caCertPath: caCertPath, cancel: cancel, done: make(chan struct{}), jobs: map[string]workload{}, services: map[string]workload{}, components: map[string]workload{}, source: identity, grace: mustGrace(request.Options)}
 	if request.Attached {
 		entry.attachment = &attachment{owner: v1.AttachedOwner{DaemonGeneration: s.generation, Attempt: attempt, Token: newID()}, expires: time.Now().Add(s.lease)}
 		response.Attachment = &v1.Attachment{Owner: entry.attachment.owner, ExpiresAt: entry.attachment.expires.UTC().Format(time.RFC3339Nano), LeaseDuration: s.lease.String()}
@@ -637,6 +642,9 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 	if failure = s.allocateResources(startup, id, snapshot, entry); failure != nil {
 		return
 	}
+	if failure = s.prepareBuildImages(startup, id, snapshot, entry); failure != nil {
+		return
+	}
 	for name, resource := range snapshot.Plan.Resources {
 		if resource.Kind != "port" {
 			continue
@@ -803,6 +811,12 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			}
 			if err := group.Stop(d.grace); err != nil {
 				failure = err
+				return
+			}
+			if exit := group.Result(); exit != nil && exit.CollectionFailure != "" {
+				result.CollectionFailure = "job output collection failed"
+			}
+			if failure = s.completeBuildImages(startup, id, component.Name, snapshot, entry, result); failure != nil {
 				return
 			}
 			if component.Policy == v1.FreshOnly {

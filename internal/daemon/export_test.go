@@ -746,3 +746,30 @@ func TestExportExcludesStartupFixtures(t *testing.T) {
 		}
 	}
 }
+
+func TestExportBuildImageProvenance(t *testing.T) {
+	s, instance, request := exportFixture(t)
+	instance.Execution.BuildImages = []v1.BuildImageResult{{Name: "app", Producer: "build", Attempt: instance.Execution.Attempt, Tag: "fixture:tag", ID: "sha256:fixture"}}
+	instance.Execution.ImageChangeWarnings = []v1.ImageChangeWarning{{Component: "check", Image: "app", PreviousID: "sha256:old", ID: "sha256:fixture", Message: "compatibility risk"}}
+	if _, err := s.store.execution(instance.ID, v1.Failed, instance.Execution); err != nil {
+		t.Fatal(err)
+	}
+	response, err := s.export(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Result.BuildImages) != 1 || response.Result.BuildImages[0] != instance.Execution.BuildImages[0] || len(response.Result.ImageChangeWarnings) != 1 {
+		t.Fatal("export lost image provenance/warnings", response.Result)
+	}
+	data, err := os.ReadFile(filepath.Join(request.Output, "report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report v1.ExportReport
+	if err = json.Unmarshal(data, &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Result.ImageChangeWarnings) != 1 {
+		t.Fatal("report lost compatibility warning")
+	}
+}

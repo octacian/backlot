@@ -1,0 +1,21 @@
+version: backlot/v1
+project: state-fixture
+tools:
+  finish: /usr/bin/true
+components:
+  complete:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: finish}
+    environment:
+      assign:
+        FIXTURE_VALUE: {literal: public-fixture-only}
+scenes:
+  prepared:
+    lifetime: persistent
+    components: [complete]
+  completed:
+    lifetime: disposable
+    components: [complete]
+    terminal_job: complete

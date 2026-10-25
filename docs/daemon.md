@@ -631,3 +631,14 @@ See [state upgrade and operation](containers.md#state-compatibility) and
 Persistent startup can show declared fixture details, including selected secrets.
 See [selection, output and lifecycle behavior](manifest.md#components-and-scenes)
 and the [seeded example](../examples/macos-quickstart/README.md#seeded-demo-account).
+
+## Build-image restart opt-in
+
+`restart INSTANCE_ID --allow-image-change` deliberately accepts changed produced
+image IDs for containers with retained mounts, with an application/data compatibility
+warning in human output and typed JSON/status/export. Without it, a changed ID
+fails after the producer, leaving runtime stopped and old pins/data retained.
+Same-ID restart needs no flag. The flag is restart-only, invocation-only, and
+cannot bypass other safety checks or affect literal/input-image declarations.
+See [image retention](containers.md#execution-scoped-image-retention) and the
+[project example](../examples/build-images/README.md). Plans remain symbolic.

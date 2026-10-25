@@ -12,6 +12,7 @@ type PlanRequest struct {
 
 // PlanResponse is a redacted, allocation-free execution plan.
 type PlanResponse struct {
+	BuildImages           map[string]BuildImage    `json:"build_images,omitempty"`
 	SharedServices        map[string]SharedService `json:"shared_services,omitempty"`
 	StartupDetails        []StartupDetailSelection `json:"startup_details,omitempty"`
 	EffectiveConfigDigest string                   `json:"effective_config_digest,omitempty"`

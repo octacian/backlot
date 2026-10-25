@@ -372,9 +372,9 @@ accepted grace plus 50 seconds for activation, verification, collection and reso
 cleanup overhead; a slower or failed join reports failure and retains state
 ownership until the owner exits. Run, scene and attached CLI cleanup waits outlast
 that join by 10 seconds so the daemon's typed result, not a client deadline, reports
-slow cleanup. Retained (kept) instances stop separately, without this join. The private `daemon.log`
-records the initiating cause of each failed native cleanup or listener-ownership
-observation behind the bounded public detail.
+slow cleanup. Retained (kept) instances stop separately, without this join. The
+private `daemon.log` records the initiating cause of each failed native cleanup or
+listener-ownership observation behind the bounded public detail.
 Disposable clients renew the finite daemon
 lease while waiting; unlimited execution never disables lease cancellation.
 Expired runs receive independent cancellation coordinators, so one run's grace

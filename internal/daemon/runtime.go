@@ -349,9 +349,11 @@ func (s *service) stopExecution(id string) (v1.Instance, error) {
 	return instance, err
 }
 
-// OwnerJoin bounds joining one execution owner after cancellation. Cleanup runs
-// two rounds of native stops (each at most grace+21s, see internal/native) with
-// artifact collection between and gateway removal (20s) beside the second.
+// OwnerJoin budgets joining one execution owner after cancellation. It covers two
+// rounds of native stops (each at most grace+21s, see internal/native) with gateway
+// removal (20s) beside the second, leaving 8s for artifact collection and container
+// and resource cleanup, which are usually fast. It is a budget, not a proven bound:
+// a slower owner reports cleanup_failed and retains state ownership.
 func OwnerJoin(grace time.Duration) time.Duration { return 2*grace + 50*time.Second }
 
 func (s *service) joinExecution(id string) (v1.Instance, error) {

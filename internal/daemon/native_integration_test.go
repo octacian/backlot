@@ -353,6 +353,10 @@ func (h *nativeHarness) absent() {
 	}
 }
 
+// harnessShutdownBudget outlasts daemon shutdown joining owners at the largest
+// grace these fixtures request (16s), whatever the harness default.
+var harnessShutdownBudget = OwnerJoin(16*time.Second) + 10*time.Second
+
 // logNativeDiagnostics reports native diagnostic lines from a joined daemon's
 // stderr; the rest of the private log can carry fixture state. These causes can
 // name fixture PIDs and temporary paths (never capability tokens) in test output.
@@ -373,7 +377,7 @@ func (h *nativeHarness) close() {
 		if h.ownerDone == nil {
 			h.ownerDone = waitFixtureChild(h.process)
 		}
-		result := finishNativeHarnessOwner(func(ctx context.Context) error { _, err := h.cli.Stop(ctx); return err }, h.ownerDone, h.process.Process.Kill, OwnerJoin(h.stopGrace)+10*time.Second, OwnerJoin(h.stopGrace)+10*time.Second, 2*time.Second)
+		result := finishNativeHarnessOwner(func(ctx context.Context) error { _, err := h.cli.Stop(ctx); return err }, h.ownerDone, h.process.Process.Kill, harnessShutdownBudget, harnessShutdownBudget, 2*time.Second)
 		h.waited = result.joined
 		if result.stopErr != nil || result.ownerErr != nil || !result.joined || h.shutdownFailureProof != nil {
 			var detail *v1.PlanError
@@ -545,7 +549,7 @@ func TestNativeRuntime(t *testing.T) {
 			if err != nil {
 				t.Fatal(action, elapsed, err)
 			}
-			if elapsed < 16*time.Second || elapsed > 36*time.Second {
+			if elapsed < 16*time.Second || elapsed > OwnerJoin(16*time.Second) {
 				t.Fatal("accepted grace not honored", elapsed)
 			}
 			for _, text := range strings.Fields(string(oldPIDs)) {
@@ -1575,7 +1579,7 @@ func TestNativeRuntime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if time.Since(start) > 15*time.Second {
+		if time.Since(start) > OwnerJoin(10*time.Second) {
 			t.Fatal("default stop exceeded bounded grace/verification")
 		}
 		if final.Instance.Execution.CollectionFailure != "" || final.Instance.Execution.CleanupFailure != "" {

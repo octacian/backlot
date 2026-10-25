@@ -367,11 +367,12 @@ Negative durations are rejected. API execution options use the same duration
 strings. `--stop-grace` accepts any finite nonnegative duration and defaults to `10s`;
 zero means immediate escalation. Verification and collection have separate finite
 budgets after the configured grace. Native cleanup can stop each workload twice
-(before and after artifact collection), so the outer owner join permits twice the
-accepted grace plus 50 seconds of bounded activation, verification and collection
-overhead; a failed join reports failure and retains state ownership until the owner
-exits. CLI cleanup waits outlast that join by 10 seconds so the daemon's typed
-result, not a client deadline, reports slow cleanup. The private `daemon.log`
+(before and after artifact collection), so the outer owner join budgets twice the
+accepted grace plus 50 seconds for activation, verification, collection and resource
+cleanup overhead; a slower or failed join reports failure and retains state
+ownership until the owner exits. Run, scene and attached CLI cleanup waits outlast
+that join by 10 seconds so the daemon's typed result, not a client deadline, reports
+slow cleanup. Retained (kept) instances stop separately, without this join. The private `daemon.log`
 records the initiating cause of each failed native cleanup or listener-ownership
 observation behind the bounded public detail.
 Disposable clients renew the finite daemon

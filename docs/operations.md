@@ -25,10 +25,79 @@ Make or a separate `go mod download` step. It does not install the example files
 the [macOS quickstart](../examples/macos-quickstart/README.md#prepare-once) explains
 how to obtain those.
 
-There are currently no release tags, so `@latest` resolves to a pseudo-version
-from `main`. Future release tags follow Go's normal version selection. The command
-currently reports `dev` version metadata; use `go version -m` on the installed
-binary to inspect its resolved module version and build settings.
+`@latest` follows Go's version selection: before a release exists it resolves to
+a pseudo-version, and after stable tags exist it normally selects the highest
+release. It is convenient but not a reproducible pin; `@main` also moves. Once
+`v0.1.0` is published, pin an installation or CI job with:
+
+```sh
+go install github.com/octacian/backlot/cmd/backlot@v0.1.0
+backlot version --json
+```
+
+Version JSON reports linked release identity or Go's resolved module version,
+including pseudo-versions. A full commit is reported when available; tagged Go
+module installations may carry only their exact module version. `go version -m
+"$(command -v backlot)"` additionally shows build settings. Local checkout builds
+report `dev`/`dev-dirty`, and unpublished archives use `dev-REVISION`; these are
+not official releases.
+
+## Release archive installation
+
+After publication, select an exact release from
+[GitHub Releases](https://github.com/octacian/backlot/releases). Download
+`backlot_v0.1.0_darwin_arm64.tar.gz` for macOS ARM64, or
+`backlot_v0.1.0_linux_amd64.tar.gz` for Ubuntu 24.04/Debian 13.4 amd64, together
+with `backlot_v0.1.0_checksums.txt`. Other targets are not supplied. In an empty
+directory containing those downloads, verify the selected archive's line before
+extraction (the manifest also lists the other target):
+
+```sh
+checksum=$(grep '  backlot_v0.1.0_darwin_arm64.tar.gz$' backlot_v0.1.0_checksums.txt) &&
+printf '%s\n' "$checksum" | shasum -a 256 -c - &&
+tar -xzf backlot_v0.1.0_darwin_arm64.tar.gz &&
+./backlot version --json &&
+mkdir -p "$HOME/.local/bin" &&
+install -m 0755 backlot "$HOME/.local/bin/backlot"
+```
+
+On Linux substitute the Linux archive name and use `sha256sum -c -` for the
+checksum command. Require an `OK` result and matching `v0.1.0` identity; missing
+or mismatched checksum entries are failures. Put `$HOME/.local/bin` on PATH and
+use `command -v backlot` to check which installation wins. Archives contain just
+the executable, LICENSE and notices. Checksums detect damaged bytes; they do not
+authenticate a publisher. Archives are unsigned/unnotarized and install no Caddy,
+Docker, dependencies or trust. Keep macOS security policy decisions explicit.
+
+## Upgrade, removal and compatibility
+
+Prefer CLI and daemon from the same release. Before replacing the binary, use
+the old matching binary to stop the daemon in each selected state directory:
+`/path/to/old/backlot daemon stop --state-dir /absolute/private/state --json`.
+Wait for exit/lock release, install the verified new binary, then explicitly run
+`backlot daemon start --state-dir /absolute/private/state --json`. Binary upgrade
+preserves private state and CA identity; do not delete them to bypass a version
+error. Existing API/state checks reject incompatible pairings. See
+[state compatibility](containers.md#state-compatibility) for retained forward
+upgrades from v9 and matching-binary recovery; pinning an older executable does
+not make newer state readable. Downgrades/reversible migrations are not promised.
+
+`v0.1.x` patches preserve documented CLI invocation/exit behavior, JSON/local API,
+manifest/machine configuration and retained-state upgrade handling. Breaking
+changes require a new `0.x` minor and migration notes. The executable release,
+wire/schema namespace and persisted-state format are independent versions;
+`1.0.0` is reserved for a deliberately stable public API. Use the exact tag's
+[documentation](https://github.com/octacian/backlot/tree/v0.1.0/docs) and
+[schemas](https://github.com/octacian/backlot/tree/v0.1.0/schemas) after publication,
+and read its release/upgrade notes. Published tags and assets never move or get
+replaced; corrections get a new patch version.
+
+To remove, first stop the daemon with its matching binary, then delete only the
+installed executable at the path you selected (for example
+`rm "$HOME/.local/bin/backlot"`).
+For Go installs use the actual `GOBIN`/`GOPATH/bin` path. State, logs, artifacts,
+databases and CA identity remain for explicit lifecycle/retention handling; removal
+does not revoke system/browser trust or clean provider resources implicitly.
 
 ## Reproducible source build and dependency notices
 
@@ -54,15 +123,23 @@ and install `bin/backlot-linux-amd64` instead. Run `sha256sum` on Linux.
 
 `release-build` defaults to `GOOS=darwin`, `GOARCH=arm64`, supports explicit
 `RELEASE_GOOS`/`RELEASE_GOARCH`, fixes `CGO_ENABLED=0`, trims build
-paths and excludes VCS dirtiness, timestamps and Go build IDs. It deliberately
-uses stable `dev` version metadata until release versioning is separately
-specified. Rebuild twice with the same Go toolchain/modules/flags, compare with
+paths and excludes automatic VCS stamping, wall-clock time and Go build IDs. It
+links the source commit/time while retaining a `dev` version. Rebuild twice with
+the same Go toolchain/modules/flags and source identity, compare with
 `cmp`, and record SHA-256 and `go version -m`. Cross-builds do not prove runtime
 support. No release distribution, signing, notarization or installer is promised
-by this local build command.
+by this plain binary command. `make release-snapshot` installs pinned GoReleaser
+OSS locally and prepares both unpublished archives/checksums under ignored
+`dist/`; `make release-package` requires a clean tagged checkout and produces the
+real-tag form without publishing. Their declarative configuration is
+[.goreleaser.yaml](../.goreleaser.yaml). See [release automation](testing.md#release-packaging-and-publication)
+for checks and publication responsibilities.
 
-Ship [LICENSE](../LICENSE) and [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)
-with any copied binary. Notices include linked CLI/optional acceptance application
+Every binary, including ordinary source builds and `go install`, embeds the full
+[LICENSE](../LICENSE) and generated [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+Run `backlot licenses` to print both; copying the executable alone preserves
+attribution without adjacent files or a share directory. Archives also retain
+readable copies. Notices include linked CLI/optional acceptance application
 modules and the Go standard library. `make notices` regenerates from downloaded
 pinned source; `make notices-check` rejects drift. Inventories label macOS ARM64
 and Linux amd64 CLI dependencies separately from the optional macOS/container application. Reviewed
@@ -91,7 +168,8 @@ provider settings and daemon state flags are separate. Follow
 [manifest/configuration](manifest.md), [native daemon](daemon.md),
 [containers/private state](containers.md) and [HTTPS setup](https.md) for exact
 contracts. The [runnable fixture](../examples/release-acceptance/README.md) supplies
-all four application workflows and explicit image setup commands.
+all four application workflows and explicit image setup commands as optional
+diagnostics. Follow [release preparation](preparing-a-release.md) for readiness checks.
 
 ```sh
 backlot daemon start --state-dir /private/backlot --json

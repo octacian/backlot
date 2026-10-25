@@ -106,8 +106,9 @@ scene through recreation. See [targeting and follow](docs/daemon.md#named-persis
 Native commands and descendants must stay in their supervised process group;
 detachment and delegation to another supervisor are unsupported. See the
 [platform guide](docs/platforms.md) for supported topologies, WSL configuration and
-planned Windows work, and [release verification](docs/release-acceptance/README.md)
-for broader gates. This is not a V1 release declaration.
+planned Windows work. See [release preparation](docs/preparing-a-release.md) for
+CI-led readiness and [targeted diagnostics](docs/release-acceptance/README.md) for
+checks beyond CI coverage.
 
 For GitHub Actions, follow the [CI quickstart](docs/ci.md) and minimal two-shard
 [adopter workflow](examples/ci-scenes/adopter.yml).

@@ -39,10 +39,14 @@ jobs:
               - '!examples/ci-scenes/**'
               - '!examples/ci-inputs/**'
               - '!**/*.md'
-              - '{go.mod,go.sum,Makefile,.golangci.yml,.gitattributes,.gitignore}'
+              - '{go.mod,go.sum,Makefile,.golangci.yml,.gitattributes,.gitignore,.goreleaser.yaml}'
             repository:
               - 'THIRD_PARTY_NOTICES.md'
+              - 'LICENSE'
+              - '*.go'
               - '.github/workflows/check.yml'
+              - '.github/workflows/release.yml'
+              - '.github/scripts/**'
             docs:
               - 'docs/**'
               - '**/*.md'

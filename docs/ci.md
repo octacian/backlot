@@ -133,7 +133,9 @@ Application-format assertions live in the scenes fixture.
 Pin `backlot-ref` to a full reviewed revision containing issue #41 public export,
 and select an action revision using that contract. An older runtime fails with
 an actionable unsupported-export error; there is no fallback to private storage.
-Release binaries/version tags remain tracked separately in #25.
+The [release archive workflow](testing.md#release-packaging-and-publication)
+prepares versioned binaries separately; this action still builds its selected
+source revision. No tag or release publication is implied.
 
 Outputs keep the original `cli-exit-code`, `cli-signal`, `wrapper-signal`,
 `terminal-exit-code`, `status`, `cancelled` and `instance-id` separate from

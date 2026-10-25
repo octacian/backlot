@@ -426,5 +426,6 @@ concurrency exhaustion, unavailable API and uncertain ownership/effect.
 
 See [state compatibility](containers.md#state-compatibility) for the v9 minimum,
 retained saved configuration/CA guarantees and rejection of pre-v9 state without
-mutation. [Testing](testing.md) separates isolated fixtures from managed macOS/browser
-and external real-domain acceptance gates.
+mutation. [Testing](testing.md) distinguishes isolated fixtures from targeted
+managed macOS/browser and external real-domain trust checks. Select manual checks
+for changed guarantees lacking CI coverage under the [release policy](preparing-a-release.md).

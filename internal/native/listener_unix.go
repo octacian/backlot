@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -18,11 +20,12 @@ import (
 // OwnsListener proves that every listener on the selected port belongs to this group.
 // An unrelated port owner is never signaled and never satisfies readiness.
 func listenerState(ctx context.Context, pgid, port int, endpoint string) (bool, bool, error) {
-	return listenerStateWith(ctx, pgid, port, endpoint, syscall.Getpgid)
+	return listenerStateWith(ctx, time.Second, pgid, port, endpoint, syscall.Getpgid)
 }
 
-func listenerStateWith(ctx context.Context, pgid, port int, endpoint string, membership func(int) (int, error)) (bool, bool, error) {
-	query, cancel := context.WithTimeout(ctx, time.Second)
+// listenerStateWith bounds the socket query and membership checks by budget.
+func listenerStateWith(ctx context.Context, budget time.Duration, pgid, port int, endpoint string, membership func(int) (int, error)) (bool, bool, error) {
+	query, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	data, err := listenerOutput(query, port)
 	if err != nil {
@@ -273,7 +276,16 @@ func (g *Group) sessionListenerRequest(ctx context.Context, address string) (boo
 		return false, false, &authorityError{message: "session listener observation unavailable", cause: errors.Join(err, ctx.Err())}
 	}
 	if proof.Identity != g.Identity || proof.Error != "" {
-		return false, false, errors.New("session listener observation unavailable")
+		cause := "listener response identity mismatch"
+		if proof.Identity == g.Identity {
+			cause = proof.Error
+		}
+		if proof.Cause != "" {
+			cause += ": " + proof.Cause
+		}
+		// Readiness reports only the bounded message; the private daemon log keeps the cause.
+		_, _ = fmt.Fprintf(os.Stderr, "native diagnostic: listener component=%s attempt=%s cause=%q\n", g.Identity.Component, g.Identity.Attempt, cause)
+		return false, false, &authorityError{message: "session listener observation unavailable", cause: errors.New(cause)}
 	}
 	return proof.Owned, proof.Conflict, nil
 }

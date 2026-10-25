@@ -116,7 +116,7 @@ func sessionListener(ctx context.Context, address string, anchor int) (bool, boo
 		}
 	}()
 	budget := sessionAcquisitionLimit
-	owned, conflict, err := listenerStateWith(ctx, 1, port, host, func(pid int) (int, error) {
+	owned, conflict, err := listenerStateWith(ctx, listenerQueryBudget, 1, port, host, func(pid int) (int, error) {
 		if pid == os.Getpid() || pid == anchor {
 			return 2, nil
 		}

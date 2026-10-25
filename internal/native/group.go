@@ -250,7 +250,7 @@ func (g *Group) Stop(grace time.Duration) (err error) {
 			for cause := errors.Unwrap(err); cause != nil; cause = errors.Unwrap(cause) {
 				causes += ": " + cause.Error()
 			}
-			_, _ = fmt.Fprintf(os.Stderr, "native cleanup diagnostic: purpose=%s component=%s attempt=%s grace=%s elapsed=%s cause=%q\n", g.Identity.Purpose, g.Identity.Component, g.Identity.Attempt, grace, time.Since(started).Round(time.Millisecond), causes)
+			_, _ = fmt.Fprintf(os.Stderr, "native diagnostic: cleanup purpose=%s component=%s attempt=%s grace=%s elapsed=%s cause=%q\n", g.Identity.Purpose, g.Identity.Component, g.Identity.Attempt, grace, time.Since(started).Round(time.Millisecond), causes)
 		}
 		if err != nil || !collected {
 			if g.Identity.Purpose == "application" {

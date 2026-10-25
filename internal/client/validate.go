@@ -81,6 +81,9 @@ func validateExecution(instance v1.Instance) error {
 	if result == nil {
 		return nil
 	}
+	if err := v1.ValidateBuildImages(instance.ID, result.BuildImages, result.ImageChangeWarnings); err != nil {
+		return responseError()
+	}
 	if err := validateOutcome(instance.Status, result.TerminalExitCode, result.Cancelled, result.Failure, result.CollectionFailure, result.CleanupFailure, result.Components); err != nil {
 		return err
 	}
@@ -174,6 +177,9 @@ func validateOutcome(status v1.InstanceStatus, exit *int, cancelled bool, failur
 }
 
 func validateExportResult(result v1.ExportResult) error {
+	if err := v1.ValidateBuildImages(result.InstanceID, result.BuildImages, result.ImageChangeWarnings); err != nil {
+		return responseError()
+	}
 	switch result.Status {
 	case v1.Cancelled, v1.Interrupted, v1.Stopped, v1.Destroyed, v1.Succeeded, v1.Failed:
 	default:

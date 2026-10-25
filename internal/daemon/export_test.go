@@ -749,8 +749,10 @@ func TestExportExcludesStartupFixtures(t *testing.T) {
 
 func TestExportBuildImageProvenance(t *testing.T) {
 	s, instance, request := exportFixture(t)
-	instance.Execution.BuildImages = []v1.BuildImageResult{{Name: "app", Producer: "build", Attempt: instance.Execution.Attempt, Tag: "fixture:tag", ID: "sha256:fixture"}}
-	instance.Execution.ImageChangeWarnings = []v1.ImageChangeWarning{{Component: "check", Image: "app", PreviousID: "sha256:old", ID: "sha256:fixture", Message: "compatibility risk"}}
+	sourceAttempt := newID()
+	imageID := "sha256:" + strings.Repeat("a", 64)
+	instance.Execution.BuildImages = []v1.BuildImageResult{{Name: "app", Producer: "build", Attempt: sourceAttempt, Tag: buildImageTag(instance.ID, sourceAttempt, "app"), ID: imageID}}
+	instance.Execution.ImageChangeWarnings = []v1.ImageChangeWarning{{Component: "not-yet-launched", Image: "app", PreviousID: "sha256:" + strings.Repeat("b", 64), ID: imageID, Message: "compatibility risk"}}
 	if _, err := s.store.execution(instance.ID, v1.Failed, instance.Execution); err != nil {
 		t.Fatal(err)
 	}

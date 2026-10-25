@@ -20,6 +20,9 @@ func validateStateAuthority(tx *bolt.Tx) error {
 	if err := validateSharedAuthority(tx); err != nil {
 		return err
 	}
+	if err := validateBuildImageResults(tx); err != nil {
+		return err
+	}
 	return tx.Bucket([]byte("resources")).ForEach(func(key, data []byte) error {
 		g, err := decodeResources(data)
 		if err != nil {
@@ -208,4 +211,43 @@ func validateSharedAuthority(tx *bolt.Tx) error {
 		}
 		return nil
 	})
+}
+
+// New result contracts are checked only after the full historical migration path.
+func validateBuildImageResults(tx *bolt.Tx) error {
+	check := func(id string, result *v1.ExecutionResult) error {
+		if result != nil && v1.ValidateBuildImages(id, result.BuildImages, result.ImageChangeWarnings) != nil {
+			return problem("state_corrupt", "invalid retained build-image execution provenance; preserved")
+		}
+		return nil
+	}
+	if err := tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
+		var r record
+		if err := decodeRecord(data, string(key), &r); err != nil {
+			return err
+		}
+		if err := check(string(key), r.Instance.Execution); err != nil {
+			return err
+		}
+		for _, history := range r.NativeAbandonments {
+			if err := check(string(key), history.Result); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if data := tx.Bucket([]byte("meta")).Get([]byte("managed_gateway")); data != nil {
+		gateway, err := decodeManagedRecord(data)
+		if err != nil {
+			return err
+		}
+		for _, history := range gateway.NativeAbandonments {
+			if err := check("", history.Result); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

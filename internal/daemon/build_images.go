@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	v1 "github.com/octacian/backlot/api/v1"
-	"github.com/octacian/backlot/internal/manifest"
 	"github.com/octacian/backlot/internal/plan"
 	bolt "go.etcd.io/bbolt"
 )
@@ -29,7 +28,7 @@ func validImageID(id string) bool {
 
 func validateBuildImagePins(id string, g resourceGeneration) error {
 	for name, pin := range g.BuildImages {
-		if g.ID == "" || pin.Name != name || !manifest.ValidIdentifier(name) || !manifest.ValidIdentifier(pin.Producer) || !validID(pin.Attempt) || !validImageID(pin.ID) || pin.Tag != buildImageTag(id, pin.Attempt, name) {
+		if g.ID == "" || pin.Name != name || pin.Validate(id) != nil {
 			return problem("state_corrupt", "invalid retained build-image provenance; preserved")
 		}
 	}

@@ -49,6 +49,15 @@ func Stop(id Identity, grace time.Duration) error {
 	return err
 }
 
+// Cleanup budgets nest after the configured grace: guardian session cleanup
+// (sessionCleanupOverhead), group verification (2s) and joins (2s), then its
+// activation input join (1s) fit inside the reply deadline with 1s to spare.
+// Scans are cheap when idle but slow sharply on an oversubscribed host (#72).
+const (
+	sessionCleanupOverhead = 5 * time.Second
+	cleanupReplyOverhead   = 11 * time.Second
+)
+
 func validIdentity(id Identity) bool {
 	return id.Protocol == 1 && (id.Purpose == "strict" && id.Component == "" && id.Attempt == "" || id.Purpose == "application" && id.Component != "" && id.Attempt != "")
 }
@@ -123,7 +132,7 @@ func stopAuthorityResult(id Identity, grace time.Duration) (*v1.NativeCleanupRes
 	var proof cleanupProof
 	connection, err := net.DialTimeout("unix", id.Control, time.Second)
 	if err == nil {
-		_ = connection.SetDeadline(time.Now().Add(grace).Add(8 * time.Second))
+		_ = connection.SetDeadline(time.Now().Add(grace).Add(cleanupReplyOverhead))
 		err = json.NewEncoder(connection).Encode(cleanupRequest{Identity: id, Grace: grace})
 		if err == nil {
 			err = json.NewDecoder(connection).Decode(&proof)
@@ -268,7 +277,7 @@ func Supervise() error {
 					_ = self.Release()
 					return
 				}
-				_ = conn.SetDeadline(time.Now().Add(request.Grace).Add(8 * time.Second))
+				_ = conn.SetDeadline(time.Now().Add(request.Grace).Add(cleanupReplyOverhead))
 				if request.Grace < 0 {
 					return
 				}

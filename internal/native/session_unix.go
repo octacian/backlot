@@ -175,7 +175,7 @@ func (w *ownedWorkload) stopSession(grace time.Duration) error {
 		return err
 	}
 	termEnd := time.Now().Add(grace)
-	ctx, cancel := context.WithDeadline(context.Background(), termEnd.Add(2*time.Second))
+	ctx, cancel := context.WithDeadline(context.Background(), termEnd.Add(sessionCleanupOverhead))
 	defer cancel()
 	if w.sessionState == nil {
 		w.sessionState = &sessionCleanupState{members: map[int]*procidentity.Handle{}}

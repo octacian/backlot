@@ -270,10 +270,10 @@ func (h *nativeHarness) state(id string, want ...v1.InstanceStatus) v1.InstanceR
 		startup, _ := time.ParseDuration(options.StartupTimeout)
 		job, _ := time.ParseDuration(options.JobTimeout)
 		grace, _ := time.ParseDuration(options.StopGrace)
-		// native.Stop permits dial (1s), proof (grace+8s), authority exit
+		// native.Stop permits dial (1s), proof (grace+11s), authority exit
 		// (2s); Group.Stop then joins the guardian (2s) and status (1s).
 		// Jobs clean up sequentially before the final concurrent group cleanup.
-		cleanup := grace + 14*time.Second
+		cleanup := grace + 17*time.Second
 		budget = startup + cleanup
 		for _, component := range last.Instance.Plan.Components {
 			if component.Kind == v1.Job {

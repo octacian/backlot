@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -127,7 +126,7 @@ case "$(cat mode)" in
  fail) exit 23;;
  missing) exit 0;;
  cached) "$DOCKER" image tag "$(cat cached)" "$APP_IMAGE"; exit 0;;
- hold) touch .control/entered; while test ! -f .control/release; do sleep 0.02; done;;
+ hold) printf '%s\n' "$APP_IMAGE" >> .control/entered; while test ! -f .control/release; do sleep 0.02; done;;
 esac
 DOCKER_BUILDKIT=0 "$DOCKER" build --pull=false --network=none --rm=true --force-rm=true -t "$APP_IMAGE" .
 `,
@@ -271,15 +270,38 @@ func TestBuildImagesDocker(t *testing.T) {
 	fixtureFile(t, h.project, ".control/release", "")
 	fixtureFile(t, h.project, "mode", "cached")
 	fixtureFile(t, h.project, "cached", next.ID)
-	assertImage(restart(false, v1.RuntimeReady), next.ID)
-	// Tag mutation cannot change a retained launch.
-	if _, err = h.engine.ImageTag(context.Background(), moby.ImageTagOptions{Source: next.ID, Target: pin.Tag}); err != nil {
+	accepted := restart(false, v1.RuntimeReady)
+	assertImage(accepted, next.ID)
+	currentPin := accepted.Instance.Execution.BuildImages[0]
+	// Mutate the current accepted tag to another owned image, then reuse the ID.
+	if _, err = h.engine.ImageTag(context.Background(), moby.ImageTagOptions{Source: pin.ID, Target: currentPin.Tag}); err != nil {
 		t.Fatal(err)
+	}
+	mutated, err := h.engine.ImageInspect(context.Background(), currentPin.Tag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutated.ID != pin.ID || mutated.ID == currentPin.ID {
+		t.Fatal("accepted tag mutation did not change image identity")
 	}
 	if _, err = h.cli.StopExecution(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
-	assertImage(h.state(h.run("dev").Instance.ID, v1.RuntimeReady), next.ID)
+	retained := h.state(h.run("dev").Instance.ID, v1.RuntimeReady)
+	assertImage(retained, next.ID)
+	logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "check"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := ""
+	for _, record := range logs.Records {
+		if record.Attempt == retained.Instance.Execution.Attempt {
+			content += record.Message
+		}
+	}
+	if !strings.Contains(content, "B\n") {
+		t.Fatal("retained image content changed after tag mutation", content)
+	}
 	// A missing retained image fails before executing the builder, never rebuilds.
 	if _, err = h.cli.StopExecution(context.Background(), id); err != nil {
 		t.Fatal(err)
@@ -344,7 +366,23 @@ func TestBuildImagesDocker(t *testing.T) {
 		git("commit", "-qm", "fixture B")
 		b := filepath.Join(filepath.Dir(h.project), "worktree-b")
 		git("worktree", "add", "--detach", b, "HEAD")
-		for _, scene := range []string{"dev", "test"} {
+		for _, pair := range []struct {
+			scene      string
+			projects   []string
+			markers    []string
+			serialized bool
+		}{
+			{"dev", []string{a, b}, []string{"worktree-A", "worktree-B"}, false},
+			{"test", []string{a, b}, []string{"worktree-A", "worktree-B"}, false},
+			{"test", []string{a, a}, []string{"worktree-A", "worktree-A"}, true},
+		} {
+			t.Log("actual CLI pair", pair.scene, "same checkout", pair.serialized)
+			for _, project := range pair.projects {
+				if err := os.RemoveAll(filepath.Join(project, ".control")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			beforeSecond := map[string]bool{}
 			type runningCLI struct {
 				command            *exec.Cmd
 				done               <-chan error
@@ -352,11 +390,8 @@ func TestBuildImagesDocker(t *testing.T) {
 				joined             bool
 			}
 			commands := []*runningCLI{}
-			for _, project := range []string{a, b} {
-				if err := os.RemoveAll(filepath.Join(project, ".control")); err != nil {
-					t.Fatal(err)
-				}
-				current := &runningCLI{command: exec.Command(binary, "run", scene, "--project", project, "--config", h.config, "--state-dir", h.dir, "--json")}
+			for i, project := range pair.projects {
+				current := &runningCLI{command: exec.Command(binary, "run", pair.scene, "--project", project, "--config", h.config, "--state-dir", h.dir, "--json")}
 				current.command.Stdout = &current.output
 				current.command.Stderr = &current.diagnostic
 				t.Cleanup(func() {
@@ -378,12 +413,68 @@ func TestBuildImagesDocker(t *testing.T) {
 				}
 				current.done = waitFixtureChild(current.command)
 				commands = append(commands, current)
+				if pair.serialized && i == 0 {
+					awaitBuildControl(t, a)
+					listed, err := h.cli.List(context.Background(), v1.ListRequest{APIVersion: v1.Version})
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, instance := range listed.Instances {
+						beforeSecond[instance.ID] = true
+					}
+				}
 			}
-			awaitBuildControl(t, a)
-			awaitBuildControl(t, b)
+			if pair.serialized {
+				// Observe admission behind the held output lock, not a second producer barrier.
+				admitted := false
+				deadline := time.Now().Add(15 * time.Second)
+				for time.Now().Before(deadline) && !admitted {
+					listed, err := h.cli.List(context.Background(), v1.ListRequest{APIVersion: v1.Version})
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, instance := range listed.Instances {
+						if beforeSecond[instance.ID] || instance.Status != v1.Starting {
+							continue
+						}
+						second, err := h.cli.Inspect(context.Background(), instance.ID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if second.Instance.Execution == nil || second.Instance.Execution.Attempt == "" {
+							continue
+						}
+						if len(second.Instance.Execution.Components) != 0 {
+							t.Fatal("second producer bypassed held checkout output group")
+						}
+						admitted = true
+					}
+					if !admitted {
+						time.Sleep(20 * time.Millisecond)
+					}
+				}
+				if !admitted {
+					t.Fatal("second disposable CLI was not admitted")
+				}
+				entered, err := os.ReadFile(filepath.Join(a, ".control/entered"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(strings.Fields(string(entered))) != 1 {
+					t.Fatal("checkout output group allowed overlapping producers")
+				}
+			} else {
+				awaitBuildControl(t, a)
+				awaitBuildControl(t, b)
+			}
 			fixtureFile(t, a, ".control/release", "")
-			fixtureFile(t, b, ".control/release", "")
+			if !pair.serialized {
+				fixtureFile(t, b, ".control/release", "")
+			}
 			ids := []string{}
+			instances := []string{}
+			attempts := []string{}
+			tags := []string{}
 			for i, current := range commands {
 				select {
 				case err := <-current.done:
@@ -399,13 +490,24 @@ func TestBuildImagesDocker(t *testing.T) {
 					t.Fatal(err, current.output.String())
 				}
 				want := v1.RuntimeReady
-				if scene == "test" {
+				if pair.scene == "test" {
 					want = v1.Succeeded
 				}
 				if settled.Instance.Status != want {
 					t.Fatal("wrong CLI result", settled.Instance.Status)
 				}
-				ids = append(ids, settled.Instance.Execution.BuildImages[0].ID)
+				result := settled.Instance.Execution
+				if len(result.BuildImages) != 1 {
+					t.Fatal("missing disposable image handoff")
+				}
+				image := result.BuildImages[0]
+				if !validImageID(image.ID) || image.Attempt != result.Attempt || image.Tag != buildImageTag(settled.Instance.ID, result.Attempt, "app") {
+					t.Fatal("wrong attempt-scoped image provenance")
+				}
+				ids = append(ids, image.ID)
+				instances = append(instances, settled.Instance.ID)
+				attempts = append(attempts, result.Attempt)
+				tags = append(tags, image.Tag)
 				logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: settled.Instance.ID, Component: "check"})
 				if err != nil {
 					t.Fatal(err)
@@ -414,15 +516,28 @@ func TestBuildImagesDocker(t *testing.T) {
 				for _, r := range logs.Records {
 					text += r.Message
 				}
-				if !strings.Contains(text, fmt.Sprintf("worktree-%c", 'A'+i)) {
+				if !strings.Contains(text, pair.markers[i]) {
 					t.Fatal("wrong checkout image output", text)
 				}
 				if _, err = h.cli.Destroy(context.Background(), settled.Instance.ID); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if ids[0] == ids[1] {
+			if instances[0] == instances[1] || attempts[0] == attempts[1] || tags[0] == tags[1] {
+				t.Fatal("concurrent CLI attempts shared handoff identity")
+			}
+			if !pair.serialized && ids[0] == ids[1] {
 				t.Fatal("different checkout sources produced the same image")
+			}
+			if pair.serialized {
+				entered, err := os.ReadFile(filepath.Join(a, ".control/entered"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				observed := strings.Fields(string(entered))
+				if len(observed) != 2 || observed[0] != tags[0] || observed[1] != tags[1] {
+					t.Fatal("serialized producers did not receive their own attempt tags")
+				}
 			}
 		}
 		// Worktree metadata is private fixture state; remove only our exact worktrees.

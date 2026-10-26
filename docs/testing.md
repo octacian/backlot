@@ -567,3 +567,22 @@ serially and record the tested revision, relevant inputs, failures/skips and cle
 per [targeted diagnostics](release-acceptance/README.md).
 Prior MariaDB evidence does not establish PostgreSQL/custom execution, other-platform,
 full-feature or published-revision CI readiness.
+
+## Execution-scoped image handoff integration
+
+With the explicit private Docker fixture grant and cached `alpine:3.21`, run:
+
+```sh
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^TestBuildImagesDocker$' -count=1 -v -timeout=8m
+```
+
+The suite builds its own labelled images using the classic builder and exact local
+base ID, without pulls. It runs selected native project producers and real daemon
+consumers, retained pin reuse, same/changed-ID restart, explicit compatibility
+warnings and parent-written data witness, failed/missing/cancelled handoffs,
+recovery and independent worktrees/disposable runs. Cleanup joins owned daemons,
+reconciles their private journals and removes only fixture-labelled images/tags;
+cached bases remain. Missing opt-in skips and does not establish provider evidence.
+Configured provider/tool/image failures are failures. The complete existing Docker
+runtime/disposable suites remain separate required frozen-candidate regressions.

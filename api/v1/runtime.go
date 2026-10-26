@@ -44,11 +44,12 @@ type ExecutionOptions struct {
 
 // RunRequest starts or explicitly restarts a validated scene.
 type RunRequest struct {
-	Attached   bool             `json:"attached,omitempty"`
-	APIVersion string           `json:"api_version"`
-	Plan       PlanRequest      `json:"plan"`
-	Options    ExecutionOptions `json:"options"`
-	InstanceID string           `json:"instance_id,omitempty"`
+	AllowImageChange bool             `json:"allow_image_change,omitempty"`
+	Attached         bool             `json:"attached,omitempty"`
+	APIVersion       string           `json:"api_version"`
+	Plan             PlanRequest      `json:"plan"`
+	Options          ExecutionOptions `json:"options"`
+	InstanceID       string           `json:"instance_id,omitempty"`
 }
 
 // ComponentResult preserves original job status independently of orchestration failures.
@@ -82,8 +83,28 @@ const (
 	CleanupAuthorityLost NativeCleanupConfidence = "authority_lost"
 )
 
+// BuildImageResult records accepted local image provenance, without deletion authority.
+type BuildImageResult struct {
+	Name     string `json:"name"`
+	Producer string `json:"producer"`
+	Attempt  string `json:"attempt"`
+	Tag      string `json:"tag"`
+	ID       string `json:"id"`
+}
+
+// ImageChangeWarning records an explicitly authorized retained-data compatibility risk.
+type ImageChangeWarning struct {
+	Component  string `json:"component"`
+	Image      string `json:"image"`
+	PreviousID string `json:"previous_id"`
+	ID         string `json:"id"`
+	Message    string `json:"message"`
+}
+
 // ExecutionResult is the durable redacted runtime view.
 type ExecutionResult struct {
+	BuildImages         []BuildImageResult   `json:"build_images,omitempty"`
+	ImageChangeWarnings []ImageChangeWarning `json:"image_change_warnings,omitempty"`
 	// Outcome preserves the terminal execution status across later stop/destroy operations.
 	Outcome          InstanceStatus  `json:"outcome,omitempty"`
 	Fixtures         []FixtureRecord `json:"fixtures,omitempty"`

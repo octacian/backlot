@@ -158,6 +158,12 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 			}
 		}
 		if c.Image != nil {
+			if r := c.Image.Ref; r != nil && r.Kind == "build_image" {
+				if result.BuildImages == nil {
+					result.BuildImages = map[string]v1.BuildImage{}
+				}
+				result.BuildImages[r.Name] = m.BuildImages[r.Name]
+			}
 			image, err := resolveValue(m, config, *c.Image, project, result)
 			if err != nil {
 				return v1.PlanResponse{}, err
@@ -310,7 +316,7 @@ func resolveValue(m v1.Manifest, c resolvedConfig, v v1.Value, project string, p
 	case "resource":
 		result.symbolic = r
 		result.secret = result.secret || (m.Resources[r.Name].Kind == "secret" || m.Resources[r.Name].Kind == "allocation" && r.Field == "password")
-	case "service":
+	case "service", "build_image":
 		result.symbolic = r
 	case "output":
 		literal := filepath.Join(project, filepath.FromSlash(m.Outputs[r.Name].Path))

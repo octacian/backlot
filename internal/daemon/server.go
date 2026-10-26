@@ -351,6 +351,10 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				writeError(w, problem("invalid_request", "run does not accept instance_id"))
 				return
 			}
+			if request.AllowImageChange && r.URL.Path != "/v1/restart" {
+				writeError(w, problem("invalid_request", "allow_image_change is only supported by restart"))
+				return
+			}
 			response, err := s.runMode(r.Context(), request, r.URL.Path == "/v1/reset")
 			if err != nil {
 				writeError(w, err)

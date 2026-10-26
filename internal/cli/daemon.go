@@ -60,6 +60,13 @@ func output(c *urfave.Command, value any, err error) error {
 	case v1.DaemonStatusResponse:
 		_, err = fmt.Fprintf(c.Writer, "Daemon %s (API %s, state %d, PID %d)\n", result.Status, result.APIVersion, result.StateVersion, result.PID)
 	case v1.InstanceResponse:
+		if result.Instance.Execution != nil {
+			for _, warning := range result.Instance.Execution.ImageChangeWarnings {
+				if _, e := fmt.Fprintln(c.ErrWriter, "Warning:", warning.Message); e != nil {
+					return e
+				}
+			}
+		}
 		for _, warning := range result.Instance.NativeOwnershipWarnings {
 			if _, e := fmt.Fprintln(c.ErrWriter, "Warning:", warning.Message); e != nil {
 				return e

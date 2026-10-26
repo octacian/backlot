@@ -392,3 +392,16 @@ connections, lifecycle/concurrency/recovery and bounded force cleanup. See the
 [Issue 43](https://github.com/octacian/backlot/issues/43) remains the umbrella:
 PR 2 adds PostgreSQL 17; PR 3 adds custom execution and a non-Go/non-database fixture.
 Those paths and overall issue completion remain follow-ups.
+
+## Execution-scoped build images (issue 80)
+
+Selected native each-start producers receive fresh image tags through explicit
+environment references; successful joined handoffs pin local Engine IDs before
+container creation. Offline plans remain symbolic. Stop/start retains accepted
+IDs; restart accepts compatible changes, with explicit `--allow-image-change`
+for changed produced IDs used by mounted consumers. Resource generations and
+version-11 state retain provenance; prebuilt literal/input images remain independent.
+See the [decision](adr/20261025T202510851Z-pin-execution-scoped-build-images-from-native-jobs.md),
+[example](../examples/build-images/README.md) and [focused provider gate](testing.md#execution-scoped-image-handoff-integration).
+Delivery still requires independent implementation reviews, frozen full regressions
+and exact published-head CI; this guide is not run-specific acceptance evidence.

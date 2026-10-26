@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -13,26 +14,28 @@ import (
 )
 
 func TestStopValidatesAcknowledgment(t *testing.T) {
-	valid := `{"api_version":"v1","state_version":10,"status":"stopping","pid":10,"lease_duration":"30s"}`
+	stateField := fmt.Sprintf(`"state_version":%d`, v1.StateVersion)
+	valid := fmt.Sprintf(`{"api_version":"v1","state_version":%d,"status":"stopping","pid":10,"lease_duration":"30s"}`, v1.StateVersion)
 	for _, tc := range []struct {
 		name, body, header, content, code string
 		status, version                   int
 	}{
 		{"current", valid, "v1", "application/json", "", 200, v1.StateVersion},
-		{"six", strings.Replace(valid, `"state_version":10`, `"state_version":6`, 1), "v1", "application/json", "api_version", 200, 0},
-		{"nine", strings.Replace(valid, `"state_version":10`, `"state_version":9`, 1), "v1", "application/json", "api_version", 200, 0},
-		{"eight", strings.Replace(valid, `"state_version":10`, `"state_version":8`, 1), "v1", "application/json", "api_version", 200, 0},
-		{"five", strings.Replace(valid, `"state_version":10`, `"state_version":5`, 1), "v1", "application/json", "api_version", 200, 0},
-		{"seven", strings.Replace(valid, `"state_version":10`, `"state_version":7`, 1), "v1", "application/json", "api_version", 200, 0},
-		{"future", strings.Replace(valid, `"state_version":10`, `"state_version":99`, 1), "v1", "application/json", "api_version", 200, 0},
-		{"version type", strings.Replace(valid, `"state_version":10`, `"state_version":"6"`, 1), "v1", "application/json", "invalid_response", 200, 0},
+		{"ten", strings.Replace(valid, stateField, `"state_version":10`, 1), "v1", "application/json", "api_version", 200, 0},
+		{"six", strings.Replace(valid, stateField, `"state_version":6`, 1), "v1", "application/json", "api_version", 200, 0},
+		{"nine", strings.Replace(valid, stateField, `"state_version":9`, 1), "v1", "application/json", "api_version", 200, 0},
+		{"eight", strings.Replace(valid, stateField, `"state_version":8`, 1), "v1", "application/json", "api_version", 200, 0},
+		{"five", strings.Replace(valid, stateField, `"state_version":5`, 1), "v1", "application/json", "api_version", 200, 0},
+		{"seven", strings.Replace(valid, stateField, `"state_version":7`, 1), "v1", "application/json", "api_version", 200, 0},
+		{"future", strings.Replace(valid, stateField, `"state_version":99`, 1), "v1", "application/json", "api_version", 200, 0},
+		{"version type", strings.Replace(valid, stateField, `"state_version":"6"`, 1), "v1", "application/json", "invalid_response", 200, 0},
 		{"body API", strings.Replace(valid, `"api_version":"v1"`, `"api_version":"v2"`, 1), "v1", "application/json", "api_version", 200, 0},
 		{"header", valid, "v2", "application/json", "api_version", 200, 0},
 		{"content", valid, "v1", "text/plain", "invalid_response", 200, 0},
 		{"PID", strings.Replace(valid, `"pid":10`, `"pid":0`, 1), "v1", "application/json", "invalid_response", 200, 0},
 		{"lease", strings.Replace(valid, `"30s"`, `"99h"`, 1), "v1", "application/json", "invalid_response", 200, 0},
 		{"lease minimum", strings.Replace(valid, `"30s"`, `"1ms"`, 1), "v1", "application/json", "invalid_response", 200, 0},
-		{"missing", `{"api_version":"v1","state_version":10,"status":"stopping"}`, "v1", "application/json", "invalid_response", 200, 0},
+		{"missing", fmt.Sprintf(`{"api_version":"v1","state_version":%d,"status":"stopping"}`, v1.StateVersion), "v1", "application/json", "invalid_response", 200, 0},
 		{"syntax", `{`, "v1", "application/json", "invalid_response", 200, 0},
 		{"unknown", strings.Replace(valid, `"pid":10`, `"pid":10,"unknown":true`, 1), "v1", "application/json", "invalid_response", 200, 0},
 		{"duplicate", strings.Replace(valid, `"pid":10`, `"pid":10,"pid":11`, 1), "v1", "application/json", "invalid_response", 200, 0},

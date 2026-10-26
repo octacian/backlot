@@ -126,8 +126,16 @@ test('version fence and child registry selection preserve HOME/XDG and unrelated
     assert.equal(env.BACKLOT_PROJECT_CONFIG_DIR, join(owner.root, 'project-config'));
     await mkdir(join(owner.root, 'tools'));
     const binary = join(owner.root, 'tools/backlot');
-    await writeFile(binary, `#!${process.execPath}\nif(process.argv[2]!=='version')throw Error('resolution attempted');console.log('{"api_version":"v1"}');`, { mode: 0o700 });
-    await assert.rejects(requireProjectRuntime(owner, binary), /state-version-10/);
+    for (const [raw, supported] of [
+      ['{"api_version":"v1","state_version":10}', true], ['{"api_version":"v1","state_version":11}', true],
+      ['{"api_version":"v1","state_version":9}', false], ['{"api_version":"v1","state_version":12}', false],
+      ['{"api_version":"v1","state_version":"11"}', false], ['{"api_version":"v1","state_version":10.5}', false],
+      ['{"api_version":"v2","state_version":11}', false], ['{"api_version":"v1"}', false], ['invalid JSON', false]
+    ]) {
+      await writeFile(binary, `#!${process.execPath}\nif(process.argv[2]!=='version')throw Error('resolution attempted');console.log(${JSON.stringify(raw)});`, { mode: 0o700 });
+      if (supported) await requireProjectRuntime(owner, binary);
+      else await assert.rejects(requireProjectRuntime(owner, binary), /state-version-10 or state-version-11/);
+    }
     await assert.rejects(lstat(join(owner.root, 'project-config')), { code: 'ENOENT' });
   } finally { await cleanup(owner); }
 });

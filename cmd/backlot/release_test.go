@@ -198,8 +198,14 @@ func TestReleaseVerifiedDraft(t *testing.T) {
 			f := newReleaseFixture(t)
 			f.write("mode", mode)
 			switch mode {
-			case "not draft", "missing asset":
-				f.json("uploaded.json", map[string]any{"isDraft": mode != "not draft", "tagName": "v0.1.1", "assets": []any{}})
+			case "not draft":
+				body, err := os.ReadFile(filepath.Join(f.root, "uploaded.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.write("uploaded.json", strings.Replace(string(body), `"isDraft":true`, `"isDraft":false`, 1))
+			case "missing asset":
+				f.json("uploaded.json", map[string]any{"isDraft": true, "tagName": "v0.1.1", "assets": []any{}})
 			case "changed source":
 				f.write("bin/git", "#!/bin/sh\nif [ -e created ]; then exit 1; fi\ncase $1 in\nrev-parse) echo source;;\nls-remote) printf 'source\\trefs/tags/v0.1.1\\n';;\nesac\n")
 			case "failed recheck":

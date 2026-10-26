@@ -82,6 +82,7 @@ multi-commit pushes.
 | `actions/` implementation | Current-head scenes and project inputs |
 | `examples/ci-scenes/` implementation | Scenes |
 | `examples/ci-inputs/` implementation | Project inputs |
+| Native recipe/runtime implementation or `.github/workflows/recipes.yml` | One serial native recipe job; one Chromium and DB-only compatibility checks |
 | An automatic workflow | Its own gates; shared change-detection edits run all automatic gates |
 
 Markdown inside implementation/example directories stays documentation-only.
@@ -530,6 +531,47 @@ replace applicable required CI at the exact published revision.
 <a id="shared-mariadb-lifecycle-and-recovery-43-gate-2"></a>
 
 ## Shared MariaDB integration
+
+The smaller [native Go/MariaDB](../examples/native-go-mariadb/README.md) and
+[loopback Playwright](../examples/native-playwright/README.md) adopter recipes
+have a separate, opt-in repository verification checkpoint:
+
+```sh
+BACKLOT_RECIPE_PLAYWRIGHT_PROJECT=/absolute/installed/native-playwright \
+PLAYWRIGHT_BROWSERS_PATH=/absolute/owned/browser-cache \
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test ./internal/daemon -run '^(TestNativePlaywrightRecipe|TestNativeGoMariaDBRecipe|TestMariaDBRecipeCompatibility)$' -count=1 -v -timeout=10m
+```
+
+Install the recipe's pinned dependencies/browser separately with an explicit
+owned `PLAYWRIGHT_BROWSERS_PATH` and `PLAYWRIGHT_SKIP_BROWSER_GC=1`, then pre-pull its
+explicit MariaDB patch image. The checkpoint covers success, assertion failure,
+recovery, original exits, exact arguments, portable exports and authenticated
+teardown. The compatibility check first proves application authentication and
+query/read/write access, then rejects a deliberately wrong environment password
+against that same initialized database. A failed fresh startup does not establish
+authentication rejection. It verifies exact owned Docker objects are absent after
+destroy.
+
+`BACKLOT_RECIPE_MARIADB_IMAGES` selects a comma-separated image list, defaulting
+to the single adopter image. The [serial workflow](../.github/workflows/recipes.yml)
+selects `mariadb:10.11.19,mariadb:11.4.13,mariadb:11.8.9,mariadb:12.3.3`, builds
+the CLI/readiness/test executables once and installs one pinned Chromium.
+`BACKLOT_INSTALLED_TEST_BINARY` and `BACKLOT_RECIPE_READY_BINARY` reuse those
+explicit executables; absent overrides build private fixture binaries.
+`BACKLOT_RECIPE_EXPORT_ROOT` can select an existing private evidence parent;
+only audited exports beneath it are uploaded. Raw daemon state stays private.
+
+Browser exports are checked for the selected test, resolved URL, status and valid
+HTML, screenshots and ZIP traces. Go events must identify the selected test without
+skipping; its report must match the original exit. The first audited export is
+rechecked after recovery.
+Representative cancellation covers a held browser SIGINT and Go SIGTERM on 11.4.
+Present partial evidence is checked while missing final reports are allowed; see
+[native runner cancellation](evidence.md#native-runner-cancellation). Cleanup
+observations can conservatively fail on PID reuse and cannot rule out unseen
+descendants. No skip establishes acceptance; these bounded checks do not replace
+shared-server/provider gates or establish other-platform coverage.
 
 Run serially with exclusive owned-fixture authority, an explicit local Docker Unix
 endpoint and existing MariaDB 11.4/Alpine 3.21 images. Fixtures build the static

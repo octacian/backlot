@@ -26,6 +26,25 @@ Disposable clients renew a finite lease while waiting. Losing the client stops
 renewals; the daemon cancels after the configured lease expires, gathers available
 evidence, and cleans up. Execution deadlines of zero do not disable the lease.
 
+## Native runner cancellation
+
+A signal to `backlot run` requests cancellation; it is not forwarded unchanged
+to the test runner. Native cleanup uses bounded TERM-based supervision. The
+outer CLI's 130/143 and the original native exit (or absence) remain separate.
+
+Native runner cancellation can leave partial evidence without finalized reports.
+Neither the [Playwright recipe](../examples/native-playwright/README.md) nor Go's
+normal `TestMain` report writer promises final reports on cancellation. Available
+partial files vary by runner/platform and termination; preserve them without
+assuming a particular report or media file will exist.
+
+Export `complete: true` means the declared evidence inventory was collected and
+audited; application report finalization is a separate fact. Keep available
+partial evidence and inspect the original result and collection/cleanup errors.
+A runner-directed graceful cancellation capability is tracked separately in
+[#84](https://github.com/octacian/backlot/issues/84); the recipe adds no signal
+translation.
+
 Attached persistent commands emit typed lifecycle/log NDJSON and aggregate only
 the accepted attempt. They retain the same log encoding, gaps and retention limits,
 without a replay or completeness guarantee. Their signal/loss cleanup preserves

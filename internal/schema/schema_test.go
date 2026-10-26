@@ -62,6 +62,9 @@ func TestEditorExamples(t *testing.T) {
 		target       any
 	}{
 		{"../../examples/adoption/backlot.yaml", "manifest-v1.schema.json", &v1.Manifest{}},
+		{"../../examples/native-playwright/backlot.yaml", "manifest-v1.schema.json", &v1.Manifest{}},
+		{"../../examples/native-go-mariadb/backlot.yaml", "manifest-v1.schema.json", &v1.Manifest{}},
+		{"../../examples/native-go-mariadb/machine.example.yaml", "machine-config-v1.schema.json", &v1.MachineConfig{}},
 		{"../../examples/shared-mariadb/backlot.yaml", "manifest-v1.schema.json", &v1.Manifest{}},
 		{"../../examples/macos-quickstart/backlot.yaml", "manifest-v1.schema.json", &v1.Manifest{}},
 		{"../../examples/macos-quickstart/machine.example.yaml", "machine-config-v1.schema.json", &v1.MachineConfig{}},

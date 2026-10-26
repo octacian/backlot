@@ -1,0 +1,80 @@
+name: Native test recipes
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recipes-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+
+  recipes:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.recipes == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      BACKLOT_DOCKER_TEST_ENDPOINT: unix:///var/run/docker.sock
+      BACKLOT_RECIPE_MARIADB_IMAGES: mariadb:10.11.19,mariadb:11.4.13,mariadb:11.8.9,mariadb:12.3.3
+      PLAYWRIGHT_SKIP_BROWSER_GC: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.8.1
+      - name: Configure owned paths
+        run: |
+          echo "BACKLOT_INSTALLED_TEST_BINARY=$RUNNER_TEMP/backlot" >> "$GITHUB_ENV"
+          echo "BACKLOT_RECIPE_READY_BINARY=$RUNNER_TEMP/ready" >> "$GITHUB_ENV"
+          echo "BACKLOT_RECIPE_PLAYWRIGHT_PROJECT=$GITHUB_WORKSPACE/examples/native-playwright" >> "$GITHUB_ENV"
+          echo "BACKLOT_RECIPE_EXPORT_ROOT=$RUNNER_TEMP/recipe-evidence" >> "$GITHUB_ENV"
+          echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/recipe-browsers" >> "$GITHUB_ENV"
+      - name: Build shared recipe executables once
+        run: |
+          mkdir -m 700 "$BACKLOT_RECIPE_EXPORT_ROOT"
+          python3 -B -m unittest discover -s internal/daemon/testdata/recipes -p '*_test.py'
+          go build -race -o "$BACKLOT_INSTALLED_TEST_BINARY" ./cmd/backlot
+          go build -o "$BACKLOT_RECIPE_READY_BINARY" ./examples/native-go-mariadb/cmd/ready
+          go test -c -race -o "$RUNNER_TEMP/recipes.test" ./internal/daemon
+      - name: Install pinned application and one Chromium
+        working-directory: examples/native-playwright
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx --no-install playwright install --with-deps chromium
+      - name: Pull explicit database images and record image costs
+        shell: bash
+        run: |
+          for image in ${BACKLOT_RECIPE_MARIADB_IMAGES//,/ }; do
+            if docker image inspect "$image" >/dev/null 2>&1; then echo "$image present=true"; else echo "$image present=false"; fi
+            /usr/bin/time -p docker pull "$image"
+            docker image inspect "$image" --format '{{.Id}} {{.Architecture}} {{.Size}} {{json .RepoDigests}}'
+          done
+      - name: Serial database-only compatibility checks
+        working-directory: internal/daemon
+        run: /usr/bin/time -p "$RUNNER_TEMP/recipes.test" -test.run '^TestMariaDBRecipeCompatibility$' -test.v -test.timeout=8m
+      - name: Representative database and browser recipe verification
+        working-directory: internal/daemon
+        run: /usr/bin/time -p "$RUNNER_TEMP/recipes.test" -test.run '^(TestNativePlaywrightRecipe|TestNativeGoMariaDBRecipe)$' -test.v -test.timeout=8m
+      - name: Preserve only audited portable recipe evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-recipe-evidence
+          path: ${{ runner.temp }}/recipe-evidence
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7

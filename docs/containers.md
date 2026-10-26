@@ -48,6 +48,10 @@ settings. This private-container path remains available alongside the optional
 own application migrations or seed logic. Applications own those operations and any application-level readiness
 probe. A TCP probe observes connectivity, which may precede application setup;
 use a declared native command probe when connectivity is insufficient.
+The [native Go/MariaDB recipe](../examples/native-go-mariadb/README.md) supplies a
+small application-user query probe with environment-only credentials, alongside
+an actual native read/write test. Its runtime and version compatibility checkpoint
+is tracked separately from the existing private-state fixture.
 
 ## State compatibility
 

@@ -1,5 +1,10 @@
 # GitHub Actions quickstart
 
+For a smaller local adopter starting point, use [native Playwright over loopback
+HTTP](../examples/native-playwright/README.md) or [native Go tests against a
+disposable MariaDB](../examples/native-go-mariadb/README.md). These recipes do not
+replace the managed HTTPS browser gate below.
+
 Copy [the adopter workflow](../examples/ci-scenes/adopter.yml) into your application
 repository for **ephemeral Ubuntu 24.04 amd64** hosted runners. Install your own
 application Node, npm dependencies and browser first, then use

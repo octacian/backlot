@@ -147,7 +147,8 @@ func validateSharedAuthority(tx *bolt.Tx) error {
 		if err != nil {
 			return err
 		}
-		if p != r.Project || !manifest.ValidIdentifier(r.Name) || r.ID != hash(p.ID+"/"+r.Name) || r.Endpoint == "" || r.Declaration.Manager != "mariadb" || r.Declaration.Image == "" || r.Declaration.Storage != "volume" || r.Declaration.Admin != "generated" || r.Declaration.Port != 3306 || r.Port < 0 || r.Port > 65535 {
+		validManager := (r.Declaration.Manager == "mariadb" && r.Declaration.Port == 3306) || (r.Declaration.Manager == "postgresql" && r.Declaration.Port == 5432)
+		if p != r.Project || !manifest.ValidIdentifier(r.Name) || r.ID != hash(p.ID+"/"+r.Name) || r.Endpoint == "" || !validManager || r.Declaration.Image == "" || r.Declaration.Storage != "volume" || r.Declaration.Admin != "generated" || r.Port < 0 || r.Port > 65535 {
 			return problem("state_corrupt", "invalid shared server identity or configuration")
 		}
 		for kind, resource := range map[string]ownedResource{"volume": r.Volume, "network": r.Network, "container": r.Server} {

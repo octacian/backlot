@@ -62,6 +62,7 @@ jobs:
           GOBIN="$RUNNER_TEMP/backlot-tools" go install github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.6
           docker pull alpine:3.21
           docker pull mariadb:11.4
+          docker pull postgres:17
           docker pull caddy:2.11.6
       - name: Verify Linux installation
         run: |
@@ -80,6 +81,11 @@ jobs:
           export BACKLOT_CADDY_TEST_BINARY="$RUNNER_TEMP/backlot-tools/caddy"
           export BACKLOT_INSTALLED_TEST_BINARY="$RUNNER_TEMP/backlot-install/backlot"
           go test -race ./internal/daemon -run '^TestLinuxHTTPS$' -count=1 -v -timeout=15m
+      - name: Shared PostgreSQL lifecycle and recovery
+        env:
+          BACKLOT_DOCKER_TEST_ENDPOINT: unix:///var/run/docker.sock
+        run: |
+          go test -race ./internal/daemon -run '^TestSharedPostgreSQL.*$' -count=1 -v -timeout=30m
       - name: Complete provider and HTTPS runtime gates
         env:
           BACKLOT_DOCKER_TEST_ENDPOINT: unix:///var/run/docker.sock

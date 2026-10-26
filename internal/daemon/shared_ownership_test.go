@@ -38,7 +38,11 @@ func (f *sharedMariaDBFixture) liveAdminRecord(t *testing.T) sharedServiceRecord
 	}
 	password := ""
 	for _, value := range out.Container.Config.Env {
-		if s, ok := strings.CutPrefix(value, "MARIADB_ROOT_PASSWORD="); ok {
+		prefix := "MARIADB_ROOT_PASSWORD="
+		if f.manager == "postgresql" {
+			prefix = "POSTGRES_PASSWORD="
+		}
+		if s, ok := strings.CutPrefix(value, prefix); ok {
 			password = s
 		}
 	}
@@ -49,7 +53,7 @@ func (f *sharedMariaDBFixture) liveAdminRecord(t *testing.T) sharedServiceRecord
 	if !validID(owner) {
 		t.Fatal("private fixture server authority incomplete")
 	}
-	return sharedServiceRecord{AdminPassword: password, Port: port, Server: ownedResource{ID: id, Token: owner}}
+	return sharedServiceRecord{Declaration: v1.SharedService{Manager: f.manager, Port: f.internalPort}, AdminPassword: password, Port: port, Server: ownedResource{ID: id, Token: owner}}
 }
 func (f *sharedMariaDBFixture) liveAdmin(t *testing.T) *sql.DB {
 	return sharedAdmin(t, f.liveAdminRecord(t))
@@ -59,6 +63,13 @@ func (f *sharedMariaDBFixture) requireAbsent(t *testing.T, c sharedFixtureCreden
 	t.Helper()
 	db := f.liveAdmin(t)
 	defer func() { _ = db.Close() }()
+	if f.manager == "postgresql" {
+		var count int
+		if err := db.QueryRow("SELECT (SELECT count(*) FROM pg_database WHERE datname=$1)+(SELECT count(*) FROM pg_roles WHERE rolname IN ($1,$2))", c.database, c.user).Scan(&count); err != nil || count != 0 {
+			t.Fatal("PostgreSQL three-target absence unverified", err)
+		}
+		return
+	}
 	databases, users := sharedSQLCounts(t, db, v1.ManagerRequest{Database: c.database, Username: c.user})
 	if databases != 0 || users != 0 {
 		t.Fatal("automatic cleanup left actual SQL database/user", databases, users)
@@ -401,6 +412,11 @@ func TestSharedMariaDBConsumerBeforeRelease(t *testing.T) {
 }
 
 func TestSharedUnselectedOfflinePrivacy(t *testing.T) {
+	for _, engine := range []string{"mariadb", "postgresql"} {
+		t.Run(engine, func(t *testing.T) { testSharedUnselectedOfflinePrivacy(t, engine) })
+	}
+}
+func testSharedUnselectedOfflinePrivacy(t *testing.T, engine string) {
 	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	h := newNativeHarness(t, binary, "30s")
 	ctx := context.Background()
@@ -422,7 +438,11 @@ func TestSharedUnselectedOfflinePrivacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.manifest.Tools["true"] = "/usr/bin/true"
-	h.manifest.SharedServices = map[string]v1.SharedService{"sql": {Manager: "mariadb", Image: "unused-mariadb:fixture", Storage: "volume", Admin: "generated", Port: 3306, ReadinessTimeout: "60s"}}
+	port := 3306
+	if engine == "postgresql" {
+		port = 5432
+	}
+	h.manifest.SharedServices = map[string]v1.SharedService{"sql": {Manager: engine, Image: "unused-sql:fixture", Storage: "volume", Admin: "generated", Port: port, ReadinessTimeout: "60s"}}
 	h.manifest.Resources["database"] = v1.Resource{Kind: "allocation", SharedService: "sql"}
 	environment := v1.Environment{Assign: map[string]v1.Value{}}
 	for _, field := range []string{"host", "port", "database", "username", "password"} {

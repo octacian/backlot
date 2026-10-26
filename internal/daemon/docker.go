@@ -714,7 +714,7 @@ func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, re
 			return "127.0.0.1", nil
 		case "port":
 			if runtime == v1.Container {
-				return "3306", nil
+				return strconv.Itoa(connection.InternalPort), nil
 			}
 			return strconv.Itoa(connection.Port), nil
 		case "database":

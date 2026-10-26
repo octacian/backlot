@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/lib/pq"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -71,6 +73,9 @@ func checkHTTP(port string) error {
 func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	if os.Getenv("DB_MANAGER") == "postgresql" {
+		return runPostgreSQL(ctx)
+	}
 	config := mysql.NewConfig()
 	config.User = os.Getenv("DB_USERNAME")
 	config.Passwd = os.Getenv("DB_PASSWORD")
@@ -119,15 +124,10 @@ func run() error {
 }
 
 func serve(port string) error {
-	config := mysql.NewConfig()
-	config.User, config.Passwd, config.DBName = os.Getenv("DB_USERNAME"), os.Getenv("DB_PASSWORD"), os.Getenv("DB_DATABASE")
-	config.Net, config.Addr = "tcp", net.JoinHostPort(os.Getenv("DB_HOST"), os.Getenv("DB_PORT"))
-	config.Timeout, config.ReadTimeout, config.WriteTimeout = time.Second, time.Second, time.Second
-	connector, err := mysql.NewConnector(config)
+	db, err := applicationDB()
 	if err != nil {
 		return err
 	}
-	db := sql.OpenDB(connector)
 	defer func() { _ = db.Close() }()
 	listener, err := net.Listen("tcp", net.JoinHostPort("0.0.0.0", port))
 	if err != nil {
@@ -165,7 +165,7 @@ func serve(port string) error {
 			proof, _ := json.Marshal(struct {
 				Database string
 				Alive    bool
-			}{config.DBName, alive})
+			}{os.Getenv("DB_DATABASE"), alive})
 			_, writeErr := out.Write(append(proof, '\n'))
 			closeErr := out.Close()
 			if writeErr != nil {
@@ -187,4 +187,81 @@ func serve(port string) error {
 		}
 		return err
 	}
+}
+
+func applicationDB() (*sql.DB, error) {
+	if os.Getenv("DB_MANAGER") == "postgresql" {
+		port, err := strconv.Atoi(os.Getenv("DB_PORT"))
+		if err != nil {
+			return nil, err
+		}
+		c, err := pq.NewConnectorConfig(pq.Config{Host: os.Getenv("DB_HOST"), Port: uint16(port), Database: os.Getenv("DB_DATABASE"), User: os.Getenv("DB_USERNAME"), Password: os.Getenv("DB_PASSWORD"), SSLMode: pq.SSLModeDisable, ConnectTimeout: time.Second, TargetSessionAttrs: pq.TargetSessionAttrsAny})
+		if err != nil {
+			return nil, err
+		}
+		return sql.OpenDB(c), nil
+	}
+	config := mysql.NewConfig()
+	config.User, config.Passwd, config.DBName = os.Getenv("DB_USERNAME"), os.Getenv("DB_PASSWORD"), os.Getenv("DB_DATABASE")
+	config.Net, config.Addr = "tcp", net.JoinHostPort(os.Getenv("DB_HOST"), os.Getenv("DB_PORT"))
+	config.Timeout, config.ReadTimeout, config.WriteTimeout = time.Second, time.Second, time.Second
+	c, err := mysql.NewConnector(config)
+	if err != nil {
+		return nil, err
+	}
+	return sql.OpenDB(c), nil
+}
+func runPostgreSQL(ctx context.Context) error {
+	port, err := strconv.Atoi(os.Getenv("DB_PORT"))
+	if err != nil {
+		return err
+	}
+	for _, user := range []string{os.Getenv("DB_USERNAME"), "postgres"} {
+		database := os.Getenv("DB_DATABASE")
+		if user == "postgres" {
+			database = "postgres"
+		}
+		wrong, err := pq.NewConnectorConfig(pq.Config{Host: os.Getenv("DB_HOST"), Port: uint16(port), Database: database, User: user, Password: "wrong-fixture-password", SSLMode: pq.SSLModeDisable, ConnectTimeout: time.Second})
+		if err != nil {
+			return err
+		}
+		bad := sql.OpenDB(wrong)
+		err = bad.PingContext(ctx)
+		_ = bad.Close()
+		var denied *pq.Error
+		if !errors.As(err, &denied) || denied.Code != "28P01" {
+			return errors.New("wrong application or administration password was not rejected")
+		}
+	}
+	db, err := applicationDB()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	var exists bool
+	if err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\')`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists && os.Getenv("DB_PERSIST") != "1" {
+		return errors.New("allocation not empty")
+	}
+	if !exists {
+		for _, query := range []string{"CREATE SCHEMA application", "CREATE TABLE application.schema_witness(value int)", "CREATE EXTENSION hstore", "CREATE TABLE witness (id INT PRIMARY KEY,value VARCHAR(40))", "INSERT INTO witness VALUES (1,'application-data')", "UPDATE witness SET value='updated' WHERE id=1", "ALTER TABLE witness ADD COLUMN extra INT", "CREATE INDEX by_value ON witness(value)", "CREATE VIEW app_view AS SELECT value FROM witness", "CREATE TEMPORARY TABLE temp_fixture(id INT)"} {
+			if _, err = db.ExecContext(ctx, query); err != nil {
+				return err
+			}
+		}
+	}
+	for _, query := range []string{"SELECT * FROM pg_authid", "CREATE ROLE forbidden_fixture", "CREATE DATABASE forbidden_fixture", "SET ROLE postgres", "ALTER DATABASE " + pq.QuoteIdentifier(os.Getenv("DB_DATABASE")) + " OWNER TO " + pq.QuoteIdentifier(os.Getenv("DB_USERNAME"))} {
+		_, err = db.ExecContext(ctx, query)
+		var denied *pq.Error
+		if !errors.As(err, &denied) || denied.Code != "42501" {
+			return errors.New("PostgreSQL administration was not denied")
+		}
+	}
+	var value string
+	if err = db.QueryRowContext(ctx, "SELECT value FROM app_view WHERE value='updated'").Scan(&value); err != nil || value != "updated" {
+		return errors.New("application read failed")
+	}
+	return nil
 }

@@ -540,3 +540,36 @@ and `TestDisposableEvidenceDocker` regressions serially. Record revision/input/i
 provenance, failures/skips and cleanup externally per [release verification](release-acceptance/README.md).
 Prior MariaDB evidence does not establish PostgreSQL/custom execution, other-platform,
 full-feature or published-revision CI readiness.
+
+## Shared PostgreSQL integration
+
+Use the same owned fixture rules as [shared MariaDB](#shared-mariadb-integration),
+with an explicit Docker Unix endpoint and cached `postgres:17` and `alpine:3.21`.
+Coordinate overlapping fixture windows; this requires no global engine/daemon
+ownership. Before broad provider regression, exercise the actual CLI/daemon native
+and bridge path, named-schema/trusted-extension permissions, wrong-auth/peer/admin
+denial, parent-written persistence and preserved credential-drift cleanup/retry:
+
+```sh
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^TestSharedPostgreSQLEarlyFlow$' -count=1 -v -timeout=8m
+```
+
+The engine-aware shared fixture registers cleanup before effects, builds only a
+uniquely labeled static consumer from the inspected cached Alpine ID, and verifies
+owned SQL/runtime/image absence while preserving cached images and uncertainty.
+Missing opt-in configuration skips and supplies no provider evidence. Exact source,
+image/configuration/environment, failures and cleanup belong in revision-bound
+external evidence. The Linux runtime job pre-pulls PostgreSQL17 and runs the focused lifecycle,
+rollback/acknowledgment, force/dependency, bootstrap-drift and cancellation cases:
+
+```sh
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^TestSharedPostgreSQL.*$' -count=1 -v -timeout=30m
+```
+
+This command is a distinct evidence gate from the early flow.
+Full PostgreSQL/MariaDB/provider/gateway regressions,
+runnable example and applicable CI remain
+separate frozen-candidate gates; an early-flow pass or prior architecture SQL proof
+must not be relabeled as those passes.

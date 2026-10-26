@@ -205,13 +205,14 @@ defines provider commands; local milestone evidence is separate from V1 acceptan
 
 ## Project-scoped shared services
 
-Shared MariaDB servers retain independent instance allocations. See the
+Shared MariaDB and PostgreSQL servers retain independent instance allocations. See the
 [implementation plan](implementation-plan.md#shared-services-issue-43) for delivery
-status and PostgreSQL/custom execution follow-ups.
+status and custom execution follow-ups.
 
 Declare `shared_services` and select `kind: allocation` resources per the
 [manifest guide](manifest.md#shared-service-declarations); follow the runnable
-[MariaDB example](../examples/shared-mariadb/README.md) for worktrees and lifecycle.
+[MariaDB](../examples/shared-mariadb/README.md) and
+[PostgreSQL](../examples/shared-postgresql/README.md) examples for worktrees and lifecycle.
 Root credentials stay in private provisioning state and the owned server's Engine
 configuration, with no public API reference. Application passwords are sensitive:
 inspect through named fixtures and explicit `secret` access, or select persistent
@@ -222,11 +223,46 @@ own application schema.
 The first selected start pins the existing local image ID, records volume/network/
 server intent, then ensures readiness before allocating. Native connection values
 use 127.0.0.1 and a dynamically published loopback port. Containers attach to a
-separate owned shared network and receive its alias and port 3306. No host DNS,
+separate owned shared network and receive its alias and internal port 3306 (MariaDB) or 5432 (PostgreSQL). No host DNS,
 extra gateway, runtime pull/build or widened bind is needed. The administrative
 password never enters consumer environment. Engine access is trusted administration.
-The bundled path checks MariaDB identity and enabled grant enforcement before allocating.
-Only MariaDB 11.4 has been validated so far.
+MariaDB checks identity and enabled grant enforcement. PostgreSQL checks identity,
+SCRAM storage/host rules and live wrong-password rejection, then verifies maintenance
+ACLs before allocating. PostgreSQL17 is the exercised compatibility target, without
+a hard major-version gate or an untested-version compatibility promise. See the
+[testing guide](testing.md#shared-postgresql-integration) for current validation gates.
+PostgreSQL uses its image entrypoint, postgres maintenance database and
+`PGDATA=/var/lib/postgresql/data` on the retained volume; incompatible image/layout
+or initialization settings preserve existing state. `PQGO_DEBUG=1` must be disabled
+before starting the daemon: the SQL driver captures it at process initialization
+and selected PostgreSQL work refuses unsafe protocol diagnostics.
+
+PostgreSQL grants application CONNECT/TEMPORARY/CREATE only in its allocation and
+USAGE/CREATE on admin-owned public, with no grant option, database ownership, owner
+role membership or server administration. It permits named schemas and PostgreSQL's
+trusted extensions/publications; project jobs own these objects. PUBLIC cannot
+connect to maintenance or peer allocation databases. Shared catalogs/comments remain
+visible metadata, and shared SQL does not provide tenant/resource containment.
+
+An extra derived NOLOGIN role owns each PostgreSQL database. Initial role creation
+and public ownership fingerprints are transactional; initial application roles have
+no password or LOGIN. Database OWNER and connection limit 0 bind its nontransactional
+creation before finalization installs retained password, LOGIN and grants atomically.
+Ready credentials must authenticate on reuse/default release. After database drop,
+remaining role witnesses permit cleanup without a connection to the absent database;
+no post-drop password-equality proof is claimed. Drift otherwise preserves targets;
+release never cascades or terminates SQL sessions.
+
+One public fingerprint comment on postgres is committed with maintenance REVOKEs.
+Only supported pristine defaults with no retained allocation facts/effects permit
+initialization. Matching witnesses still require actual ACL/security checks; missing,
+changed or nonpristine witnesses preserve state rather than repair it. This SQL
+metadata shares the server volume lifetime; it is not an extra journal or deletion
+target. Bounded force allocation release never initializes/repairs maintenance or
+rewrites this marker. Restore the original configuration/authority or use the
+existing explicit retirement procedure; there is no marker-reset command.
+Use a matching binary for retained PostgreSQL manager values; older binaries do
+not understand them. The state10 layout and retained v9 migration remain unchanged.
 
 List recorded services, then control the recorded service ID through the daemon:
 

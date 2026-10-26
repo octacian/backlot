@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=../../schemas/manifest-v1.schema.json
+version: backlot/v1
+project: shared-postgresql-example
+shared_services:
+  sql:
+    manager: postgresql
+    image: postgres:17
+    storage: volume
+    admin: generated
+    port: 5432
+    readiness_timeout: 60s
+resources:
+  database: {kind: allocation, shared_service: sql}
+components:
+  visit:
+    kind: job
+    runtime: container
+    policy: each-start
+    image: {literal: "postgres:17"}
+    resources: [database]
+    environment:
+      assign:
+        DB_HOST: {ref: {kind: resource, name: database, field: host}}
+        DB_PORT: {ref: {kind: resource, name: database, field: port}}
+        DB_DATABASE: {ref: {kind: resource, name: database, field: database}}
+        DB_USERNAME: {ref: {kind: resource, name: database, field: username}}
+        PGPASSWORD: {ref: {kind: resource, name: database, field: password}}
+    args:
+      - sh
+      - -ec
+      - |
+        exec psql --no-psqlrc --host="$DB_HOST" --port="$DB_PORT" \
+          --username="$DB_USERNAME" --dbname="$DB_DATABASE" --set=ON_ERROR_STOP=1 \
+          --command='CREATE SCHEMA IF NOT EXISTS application; CREATE TABLE IF NOT EXISTS application.visits (id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY); INSERT INTO application.visits DEFAULT VALUES; SELECT COUNT(*) AS visits FROM application.visits;'
+scenes:
+  dev:
+    lifetime: persistent
+    components: [visit]
+    resources: [database]
+  preview:
+    lifetime: persistent
+    components: [visit]
+    resources: [database]

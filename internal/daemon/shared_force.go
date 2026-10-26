@@ -7,7 +7,6 @@ import (
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
-	"github.com/octacian/backlot/internal/manager"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -82,12 +81,12 @@ func (s *store) releaseSharedAllocation(ctx context.Context, record *sharedServi
 		return result, err
 	}
 	defer func() { _ = db.Close() }()
-	return manager.MariaDB(ctx, db, request, s.sharedPoint)
+	return sharedManager(ctx, *record, db, request, s.sharedPoint)
 }
 
 // checkSharedReleaseCollision protects known siblings and peers even when the
 // operator waives ownership proof. All allocation-map writers hold this service lock.
-func (s *store) checkSharedReleaseCollision(instanceID, name string, target sharedAllocation) error {
+func (s *store) checkSharedReleaseCollision(instanceID, name string, target sharedAllocation, postgres bool) error {
 	return s.db.View(func(tx *bolt.Tx) error {
 		return tx.Bucket([]byte("shared_allocations")).ForEach(func(key, data []byte) error {
 			allocations, err := decodeSharedAllocations(data)
@@ -98,7 +97,7 @@ func (s *store) checkSharedReleaseCollision(instanceID, name string, target shar
 				if string(key) == instanceID && otherName == name || a.Released || a.ServiceID != target.ServiceID {
 					continue
 				}
-				if a.Request.Database == target.Request.Database || a.Request.Username == target.Request.Username {
+				if a.Request.Database == target.Request.Database || a.Request.Username == target.Request.Username || (postgres && (a.Request.Database == target.Request.Username || a.Request.Username == target.Request.Database)) {
 					return problem("shared_in_use", "recorded SQL target overlaps another retained allocation; preserved")
 				}
 			}

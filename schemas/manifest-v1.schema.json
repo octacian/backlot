@@ -1510,11 +1510,52 @@
       "description": "ServicePort maps an allocated host port to an explicit container listener when needed."
     },
     "SharedService": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "manager": {
+                "const": "mariadb"
+              }
+            },
+            "required": [
+              "manager"
+            ]
+          },
+          "then": {
+            "properties": {
+              "port": {
+                "const": 3306
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "manager": {
+                "const": "postgresql"
+              }
+            },
+            "required": [
+              "manager"
+            ]
+          },
+          "then": {
+            "properties": {
+              "port": {
+                "const": 5432
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "manager": {
           "type": "string",
           "enum": [
-            "mariadb"
+            "mariadb",
+            "postgresql"
           ]
         },
         "image": {
@@ -1541,8 +1582,10 @@
         },
         "port": {
           "type": "integer",
-          "maximum": 3306,
-          "minimum": 3306
+          "enum": [
+            3306,
+            5432
+          ]
         },
         "readiness_timeout": {
           "type": "string",
@@ -1559,7 +1602,7 @@
         "port",
         "readiness_timeout"
       ],
-      "description": "SharedService declares a retained project-owned MariaDB server independently of scene allocations."
+      "description": "SharedService declares a retained project-owned SQL server independently of scene allocations."
     },
     "StartupDetailSelection": {
       "properties": {

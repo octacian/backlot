@@ -22,9 +22,11 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/lib/pq"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/manager"
 )
 
 type sharedFixtureCredential struct{ database, user, password string }
@@ -72,7 +74,7 @@ func (f *sharedMariaDBFixture) server(t *testing.T) (string, int, bool) {
 	if err != nil || out.Container.NetworkSettings == nil || out.Container.State == nil {
 		t.Fatal("server observation unavailable", err)
 	}
-	port, _ := network.ParsePort("3306/tcp")
+	port, _ := network.ParsePort(strconv.Itoa(f.internalPort) + "/tcp")
 	bindings := out.Container.NetworkSettings.Ports[port]
 	// Docker does not expose active bindings while a retained server is stopped.
 	published := 0
@@ -89,6 +91,17 @@ func (f *sharedMariaDBFixture) db(t *testing.T, c sharedFixtureCredential) *sql.
 	_, port, running := f.server(t)
 	if !running || port == 0 {
 		t.Fatal("application requires running retained server")
+	}
+	if f.manager == "postgresql" {
+		db, err := manager.PostgreSQLDB("127.0.0.1", port, c.database, c.user, c.password)
+		if db != nil {
+			db.SetMaxIdleConns(0)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db
 	}
 	cfg := mysql.NewConfig()
 	cfg.User = c.user
@@ -110,18 +123,26 @@ func (f *sharedMariaDBFixture) db(t *testing.T, c sharedFixtureCredential) *sql.
 func independentSharedWitness(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	value := newID()
-	if _, err := db.Exec("CREATE TABLE independent_witness (value VARCHAR(64) NOT NULL)"); err != nil {
+	table, placeholder := "independent_witness", "?"
+	if _, postgres := db.Driver().(*pq.Driver); postgres {
+		table, placeholder = "public.independent_witness", "$1"
+	}
+	if _, err := db.Exec("CREATE TABLE " + table + " (value VARCHAR(64) NOT NULL)"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("INSERT INTO independent_witness VALUES (?)", value); err != nil {
+	if _, err := db.Exec("INSERT INTO "+table+" VALUES ("+placeholder+")", value); err != nil {
 		t.Fatal(err)
 	}
 	return value
 }
 func verifySharedWitness(t *testing.T, db *sql.DB, want string) {
 	t.Helper()
+	table := "independent_witness"
+	if _, postgres := db.Driver().(*pq.Driver); postgres {
+		table = "public.independent_witness"
+	}
 	var got string
-	if err := db.QueryRow("SELECT value FROM independent_witness").Scan(&got); err != nil || got != want {
+	if err := db.QueryRow("SELECT value FROM " + table).Scan(&got); err != nil || got != want {
 		t.Fatal("independent allocation witness changed/lost", err)
 	}
 }
@@ -362,8 +383,10 @@ func TestSharedConsumerHTTPReadiness(t *testing.T) {
 	}
 }
 
-func TestSharedMariaDBLifecycle(t *testing.T) {
-	f := newSharedMariaDBFixture(t, true)
+func TestSharedMariaDBLifecycle(t *testing.T)    { testSharedLifecycle(t, "mariadb") }
+func TestSharedPostgreSQLLifecycle(t *testing.T) { testSharedLifecycle(t, "postgresql") }
+func testSharedLifecycle(t *testing.T, engine string) {
+	f := newSharedSQLFixture(t, true, engine)
 	ctx := context.Background()
 	proof := f.addLive(t)
 	// Actual long-running native and container services, in independent worktrees.
@@ -417,7 +440,11 @@ func TestSharedMariaDBLifecycle(t *testing.T) {
 	verifySharedWitness(t, f.db(t, cb), wb)
 	f.http(t, b.Instance.ID)
 	var count int
-	if err := f.db(t, newer).QueryRow("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='independent_witness'").Scan(&count); err != nil || count != 0 {
+	query := "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='independent_witness'"
+	if engine == "postgresql" {
+		query = "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='public' AND TABLE_NAME='independent_witness'"
+	}
+	if err := f.db(t, newer).QueryRow(query).Scan(&count); err != nil || count != 0 {
 		t.Fatal("reset retained independent data", err)
 	}
 	wa = independentSharedWitness(t, f.db(t, newer))
@@ -824,9 +851,11 @@ func (f *sharedMariaDBFixture) keepLease(t *testing.T, response v1.InstanceRespo
 
 // Exercise the joins with main's private composition, startup presentation and
 // attached owners through the real CLI/API and shared SQL, without a new harness.
-func TestSharedMariaDBMainContracts(t *testing.T) {
+func TestSharedMariaDBMainContracts(t *testing.T)    { testSharedMainContracts(t, "mariadb") }
+func TestSharedPostgreSQLMainContracts(t *testing.T) { testSharedMainContracts(t, "postgresql") }
+func testSharedMainContracts(t *testing.T, engine string) {
 	t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", filepath.Join(shortTemp(t), "registry"))
-	f := newSharedMariaDBFixture(t, false)
+	f := newSharedSQLFixture(t, false, engine)
 	sharedStop(t, f.h)
 	f.h.lease = "10s"
 	f.h.start()

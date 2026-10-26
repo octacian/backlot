@@ -15,9 +15,9 @@ An open TCP listener or a successful administrative login cannot satisfy it.
 Build Backlot from the repository root with `make build`. Outside Backlot,
 explicitly pull the chosen image, then copy `machine.example.yaml` to a private
 absolute path and set its Docker Unix endpoint (Docker Desktop commonly uses a
-different socket). The adopter recipe selects `mariadb:11.4.13`. The same bounded
-database check has run against 10.11.19, 11.4.13, 11.8.9 and 12.3.3 on macOS
-ARM64; fresh Ubuntu CI image-pull and runner cost acceptance remains pending.
+different socket). The adopter recipe selects `mariadb:11.4.13`. Bounded macOS
+ARM64 compatibility checks cover exact MariaDB pins 10.11.19, 11.4.13, 11.8.9 and
+12.3.3; they do not establish compatibility with other versions or every platform.
 
 Choose a new private absolute `STATE`, an existing private `EVIDENCE` directory,
 the private machine file as `CONFIG`, and the built binary's absolute `BACKLOT`:

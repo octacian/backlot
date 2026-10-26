@@ -32,24 +32,18 @@ A signal to `backlot run` requests cancellation; it is not forwarded unchanged
 to the test runner. Native cleanup uses bounded TERM-based supervision. The
 outer CLI's 130/143 and the original native exit (or absence) remain separate.
 
-In the bounded macOS ARM64 check of the [native Playwright recipe](../examples/native-playwright/README.md),
-Playwright 1.64.1 receiving a direct SIGINT wrote final JSON/HTML and media before
-exiting 130. Direct SIGTERM produced no final JSON/HTML. Backlot client SIGINT and
-SIGTERM returned 130 and 143, both with `cancelled: true`, native exit `-1`, and
-retained invocation/holding evidence plus a valid partial `test.trace` ZIP.
-The earlier control lacked final JSON/HTML, screenshots and browser network trace.
-The repeatable fixture also retained raw `.network`/`.trace` files and screencast
-JPEG data while final JSON/HTML remained absent. Partial files vary; neither
-observation guarantees which files will exist on forced termination or another
-runner/platform.
+Native runner cancellation can leave partial evidence without finalized reports.
+Neither the [Playwright recipe](../examples/native-playwright/README.md) nor Go's
+normal `TestMain` report writer promises final reports on cancellation. Available
+partial files vary by runner/platform and termination; preserve them without
+assuming a particular report or media file will exist.
 
 Export `complete: true` means the declared evidence inventory was collected and
 audited; application report finalization is a separate fact. Keep available
 partial evidence and inspect the original result and collection/cleanup errors.
-Go's normal `TestMain` report writer can also be interrupted; no final report
-is promised on cancellation. A runner-directed graceful cancellation capability
-is tracked separately in [#84](https://github.com/octacian/backlot/issues/84); the
-recipe adds no signal translation.
+A runner-directed graceful cancellation capability is tracked separately in
+[#84](https://github.com/octacian/backlot/issues/84); the recipe adds no signal
+translation.
 
 Attached persistent commands emit typed lifecycle/log NDJSON and aggregate only
 the accepted attempt. They retain the same log encoding, gaps and retention limits,

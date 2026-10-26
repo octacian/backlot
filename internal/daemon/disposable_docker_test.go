@@ -66,7 +66,7 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			}
 			var proveObjectsAbsent func() error
 			if mode == "cleanup-failure" {
-				proveObjectsAbsent = h.observeDisposableDockerObjects(id)
+				proveObjectsAbsent = h.observeDisposableDockerObjects(id, "each")
 			}
 			var marker string
 			var proof []byte
@@ -128,7 +128,7 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 				t.Fatal("cancellation omitted")
 			}
 			if mode == "collection-failure" {
-				proveObjectsAbsent = h.observeDisposableDockerObjects(id)
+				proveObjectsAbsent = h.observeDisposableDockerObjects(id, "each")
 			}
 			if result.Kept != request.Options.KeepOnFailure {
 				t.Fatalf("kept resources=%v want=%v", result.Kept, request.Options.KeepOnFailure)
@@ -207,7 +207,7 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 // These observations never authorize removal. The normal fixture journal owns
 // reconciliation; exact live Engine objects and the directory owner marker give
 // an independent absence check after Destroy, in addition to the closed journal.
-func (h *dockerHarness) observeDisposableDockerObjects(id string) func() error {
+func (h *dockerHarness) observeDisposableDockerObjects(id, directoryComponent string) func() error {
 	h.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -252,17 +252,21 @@ func (h *dockerHarness) observeDisposableDockerObjects(id string) func() error {
 			remember(ownedResource{Kind: "network", ID: endpoint.NetworkID, Token: network.Network.Labels["io.backlot.owner"]})
 		}
 	}
-	fixtures, err := h.cli.Fixtures(ctx, v1.FixturesRequest{APIVersion: v1.Version, InstanceID: id, Component: "each"})
-	if err != nil || len(fixtures.Fixtures) != 1 {
-		h.t.Fatal("original fixture directory unavailable", err)
+	kinds := []string{"container", "network", "volume"}
+	if directoryComponent != "" {
+		fixtures, err := h.cli.Fixtures(ctx, v1.FixturesRequest{APIVersion: v1.Version, InstanceID: id, Component: directoryComponent})
+		if err != nil || len(fixtures.Fixtures) != 1 {
+			h.t.Fatal("original fixture directory unavailable", err)
+		}
+		directory := fixtures.Fixtures[0].Value
+		marker, err := os.ReadFile(filepath.Join(directory, ".backlot-owner"))
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		remember(ownedResource{Kind: "directory", Name: directory, Token: string(marker), ID: string(marker)})
+		kinds = append(kinds, "directory")
 	}
-	directory := fixtures.Fixtures[0].Value
-	marker, err := os.ReadFile(filepath.Join(directory, ".backlot-owner"))
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	remember(ownedResource{Kind: "directory", Name: directory, Token: string(marker), ID: string(marker)})
-	for _, kind := range []string{"container", "network", "volume", "directory"} {
+	for _, kind := range kinds {
 		found := false
 		for _, r := range objects {
 			found = found || r.Kind == kind

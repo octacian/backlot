@@ -1,5 +1,14 @@
 # GitHub Actions quickstart
 
+For a smaller local adopter starting point, use [native Playwright over loopback
+HTTP](../examples/native-playwright/README.md) or [native Go tests against a
+disposable MariaDB](../examples/native-go-mariadb/README.md). Their manifests and
+application commands are separate from repository fault/evidence verification.
+Early real success/failure/recovery and a bounded cancellation check have been
+observed; see [the native runner limitation](evidence.md#native-runner-cancellation).
+The conditional four-LTS fresh-runner cost checkpoint remains pending. The recipes
+do not replace the managed HTTPS browser gate below.
+
 Copy [the adopter workflow](../examples/ci-scenes/adopter.yml) into your application
 repository for **ephemeral Ubuntu 24.04 amd64** hosted runners. Install your own
 application Node, npm dependencies and browser first, then use

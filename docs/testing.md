@@ -82,6 +82,7 @@ multi-commit pushes.
 | `actions/` implementation | Current-head scenes and project inputs |
 | `examples/ci-scenes/` implementation | Scenes |
 | `examples/ci-inputs/` implementation | Project inputs |
+| Native recipe/runtime implementation or `.github/workflows/recipes.yml` | One serial native recipe job; one Chromium and DB-only compatibility checks |
 | An automatic workflow | Its own gates; shared change-detection edits run all automatic gates |
 
 Markdown inside implementation/example directories stays documentation-only.
@@ -530,6 +531,59 @@ replace applicable required CI at the exact published revision.
 <a id="shared-mariadb-lifecycle-and-recovery-43-gate-2"></a>
 
 ## Shared MariaDB integration
+
+The smaller [native Go/MariaDB](../examples/native-go-mariadb/README.md) and
+[loopback Playwright](../examples/native-playwright/README.md) adopter recipes
+have a separate, opt-in repository verification checkpoint:
+
+```sh
+BACKLOT_RECIPE_PLAYWRIGHT_PROJECT=/absolute/installed/native-playwright \
+PLAYWRIGHT_BROWSERS_PATH=/absolute/owned/browser-cache \
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test ./internal/daemon -run '^(TestNativePlaywrightRecipe|TestNativeGoMariaDBRecipe|TestMariaDBRecipeCompatibility)$' -count=1 -v -timeout=10m
+```
+
+Install the recipe's pinned dependencies/browser separately with an explicit
+owned `PLAYWRIGHT_BROWSERS_PATH` and `PLAYWRIGHT_SKIP_BROWSER_GC=1`, then pre-pull its
+explicit MariaDB patch image. This checkpoint currently exercises success,
+assertion failure, recovery, original exits, exact arguments, portable exports
+and authenticated teardown. The compatibility check runs the same native
+application probe with a deliberately wrong environment password after a useful
+application query/read/write succeeds. Its two-second query deadline avoids a
+full readiness-timeout wait on each version. It keeps that failed scene long
+enough to authenticate exact live Docker objects, then verifies their absence
+after destroy. This credential negative runs against that same initialized DB;
+a failed fresh startup is not treated as evidence of authentication rejection.
+
+`BACKLOT_RECIPE_MARIADB_IMAGES` selects a comma-separated image list, defaulting
+to the single adopter image. The [serial workflow](../.github/workflows/recipes.yml)
+selects `mariadb:10.11.19,mariadb:11.4.13,mariadb:11.8.9,mariadb:12.3.3`, builds
+the CLI/readiness/test executables once and installs one pinned Chromium.
+`BACKLOT_INSTALLED_TEST_BINARY` and `BACKLOT_RECIPE_READY_BINARY` reuse those
+explicit executables; absent overrides build private fixture binaries.
+`BACKLOT_RECIPE_EXPORT_ROOT` can select an existing private evidence parent;
+only audited exports beneath it are uploaded. Raw daemon state stays private.
+
+The exported browser report must identify the exact selected test, resolved URL,
+status, HTML, valid screenshots and ZIP traces. Go JSON events must identify the
+selected test without skipping, and its report must match the original exit.
+The first audited export is checked again after failure/recovery.
+The representative suite adds one held browser SIGINT and one held Go SIGTERM
+case on 11.4. Verification-only markers capture a live runner, server and pinned
+Chromium CDP browser/renderer process IDs before cancellation; the retained CLI
+child handle is the only signal target. Nonempty positive-live PID/PGID witnesses
+feed the existing absence helper after authenticated destroy. PID reuse can
+conservatively fail the test; these observations do not rule out unseen descendants.
+Go also retains exact Docker object witnesses. Present JSON/media/ZIP/NDJSON is
+checked with an explicit cancelled-report mode that allows missing final reports.
+
+The four-version database check passed a local warm timing comparison, adding
+26.38 seconds versus one version on macOS ARM64. Fresh Ubuntu image/runner cost
+acceptance remains pending. The representative cancellation cases passed a bounded
+macOS ARM64 fixture run before main integration; final integrated-candidate
+validation remains pending. These cases reproduced the
+[pinned reporting limitation](evidence.md#native-runner-cancellation).
+No skip establishes acceptance. Existing shared-server/provider gates remain separate.
 
 Run serially with exclusive owned-fixture authority, an explicit local Docker Unix
 endpoint and existing MariaDB 11.4/Alpine 3.21 images. Fixtures build the static

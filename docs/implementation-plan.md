@@ -370,13 +370,16 @@ focused development evidence is not a release/adoption claim.
 
 Implemented for independent review: Go build-info fallback and linked identity,
 pinned GoReleaser OSS macOS ARM64/Linux amd64 archives with checksums/notices,
-native installed-binary smoke and a stable-tag workflow with fresh checks and
-complete draft publication. The [release decision](adr/20261023T212448687Z-publish-immutable-versioned-releases-with-goreleaser.md)
+native installed-binary smoke and a stable-tag workflow reusing verified exact-SHA
+main CI, with fresh archive checks and verified draft preparation. The
+[release decision](adr/20261026T020229927Z-reuse-exact-main-ci-and-prepare-verified-release-drafts.md)
 sets compatibility and immutability policy; [operations](operations.md) covers
 installation/upgrade/removal and [tooling](testing.md#release-packaging-and-publication)
 covers packaging and bounded failed-draft recovery. The
-[release procedure](preparing-a-release.md) defines CI-led readiness. No tags/assets are published by this delivery. Applicable required CI and reviewed notes
-remain required; public tagged Go installation waits for an actual release.
+[release procedure](preparing-a-release.md) defines CI-led readiness. No tags/assets are published by this delivery. All five
+trusted main workflows and fresh tag archive smokes remain required.
+GitHub-generated draft notes are curated before manual publication; public tagged
+Go installation waits for an actual release.
 No Windows, installer, updater or runtime-state change is included.
 
 ## Shared services (issue 43)

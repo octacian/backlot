@@ -1,11 +1,11 @@
 ---
 title: "Publish immutable versioned releases with GoReleaser"
 date: 2026-10-23
-status: accepted
+status: superseded
 summary: 'Use pinned GoReleaser OSS archives and a gated GitHub draft publication to distribute identifiable releases without a packaging framework.'
 tags: [release, compatibility, tooling, ci]
 supersedes: []
-superseded_by: []
+superseded_by: [20261026T020229927Z-reuse-exact-main-ci-and-prepare-verified-release-drafts.md]
 ---
 
 # Publish immutable versioned releases with GoReleaser

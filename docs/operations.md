@@ -133,7 +133,8 @@ OSS locally and prepares both unpublished archives/checksums under ignored
 `dist/`; `make release-package` requires a clean tagged checkout and produces the
 real-tag form without publishing. Their declarative configuration is
 [.goreleaser.yaml](../.goreleaser.yaml). See [release automation](testing.md#release-packaging-and-publication)
-for checks and publication responsibilities.
+for checks and draft preparation responsibilities; [release preparation](preparing-a-release.md)
+covers generated GitHub notes, durable compatibility links and manual publication.
 
 Every binary, including ordinary source builds and `go install`, embeds the full
 [LICENSE](../LICENSE) and generated [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).

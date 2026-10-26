@@ -2,8 +2,10 @@
 
 Backlot targets macOS ARM64 and Linux amd64. The initial Linux targets are
 Ubuntu 24.04 amd64 and Debian 13.4 amd64, with a local rootful Docker Engine and
-IPv4 bridge containers. Ubuntu has a fresh-runner runtime CI gate; Debian requires
-actual-machine evidence in addition to CI. Every readiness report must identify
+IPv4 bridge containers. Ubuntu has a fresh-runner runtime CI gate; Debian
+actual-machine results remain distinct evidence, without a mandatory per-release
+rerun. Select platform-specific manual checks for changed guarantees lacking CI
+coverage under the [release policy](preparing-a-release.md). Reports must identify
 the tested revision, dependency versions, failures/skips and cleanup; a target in
 this policy is not evidence that an untested release passed. Other distributions,
 architectures, rootless/remote engines and alternative container runtimes are

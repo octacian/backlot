@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -34,6 +35,23 @@ func New(socket string) *Client {
 		return (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "unix", socket)
 	}}
 	return &Client{http: &http.Client{Transport: transport, Timeout: 20 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}, transport: transport}
+}
+
+// transportFailure classifies a failed exchange without exposing socket paths.
+// A deadline or refusal alone does not establish that the daemon exited.
+func transportFailure(err error) string {
+	var timeout net.Error
+	switch {
+	case errors.As(err, &timeout) && timeout.Timeout():
+		return "request deadline exceeded"
+	case errors.Is(err, syscall.ECONNREFUSED), errors.Is(err, syscall.ENOENT):
+		return "socket refused or missing"
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, syscall.ECONNRESET), errors.Is(err, syscall.EPIPE):
+		return "connection closed"
+	case errors.Is(err, context.Canceled):
+		return "request cancelled"
+	}
+	return "transport failed"
 }
 
 // Close releases idle socket connections without affecting accepted preparations.
@@ -99,7 +117,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 		if errors.As(err, &detail) {
 			return detail
 		}
-		return &v1.PlanError{Code: "daemon_unavailable", Message: "cannot contact local daemon; run daemon start or doctor with the same --state-dir"}
+		return &v1.PlanError{Code: "daemon_unavailable", Message: "cannot contact local daemon (" + path + ": " + transportFailure(err) + "); run daemon start or doctor with the same --state-dir"}
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.Header.Get("X-Backlot-API-Version") != v1.Version {

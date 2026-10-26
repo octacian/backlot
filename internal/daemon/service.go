@@ -262,11 +262,16 @@ func (s *service) expireOwners() error {
 func (s *service) joinExpiryWorkers() error {
 	s.mu.Lock()
 	var channels []<-chan struct{}
-	for _, done := range s.expiryWorkers {
+	var grace time.Duration
+	for id, done := range s.expiryWorkers {
 		channels = append(channels, done)
+		if entry := s.executions[id]; entry != nil {
+			grace = max(grace, entry.grace)
+		}
 	}
 	s.mu.Unlock()
-	budget := time.NewTimer(20 * time.Second)
+	// Coordinators join their owners concurrently, so the longest owner join bounds all.
+	budget := time.NewTimer(OwnerJoin(grace) + 5*time.Second)
 	defer budget.Stop()
 	for _, done := range channels {
 		select {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/octacian/backlot"
 	apiv1 "github.com/octacian/backlot/api/v1"
 	urfave "github.com/urfave/cli/v3"
 )
@@ -25,6 +26,14 @@ func NewCommand(version apiv1.VersionResponse, stdout, stderr io.Writer) *urfave
 			return urfave.ShowAppHelp(command)
 		},
 		Commands: append(append(preparationCommands(), runtimeCommands()...), projectCommand(), daemonCommand(), sceneCommand(), exportCommand(), gatewayCommand(), sharedCommand(), planCommand(), listCommand(), &urfave.Command{
+			Name: "licenses", Usage: "Show the project license and dependency notices",
+			Action: func(_ context.Context, command *urfave.Command) error {
+				if command.Args().Len() != 0 {
+					return fmt.Errorf("licenses takes no arguments")
+				}
+				return backlot.WriteLicenses(command.Writer)
+			},
+		}, &urfave.Command{
 			Name: "version", Usage: "Show executable and API versions",
 			Flags: []urfave.Flag{&urfave.BoolFlag{Name: "json", Usage: "Emit the shared JSON version response"}},
 			Action: func(_ context.Context, command *urfave.Command) error {

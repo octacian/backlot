@@ -70,7 +70,7 @@ jobs:
           install -m 0755 bin/backlot-linux-amd64 "$RUNNER_TEMP/backlot-install/backlot"
           "$RUNNER_TEMP/backlot-install/backlot" version --json
           BACKLOT_INSTALLED_TEST_BINARY="$RUNNER_TEMP/backlot-install/backlot" \
-            go test -race ./internal/daemon -run '^TestLinuxInstallation$' -count=1 -v
+            go test -race ./internal/daemon -run '^TestInstalledBinary$' -count=1 -v
       - name: Early native and bridge HTTPS trust and cleanup
         env:
           BACKLOT_DOCKER_TEST_ENDPOINT: unix:///var/run/docker.sock

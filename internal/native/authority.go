@@ -32,6 +32,8 @@ type cleanupProof struct {
 	Conflict bool                    `json:",omitempty"`
 	Identity Identity
 	Error    string
+	// Cause privately retains the initiating cleanup error behind a bounded Error.
+	Cause string `json:",omitempty"`
 }
 type authorityRequest struct {
 	request cleanupRequest
@@ -46,6 +48,21 @@ func Stop(id Identity, grace time.Duration) error {
 	_, err := StopResult(id, grace)
 	return err
 }
+
+// Cleanup budgets nest after the configured grace. The guardian serves one
+// request at a time, so cleanup can first wait for an in-flight listener query
+// (2s), then session cleanup (grace+5s), group verification (2s), anchor,
+// status and two output collector joins (4s) and the activation input join
+// (1s): grace+14s, inside the grace+15s reply deadline. The daemon side adds
+// dial (1s), guardian exit (2s) and joins (3s), so one Stop takes at most
+// grace+21s; the daemon's owner join covers two such rounds (daemon.ownerJoin).
+// Scans are cheap when idle but slow sharply on an oversubscribed host (#72, #79).
+const (
+	listenerQueryBudget    = 2 * time.Second
+	listenerRequestBudget  = 3 * time.Second
+	sessionCleanupOverhead = 5 * time.Second
+	cleanupReplyOverhead   = 15 * time.Second
+)
 
 func validIdentity(id Identity) bool {
 	return id.Protocol == 1 && (id.Purpose == "strict" && id.Component == "" && id.Attempt == "" || id.Purpose == "application" && id.Component != "" && id.Attempt != "")
@@ -121,7 +138,7 @@ func stopAuthorityResult(id Identity, grace time.Duration) (*v1.NativeCleanupRes
 	var proof cleanupProof
 	connection, err := net.DialTimeout("unix", id.Control, time.Second)
 	if err == nil {
-		_ = connection.SetDeadline(time.Now().Add(grace).Add(8 * time.Second))
+		_ = connection.SetDeadline(time.Now().Add(grace).Add(cleanupReplyOverhead))
 		err = json.NewEncoder(connection).Encode(cleanupRequest{Identity: id, Grace: grace})
 		if err == nil {
 			err = json.NewDecoder(connection).Decode(&proof)
@@ -154,6 +171,9 @@ func stopAuthorityResult(id Identity, grace time.Duration) (*v1.NativeCleanupRes
 		return nil, false, errors.New("strict cleanup receipt policy mismatch")
 	}
 	if proof.Error != "" {
+		if proof.Cause != "" {
+			return proof.Result, false, &authorityError{message: proof.Error, cause: errors.New(proof.Cause)}
+		}
 		return proof.Result, false, errors.New(proof.Error)
 	}
 	// A receipt is emitted after anchor and collectors join, but success also requires
@@ -263,7 +283,7 @@ func Supervise() error {
 					_ = self.Release()
 					return
 				}
-				_ = conn.SetDeadline(time.Now().Add(request.Grace).Add(8 * time.Second))
+				_ = conn.SetDeadline(time.Now().Add(request.Grace).Add(cleanupReplyOverhead))
 				if request.Grace < 0 {
 					return
 				}
@@ -327,11 +347,12 @@ func Supervise() error {
 				if id.Purpose != "application" || workload == nil {
 					proof.Error = "session listener authority unavailable"
 				} else {
-					query, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+					query, cancel := context.WithTimeout(context.Background(), listenerQueryBudget)
 					proof.Owned, proof.Conflict, err = sessionListener(query, request.request.ListenerAddress, workload.anchor.Process.Pid)
 					cancel()
 					if err != nil {
 						proof.Error = "session listener ownership observation unavailable"
+						proof.Cause = err.Error()
 					}
 				}
 				request.reply <- proof
@@ -361,6 +382,7 @@ func Supervise() error {
 				proof.Error = cleanupErr.Error()
 				if id.Purpose == "application" {
 					proof.Error = "native session cleanup incomplete; preserve lifecycle fences"
+					proof.Cause = cleanupErr.Error()
 				}
 				proof.Result = sessionResult(id, v1.CleanupIncomplete)
 				request.reply <- proof

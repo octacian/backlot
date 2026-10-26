@@ -233,6 +233,10 @@ func TestBuildImagesDocker(t *testing.T) {
 	h.close()
 	g := h.generation(id)
 	directory := g.Resources["data"].Name
+	// Rootful containers own the old file; the fixture owns its parent directory.
+	if err := os.Remove(filepath.Join(directory, "witness")); err != nil {
+		t.Fatal(err)
+	}
 	fixtureFile(t, directory, "witness", "parent-witness\n")
 	h.start()
 	assertImage(restart(false, v1.RuntimeReady), next.ID)

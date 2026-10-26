@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"syscall"
 	"testing"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -127,5 +128,28 @@ func TestClientRejectsIncompatibleMalformedAndOversizeResponses(t *testing.T) {
 				t.Fatalf("error %v, want %s", err, test.code)
 			}
 		})
+	}
+}
+
+func TestDaemonUnavailableNamesRequestAndFailureClass(t *testing.T) {
+	cli := New("unused")
+	defer cli.Close()
+	for _, test := range []struct {
+		err  error
+		want string
+	}{
+		{context.DeadlineExceeded, "/v1/inspect: request deadline exceeded"},
+		{syscall.ECONNREFUSED, "/v1/inspect: socket refused or missing"},
+		{syscall.ENOENT, "/v1/inspect: socket refused or missing"},
+		{io.EOF, "/v1/inspect: connection closed"},
+		{context.Canceled, "/v1/inspect: request cancelled"},
+		{errors.New("other"), "/v1/inspect: transport failed"},
+	} {
+		cli.http.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, test.err })
+		_, err := cli.Inspect(context.Background(), strings.Repeat("a", 64))
+		var detail *v1.PlanError
+		if !errors.As(err, &detail) || detail.Code != "daemon_unavailable" || !strings.Contains(detail.Message, test.want) {
+			t.Fatal(test.want, err)
+		}
 	}
 }

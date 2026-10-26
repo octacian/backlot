@@ -315,7 +315,7 @@ func TestDoctorUnresolvedCopyDaemonAvailability(t *testing.T) {
 		if owner == nil {
 			owner = &fixtureOwnerJoin{done: waitFixtureChild(h.process)}
 		}
-		err := owner.join(40*time.Second, 5*time.Second, h.process.Process.Kill)
+		err := owner.join(harnessShutdownBudget, 5*time.Second, h.process.Process.Kill)
 		h.waited = owner.joined
 		if err != nil {
 			h.cleanupUnverified = true
@@ -328,7 +328,7 @@ func TestDoctorUnresolvedCopyDaemonAvailability(t *testing.T) {
 	}
 	closeDaemon := func() {
 		if h.process != nil && h.process.Process != nil && !h.waited {
-			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), harnessShutdownBudget)
 			_, stopErr := h.cli.Stop(ctx)
 			cancel()
 			if err := join(); err != nil {

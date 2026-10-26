@@ -207,6 +207,7 @@ func (h *nativeHarness) start() {
 	if strings.Contains(h.daemonLog.String(), "DATA RACE") {
 		h.t.Fatal("race-instrumented daemon reported a data race", h.daemonLog.String())
 	}
+	h.logNativeDiagnostics()
 	h.daemonLog.Reset()
 	h.process.Stderr = &h.daemonLog
 	if err := h.process.Start(); err != nil {
@@ -269,10 +270,9 @@ func (h *nativeHarness) state(id string, want ...v1.InstanceStatus) v1.InstanceR
 		startup, _ := time.ParseDuration(options.StartupTimeout)
 		job, _ := time.ParseDuration(options.JobTimeout)
 		grace, _ := time.ParseDuration(options.StopGrace)
-		// native.Stop permits dial (1s), proof (grace+8s), authority exit
-		// (2s); Group.Stop then joins the guardian (2s) and status (1s).
-		// Jobs clean up sequentially before the final concurrent group cleanup.
-		cleanup := grace + 14*time.Second
+		// Jobs clean up sequentially, each within one owner join, before the
+		// final service cleanup's owner join.
+		cleanup := OwnerJoin(grace)
 		budget = startup + cleanup
 		for _, component := range last.Instance.Plan.Components {
 			if component.Kind == v1.Job {
@@ -353,6 +353,22 @@ func (h *nativeHarness) absent() {
 	}
 }
 
+// harnessShutdownBudget outlasts daemon shutdown joining owners at the largest
+// grace these fixtures request (16s), whatever the harness default.
+var harnessShutdownBudget = OwnerJoin(16*time.Second) + 10*time.Second
+
+// logNativeDiagnostics reports native diagnostic lines from a joined daemon's
+// stderr; the rest of the private log can carry fixture state. These causes can
+// name fixture PIDs and temporary paths (never capability tokens) in test output.
+func (h *nativeHarness) logNativeDiagnostics() {
+	h.t.Helper()
+	for _, line := range strings.Split(h.daemonLog.String(), "\n") {
+		if strings.HasPrefix(line, "native diagnostic: ") {
+			h.t.Log(line)
+		}
+	}
+}
+
 // A shutdown error is never an absence witness. Intentional fault tests may
 // supply a separate authenticated cleanup proof for their exact original owners.
 func (h *nativeHarness) close() {
@@ -361,7 +377,7 @@ func (h *nativeHarness) close() {
 		if h.ownerDone == nil {
 			h.ownerDone = waitFixtureChild(h.process)
 		}
-		result := finishNativeHarnessOwner(func(ctx context.Context) error { _, err := h.cli.Stop(ctx); return err }, h.ownerDone, h.process.Process.Kill, 40*time.Second, 40*time.Second, 2*time.Second)
+		result := finishNativeHarnessOwner(func(ctx context.Context) error { _, err := h.cli.Stop(ctx); return err }, h.ownerDone, h.process.Process.Kill, harnessShutdownBudget, harnessShutdownBudget, 2*time.Second)
 		h.waited = result.joined
 		if result.stopErr != nil || result.ownerErr != nil || !result.joined || h.shutdownFailureProof != nil {
 			var detail *v1.PlanError
@@ -389,6 +405,9 @@ func (h *nativeHarness) close() {
 	if h.waited && strings.Contains(h.daemonLog.String(), "DATA RACE") {
 		h.cleanupUnverified = true
 		h.t.Error("race-instrumented daemon reported a data race", h.daemonLog.String())
+	}
+	if h.waited {
+		h.logNativeDiagnostics()
 	}
 	if h.cli != nil {
 		h.cli.Close()
@@ -530,7 +549,7 @@ func TestNativeRuntime(t *testing.T) {
 			if err != nil {
 				t.Fatal(action, elapsed, err)
 			}
-			if elapsed < 16*time.Second || elapsed > 36*time.Second {
+			if elapsed < 16*time.Second || elapsed > OwnerJoin(16*time.Second) {
 				t.Fatal("accepted grace not honored", elapsed)
 			}
 			for _, text := range strings.Fields(string(oldPIDs)) {
@@ -1587,7 +1606,7 @@ func TestNativeRuntime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if time.Since(start) > 15*time.Second {
+		if time.Since(start) > OwnerJoin(10*time.Second) {
 			t.Fatal("default stop exceeded bounded grace/verification")
 		}
 		if final.Instance.Execution.CollectionFailure != "" || final.Instance.Execution.CleanupFailure != "" {

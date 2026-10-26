@@ -214,7 +214,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 			if request.Options.StopGrace != "" {
 				grace, _ = time.ParseDuration(request.Options.StopGrace)
 			}
-			cleanup, cancel := context.WithDeadline(context.Background(), time.Now().Add(grace).Add(10*time.Second))
+			cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
 			response, err = cli.StopExecution(cleanup, id)
 			cancel()
 			if err != nil {
@@ -274,7 +274,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 			if request.Options.StopGrace != "" {
 				grace, _ = time.ParseDuration(request.Options.StopGrace)
 			}
-			cleanup, cancel := context.WithDeadline(context.Background(), time.Now().Add(grace).Add(10*time.Second))
+			cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
 			response, err = cli.StopExecution(cleanup, id)
 			cancel()
 			if err != nil {

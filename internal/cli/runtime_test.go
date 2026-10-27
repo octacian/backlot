@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-func TestRuntimeRequiresTerminalSeparator(t *testing.T) {
-	for _, args := range [][]string{{"backlot", "run", "test", "unseparated"}, {"backlot", "run", "dev", "--job-timeout"}, {"backlot", "run", "dev", "--unknown"}, {"backlot", "restart", "id", "--", "extra"}, {"backlot", "restart", "id", "--attached"}, {"backlot", "reset", "id", "--attached"}, {"backlot", "run", "dev", "--attached", "--keep-on-failure"}, {"backlot", "run", "dev", "--attached", "--", "arg"}} {
+func TestRuntimeRejectsInapplicableOptions(t *testing.T) {
+	for _, args := range [][]string{{"backlot", "run", "dev", "--job-timeout"}, {"backlot", "run", "dev", "--unknown"}, {"backlot", "restart", "id", "--", "extra"}, {"backlot", "restart", "id", "--attached"}, {"backlot", "reset", "id", "--attached"}, {"backlot", "run", "dev", "--attached", "--keep-on-failure"}, {"backlot", "run", "dev", "--attached", "--", "arg"}} {
 		var stdout, stderr bytes.Buffer
 		command := NewCommand(v1.VersionResponse{APIVersion: v1.Version}, &stdout, &stderr)
 		if err := command.Run(context.Background(), args); err == nil {
@@ -31,7 +31,7 @@ func TestForceUnsupportedActions(t *testing.T) {
 		args := append([]string{"backlot"}, strings.Fields(action)...)
 		args = append(args, "--force")
 		err := command.Run(context.Background(), args)
-		if err == nil || !strings.Contains(err.Error(), "flag") {
+		if err == nil || !strings.Contains(err.Error(), "unknown option") {
 			t.Fatal("unsupported action accepted force", action, err)
 		}
 	}
@@ -42,14 +42,14 @@ func TestImageChangeOnlyOnRestart(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		command := NewCommand(v1.VersionResponse{APIVersion: v1.Version}, &stdout, &stderr)
 		err := command.Run(context.Background(), []string{"backlot", action, "target", "--allow-image-change"})
-		if err == nil || !strings.Contains(err.Error(), "only supported by restart") {
+		if err == nil || !strings.Contains(err.Error(), "unknown option") {
 			t.Fatal("accepted unsupported image override", action, err)
 		}
 	}
 	var stdout, stderr bytes.Buffer
 	command := NewCommand(v1.VersionResponse{APIVersion: v1.Version}, &stdout, &stderr)
 	err := command.Run(context.Background(), []string{"backlot", "restart", "target", "--allow-image-change", "--json", "--state-dir", "/nonexistent-backlot-image-fixture"})
-	if err == nil || strings.Contains(err.Error(), "flag") || !strings.Contains(stdout.String(), `"api_version":"v1"`) {
+	if err == nil || strings.Contains(err.Error(), "unknown option") || !strings.Contains(stdout.String(), `"api_version":"v1"`) {
 		t.Fatal("restart parser rejected flag or lost JSON", err, stdout.String())
 	}
 }

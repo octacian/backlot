@@ -12,7 +12,7 @@ func (c *Client) Run(ctx context.Context, request v1.RunRequest) (v1.InstanceRes
 	var response v1.InstanceResponse
 	err := c.call(ctx, http.MethodPost, "/v1/run", request, &response)
 	if err == nil {
-		err = validateAttachment(response, request.Attached)
+		err = mutationError("/v1/run", request, validateAttachment(response, request.Attached))
 	}
 	return response, err
 }
@@ -124,17 +124,17 @@ func (c *Client) Export(ctx context.Context, request v1.ExportRequest) (v1.Expor
 	// Never expose rejected wire fields as a usable publication. Valid failed
 	// publications below still retain their independently validated run result.
 	if response.APIVersion != v1.Version || response.Result.InstanceID != request.InstanceID || !validID(response.Result.Attempt) {
-		return v1.ExportResponse{}, responseError()
+		return v1.ExportResponse{}, mutationError("/v1/export", request, responseError())
 	}
 	if err := validateExportResult(response.Result); err != nil {
-		return v1.ExportResponse{}, err
+		return v1.ExportResponse{}, mutationError("/v1/export", request, err)
 	}
 	if response.Published {
 		if !response.Complete && !request.AllowPartial || response.Error != nil || !filepath.IsAbs(response.Output) || response.Report != "report.json" || response.HTML != "index.html" {
-			return v1.ExportResponse{}, responseError()
+			return v1.ExportResponse{}, mutationError("/v1/export", request, responseError())
 		}
 	} else if response.Error == nil || response.Error.Code == "" || response.Error.Message == "" || response.Output != "" || response.Report != "" || response.HTML != "" || response.Complete {
-		return v1.ExportResponse{}, responseError()
+		return v1.ExportResponse{}, mutationError("/v1/export", request, responseError())
 	}
 	if response.Error != nil {
 		return response, response.Error

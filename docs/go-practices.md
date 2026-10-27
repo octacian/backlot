@@ -61,3 +61,25 @@ server marshal/unmarshal the same named Go types. Validate decoded values;
 static Go typing does not validate untrusted JSON. Avoid `map[string]any` and
 anonymous structs as endpoint contracts. Keep internal persistence and secret
 values out of wire types unless the endpoint explicitly exposes them.
+
+## CLI adapters
+
+Use the pinned urfave/cli built-in parser and inherit the root `--json`. Register
+options on their implementing commands, use `OnlyOnce` for singleton flags, and
+mark repeatable flags explicitly. Do not add manual parsing, public
+`SkipFlagParsing`, raw-argument scans, reordering or delimiter-position recovery.
+Validate cardinality, option applicability and lifetime rules before effects.
+Test Backlot command construction and semantics; trust upstream parser guarantees.
+
+Install usage hooks on leaves and groups. When JSON is recognized, emit one typed
+`invalid_arguments` error without automatic help on stdout or rejected values.
+Main owns process exits and the final stderr diagnostic; suppress framework
+duplicates. The [CLI reference](operations.md#cli-invocation-and-results) defines
+framing, text exceptions and errors before JSON recognition.
+
+Retain only validated snapshots matching the accepted identity/attempt. Preserve
+independent outcomes and drift; label retained failure results as last observed
+and strip private capabilities and hydrated startup values. Reject presentation
+errors on daemon wire snapshots and never persist them. Missing mutation replies
+mean unknown acceptance/completion, not permission to retry. See the
+[decision](adr/20261027T183153280Z-use-framework-parsing-and-preserve-truthful-cli-results.md).

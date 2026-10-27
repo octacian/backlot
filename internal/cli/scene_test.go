@@ -66,7 +66,7 @@ func TestSceneCommandsRejectInstanceFlag(t *testing.T) {
 		var out, stderr bytes.Buffer
 		c := NewCommand(v1.VersionResponse{APIVersion: v1.Version}, &out, &stderr)
 		err := c.Run(context.Background(), []string{"backlot", "scene", action, "--instance", strings.Repeat("a", 64)})
-		if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -instance") {
+		if err == nil || !strings.Contains(err.Error(), "unknown option --instance") {
 			t.Fatal(action, err, out.String(), stderr.String())
 		}
 	}

@@ -65,6 +65,8 @@ type SceneStartRequest struct {
 // SceneResponse is a coherent recorded snapshot or a successful missing selection.
 // Checkout is independently daemon-resolved for named results, even before a first instance.
 type SceneResponse struct {
+	// Error marks CLI presentation of a last observed snapshot, never durable state.
+	Error            *PlanError        `json:"error,omitempty"`
 	APIVersion       string            `json:"api_version"`
 	DaemonGeneration string            `json:"daemon_generation"`
 	Outcome          SceneOutcome      `json:"outcome"`

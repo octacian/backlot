@@ -329,3 +329,56 @@ func TestCancelledOutputWaiterArtifacts(t *testing.T) {
 	}
 	h.absent()
 }
+
+// TestCLIResultNative witnesses Backlot's real request, application arguments and exits.
+func TestCLIResultNative(t *testing.T) {
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
+	for _, code := range []int{0, 23} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			h := newNativeHarness(t, binary)
+			var refusal strings.Builder
+			rejected := exec.Command(binary, "--json", "run", "dev", "--project", h.project, "--state-dir", h.dir, "--keep-on-failure")
+			rejected.Stdout = &refusal
+			if err := rejected.Run(); err == nil || !strings.Contains(refusal.String(), "invalid_arguments") {
+				t.Fatal("persistent keep accepted", err, refusal.String())
+			}
+			instances, err := h.cli.List(context.Background(), v1.ListRequest{APIVersion: v1.Version, Limit: 100})
+			if err != nil || len(instances.Instances) != 0 {
+				t.Fatal("rejected option allocated an instance", err, instances)
+			}
+			h.manifest.Tools["sh"] = "/bin/sh"
+			job := h.manifest.Components["job"]
+			job.Command = &v1.Command{Tool: "sh", Args: []string{"-c", fmt.Sprintf("printf 'witness:<%%s>\\n' \"$@\"; exit %d", code), "job"}}
+			h.manifest.Components["job"] = job
+			h.write()
+			command := exec.Command(binary, "run", "test", "--project", h.project, "--state-dir", h.dir, "--stop-grace", "50ms", "--json", "--", "argument with spaces", "--selector", "")
+			var stderr strings.Builder
+			command.Stderr = &stderr
+			data, err := command.Output()
+			gotCode := 0
+			if err != nil {
+				exit, ok := err.(*exec.ExitError)
+				if !ok {
+					t.Fatal(err)
+				}
+				gotCode = exit.ExitCode()
+			}
+			var response v1.InstanceResponse
+			if json.Unmarshal(data, &response) != nil || gotCode != code || response.Instance.Execution == nil || response.Instance.Execution.TerminalExitCode == nil || *response.Instance.Execution.TerminalExitCode != code || response.Instance.ID == "" || response.LeaseToken != "" {
+				t.Fatalf("exit=%d want=%d response=%s stderr=%s", gotCode, code, data, stderr.String())
+			}
+			page, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: response.Instance.ID, Component: "job"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var witness strings.Builder
+			for _, record := range page.Records {
+				witness.WriteString(record.Message)
+			}
+			if !strings.Contains(witness.String(), "witness:<argument with spaces>\nwitness:<--selector>\nwitness:<>\n") {
+				t.Fatal("application argument witness", witness.String())
+			}
+			h.absent()
+		})
+	}
+}

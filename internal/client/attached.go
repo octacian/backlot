@@ -33,11 +33,12 @@ func (c *Client) Attached(ctx context.Context, request v1.AttachedRequest, cance
 	}
 	var response v1.SceneResponse
 	err := c.call(ctx, http.MethodPost, path, request, &response)
-	if err == nil {
-		err = validateScene(response, v1.SceneTarget{InstanceID: request.InstanceID}, false)
+	if err != nil {
+		return response, err
 	}
+	err = validateScene(response, v1.SceneTarget{InstanceID: request.InstanceID}, false)
 	if err == nil && (response.Outcome != v1.SceneFound || response.DaemonGeneration != request.Owner.DaemonGeneration || response.Result == nil || response.Result.Attachment != nil || response.Result.Instance.Execution == nil || response.Result.Instance.Execution.Attempt != request.Owner.Attempt) {
 		err = responseError()
 	}
-	return response, err
+	return response, mutationError(path, request, err)
 }

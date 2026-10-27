@@ -13,8 +13,8 @@ import (
 )
 
 func doctorCommand() *urfave.Command {
-	return &urfave.Command{Name: "doctor", Usage: "Diagnose daemon access, a selected scene, or a recorded instance", Flags: append(daemonFlags(false),
-		&urfave.StringFlag{Name: "project"}, &urfave.StringFlag{Name: "scene"}, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "instance"},
+	return &urfave.Command{Name: "doctor", ArgsUsage: " ", Description: "Without a target, check daemon access only; scene and instance targets add provider diagnostics.\nExamples:\n  backlot doctor\n  backlot doctor --scene dev\n  backlot doctor --instance INSTANCE_ID", Usage: "Diagnose daemon access, a selected scene, or a recorded instance", Flags: append(daemonFlags(false),
+		&urfave.StringFlag{Name: "project", Usage: "Project directory or manifest path for --scene (default: discover from working directory)"}, &urfave.StringFlag{Name: "scene", Usage: "Scene name to diagnose with current project configuration"}, &urfave.StringFlag{Name: "config", Usage: "Machine configuration for --scene (default: per-user configuration)"}, &urfave.StringFlag{Name: "instance", Usage: "Recorded instance ID; excludes --project, --scene and --config"},
 		&urfave.StringFlag{Name: "container-probe-image", Usage: "Opt in to bounded owned probe using an already-present image with the documented shell/getent/timeout/OpenSSL contract"},
 		&urfave.BoolFlag{Name: "probe-public-ca", Usage: "Explicitly mount the managed public CA for the diagnostic container only"}),
 		Action: func(ctx context.Context, c *urfave.Command) error {

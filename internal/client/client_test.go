@@ -153,3 +153,72 @@ func TestDaemonUnavailableNamesRequestAndFailureClass(t *testing.T) {
 		}
 	}
 }
+
+func TestMutationExchangeFailuresDistinguishPreflightRejectionAndUnknownResult(t *testing.T) {
+	id := strings.Repeat("a", 64)
+	for _, mode := range []string{"preflight", "dispatch", "invalid-reply", "rejected"} {
+		t.Run(mode, func(t *testing.T) {
+			cli := New("unused")
+			defer cli.Close()
+			mutations := 0
+			cli.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				var value any
+				status := 200
+				if r.URL.Path == "/v1/status" {
+					if mode == "preflight" {
+						return nil, errors.New("private-preflight-canary")
+					}
+					value = v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, Status: "running", PID: 1, LeaseDuration: "30s"}
+				} else {
+					mutations++
+					if mode == "dispatch" {
+						return nil, errors.New("private-socket-canary")
+					}
+					if mode == "rejected" {
+						status = 409
+						value = v1.ErrorResponse{APIVersion: v1.Version, Error: v1.PlanError{Code: "conflict", Message: "explicit refusal"}}
+					} else {
+						value = v1.InstanceResponse{APIVersion: "wrong"}
+					}
+				}
+				data, err := json.Marshal(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/json"}, "X-Backlot-Api-Version": {v1.Version}}, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
+			})
+			_, err := cli.Restart(context.Background(), v1.RunRequest{APIVersion: v1.Version, InstanceID: id})
+			var detail *v1.PlanError
+			if !errors.As(err, &detail) || strings.Contains(err.Error(), "canary") {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "preflight":
+				if mutations != 0 || !strings.Contains(detail.Message, "cannot verify") || strings.Contains(detail.Message, "acceptance/result is unknown") {
+					t.Fatal(mutations, err)
+				}
+			case "rejected":
+				if mutations != 1 || detail.Code != "conflict" || detail.Message != "explicit refusal" {
+					t.Fatal(mutations, err)
+				}
+			default:
+				if mutations != 1 || !strings.Contains(detail.Message, "acceptance/result is unknown") || !strings.Contains(detail.Message, id) || !strings.Contains(detail.Message, "do not automatically retry") || strings.Contains(detail.Message, "run daemon start") {
+					t.Fatal(mutations, err)
+				}
+			}
+		})
+	}
+}
+
+func TestPresentationErrorsAreNotTrustedWireSnapshots(t *testing.T) {
+	instance := sceneInstance("e")
+	instance.Error = &v1.PlanError{Code: "wire", Message: "wire presentation"}
+	if err := validateInstance(*instance); err == nil {
+		t.Fatal("trusted wire presentation error")
+	}
+	response := sceneResponse()
+	response.Error = instance.Error
+	if err := validateScene(response, sceneRequest().Target, true); err == nil {
+		t.Fatal("trusted scene presentation error")
+	}
+}

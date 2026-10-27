@@ -19,14 +19,14 @@ import (
 func sceneCommand() *urfave.Command {
 	children := []*urfave.Command{}
 	for _, name := range []string{"start", "status", "stop"} {
-		flags := append(daemonFlags(false), &urfave.StringFlag{Name: "project", Usage: "Exact project directory or recognized manifest path"})
+		flags := append(daemonFlags(false), &urfave.StringFlag{Name: "project", Usage: "Exact project directory or recognized manifest path (default: resolve from working directory)"})
 		if name == "start" {
-			flags = append(flags, &urfave.BoolFlag{Name: "attached", Usage: "Own a persistent attempt until this client ends"}, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s"})
+			flags = append(flags, &urfave.BoolFlag{Name: "attached", Usage: "Own a persistent attempt until this client ends"}, &urfave.StringFlag{Name: "config", Usage: "Machine configuration path (default: per-user configuration)"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m", Usage: "Startup budget; 0s is unlimited"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m", Usage: "Job budget; 0s is unlimited"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s", Usage: "Grace before cleanup escalation"})
 		}
 		if name == "status" {
 			flags = append(flags, statusFollowFlags()...)
 		}
-		children = append(children, &urfave.Command{Name: name, Usage: "Target a persistent scene through the daemon", Flags: flags, Action: sceneAction})
+		children = append(children, &urfave.Command{Name: name, Description: "Example: backlot scene " + name + " dev\nNamed scenes resolve within the selected checkout; use status/inspect with an instance ID for exact recorded state.", ArgsUsage: "<scene>", Usage: map[string]string{"start": "Start a persistent scene and wait for readiness; --attached owns its attempt", "status": "Read a named persistent scene; --follow observes without lifecycle ownership", "stop": "Stop a recorded persistent scene, retaining data; current manifest is not required"}[name], Flags: flags, Action: sceneAction})
 	}
 	return &urfave.Command{Name: "scene", Usage: "Start, observe or stop recorded persistent scenes", Commands: children}
 }
@@ -71,7 +71,10 @@ func sceneAction(ctx context.Context, c *urfave.Command) error {
 		} else {
 			response, err = cli.SceneStatus(ctx, request)
 		}
-		return sceneOutput(c, response, err)
+		if err != nil {
+			return output(c, nil, err)
+		}
+		return sceneOutput(c, response, nil)
 	}
 	if c.Bool("attached") {
 		return startScene(ctx, c, cli, target, nil)
@@ -156,11 +159,16 @@ func sceneRecord(c *urfave.Command, record v1.SceneFollowRecord) error {
 		return json.NewEncoder(c.Writer).Encode(record)
 	}
 	if record.Snapshot != nil {
-		return sceneOutput(c, *record.Snapshot, nil)
+		if err := sceneOutput(c, *record.Snapshot, nil); err != nil {
+			return err
+		}
 	}
 	if record.Error != nil {
 		_, err := fmt.Fprintln(c.ErrWriter, record.Error.Error())
 		return err
+	}
+	if record.Reason == "" {
+		return nil
 	}
 	_, err := fmt.Fprintf(c.Writer, "Observation %s\n", record.Reason)
 	return err
@@ -168,7 +176,17 @@ func sceneRecord(c *urfave.Command, record v1.SceneFollowRecord) error {
 
 func sceneOutput(c *urfave.Command, response v1.SceneResponse, err error) error {
 	if err != nil {
-		return output(c, nil, err)
+		if response.Result == nil {
+			return output(c, nil, err)
+		}
+		response.Error = observationError(err)
+		observed := lastObserved(*response.Result, err)
+		observed.Error = nil
+		response.Result = &observed
+		if writeErr := sceneOutput(c, response, nil); writeErr != nil {
+			return writeErr
+		}
+		return err
 	}
 	if c.Bool("json") {
 		return json.NewEncoder(c.Writer).Encode(response)
@@ -180,10 +198,10 @@ func sceneOutput(c *urfave.Command, response v1.SceneResponse, err error) error 
 		if err := output(c, *response.Result, nil); err != nil {
 			return err
 		}
-		if result := response.Result.Instance.Execution; result != nil && result.Failure != "" {
-			_, err := fmt.Fprintln(c.Writer, "Runtime failure:", result.Failure)
-			return err
-		}
+	}
+	if response.Error != nil {
+		_, err := fmt.Fprintln(c.ErrWriter, response.Error)
+		return err
 	}
 	return nil
 }
@@ -208,7 +226,7 @@ func startScene(ctx context.Context, c *urfave.Command, cli *client.Client, targ
 	}
 	response, err := cli.StartScene(context.WithoutCancel(ctx), request)
 	if err != nil {
-		return sceneOutput(c, response, err)
+		return output(c, nil, err)
 	}
 	id := response.Result.Instance.ID
 	attempt := startupAttempt(response.Result.Instance)
@@ -221,8 +239,12 @@ func startScene(ctx context.Context, c *urfave.Command, cli *client.Client, targ
 		defer cancel()
 		result, err := cli.StopExecution(cleanup, id)
 		if err != nil {
-			return output(c, nil, err)
+			return sceneOutput(c, response, err)
 		}
+		if result.Instance.ID != id || startupAttempt(result.Instance) != attempt {
+			return sceneOutput(c, response, startupConflict())
+		}
+		result.ManifestDrift, result.ConfigDrift = driftManifest, driftConfig
 		response.Result = &result
 		if err := sceneOutput(c, response, nil); err != nil {
 			return err
@@ -241,7 +263,7 @@ func startScene(ctx context.Context, c *urfave.Command, cli *client.Client, targ
 		default:
 		}
 		if attempt == "" || startupAttempt(instance) != attempt {
-			return output(c, nil, startupConflict())
+			return sceneOutput(c, response, startupConflict())
 		}
 		switch instance.Status {
 		case v1.RuntimeReady:
@@ -292,10 +314,10 @@ func startScene(ctx context.Context, c *urfave.Command, cli *client.Client, targ
 			}
 			return sceneOutput(c, response, err)
 		}
-		response = next
-		if response.Result == nil {
-			return output(c, nil, &v1.PlanError{Code: "not_found", Message: "accepted startup instance is unavailable"})
+		if next.Result == nil || next.Result.Instance.ID != id || startupAttempt(next.Result.Instance) != attempt || next.DaemonGeneration != response.DaemonGeneration {
+			return sceneOutput(c, response, startupConflict())
 		}
+		response = next
 		response.Checkout = checkout
 		response.CanonicalTarget = canonicalTarget
 		response.Result.ManifestDrift, response.Result.ConfigDrift = driftManifest, driftConfig

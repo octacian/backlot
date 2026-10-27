@@ -334,7 +334,7 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 		t.Fatal("unavailable gateway launch accepted")
 	}
 	command(true, "gateway", "start")
-	command(true, "restart", "--project", h.project, "--config", configPath, id)
+	command(true, "restart", "--config", configPath, id)
 	command(true, "stop", id)
 	command(true, "gateway", "stop")
 	after, err := os.ReadFile(filepath.Join(storage, "pki", "authorities", "local", "root.crt"))
@@ -344,7 +344,7 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	// Unavailable-Caddy crash recovery retains exact route intent and leaves
 	// daemon administration usable. Only authenticated guardian authority stops it.
 	command(true, "gateway", "start")
-	command(true, "restart", "--project", h.project, "--config", configPath, id)
+	command(true, "restart", "--config", configPath, id)
 	if err := h.process.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +420,7 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	}
 	h.start()
 	command(true, "gateway", "start")
-	command(true, "restart", "--project", h.project, "--config", configPath, id)
+	command(true, "restart", "--config", configPath, id)
 	repaired, err := h.cli.Inspect(context.Background(), id)
 	if err != nil || repaired.Instance.Execution.CleanupFailure != "" || repaired.Instance.Execution.Origin != origin {
 		t.Fatal("exact route cleanup retry failed", err, repaired)
@@ -437,7 +437,7 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	}
 	h.start()
 	command(true, "gateway", "start")
-	failedOutput := command(false, "restart", "--project", h.project, "--config", configPath, id)
+	failedOutput := command(false, "restart", "--config", configPath, id)
 	var failed v1.InstanceResponse
 	if err := json.Unmarshal(failedOutput, &failed); err != nil {
 		t.Fatal(err)
@@ -451,7 +451,7 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	}
 	h.start()
 	command(true, "gateway", "start")
-	command(true, "restart", "--project", h.project, "--config", configPath, id)
+	command(true, "restart", "--config", configPath, id)
 	command(true, "stop", id)
 	command(true, "gateway", "stop")
 

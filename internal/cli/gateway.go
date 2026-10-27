@@ -21,7 +21,7 @@ func gatewayCommand() *urfave.Command {
 		if name == "start" || name == "restart" {
 			flags = append(flags, &urfave.StringFlag{Name: "config", Usage: "Machine configuration with explicit managed Caddy mode"})
 		}
-		children = append(children, &urfave.Command{Name: name, Flags: flags, Action: func(ctx context.Context, c *urfave.Command) error {
+		children = append(children, &urfave.Command{Name: name, ArgsUsage: " ", Description: "Example: backlot gateway " + name, Usage: map[string]string{"start": "Start the configured managed HTTPS gateway", "stop": "Stop the recorded gateway; preserve uncertain ownership", "restart": "Stop and restart the configured managed gateway", "status": "Observe gateway status without starting it"}[name], Flags: flags, Action: func(ctx context.Context, c *urfave.Command) error {
 			if c.Args().Len() != 0 {
 				return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "gateway commands take flags only"})
 			}

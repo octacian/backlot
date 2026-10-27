@@ -11,7 +11,11 @@ import (
 func fixtureCommands() []*urfave.Command {
 	var commands []*urfave.Command
 	for _, name := range []string{"fixtures", "secret"} {
-		commands = append(commands, &urfave.Command{Name: name, Usage: "Discover fixtures or explicitly read one sensitive fixture", Flags: append(daemonFlags(false), &urfave.StringFlag{Name: "component"}), Action: func(ctx context.Context, c *urfave.Command) error {
+		args, usage, example := "<instance-id>", "Discover fixtures with sensitive values redacted", "backlot fixtures --component db INSTANCE_ID"
+		if name == "secret" {
+			args, usage, example = "<instance-id> <fixture-name>", "Explicitly reveal one sensitive fixture; requires --component", "backlot secret --component db INSTANCE_ID password"
+		}
+		commands = append(commands, &urfave.Command{Name: name, ArgsUsage: args, Usage: usage, Description: "Example: " + example, Flags: append(daemonFlags(false), &urfave.StringFlag{Name: "component", Usage: "Component name (optional filter for fixtures; required for secret)"}), Action: func(ctx context.Context, c *urfave.Command) error {
 			secret := c.Name == "secret"
 			if c.Args().Len() != 1 && !secret || secret && (c.Args().Len() != 2 || c.String("component") == "") {
 				return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "fixtures requires an instance ID; secret requires --component NAME and instance ID plus fixture name"})

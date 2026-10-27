@@ -15,7 +15,11 @@ func sharedCommand() *urfave.Command {
 		if name == "destroy" {
 			flags = append(flags, &urfave.BoolFlag{Name: "force", Usage: "Delete recorded shared targets despite ownership proof mismatch; retained allocations/consumers still block"})
 		}
-		children = append(children, &urfave.Command{Name: name, Flags: flags, Action: func(ctx context.Context, c *urfave.Command) error {
+		args, example := "<service-id>", "Example: backlot shared "+name+" SERVICE_ID"
+		if name == "list" {
+			args, example = " ", "Example: backlot shared list"
+		}
+		children = append(children, &urfave.Command{Name: name, Description: example, ArgsUsage: args, Usage: map[string]string{"list": "List retained shared server identities and allocation counts", "inspect": "Read one recorded shared server", "start": "Start one recorded shared server", "stop": "Stop one recorded shared server, retaining storage", "restart": "Restart one recorded shared server, retaining storage", "destroy": "Delete one allocation-free recorded shared server and its data"}[name], Flags: flags, Action: func(ctx context.Context, c *urfave.Command) error {
 			count := 1
 			if c.Name == "list" {
 				count = 0

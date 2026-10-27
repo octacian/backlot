@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -19,7 +20,7 @@ import (
 )
 
 func daemonFlags(lease bool) []urfave.Flag {
-	flags := []urfave.Flag{&urfave.StringFlag{Name: "state-dir", Usage: "Private daemon state/socket directory (absolute path)"}, &urfave.BoolFlag{Name: "json", Usage: "Emit shared typed JSON"}}
+	flags := []urfave.Flag{&urfave.StringFlag{Name: "state-dir", Usage: "Private daemon state/socket directory (absolute path)"}}
 	if lease {
 		flags = append(flags, &urfave.DurationFlag{Name: "retention-age", Value: 168 * time.Hour, Usage: "Completed evidence retention age"}, &urfave.Int64Flag{Name: "retention-bytes", Value: 1 << 30, Usage: "Daemon-wide evidence size cap"}, &urfave.DurationFlag{Name: "lease-duration", Value: daemon.DefaultLeaseDuration, Usage: "Disposable disconnect grace period (100ms to 24h)"})
 	}
@@ -36,6 +37,9 @@ func output(c *urfave.Command, value any, err error) error {
 	if err != nil {
 		if c.Bool("json") {
 			detail := &v1.PlanError{Code: "daemon_failed", Message: "local daemon operation failed"}
+			if c.Name == "plan" {
+				detail = &v1.PlanError{Code: "plan_failed", Message: "cannot resolve plan"}
+			}
 			var typed *v1.PlanError
 			if errors.As(err, &typed) {
 				detail = typed
@@ -57,9 +61,25 @@ func output(c *urfave.Command, value any, err error) error {
 			}
 		}
 		_, err = fmt.Fprintf(c.Writer, "Gateway %s (%s, HTTPS port %d)\n%s\n", result.Status, result.Mode, result.HTTPSPort, result.Message)
+	case v1.SharedResponse:
+		for _, service := range result.Services {
+			if _, err = fmt.Fprintf(c.Writer, "Shared %s (%s/%s): %s\nAllocations: %d; pending releases: %d\n", service.ID, service.ProjectID, service.Name, service.Status, service.Allocations, service.PendingReleases); err != nil {
+				return err
+			}
+			if service.Failure != "" {
+				if _, err = fmt.Fprintln(c.Writer, "Failure:", service.Failure); err != nil {
+					return err
+				}
+			}
+		}
 	case v1.DaemonStatusResponse:
 		_, err = fmt.Fprintf(c.Writer, "Daemon %s (API %s, state %d, PID %d)\n", result.Status, result.APIVersion, result.StateVersion, result.PID)
 	case v1.InstanceResponse:
+		if result.Error != nil {
+			if _, err = fmt.Fprintln(c.ErrWriter, result.Error); err != nil {
+				return err
+			}
+		}
 		if result.Instance.Execution != nil {
 			for _, warning := range result.Instance.Execution.ImageChangeWarnings {
 				if _, e := fmt.Fprintln(c.ErrWriter, "Warning:", warning.Message); e != nil {
@@ -92,11 +112,50 @@ func output(c *urfave.Command, value any, err error) error {
 				}
 			}
 		}
+		if result.Instance.Execution != nil && err == nil {
+			execution := result.Instance.Execution
+			outcome := string(execution.Outcome)
+			if outcome == "" {
+				outcome = "unknown"
+			}
+			if _, err = fmt.Fprintf(c.Writer, "Attempt: %s\nOutcome: %s; cancelled: %t; kept resources: %t; evidence expired: %t\n", execution.Attempt, outcome, execution.Cancelled, execution.Kept, execution.EvidenceExpired); err != nil {
+				return err
+			}
+			if len(execution.NativeCleanup) > 0 {
+				if _, err = fmt.Fprintln(c.Writer, "Native cleanup is bounded observation, not universal descendant absence."); err != nil {
+					return err
+				}
+			}
+			if err = outcomeOutput(c.Writer, execution.TerminalExitCode, execution.Components, execution.Failure, execution.CollectionFailure, execution.CleanupFailure); err != nil {
+				return err
+			}
+			if execution.FailureDetail != nil {
+				if _, err = fmt.Fprintf(c.Writer, "Failure detail [%s]: %s\n", execution.FailureDetail.Code, execution.FailureDetail); err != nil {
+					return err
+				}
+			}
+			for _, detail := range execution.CleanupDetails {
+				if _, err = fmt.Fprintf(c.Writer, "Cleanup detail [%s]: %s\n", detail.Code, &detail); err != nil {
+					return err
+				}
+			}
+			if _, err = fmt.Fprintf(c.Writer, "Inspect: backlot inspect %s\nLogs: backlot logs %s\nExport: backlot export %s --output NEW_DIRECTORY\n", result.Instance.ID, result.Instance.ID, result.Instance.ID); err != nil {
+				return err
+			}
+			if execution.Kept || execution.CleanupFailure != "" {
+				if _, err = fmt.Fprintf(c.Writer, "Cleanup: inspect ownership, then backlot stop %s or backlot destroy %s for explicit data removal\n", result.Instance.ID, result.Instance.ID); err != nil {
+					return err
+				}
+			}
+		}
 		if result.Instance.Execution == nil && err == nil {
 			_, err = fmt.Fprintln(c.Writer, "Metadata only; no application work executed or readiness observed.")
 		}
 		if err == nil && (result.ManifestDrift || result.ConfigDrift) {
 			_, err = fmt.Fprintln(c.Writer, "Manifest/config drift detected; the original snapshot is preserved.")
+		}
+		if err == nil && result.Instance.Operation.Reason != "" {
+			_, err = fmt.Fprintln(c.Writer, "Operation reason:", result.Instance.Operation.Reason)
 		}
 		if err == nil && result.LeaseToken != "" {
 			_, err = fmt.Fprintf(c.Writer, "Disposable lease expires %s; renew using the private token returned by JSON preparation.\n", result.Instance.LeaseExpiresAt)
@@ -127,7 +186,7 @@ func output(c *urfave.Command, value any, err error) error {
 func daemonCommand() *urfave.Command {
 	children := []*urfave.Command{}
 	for _, name := range []string{"serve", "start", "stop", "status"} {
-		children = append(children, &urfave.Command{Name: name, Flags: daemonFlags(name == "serve" || name == "start"), Action: func(ctx context.Context, c *urfave.Command) error {
+		children = append(children, &urfave.Command{Name: name, ArgsUsage: " ", Description: "Example: backlot daemon " + name, Usage: map[string]string{"serve": "Serve the local daemon in the foreground until shutdown or signal", "start": "Start the local daemon and wait for compatible access", "stop": "Request daemon shutdown (acknowledgment does not prove exit)", "status": "Observe daemon connectivity and API/state compatibility"}[name], Flags: daemonFlags(name == "serve" || name == "start"), Action: func(ctx context.Context, c *urfave.Command) error {
 			if c.Args().Len() != 0 {
 				return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "daemon commands take flags only"})
 			}
@@ -164,7 +223,7 @@ func daemonCommand() *urfave.Command {
 	return &urfave.Command{Name: "daemon", Usage: "Explicit local metadata daemon control", Commands: children}
 }
 func preparationCommands() []*urfave.Command {
-	commands := []*urfave.Command{{Name: "prepare", Usage: "Persist scene metadata without executing application work", Flags: append(daemonFlags(false), &urfave.StringFlag{Name: "project"}, &urfave.StringFlag{Name: "config"}), Action: func(ctx context.Context, c *urfave.Command) error {
+	commands := []*urfave.Command{{Name: "prepare", Description: "Preparation does not establish runtime readiness; use run or scene start to execute.\nExample: backlot prepare dev", ArgsUsage: "<scene>", Usage: "Persist scene metadata without executing application work", Flags: append(daemonFlags(false), &urfave.StringFlag{Name: "project", Usage: "Project directory or manifest path (default: discover from working directory)"}, &urfave.StringFlag{Name: "config", Usage: "Machine configuration path (default: per-user configuration)"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
 			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "usage: backlot prepare [flags] <scene>"})
 		}
@@ -203,7 +262,7 @@ func preparationCommands() []*urfave.Command {
 		if name == "renew" {
 			flags = append(flags, &urfave.StringFlag{Name: "lease-token", Usage: "Private capability from disposable preparation"})
 		}
-		commands = append(commands, &urfave.Command{Name: name, Usage: "Manage durable preparation metadata", Flags: flags, Action: func(ctx context.Context, c *urfave.Command) error {
+		commands = append(commands, &urfave.Command{Name: name, Description: "Example: backlot " + name + map[string]string{"inspect": " INSTANCE_ID", "status": " --follow INSTANCE_ID", "cancel": " INSTANCE_ID", "renew": " --lease-token TOKEN INSTANCE_ID"}[name], ArgsUsage: "<instance-id>", Usage: map[string]string{"inspect": "Read recorded metadata and execution without changing runtime", "status": "Read a recorded instance; --follow samples without lifecycle ownership", "cancel": "Cancel metadata preparation without executing work", "renew": "Renew a disposable lease with its private capability"}[name], Flags: flags, Action: func(ctx context.Context, c *urfave.Command) error {
 			if c.Args().Len() != 1 {
 				return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "command requires one recorded instance ID"})
 			}
@@ -238,4 +297,54 @@ func preparationCommands() []*urfave.Command {
 	}
 	commands = append(commands, doctorCommand())
 	return commands
+}
+
+// lastObserved reports only an already validated snapshot and strips transient disclosure.
+func lastObserved(response v1.InstanceResponse, err error) v1.InstanceResponse {
+	response.LeaseToken, response.Attachment, response.StartupDetails = "", nil, nil
+	response.Error = observationError(err)
+	return response
+}
+
+func observationError(err error) *v1.PlanError {
+	detail := &v1.PlanError{Code: "observation_failed", Message: "operation result could not be observed"}
+	var typed *v1.PlanError
+	if errors.As(err, &typed) {
+		detail = typed
+	}
+	return &v1.PlanError{Code: detail.Code, Message: "Last observed snapshot; current/final state is unknown. " + detail.Message + "; inspect the recorded ID with the same --state-dir before recovery"}
+}
+
+func observedFailure(c *urfave.Command, response v1.InstanceResponse, err error) error {
+	if writeErr := output(c, lastObserved(response, err), nil); writeErr != nil {
+		return writeErr
+	}
+	return err
+}
+
+func outcomeOutput(w io.Writer, exit *int, components []v1.ComponentResult, failure, collection, cleanup string) error {
+	exitText := "unknown"
+	if exit != nil {
+		exitText = fmt.Sprint(*exit)
+	}
+	if _, err := fmt.Fprintln(w, "Terminal exit:", exitText); err != nil {
+		return err
+	}
+	for _, component := range components {
+		code := "unknown"
+		if component.ExitCode != nil {
+			code = fmt.Sprint(*component.ExitCode)
+		}
+		if _, err := fmt.Fprintf(w, "Component %s: %s (exit %s)\n", component.Name, component.Status, code); err != nil {
+			return err
+		}
+	}
+	for _, item := range []struct{ label, reason string }{{"Runtime failure", failure}, {"Collection failure", collection}, {"Cleanup failure", cleanup}} {
+		if item.reason != "" {
+			if _, err := fmt.Fprintln(w, item.label+":", item.reason); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

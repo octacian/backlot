@@ -23,7 +23,7 @@ func validID(id string) bool {
 }
 func validateInstance(response v1.InstanceResponse) error {
 	instance := response.Instance
-	if response.StartupDetails != nil {
+	if response.StartupDetails != nil || response.Error != nil {
 		return responseError()
 	}
 	if !validID(instance.ID) || !validID(instance.Checkout.ID) || !validID(instance.Operation.ID) || !filepath.IsAbs(instance.Checkout.Path) || instance.Plan.APIVersion != v1.Version || instance.Plan.Project == "" || instance.Plan.Scene == "" {

@@ -36,22 +36,22 @@ func (c *Client) sharedCall(ctx context.Context, action, serviceID string, reque
 	err := c.call(ctx, http.MethodPost, "/v1/shared/"+action, request, &response)
 	if err == nil {
 		if response.APIVersion != v1.Version || response.Services == nil {
-			return response, responseError()
+			return response, mutationError("/v1/shared/"+action, request, responseError())
 		}
 		seen := map[string]bool{}
 		for _, service := range response.Services {
 			if !validID(service.ID) || !validID(service.ProjectID) || !validID(service.Configuration) || service.Name == "" || service.Allocations < 0 || service.PendingReleases < 0 || service.PendingReleases > service.Allocations || seen[service.ID] {
-				return response, responseError()
+				return response, mutationError("/v1/shared/"+action, request, responseError())
 			}
 			seen[service.ID] = true
 			switch service.Status {
 			case "intent", "running", "stopped", "uncertain", "destroying", "destroyed":
 			default:
-				return response, responseError()
+				return response, mutationError("/v1/shared/"+action, request, responseError())
 			}
 		}
 		if action != "list" && (len(response.Services) != 1 || response.Services[0].ID != serviceID) {
-			return response, responseError()
+			return response, mutationError("/v1/shared/"+action, request, responseError())
 		}
 	}
 	return response, err

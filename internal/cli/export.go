@@ -15,7 +15,7 @@ import (
 )
 
 func exportCommand() *urfave.Command {
-	return &urfave.Command{Name: "export", Usage: "Publish a portable report for the latest settled execution attempt", Flags: append(daemonFlags(false),
+	return &urfave.Command{Name: "export", ArgsUsage: "<instance-id>", Description: "Export observes the latest attempt without owning runtime; interruption stops waiting, not execution. Without --wait the attempt must already be settled.\nExample: backlot export --output ./report INSTANCE_ID", Usage: "Publish a portable report for the latest settled execution attempt", Flags: append(daemonFlags(false),
 		&urfave.StringFlag{Name: "output", Required: true, Usage: "New caller-owned directory (existing destinations are rejected)"},
 		&urfave.BoolFlag{Name: "allow-partial", Usage: "Publish explicitly incomplete evidence; safety checks still apply"},
 		&urfave.GenericFlag{Name: "wait", Value: &exportWaitValue{}, Usage: "Wait indefinitely or use --wait=SECONDS_OR_DURATION", OnlyOnce: true}),
@@ -52,8 +52,18 @@ func exportCommand() *urfave.Command {
 				}
 				return err
 			}
-			if err != nil {
+			if response.Result.InstanceID == "" {
 				return output(c, nil, err)
+			}
+			operationErr := err
+			if _, err := fmt.Fprintf(c.Writer, "Export instance %s, attempt %s: %s\n", response.Result.InstanceID, response.Result.Attempt, response.Result.Status); err != nil {
+				return err
+			}
+			if err := outcomeOutput(c.Writer, response.Result.TerminalExitCode, response.Result.Components, response.Result.Failure, response.Result.CollectionFailure, response.Result.CleanupFailure); err != nil {
+				return err
+			}
+			if operationErr != nil {
+				return operationErr
 			}
 			for _, warning := range response.Result.NativeOwnershipWarnings {
 				if _, err := fmt.Fprintln(c.ErrWriter, "Warning:", warning.Message); err != nil {

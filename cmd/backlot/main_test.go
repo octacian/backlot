@@ -1,7 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	apiv1 "github.com/octacian/backlot/api/v1"
+	"os/exec"
+	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"testing"
 )
 
@@ -35,5 +41,28 @@ func TestBuildVersion(t *testing.T) {
 	got := buildVersion(&debug.BuildInfo{Main: debug.Module{Version: "v0.0.0"}})
 	if got.Version != version || got.Commit != commit || got.BuildTime != buildTime {
 		t.Fatal(got)
+	}
+}
+
+func TestExecutableMachineFailuresAndTextExceptions(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "backlot")
+	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
+		t.Fatal(err, string(out))
+	}
+	for _, args := range [][]string{{"--json", "restart", "--project", "private-value-canary", "id"}, {"--json", "export"}, {"--json", "scene", "unknown"}, {"--json", "version", "extra"}, {"--json", "status", "--interval", "private-value-canary"}} {
+		var stdout, stderr bytes.Buffer
+		command := exec.Command(binary, args...)
+		command.Stdout, command.Stderr = &stdout, &stderr
+		err := command.Run()
+		var response apiv1.ErrorResponse
+		if err == nil || json.Unmarshal(stdout.Bytes(), &response) != nil || response.Error.Code != "invalid_arguments" || strings.Count(stderr.String(), "\n") != 1 || strings.Contains(stdout.String()+stderr.String(), "private-value-canary") {
+			t.Fatal(args, err, stdout.String(), stderr.String())
+		}
+	}
+	for _, args := range [][]string{{"--json", "licenses"}, {"--json", "run", "--help"}, {"--json", "daemon"}} {
+		data, err := exec.Command(binary, args...).Output()
+		if err != nil || len(data) == 0 || json.Valid(data) {
+			t.Fatal(args, err, string(data))
+		}
 	}
 }

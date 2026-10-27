@@ -186,7 +186,7 @@ func output(c *urfave.Command, value any, err error) error {
 func daemonCommand() *urfave.Command {
 	children := []*urfave.Command{}
 	for _, name := range []string{"serve", "start", "stop", "status"} {
-		children = append(children, &urfave.Command{Name: name, Usage: map[string]string{"serve": "Serve the local daemon in the foreground until shutdown or signal", "start": "Start the local daemon and wait for compatible access", "stop": "Request daemon shutdown (acknowledgment does not prove exit)", "status": "Observe daemon connectivity and API/state compatibility"}[name], Flags: daemonFlags(name == "serve" || name == "start"), Action: func(ctx context.Context, c *urfave.Command) error {
+		children = append(children, &urfave.Command{Name: name, ArgsUsage: " ", Description: "Example: backlot daemon " + name, Usage: map[string]string{"serve": "Serve the local daemon in the foreground until shutdown or signal", "start": "Start the local daemon and wait for compatible access", "stop": "Request daemon shutdown (acknowledgment does not prove exit)", "status": "Observe daemon connectivity and API/state compatibility"}[name], Flags: daemonFlags(name == "serve" || name == "start"), Action: func(ctx context.Context, c *urfave.Command) error {
 			if c.Args().Len() != 0 {
 				return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "daemon commands take flags only"})
 			}
@@ -223,7 +223,7 @@ func daemonCommand() *urfave.Command {
 	return &urfave.Command{Name: "daemon", Usage: "Explicit local metadata daemon control", Commands: children}
 }
 func preparationCommands() []*urfave.Command {
-	commands := []*urfave.Command{{Name: "prepare", ArgsUsage: "<scene>", Usage: "Persist scene metadata without executing application work", Flags: append(daemonFlags(false), &urfave.StringFlag{Name: "project"}, &urfave.StringFlag{Name: "config"}), Action: func(ctx context.Context, c *urfave.Command) error {
+	commands := []*urfave.Command{{Name: "prepare", Description: "Preparation does not establish runtime readiness; use run or scene start to execute.\nExample: backlot prepare dev", ArgsUsage: "<scene>", Usage: "Persist scene metadata without executing application work", Flags: append(daemonFlags(false), &urfave.StringFlag{Name: "project", Usage: "Project directory or manifest path (default: discover from working directory)"}, &urfave.StringFlag{Name: "config", Usage: "Machine configuration path (default: per-user configuration)"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
 			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "usage: backlot prepare [flags] <scene>"})
 		}
@@ -262,7 +262,7 @@ func preparationCommands() []*urfave.Command {
 		if name == "renew" {
 			flags = append(flags, &urfave.StringFlag{Name: "lease-token", Usage: "Private capability from disposable preparation"})
 		}
-		commands = append(commands, &urfave.Command{Name: name, ArgsUsage: "<instance-id>", Usage: map[string]string{"inspect": "Read recorded metadata and execution without changing runtime", "status": "Read a recorded instance; --follow samples without lifecycle ownership", "cancel": "Cancel metadata preparation without executing work", "renew": "Renew a disposable lease with its private capability"}[name], Flags: flags, Action: func(ctx context.Context, c *urfave.Command) error {
+		commands = append(commands, &urfave.Command{Name: name, Description: "Example: backlot " + name + map[string]string{"inspect": " INSTANCE_ID", "status": " --follow INSTANCE_ID", "cancel": " INSTANCE_ID", "renew": " --lease-token TOKEN INSTANCE_ID"}[name], ArgsUsage: "<instance-id>", Usage: map[string]string{"inspect": "Read recorded metadata and execution without changing runtime", "status": "Read a recorded instance; --follow samples without lifecycle ownership", "cancel": "Cancel metadata preparation without executing work", "renew": "Renew a disposable lease with its private capability"}[name], Flags: flags, Action: func(ctx context.Context, c *urfave.Command) error {
 			if c.Args().Len() != 1 {
 				return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "command requires one recorded instance ID"})
 			}

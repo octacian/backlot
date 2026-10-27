@@ -56,6 +56,7 @@ func runAttached(ctx context.Context, c *urfave.Command, cli *client.Client, gra
 	if err != nil {
 		return output(c, nil, err)
 	}
+	manifestDrift, configDrift := response.ManifestDrift, response.ConfigDrift
 	a := response.Attachment
 	response.Attachment = nil
 	request := v1.AttachedRequest{APIVersion: v1.Version, InstanceID: response.Instance.ID, Owner: a.Owner}
@@ -79,6 +80,7 @@ func runAttached(ctx context.Context, c *urfave.Command, cli *client.Client, gra
 		}
 		if cleanupErr == nil && stopped.Result != nil && stopped.Result.Instance.ID == request.InstanceID && startupAttempt(stopped.Result.Instance) == request.Owner.Attempt {
 			response = *stopped.Result
+			response.ManifestDrift, response.ConfigDrift = manifestDrift, configDrift
 		}
 		var exit *ExitError
 		if !errors.As(err, &exit) || cleanupErr != nil {
@@ -127,6 +129,7 @@ func runAttached(ctx context.Context, c *urfave.Command, cli *client.Client, gra
 				return startupConflict()
 			}
 			response = *stopped.Result
+			response.ManifestDrift, response.ConfigDrift = manifestDrift, configDrift
 		}
 		instance := response.Instance
 		result := instance.Execution
@@ -226,5 +229,6 @@ func runAttached(ctx context.Context, c *urfave.Command, cli *client.Client, gra
 			return startupConflict()
 		}
 		response = *next.Result
+		response.ManifestDrift, response.ConfigDrift = manifestDrift, configDrift
 	}
 }

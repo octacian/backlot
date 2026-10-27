@@ -30,7 +30,7 @@ func NewCommand(version apiv1.VersionResponse, stdout, stderr io.Writer) *urfave
 			return urfave.ShowAppHelp(command)
 		},
 		Commands: append(append(preparationCommands(), runtimeCommands()...), projectCommand(), daemonCommand(), sceneCommand(), exportCommand(), gatewayCommand(), sharedCommand(), planCommand(), listCommand(), &urfave.Command{
-			Name: "licenses", Usage: "Show the project license and dependency notices",
+			Name: "licenses", ArgsUsage: " ", Description: "Example: backlot licenses", Usage: "Show the project license and dependency notices",
 			Action: func(_ context.Context, command *urfave.Command) error {
 				if command.Args().Len() != 0 {
 					return output(command, nil, &apiv1.PlanError{Code: "invalid_arguments", Message: "licenses takes no arguments"})
@@ -38,7 +38,7 @@ func NewCommand(version apiv1.VersionResponse, stdout, stderr io.Writer) *urfave
 				return backlot.WriteLicenses(command.Writer)
 			},
 		}, &urfave.Command{
-			Name: "version", Usage: "Show executable and API versions",
+			Name: "version", ArgsUsage: " ", Description: "Example: backlot version --json", Usage: "Show executable and API versions",
 			Action: func(_ context.Context, command *urfave.Command) error {
 				if command.Args().Len() != 0 {
 					return output(command, nil, &apiv1.PlanError{Code: "invalid_arguments", Message: "version takes no arguments"})

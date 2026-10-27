@@ -32,9 +32,9 @@ func runtimeCommands() []*urfave.Command {
 				usage = "Stop and replace a recorded persistent instance's data, then start fresh"
 			}
 		}
-		commands = append(commands, &urfave.Command{Name: name, Usage: usage, ArgsUsage: args, Flags: flags, Action: runNative})
+		commands = append(commands, &urfave.Command{Name: name, Usage: usage, ArgsUsage: args, Description: map[string]string{"run": "Persistent runs return at readiness and remain running; disposable runs wait, collect evidence and clean up. --attached owns a persistent attempt and stops it on client loss.\nExample: backlot run test -- -run TestExample", "restart": "Example: backlot restart INSTANCE_ID", "reset": "Example: backlot reset INSTANCE_ID"}[name], Flags: flags, Action: runNative})
 	}
-	commands = append(commands, &urfave.Command{Name: "stop", Usage: "Stop runtime; --force acknowledges potentially live native survivors", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force", Usage: "Relinquish unresolved native claims; survivors may still run/write"}), Action: func(ctx context.Context, c *urfave.Command) error {
+	commands = append(commands, &urfave.Command{Name: "stop", ArgsUsage: "<instance-id>", Description: "Retain persistent data; use destroy to remove it.\nExample: backlot stop INSTANCE_ID", Usage: "Stop runtime; --force acknowledges potentially live native survivors", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force", Usage: "Relinquish unresolved native claims; survivors may still run/write"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
 			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "stop requires one recorded instance ID"})
 		}
@@ -56,7 +56,7 @@ func runtimeCommands() []*urfave.Command {
 		response, err := cli.StopExecutionWithRequest(ctx, request)
 		return output(c, response, err)
 	}})
-	commands = append(commands, &urfave.Command{Name: "destroy", Usage: "Remove runtime/data; --force waives shared ownership proof only, retaining consumer/native/private-resource fences", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force"}), Action: func(ctx context.Context, c *urfave.Command) error {
+	commands = append(commands, &urfave.Command{Name: "destroy", ArgsUsage: "<instance-id>", Description: "Evidence remains subject to retention after runtime/data removal.\nExample: backlot destroy INSTANCE_ID", Usage: "Remove runtime/data; --force waives shared ownership proof only, retaining consumer/native/private-resource fences", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force", Usage: "Waive shared ownership proof only; consumer, native and private-resource fences still apply"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
 			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "destroy requires one recorded instance ID"})
 		}
@@ -68,7 +68,7 @@ func runtimeCommands() []*urfave.Command {
 		response, err := cli.DestroyWithRequest(ctx, v1.DestroyRequest{APIVersion: v1.Version, InstanceID: c.Args().First(), Force: c.Bool("force")})
 		return output(c, response, err)
 	}})
-	commands = append(commands, &urfave.Command{Name: "logs", Usage: "Read retained component logs", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "follow"}, &urfave.StringFlag{Name: "component"}), Action: func(ctx context.Context, c *urfave.Command) error {
+	commands = append(commands, &urfave.Command{Name: "logs", ArgsUsage: "<instance-id>", Description: "Reads retained logs after teardown too; follow interruption stops observation without stopping runtime. JSON emits log NDJSON.\nExample: backlot logs --follow --component app INSTANCE_ID", Usage: "Read retained component logs", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "follow", Usage: "Stream new logs until runtime settles or observation is interrupted"}, &urfave.StringFlag{Name: "component", Usage: "Filter logs by component name (default: all components)"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
 			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "logs requires one recorded instance ID"})
 		}

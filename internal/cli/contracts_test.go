@@ -188,3 +188,58 @@ func TestUnhealthyDoctorKeepsFindingsInOneResult(t *testing.T) {
 		t.Fatal("doctor lost unhealthy result", err, out.String())
 	}
 }
+
+// These assertions cover Backlot registration metadata, not framework help formatting.
+func TestPublicHelpMetadata(t *testing.T) {
+	var visit func(*urfave.Command, string)
+	visit = func(c *urfave.Command, path string) {
+		if c.Usage == "" {
+			t.Errorf("%s missing usage", path)
+		}
+		for _, flag := range c.Flags {
+			if flag.(urfave.DocGenerationFlag).GetUsage() == "" {
+				t.Errorf("%s --%s missing usage", path, flag.Names()[0])
+			}
+		}
+		if len(c.Commands) == 0 {
+			if c.ArgsUsage == "" || !strings.Contains(c.Description, "Example") {
+				t.Errorf("%s missing target shape or example", path)
+			}
+		}
+		for _, child := range c.Commands {
+			visit(child, path+" "+child.Name)
+		}
+	}
+	root := NewCommand(v1.VersionResponse{}, io.Discard, io.Discard)
+	visit(root, "backlot")
+	for _, tc := range []struct {
+		path    []string
+		args    string
+		phrases []string
+	}{
+		{[]string{"secret"}, "<instance-id> <fixture-name>", []string{"requires --component", "backlot secret --component db INSTANCE_ID password"}},
+		{[]string{"fixtures"}, "<instance-id>", []string{"redacted", "backlot fixtures --component db INSTANCE_ID"}},
+		{[]string{"project", "setup"}, " ", []string{"Inspect registered setup", "--edit", "--from private.yaml --reassociate", "does not import old credentials"}},
+		{[]string{"scene", "start"}, "<scene>", []string{"--attached owns", "backlot scene start dev"}},
+		{[]string{"scene", "status"}, "<scene>", []string{"without lifecycle ownership", "backlot scene status dev"}},
+		{[]string{"scene", "stop"}, "<scene>", []string{"retaining data", "backlot scene stop dev"}},
+	} {
+		c := root
+		for _, name := range tc.path {
+			for _, child := range c.Commands {
+				if child.Name == name {
+					c = child
+					break
+				}
+			}
+		}
+		if c.ArgsUsage != tc.args {
+			t.Errorf("%v target = %q", tc.path, c.ArgsUsage)
+		}
+		for _, phrase := range tc.phrases {
+			if !strings.Contains(c.Usage+" "+c.Description, phrase) {
+				t.Errorf("%v missing %q", tc.path, phrase)
+			}
+		}
+	}
+}

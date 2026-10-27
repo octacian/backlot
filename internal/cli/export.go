@@ -15,7 +15,7 @@ import (
 )
 
 func exportCommand() *urfave.Command {
-	return &urfave.Command{Name: "export", Usage: "Publish a portable report for the latest settled execution attempt", Flags: append(daemonFlags(false),
+	return &urfave.Command{Name: "export", ArgsUsage: "<instance-id>", Description: "Export observes the latest attempt without owning runtime; interruption stops waiting, not execution. Without --wait the attempt must already be settled.\nExample: backlot export --output ./report INSTANCE_ID", Usage: "Publish a portable report for the latest settled execution attempt", Flags: append(daemonFlags(false),
 		&urfave.StringFlag{Name: "output", Required: true, Usage: "New caller-owned directory (existing destinations are rejected)"},
 		&urfave.BoolFlag{Name: "allow-partial", Usage: "Publish explicitly incomplete evidence; safety checks still apply"},
 		&urfave.GenericFlag{Name: "wait", Value: &exportWaitValue{}, Usage: "Wait indefinitely or use --wait=SECONDS_OR_DURATION", OnlyOnce: true}),

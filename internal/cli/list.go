@@ -10,7 +10,7 @@ import (
 )
 
 func listCommand() *urfave.Command {
-	return &urfave.Command{Name: "list", Usage: "Discover current and historical instance IDs (one bounded page)", Flags: append(daemonFlags(false), &urfave.StringFlag{Name: "after", Usage: "Continue after the previous page's next_after_id"}, &urfave.IntFlag{Name: "limit", Value: 100, Usage: "Page size, 1 through 100"}), Action: func(ctx context.Context, c *urfave.Command) error {
+	return &urfave.Command{Name: "list", ArgsUsage: " ", Description: "Example: backlot list --json", Usage: "Discover current and historical instance IDs (one bounded page)", Flags: append(daemonFlags(false), &urfave.StringFlag{Name: "after", Usage: "Continue after the previous page's next_after_id"}, &urfave.IntFlag{Name: "limit", Value: 100, Usage: "Page size, 1 through 100"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 0 {
 			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "list takes flags only"})
 		}

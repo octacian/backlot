@@ -117,3 +117,11 @@ no Node toolchain, custom schema parser, or runtime download is required.
 `private-config-v1.schema.json` describes inputs/tools-only setup imports. The
 [setup guide](../docs/manifest.md#registered-private-project-configuration) covers
 registration, atomic edits, linked worktrees and private-generation retention.
+
+## Installed matching schemas
+
+`backlot schema manifest|machine|private` writes the exact generated document
+embedded in that executable, including with `--json`. Redirect it to a local
+editor schema file; no source checkout or network fetch is needed. Generation
+remains `make schema-generate`; `make schema-check` and parity tests verify the
+committed/embedded bytes. Strict runtime validation remains authoritative.

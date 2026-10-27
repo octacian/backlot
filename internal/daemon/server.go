@@ -31,6 +31,12 @@ type Options struct {
 // DefaultLeaseDuration is the disposable disconnect grace period.
 const DefaultLeaseDuration = 30 * time.Second
 
+// DefaultRetentionAge is the completed-evidence age limit absent startup overrides.
+const DefaultRetentionAge = 168 * time.Hour
+
+// DefaultRetentionBytes is the evidence size limit absent startup overrides.
+const DefaultRetentionBytes int64 = 1 << 30
+
 // Serve owns the socket, database and lease sweeper until shutdown or cancellation.
 // Only the daemon opens state.db; it owns all accepted native execution.
 func Serve(ctx context.Context, options Options) (resultErr error) {
@@ -322,6 +328,39 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				return
 			}
 			response, err := s.doctor(r.Context(), request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+		case "/v1/discovery/configuration", "/v1/discovery/contracts":
+			var request v1.ControlRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			if r.URL.Path == "/v1/discovery/contracts" {
+				writeJSON(w, v1.ContractsResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, Context: "daemon supported contracts", DaemonGeneration: s.generation, Schemas: []string{}, Contracts: v1.SupportedDaemonReadContracts()})
+				return
+			}
+			age, size := s.evidenceLimits()
+			writeJSON(w, v1.DaemonConfigurationResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, DaemonGeneration: s.generation, Context: "daemon-startup policy", Directory: s.directory, Socket: SocketPath(s.directory), LeaseDuration: s.lease.String(), RetentionAge: age.String(), RetentionBytes: size})
+		case "/v1/logs/page":
+			var request v1.LogPageRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.logPage(request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+		case "/v1/discovery/instances":
+			var request v1.FilteredListRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.store.filteredList(request)
 			if err != nil {
 				writeError(w, err)
 				return

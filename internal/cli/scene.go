@@ -17,18 +17,18 @@ import (
 )
 
 func sceneCommand() *urfave.Command {
-	children := []*urfave.Command{}
+	children := sceneDiscoveryCommands()
 	for _, name := range []string{"start", "status", "stop"} {
 		flags := append(daemonFlags(false), &urfave.StringFlag{Name: "project", Usage: "Exact project directory or recognized manifest path (default: resolve from working directory)"})
 		if name == "start" {
-			flags = append(flags, &urfave.BoolFlag{Name: "attached", Usage: "Own a persistent attempt until this client ends"}, &urfave.StringFlag{Name: "config", Usage: "Machine configuration path (default: per-user configuration)"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m", Usage: "Startup budget; 0s is unlimited"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m", Usage: "Job budget; 0s is unlimited"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s", Usage: "Grace before cleanup escalation"})
+			flags = append(flags, &urfave.BoolFlag{Name: "attached", Usage: "Own a persistent attempt until this client ends"}, &urfave.StringFlag{Name: "config", Usage: "Machine configuration path (default: per-user configuration)"}, &urfave.StringFlag{Name: "startup-timeout", Value: defaultStartupTimeout, Usage: "Startup budget; 0s is unlimited"}, &urfave.StringFlag{Name: "job-timeout", Value: defaultJobTimeout, Usage: "Job budget; 0s is unlimited"}, &urfave.StringFlag{Name: "stop-grace", Value: defaultStopGrace, Usage: "Grace before cleanup escalation"})
 		}
 		if name == "status" {
 			flags = append(flags, statusFollowFlags()...)
 		}
 		children = append(children, &urfave.Command{Name: name, Description: "Example: backlot scene " + name + " dev\nNamed scenes resolve within the selected checkout; use status/inspect with an instance ID for exact recorded state.", ArgsUsage: "<scene>", Usage: map[string]string{"start": "Start a persistent scene and wait for readiness; --attached owns its attempt", "status": "Read a named persistent scene; --follow observes without lifecycle ownership", "stop": "Stop a recorded persistent scene, retaining data; current manifest is not required"}[name], Flags: flags, Action: sceneAction})
 	}
-	return &urfave.Command{Name: "scene", Usage: "Start, observe or stop recorded persistent scenes", Commands: children}
+	return &urfave.Command{Name: "scene", Usage: "Discover declarations and manage recorded persistent scenes", Commands: children}
 }
 
 func sceneAction(ctx context.Context, c *urfave.Command) error {

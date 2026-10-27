@@ -302,3 +302,26 @@ Backlot does not automatically retry. Preflight compatibility refusal instead
 requires matching-binary recovery. `daemon stop` acknowledges stopping, not process
 exit or lock release. Output-write failures are nonzero; a closed pipe cannot
 promise a final document or record.
+
+## Installed read contracts and schemas
+
+```sh
+backlot contracts --json
+backlot contracts --daemon --state-dir /private/backlot --json
+backlot schema manifest > manifest.schema.json
+backlot schema machine > machine.schema.json
+backlot schema private > private.schema.json
+```
+
+Local contracts reports existing executable version identity, matching schema
+selectors and focused supported reads/output modes. Daemon contracts reports
+API/state/generation and its finite read endpoints (excluding local declarations),
+without attributing the caller's
+build identity to the daemon. Capabilities do not prove provider readiness.
+This inventory is not a command/flag catalog. `version --json` remains unchanged.
+
+`schema` emits the exact embedded Draft 2020-12 document in both human and JSON
+modes, a finite raw-schema exception to ordinary result envelopes. Runtime strict
+validation remains authoritative. See [declaration/configuration discovery](manifest.md#discover-declarations-before-setup),
+[recorded filters and active policy](daemon.md#bounded-recorded-discovery-and-active-policy)
+and [finite log pages](evidence.md#finite-retained-log-pages).

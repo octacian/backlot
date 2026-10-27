@@ -169,13 +169,7 @@ func (s *service) pruneEvidence() error {
 	if err := s.observeLegacyEvidence(); err != nil {
 		return err
 	}
-	age, limit := s.evidence.age, s.evidence.bytes
-	if age == 0 {
-		age = 168 * time.Hour
-	}
-	if limit == 0 {
-		limit = 1 << 30
-	}
+	age, limit := s.evidenceLimits()
 	var completed []v1.Instance
 	var total int64
 	err := s.store.db.View(func(tx *bolt.Tx) error {
@@ -342,4 +336,15 @@ func retentionStart(result *v1.ExecutionResult) string {
 		return result.CompletedAt
 	}
 	return result.EvidenceObservedAt
+}
+
+func (s *service) evidenceLimits() (time.Duration, int64) {
+	age, limit := s.evidence.age, s.evidence.bytes
+	if age == 0 {
+		age = DefaultRetentionAge
+	}
+	if limit == 0 {
+		limit = DefaultRetentionBytes
+	}
+	return age, limit
 }

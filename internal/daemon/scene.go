@@ -146,17 +146,8 @@ func (s *service) resolveScene(target v1.SceneTarget, persistentOnly bool) (v1.S
 			return err
 		}
 		response.Checkout = &checkout
-		if data := tx.Bucket([]byte("paths")).Get([]byte(checkout.Path)); data != nil && string(data) != checkout.ID {
-			return problem("checkout_replaced", "recorded checkout path identifies different files; use explicit recorded ID")
-		}
-		if data := tx.Bucket([]byte("checkouts")).Get([]byte(checkout.ID)); data != nil {
-			var previous v1.CheckoutIdentity
-			if err := json.Unmarshal(data, &previous); err != nil {
-				return problem("state_corrupt", "cannot decode checkout identity")
-			}
-			if previous.Path != checkout.Path || previous.GitDirectory != checkout.GitDirectory {
-				return problem("checkout_moved", "checkout moved; use explicit recorded ID")
-			}
+		if err := verifyRecordedCheckout(tx, checkout); err != nil {
+			return err
 		}
 		selected := ""
 		for _, instance := range instances {
@@ -341,4 +332,21 @@ func storedSceneInstances(tx *bolt.Tx) (map[string]recordedScene, error) {
 
 func sceneSlot(i v1.Instance) string {
 	return i.Plan.Project + "/" + i.Checkout.ID + "/" + i.Plan.Scene
+}
+
+// verifyRecordedCheckout compares current filesystem identity with recorded location indexes.
+func verifyRecordedCheckout(tx *bolt.Tx, checkout v1.CheckoutIdentity) error {
+	if data := tx.Bucket([]byte("paths")).Get([]byte(checkout.Path)); data != nil && string(data) != checkout.ID {
+		return problem("checkout_replaced", "recorded checkout path identifies different files; use explicit recorded ID")
+	}
+	if data := tx.Bucket([]byte("checkouts")).Get([]byte(checkout.ID)); data != nil {
+		var previous v1.CheckoutIdentity
+		if err := json.Unmarshal(data, &previous); err != nil {
+			return problem("state_corrupt", "cannot decode checkout identity")
+		}
+		if previous.Path != checkout.Path || previous.GitDirectory != checkout.GitDirectory {
+			return problem("checkout_moved", "checkout moved; use explicit recorded ID")
+		}
+	}
+	return nil
 }

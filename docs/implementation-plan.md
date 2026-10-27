@@ -411,3 +411,14 @@ See the [decision](adr/20261025T202510851Z-pin-execution-scoped-build-images-fro
 [example](../examples/build-images/README.md) and [focused provider gate](testing.md#execution-scoped-image-handoff-integration).
 Delivery still requires independent implementation reviews, frozen full regressions
 and exact published-head CI; this guide is not run-specific acceptance evidence.
+
+## Issue 57: discovery and bounded recorded reads
+
+Implemented prerequisite-free validated scene list/describe, recorded instance
+filters, opt-in bounded log pages, safe local configuration/active daemon policy
+and installed schema/contract inspection. Existing result views, lifecycle
+selection, default wire/output contracts and state version 11 are retained.
+See the [decision](adr/20261027T215913789Z-separate-declaration-discovery-from-bounded-recorded-inspection.md)
+and [commands](operations.md#installed-read-contracts-and-schemas). Local owned
+native evidence and repository checks accompany implementation; provider/platform
+and exact published-revision CI remain separate acceptance evidence.

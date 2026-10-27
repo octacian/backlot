@@ -1,0 +1,32 @@
+version: backlot/v1
+project: build-images
+tools:
+  sh: /bin/sh
+build_images:
+  app: {producer: build}
+components:
+  build:
+    kind: job
+    runtime: native
+    policy: each-start
+    command:
+      tool: sh
+      args: [-c, 'docker build --pull=false -t "$APP_IMAGE" .']
+    environment:
+      assign:
+        APP_IMAGE: {ref: {kind: build_image, name: app, field: tag}}
+  test:
+    kind: job
+    runtime: container
+    policy: each-start
+    image: {ref: {kind: build_image, name: app, field: id}}
+    args: [cat, /message]
+    depends_on: [{component: build, condition: completed}]
+scenes:
+  preview:
+    lifetime: persistent
+    components: [build, test]
+  test:
+    lifetime: disposable
+    components: [build, test]
+    terminal_job: test

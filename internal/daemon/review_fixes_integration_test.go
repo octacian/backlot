@@ -381,7 +381,8 @@ func TestKeptGuardianLossReportsEvidenceGap(t *testing.T) {
 	}
 	final := h.state(r.Instance.ID, v1.Failed).Instance.Execution
 	if !final.Kept || final.TerminalExitCode == nil || *final.TerminalExitCode != 17 {
-		t.Fatal("kept job result missing")
+		data, _ := json.Marshal(final)
+		t.Fatalf("kept job result missing: %s", data)
 	}
 	authorities := h.guardianCapabilities(r.Instance.ID)
 	identity := authorities[0]

@@ -54,7 +54,7 @@ func Validate(m v1.Manifest) error {
 	if len(m.Components) == 0 || len(m.Scenes) == 0 {
 		return invalid("manifest", "declare components and scenes")
 	}
-	checks := []error{names(m.SharedServices, "shared_services"), names(m.Tools, "tools"), names(m.Inputs, "inputs"), names(m.Environments, "environments"), names(m.Resources, "resources"), names(m.Outputs, "outputs"), names(m.Components, "components"), names(m.Scenes, "scenes")}
+	checks := []error{names(m.BuildImages, "build_images"), names(m.SharedServices, "shared_services"), names(m.Tools, "tools"), names(m.Inputs, "inputs"), names(m.Environments, "environments"), names(m.Resources, "resources"), names(m.Outputs, "outputs"), names(m.Components, "components"), names(m.Scenes, "scenes")}
 	for _, err := range checks {
 		if err != nil {
 			return err
@@ -141,6 +141,9 @@ func Validate(m v1.Manifest) error {
 			return err
 		}
 	}
+	if err := validateBuildImages(m); err != nil {
+		return err
+	}
 	all := v1.Scene{}
 	for name := range m.Components {
 		all.Components = append(all.Components, name)
@@ -215,6 +218,10 @@ func value(m v1.Manifest, v v1.Value, field string) error {
 	}
 	r := v.Ref
 	switch r.Kind {
+	case "build_image":
+		if _, ok := m.BuildImages[r.Name]; !ok || (r.Field != "tag" && r.Field != "id") || r.Port != "" {
+			return invalid(field, "build_image requires a declared name and tag or id field")
+		}
 	case "input":
 		if _, ok := m.Inputs[r.Name]; !ok || r.Field != "" || r.Port != "" {
 			return invalid(field, "input reference requires a declared name only")
@@ -316,8 +323,8 @@ func component(m v1.Manifest, name string, c v1.Component) error {
 		if c.Image.Literal != nil && *c.Image.Literal == "" {
 			return invalid(f+".image", "provide a nonempty image reference")
 		}
-		if c.Image.Ref != nil && c.Image.Ref.Kind != "input" {
-			return invalid(f+".image", "image references must name a declared input")
+		if c.Image.Ref != nil && c.Image.Ref.Kind != "input" && (c.Image.Ref.Kind != "build_image" || c.Image.Ref.Field != "id") {
+			return invalid(f+".image", "image references require an input or build_image id")
 		}
 		if err := value(m, *c.Image, f+".image"); err != nil {
 			return err
@@ -451,6 +458,9 @@ func component(m v1.Manifest, name string, c v1.Component) error {
 }
 
 func scene(m v1.Manifest, name string, s v1.Scene) error {
+	if err := selectedBuildImages(m, s); err != nil {
+		return err
+	}
 	f := "scenes." + name
 	if s.Lifetime != v1.Persistent && s.Lifetime != v1.Disposable {
 		return invalid(f+".lifetime", "use persistent or disposable")

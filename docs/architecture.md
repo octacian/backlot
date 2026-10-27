@@ -64,7 +64,7 @@ the UI or CLI. A separately published Go SDK is not required for V1.
 
 Recommended embedded storage is bbolt: only the daemon opens the database and
 mutations use transactions. Keep a versioned state format. The current format is
-9. Retain each real Go migration from v9 onward so the newest binary can apply
+11. Retain each real Go migration from v9 onward so the newest binary can apply
 all required steps when users skip releases. Version 9 is the minimum supported
 baseline. Source-specific validation, transformations, final current-authority
 validation and the version fence share one startup write transaction under

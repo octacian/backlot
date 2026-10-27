@@ -17,6 +17,20 @@
       ],
       "description": "ArtifactSource names a file or directory collected before runtime removal."
     },
+    "BuildImage": {
+      "properties": {
+        "producer": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "producer"
+      ],
+      "description": "BuildImage names a native each-start job producing an attempt-scoped local image."
+    },
     "Command": {
       "properties": {
         "tool": {
@@ -132,11 +146,25 @@
                         "minLength": 1
                       },
                       "ref": {
-                        "properties": {
-                          "kind": {
-                            "const": "input"
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "kind": {
+                                "const": "input"
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "field": {
+                                "const": "id"
+                              },
+                              "kind": {
+                                "const": "build_image"
+                              }
+                            }
                           }
-                        }
+                        ]
                       }
                     }
                   }
@@ -327,7 +355,7 @@
         },
         "image": {
           "$ref": "#/$defs/Value",
-          "description": "Container image literal or declared input reference."
+          "description": "Container image literal, declared input or build_image id reference."
         },
         "args": {
           "items": {
@@ -476,7 +504,36 @@
         },
         "assign": {
           "additionalProperties": {
-            "$ref": "#/$defs/Value"
+            "$ref": "#/$defs/Value",
+            "allOf": [
+              {
+                "properties": {
+                  "ref": {
+                    "allOf": [
+                      {
+                        "if": {
+                          "properties": {
+                            "kind": {
+                              "const": "build_image"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ]
+                        },
+                        "then": {
+                          "properties": {
+                            "field": {
+                              "const": "tag"
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
           },
           "propertyNames": {
             "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
@@ -586,6 +643,15 @@
     },
     "Manifest": {
       "properties": {
+        "build_images": {
+          "additionalProperties": {
+            "$ref": "#/$defs/BuildImage"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object"
+        },
         "shared_services": {
           "additionalProperties": {
             "$ref": "#/$defs/SharedService"
@@ -1066,6 +1132,42 @@
           "allOf": [
             {
               "properties": {
+                "field": {
+                  "type": "string",
+                  "enum": [
+                    "tag",
+                    "id"
+                  ]
+                },
+                "kind": {
+                  "const": "build_image"
+                }
+              }
+            },
+            {
+              "properties": {
+                "name": {
+                  "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+                }
+              },
+              "required": [
+                "name",
+                "field"
+              ]
+            },
+            {
+              "properties": {
+                "port": {
+                  "const": ""
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "properties": {
                 "kind": {
                   "const": "input"
                 }
@@ -1274,7 +1376,8 @@
             "instance",
             "resource",
             "output",
-            "service"
+            "service",
+            "build_image"
           ],
           "description": "Explicit discriminator; see the supported values and conditional fields."
         },

@@ -27,8 +27,22 @@ func copyStateNine(t *testing.T) string {
 	return dir
 }
 
-func TestRetainedStateNine(t *testing.T) {
-	dir := copyStateNine(t)
+func TestRetainedStateNine(t *testing.T) { testRetainedState(t, copyStateNine(t), 9) }
+
+func TestRetainedStateTen(t *testing.T) {
+	data, err := os.ReadFile("testdata/state/v10/state.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err = os.WriteFile(filepath.Join(dir, "state.db"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	testRetainedState(t, dir, 10)
+}
+
+func testRetainedState(t *testing.T, dir string, version int) {
+	t.Helper()
 	db, err := bolt.Open(filepath.Join(dir, "state.db"), 0600, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +63,7 @@ func TestRetainedStateNine(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if before["meta"]["version"] != "9" || len(before["instances"]) != 2 || len(before["checkouts"]) != 1 || len(before["persistent"]) != 1 || len(before["snapshots"]) != 2 || len(before["secrets"]) != 2 {
+	if before["meta"]["version"] != strconv.Itoa(version) || len(before["instances"]) != 2 || len(before["checkouts"]) != 1 || len(before["persistent"]) != 1 || len(before["snapshots"]) != 2 || len(before["secrets"]) != 2 {
 		t.Fatal("fixture lost its historical record classes")
 	}
 	before["meta"]["version"] = strconv.Itoa(v1.StateVersion)
@@ -146,5 +160,46 @@ func TestRetainedStateNineRejectedCopy(t *testing.T) {
 				t.Fatal("rejection touched passive file", err)
 			}
 		})
+	}
+}
+
+func TestRetainedStateTenRejectsInventedPinsUnchanged(t *testing.T) {
+	data, err := os.ReadFile("testdata/state/v10/state.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.db")
+	if err = os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	db, err := bolt.Open(path, 0600, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Update(func(tx *bolt.Tx) error {
+		key := tx.Bucket([]byte("instances")).Cursor()
+		id, _ := key.First()
+		return tx.Bucket([]byte("resources")).Put(id, []byte(`{"build_images":{}}`))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s, err := openStore(dir); err == nil {
+		_ = s.db.Close()
+		t.Fatal("invented source pins accepted")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("rejected v10 fixture changed")
 	}
 }

@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=../../schemas/manifest-v1.schema.json
+version: backlot/v1
+project: native-go-mariadb
+tools: {go: go, ready: ./bin/ready}
+resources:
+  data: {kind: volume}
+  admin-password: {kind: secret}
+  app-password: {kind: secret}
+  sql: {kind: port}
+outputs:
+  reports: {path: reports, concurrency_group: reports}
+environments:
+  application:
+    assign:
+      DB_HOST: {literal: 127.0.0.1}
+      DB_PORT: {ref: {kind: resource, name: sql, field: port}}
+      DB_DATABASE: {literal: app}
+      DB_USERNAME: {literal: app}
+      DB_PASSWORD: {ref: {kind: resource, name: app-password, field: value}}
+components:
+  database:
+    kind: service
+    runtime: container
+    image: {literal: 'mariadb:11.4.13'}
+    resources: [data, admin-password, app-password, sql]
+    environment_sets: [application]
+    environment:
+      assign:
+        MARIADB_DATABASE: {literal: app}
+        MARIADB_USER: {literal: app}
+        MARIADB_PASSWORD: {ref: {kind: resource, name: app-password, field: value}}
+        MARIADB_ROOT_PASSWORD: {ref: {kind: resource, name: admin-password, field: value}}
+    mounts: [{resource: data, target: /var/lib/mysql}]
+    ports: {sql: {resource: sql, container_port: 3306}}
+    readiness:
+      kind: command
+      command: {tool: ready}
+      timeout: 90s
+  tests:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: go, args: [test, -count=1, -json, .]}
+    depends_on: [{component: database, condition: ready}]
+    resources: [sql, app-password]
+    environment_sets: [application]
+    outputs: [reports]
+    artifacts:
+      reports: {path: reports}
+scenes:
+  test:
+    lifetime: disposable
+    components: [database, tests]
+    resources: [data, admin-password, app-password, sql]
+    terminal_job: tests

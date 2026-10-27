@@ -26,6 +26,8 @@ type ExportResponse struct {
 
 // ExportResult preserves original runtime outcomes without private runtime records.
 type ExportResult struct {
+	BuildImages             []BuildImageResult       `json:"build_images,omitempty"`
+	ImageChangeWarnings     []ImageChangeWarning     `json:"image_change_warnings,omitempty"`
 	NativeOwnershipWarnings []NativeOwnershipWarning `json:"native_ownership_warnings,omitempty"`
 	InstanceID              string                   `json:"instance_id"`
 	Attempt                 string                   `json:"attempt"`

@@ -71,7 +71,7 @@ jobs:
           install -m 0755 bin/backlot-linux-amd64 "$RUNNER_TEMP/backlot-install/backlot"
           "$RUNNER_TEMP/backlot-install/backlot" version --json
           BACKLOT_INSTALLED_TEST_BINARY="$RUNNER_TEMP/backlot-install/backlot" \
-            go test -race ./internal/daemon -run '^TestLinuxInstallation$' -count=1 -v
+            go test -race ./internal/daemon -run '^TestInstalledBinary$' -count=1 -v
       - name: Early native and bridge HTTPS trust and cleanup
         env:
           BACKLOT_DOCKER_TEST_ENDPOINT: unix:///var/run/docker.sock
@@ -92,4 +92,4 @@ jobs:
         run: |
           export BACKLOT_CADDY_TEST_BINARY="$RUNNER_TEMP/backlot-tools/caddy"
           go test -race ./internal/gateway -count=1 -v -timeout=15m
-          go test -race ./internal/daemon -run '^(TestDockerRuntime|TestDisposableEvidenceDocker|TestHTTPSRuntime|TestManagedHTTPSRuntime|TestManagedForceRestart|TestGatewayDefaultConfig|TestContainerManagedHTTPSRuntime)$' -count=1 -v -timeout=40m
+          go test -race ./internal/daemon -run '^(TestDockerRuntime|TestDisposableEvidenceDocker|TestHTTPSRuntime|TestManagedHTTPSRuntime|TestManagedForceRestart|TestGatewayDefaultConfig|TestContainerManagedHTTPSRuntime|TestBuildImagesDocker)$' -count=1 -v -timeout=40m

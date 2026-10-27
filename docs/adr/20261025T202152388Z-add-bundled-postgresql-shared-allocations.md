@@ -146,9 +146,9 @@ absence reconciliation, retained-allocation fences and no replacement infrastruc
 
 ### Retention
 
-State-v10 records represent the declaration and derived role identity without a
-layout change or migration. Preserve MariaDB interpretation and matching-binary
-guidance; old binaries do not understand PostgreSQL records. Apply the deferred
+Existing shared records represent the declaration and derived role identity;
+PostgreSQL adds no persisted fields or migration. Preserve MariaDB interpretation
+and matching-binary guidance; old binaries do not understand PostgreSQL records. Apply the deferred
 `saveShared` Server/Network/Volume validation before saving provider responses;
 rejection preserves prior valid intent/capability and reopenable state.
 

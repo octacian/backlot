@@ -701,6 +701,9 @@ func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, re
 		value = snap.Secrets[key]
 	}
 	r := value.Symbolic
+	if r != nil && r.Kind == "build_image" {
+		return resolvedBuildImage(r, key, id, snap, result, entry)
+	}
 	if r != nil && r.Kind == "resource" && snap.Plan.Resources[r.Name].Kind == "allocation" {
 		connection, ok := entry.shared[r.Name]
 		if !ok {

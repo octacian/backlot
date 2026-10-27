@@ -366,9 +366,15 @@ be `0s` for unlimited; any other applicable finite budget still limits execution
 Negative durations are rejected. API execution options use the same duration
 strings. `--stop-grace` accepts any finite nonnegative duration and defaults to `10s`;
 zero means immediate escalation. Verification and collection have separate finite
-budgets after the configured grace. The outer owner join permits the accepted
-grace plus 20 seconds of bounded activation, verification and collection overhead;
-a failed join reports failure and retains state ownership until the owner exits.
+budgets after the configured grace. Native cleanup can stop each workload twice
+(before and after artifact collection), so the outer owner join budgets twice the
+accepted grace plus 50 seconds for activation, verification, collection and resource
+cleanup overhead; a slower or failed join reports failure and retains state
+ownership until the owner exits. Run, scene and attached CLI cleanup waits outlast
+that join by 10 seconds so the daemon's typed result, not a client deadline, reports
+slow cleanup. Retained (kept) instances stop separately, without this join. The
+private `daemon.log` records the initiating cause of each failed native cleanup or
+listener-ownership observation behind the bounded public detail.
 Disposable clients renew the finite daemon
 lease while waiting; unlimited execution never disables lease cancellation.
 Expired runs receive independent cancellation coordinators, so one run's grace
@@ -631,3 +637,14 @@ See [state upgrade and operation](containers.md#state-compatibility) and
 Persistent startup can show declared fixture details, including selected secrets.
 See [selection, output and lifecycle behavior](manifest.md#components-and-scenes)
 and the [seeded example](../examples/macos-quickstart/README.md#seeded-demo-account).
+
+## Build-image restart opt-in
+
+`restart INSTANCE_ID --allow-image-change` deliberately accepts changed produced
+image IDs for containers with retained mounts, with an application/data compatibility
+warning in human output and typed JSON/status/export. Without it, a changed ID
+fails after the producer, leaving runtime stopped and old pins/data retained.
+Same-ID restart needs no flag. The flag is restart-only, invocation-only, and
+cannot bypass other safety checks or affect literal/input-image declarations.
+See [image retention](containers.md#execution-scoped-image-retention) and the
+[project example](../examples/build-images/README.md). Plans remain symbolic.

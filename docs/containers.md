@@ -48,15 +48,21 @@ settings. This private-container path remains available alongside the optional
 own application migrations or seed logic. Applications own those operations and any application-level readiness
 probe. A TCP probe observes connectivity, which may precede application setup;
 use a declared native command probe when connectivity is insufficient.
+The [native Go/MariaDB recipe](../examples/native-go-mariadb/README.md) supplies a
+small application-user query probe with environment-only credentials, alongside
+an actual native read/write test. Its runtime and version compatibility checkpoint
+is tracked separately from the existing private-state fixture.
 
 ## State compatibility
 
-The durable state format is version 10; version 9 is the minimum supported baseline. Pre-v9
+The durable state format is version 11; version 9 is the minimum supported baseline. Pre-v9
 formats, including 6 and 8, are rejected unchanged; no migration from those
 preproduction formats is provided. From v9 onward, retain every real Go migration
 so the newest binary can apply the complete path when users skip releases,
 without intermediate binaries or reset. The 9-to-10 step adds four empty shared
-project/path/service/allocation buckets without rewriting retained records.
+project/path/service/allocation buckets without rewriting retained records. The
+10-to-11 semantic fence adds optional build-image pins/provenance; historical
+generations keep no pins and no invented image identity.
 
 Source validation, transformations, current authority validation and the final
 version fence share one write transaction. Any precommit error, cancellation or
@@ -244,7 +250,8 @@ retirement procedure below; there is no marker-reset command. Release does not
 cascade or terminate SQL sessions. The
 [PostgreSQL decision](adr/20261025T202152388Z-add-bundled-postgresql-shared-allocations.md)
 defines SQL ownership and recovery. Use a matching binary for retained PostgreSQL
-records; the state-v10 layout and retained v9 migration are unchanged.
+records. PostgreSQL adds no persisted fields or migration; follow the current
+[state compatibility policy](#state-compatibility).
 
 List recorded services, then control the recorded service ID through the daemon:
 
@@ -347,3 +354,31 @@ The bundled path validates the provisional private [`backlot.manager/v1` message
 bounded to 64 KiB. The [manager contract](adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md#decision)
 separates ownership/effect from exit status and requires transient release-only
 force or explicit unsupported failure. Custom execution remains later work.
+
+## Execution-scoped image retention
+
+Explicit [build images](manifest.md#execution-scoped-build-images) retain accepted
+local Engine IDs and producer/attempt/tag provenance with the resource generation.
+Container creation uses the ID, never a mutable tag. Stop/start runs declared
+each-start jobs and validates their fresh tag handoff, but keeps accepted IDs even
+if an unused candidate differs. Active repeated starts remain idempotent.
+First creation, explicit restart, reset and each disposable run may accept an ID;
+same-ID restart is valid. A missing retained image fails with explicit restoration
+or restart guidance. Recovery preserves pins and never completes a leftover tag
+handoff or restarts work automatically.
+
+Restart preserves pre-stop declaration/argument/initialization, sensitive-value,
+provider and ownership fences. Once the producer succeeds, changed produced IDs
+for **any mounted consumer**, including skipped fresh-only jobs, are rejected
+before acceptance/consumer create unless `restart --allow-image-change` was given.
+The default late failure leaves the old execution stopped with data/credentials
+and old pins retained. The opt-in accepts the changed ID and records a public
+application/data compatibility warning with old/new IDs and affected components;
+it does not establish compatibility or authorize any later invocation. Other
+fences and literal/input image behavior remain unchanged. Use reset when replacing
+data is intended. A later consumer failure retains already accepted provenance
+and warnings; this is not atomic rollout or rollback of project side effects.
+
+Build-created images and tags remain project-owned, including abandoned failed
+attempts and reset/destroy. Acceptance grants no deletion authority or automatic
+image-GC. Operators/projects must retain needed IDs and manage image disk use.

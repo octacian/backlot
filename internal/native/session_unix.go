@@ -116,7 +116,7 @@ func sessionListener(ctx context.Context, address string, anchor int) (bool, boo
 		}
 	}()
 	budget := sessionAcquisitionLimit
-	owned, conflict, err := listenerStateWith(ctx, 1, port, host, func(pid int) (int, error) {
+	owned, conflict, err := listenerStateWith(ctx, listenerQueryBudget, 1, port, host, func(pid int) (int, error) {
 		if pid == os.Getpid() || pid == anchor {
 			return 2, nil
 		}
@@ -175,7 +175,7 @@ func (w *ownedWorkload) stopSession(grace time.Duration) error {
 		return err
 	}
 	termEnd := time.Now().Add(grace)
-	ctx, cancel := context.WithDeadline(context.Background(), termEnd.Add(2*time.Second))
+	ctx, cancel := context.WithDeadline(context.Background(), termEnd.Add(sessionCleanupOverhead))
 	defer cancel()
 	if w.sessionState == nil {
 		w.sessionState = &sessionCleanupState{members: map[int]*procidentity.Handle{}}

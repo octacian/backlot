@@ -82,7 +82,8 @@ sensitive environment mappings instead.
 and secret generation hints. Referenced inputs must have nonempty effective
 values in registered private project `inputs`. Secret inputs remain redacted in results.
 An unreferenced input does not block another scene. Images can be nonempty
-literal values or declared input references; there is no image-building engine.
+literal values, declared input references or explicit build-image ID references;
+there is no image-building engine. See [build images](#execution-scoped-build-images).
 Build jobs may invoke the project's existing tools.
 
 `resources` maps names to a `kind`: `port`, `directory`, `volume`, `network`,
@@ -458,3 +459,31 @@ PostgreSQL application roles can create their own schemas and trusted extensions
 inside their allocation database, without database ownership or server/peer access.
 Image/storage/authentication compatibility is verified, with evidence scoped to the
 versions actually exercised; this declaration is not an automatic upgrade policy.
+
+## Execution-scoped build images
+
+`build_images` maps names to `{producer: build}`. The producer must be a native
+`each-start` job and explicitly assign `{ref: {kind: build_image, name: app,
+field: tag}}` to its environment. A container selects `{ref: {kind: build_image,
+name: app, field: id}}` as its `image` and directly depends on that producer with
+`condition: completed`; scenes explicitly select both. These references are only
+for producer environment and container images, not fixtures, probes or general
+outputs. A selected producer tag must have a selected image consumer. Reusable
+sets follow ordinary environment layering; the tag must remain in the effective
+producer environment. Missing producers, wrong owners/fields, dependencies and
+cycles fail validation before effects.
+
+The [runnable example](../examples/build-images/README.md) builds this checkout
+using project Docker tooling. The tag is unique to an instance, attempt and image
+name. Successful completion and native join precede inspection at the configured
+local Engine, followed by durable immutable-ID acceptance before consumer creation.
+The producer must tag the supplied name even when caching avoids a rebuild;
+failed/cancelled/missing/stale handoffs never fall back to an earlier result.
+Align project tooling with machine `docker.endpoint`; Backlot adds no Dockerfile
+engine, credentials, shared-input updates, automatic pulls/builds or image cleanup.
+
+Offline planning preserves symbolic references and selected declarations without
+running commands or looking up images. Valid unselected build-image declarations
+do not contact Docker. Existing literal/input images keep their existing behavior.
+See [retained ID and restart rules](containers.md#execution-scoped-image-retention)
+and the [decision](adr/20261025T202510851Z-pin-execution-scoped-build-images-from-native-jobs.md).

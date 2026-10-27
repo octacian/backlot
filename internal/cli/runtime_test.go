@@ -36,3 +36,20 @@ func TestForceUnsupportedActions(t *testing.T) {
 		}
 	}
 }
+
+func TestImageChangeOnlyOnRestart(t *testing.T) {
+	for _, action := range []string{"run", "reset"} {
+		var stdout, stderr bytes.Buffer
+		command := NewCommand(v1.VersionResponse{APIVersion: v1.Version}, &stdout, &stderr)
+		err := command.Run(context.Background(), []string{"backlot", action, "target", "--allow-image-change"})
+		if err == nil || !strings.Contains(err.Error(), "only supported by restart") {
+			t.Fatal("accepted unsupported image override", action, err)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	command := NewCommand(v1.VersionResponse{APIVersion: v1.Version}, &stdout, &stderr)
+	err := command.Run(context.Background(), []string{"backlot", "restart", "target", "--allow-image-change", "--json", "--state-dir", "/nonexistent-backlot-image-fixture"})
+	if err == nil || strings.Contains(err.Error(), "flag") || !strings.Contains(stdout.String(), `"api_version":"v1"`) {
+		t.Fatal("restart parser rejected flag or lost JSON", err, stdout.String())
+	}
+}

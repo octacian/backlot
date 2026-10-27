@@ -1,0 +1,146 @@
+name: Release archives
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    uses: ./.github/workflows/changes.yml
+
+  preflight:
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Verify exact stable source and main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: bash .github/scripts/release.sh preflight
+
+  package:
+    needs: [changes, preflight]
+    if: ${{ !cancelled() && ((startsWith(github.ref, 'refs/tags/') && needs.preflight.result == 'success') || (!startsWith(github.ref, 'refs/tags/') && (needs.changes.result != 'success' || needs.changes.outputs.check == 'true'))) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Package without publication
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          if [[ "$IS_TAG" == true ]]; then
+            bash .github/scripts/release.sh verify-tag
+            GORELEASER_CURRENT_TAG="$RELEASE_TAG" make release-package
+          else
+            make release-snapshot
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-archives
+          path: |
+            dist/*.tar.gz
+            dist/*checksums.txt
+          if-no-files-found: error
+
+  smoke:
+    needs: package
+    if: ${{ !cancelled() && needs.package.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: macos-15, target: darwin_arm64}
+          - {os: ubuntu-24.04, target: linux_amd64}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-archives
+          path: dist
+      - name: Verify and exercise the final archive
+        env:
+          TARGET: ${{ matrix.target }}
+          SOURCE_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          version="dev-$SOURCE_SHA"
+          if [[ "$IS_TAG" == true ]]; then version="$RELEASE_TAG"; fi
+          (cd dist && diff -u <(shasum -a 256 "backlot_${version}_darwin_arm64.tar.gz" "backlot_${version}_linux_amd64.tar.gz" | sort) <(sort "backlot_${version}_checksums.txt"))
+          mkdir "$RUNNER_TEMP/backlot-extracted"
+          archive="dist/backlot_${version}_${TARGET}.tar.gz"
+          diff -u <(printf '%s\n' LICENSE THIRD_PARTY_NOTICES.md backlot) <(tar -tzf "$archive" | LC_ALL=C sort)
+          tar -xzf "$archive" -C "$RUNNER_TEMP/backlot-extracted"
+          export BACKLOT_INSTALLED_TEST_BINARY="$RUNNER_TEMP/backlot-extracted/backlot"
+          test -x "$BACKLOT_INSTALLED_TEST_BINARY"
+          cmp LICENSE "$RUNNER_TEMP/backlot-extracted/LICENSE"
+          cmp THIRD_PARTY_NOTICES.md "$RUNNER_TEMP/backlot-extracted/THIRD_PARTY_NOTICES.md"
+          { cat LICENSE; printf '\n'; cat THIRD_PARTY_NOTICES.md; } > "$RUNNER_TEMP/expected-licenses"
+          mkdir "$RUNNER_TEMP/backlot-standalone"
+          cp "$BACKLOT_INSTALLED_TEST_BINARY" "$RUNNER_TEMP/backlot-standalone/backlot"
+          (cd "$RUNNER_TEMP/backlot-standalone" && ./backlot licenses) > "$RUNNER_TEMP/actual-licenses"
+          cmp "$RUNNER_TEMP/expected-licenses" "$RUNNER_TEMP/actual-licenses"
+          source_time=$(TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd HEAD)
+          "$BACKLOT_INSTALLED_TEST_BINARY" version --json | jq -e --arg version "$version" --arg sha "$SOURCE_SHA" --arg time "$source_time" '.version == $version and .commit == $sha and .api_version == "v1" and .build_time == $time'
+          go test -race ./internal/daemon -run '^TestInstalledBinary$' -count=1 -v
+
+  draft:
+    needs: [preflight, package, smoke]
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') && needs.preflight.result == 'success' && needs.package.result == 'success' && needs.smoke.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-archives
+          path: dist
+      - name: Prepare complete verified draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: bash .github/scripts/release.sh draft

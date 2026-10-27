@@ -9,6 +9,8 @@ on:
         value: ${{ jobs.paths.outputs.docs }}
       scenes:
         value: ${{ jobs.paths.outputs.scenes }}
+      recipes:
+        value: ${{ jobs.paths.outputs.recipes }}
       project-inputs:
         value: ${{ jobs.paths.outputs.project-inputs }}
 
@@ -22,6 +24,7 @@ jobs:
       check: ${{ steps.filter.outputs.implementation == 'true' || steps.filter.outputs.repository == 'true' || steps.filter.outputs.ci == 'true' }}
       docs: ${{ steps.filter.outputs.docs == 'true' || steps.filter.outputs.ci == 'true' }}
       scenes: ${{ steps.filter.outputs.implementation == 'true' || steps.filter.outputs.actions == 'true' || steps.filter.outputs.scenes == 'true' || steps.filter.outputs.ci == 'true' }}
+      recipes: ${{ steps.filter.outputs.implementation == 'true' || steps.filter.outputs.recipes == 'true' || steps.filter.outputs.ci == 'true' }}
       project-inputs: ${{ steps.filter.outputs.implementation == 'true' || steps.filter.outputs.actions == 'true' || steps.filter.outputs.project-inputs == 'true' || steps.filter.outputs.ci == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,10 +42,14 @@ jobs:
               - '!examples/ci-scenes/**'
               - '!examples/ci-inputs/**'
               - '!**/*.md'
-              - '{go.mod,go.sum,Makefile,.golangci.yml,.gitattributes,.gitignore}'
+              - '{go.mod,go.sum,Makefile,.golangci.yml,.gitattributes,.gitignore,.goreleaser.yaml}'
             repository:
               - 'THIRD_PARTY_NOTICES.md'
+              - 'LICENSE'
+              - '*.go'
               - '.github/workflows/check.yml'
+              - '.github/workflows/release.yml'
+              - '.github/scripts/**'
             docs:
               - 'docs/**'
               - '**/*.md'
@@ -60,5 +67,8 @@ jobs:
               - 'examples/ci-inputs/**'
               - '!**/*.md'
               - '.github/workflows/project-inputs.yml'
+            recipes:
+              - '.github/workflows/recipes.yml'
+              - 'examples/ci-scenes/report-formats.py'
             ci:
               - '.github/workflows/changes.yml'

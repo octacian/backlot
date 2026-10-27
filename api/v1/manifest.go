@@ -50,6 +50,7 @@ const (
 
 // Manifest declares reusable components and independently selected scenes.
 type Manifest struct {
+	BuildImages    map[string]BuildImage    `json:"build_images,omitempty" yaml:"build_images,omitempty"`
 	SharedServices map[string]SharedService `json:"shared_services,omitempty" yaml:"shared_services,omitempty"`
 	Version        string                   `json:"version" yaml:"version" jsonschema_description:"Contract version; use backlot/v1."`
 	Project        string                   `json:"project" yaml:"project" jsonschema_description:"Stable project identifier, independent of branch names."`
@@ -93,6 +94,11 @@ type Reference struct {
 	Name  string `json:"name,omitempty" yaml:"name,omitempty" jsonschema_description:"Declared identifier used by this reference; graph lookup happens in backlot plan."`
 	Field string `json:"field,omitempty" yaml:"field,omitempty" jsonschema_description:"Bounded field selected from the referenced object."`
 	Port  string `json:"port,omitempty" yaml:"port,omitempty" jsonschema_description:"Named service port, required by service port references."`
+}
+
+// BuildImage names a native each-start job producing an attempt-scoped local image.
+type BuildImage struct {
+	Producer string `json:"producer" yaml:"producer" jsonschema:"minLength=1"`
 }
 
 // Resource declares an instance-owned allocation; planning never provisions it.
@@ -156,7 +162,7 @@ type Component struct {
 	Kind            ComponentKind             `json:"kind" yaml:"kind" jsonschema_description:"Explicit discriminator; see the supported values and conditional fields."`
 	Runtime         Runtime                   `json:"runtime" yaml:"runtime" jsonschema_description:"Native command or generic container; selects command versus image."`
 	Command         *Command                  `json:"command,omitempty" yaml:"command,omitempty" jsonschema_description:"Explicit native executable tool and argument vector."`
-	Image           *Value                    `json:"image,omitempty" yaml:"image,omitempty" jsonschema_description:"Container image literal or declared input reference."`
+	Image           *Value                    `json:"image,omitempty" yaml:"image,omitempty" jsonschema_description:"Container image literal, declared input or build_image id reference."`
 	Args            []string                  `json:"args,omitempty" yaml:"args,omitempty" jsonschema_description:"Direct argument vector; shell expansion requires an explicit shell command."`
 	Policy          JobPolicy                 `json:"policy,omitempty" yaml:"policy,omitempty" jsonschema_description:"Job scheduling policy; services omit this field."`
 	Initializes     []string                  `json:"initializes,omitempty" yaml:"initializes,omitempty" jsonschema_description:"Attached volume/directory/allocation generations initialized by a fresh-only job."`

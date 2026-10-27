@@ -37,6 +37,8 @@ Before planning or editing, read:
 | macOS/Linux targets and WSL configuration | [Platforms](platforms.md) |
 | Planned native Windows work (#34/#37/#38) | [Design and acceptance](windows-design.md) |
 | GitHub Actions and Chromium scenes | [CI quickstart](ci.md), [Ubuntu example](../examples/ci-scenes/README.md) |
-| Release gates and external evidence | [Verification](release-acceptance/README.md), [four-workflow fixture](../examples/release-acceptance/README.md) |
+| Small native test recipes | [Playwright over loopback HTTP](../examples/native-playwright/README.md), [Go tests with MariaDB](../examples/native-go-mariadb/README.md) |
+| Preparing a release | [Release procedure](preparing-a-release.md) |
+| Targeted runtime diagnostics | [Diagnostics and evidence](release-acceptance/README.md), [four-workflow fixture](../examples/release-acceptance/README.md) |
 
 [Testing and tooling](testing.md#commands) is the contributor command reference.

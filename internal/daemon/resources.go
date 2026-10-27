@@ -33,11 +33,12 @@ type ownedResource struct {
 	Removed   bool   `json:"removed,omitempty"`
 }
 type resourceGeneration struct {
-	ID          string                   `json:"id"`
-	Endpoint    string                   `json:"endpoint,omitempty"`
-	Resources   map[string]ownedResource `json:"resources"`
-	Containers  []ownedResource          `json:"containers,omitempty"`
-	Initialized map[string]bool          `json:"initialized"`
+	BuildImages map[string]v1.BuildImageResult `json:"build_images,omitempty"`
+	ID          string                         `json:"id"`
+	Endpoint    string                         `json:"endpoint,omitempty"`
+	Resources   map[string]ownedResource       `json:"resources"`
+	Containers  []ownedResource                `json:"containers,omitempty"`
+	Initialized map[string]bool                `json:"initialized"`
 }
 
 func (s *store) resources(id string) (resourceGeneration, error) {
@@ -64,7 +65,7 @@ func decodeResources(data []byte) (g resourceGeneration, err error) {
 		return g, problem("state_corrupt", "private resource generation cannot be decoded; preserved")
 	}
 	if g.ID == "" {
-		if g.Endpoint != "" || len(g.Resources) > 0 || len(g.Containers) > 0 || len(g.Initialized) > 0 {
+		if g.Endpoint != "" || len(g.Resources) > 0 || len(g.Containers) > 0 || len(g.Initialized) > 0 || len(g.BuildImages) > 0 {
 			return g, problem("state_corrupt", "resource generation identity missing; resources preserved")
 		}
 		return g, nil
@@ -147,6 +148,7 @@ func safeRestart(old, next plan.Snapshot) error {
 	}
 	type contract struct {
 		Name           string
+		BuildProducer  string
 		Runtime        v1.Runtime
 		Image          *v1.PlannedValue
 		Args           []string
@@ -162,6 +164,15 @@ func safeRestart(old, next plan.Snapshot) error {
 			if c.Runtime == v1.Container && len(c.Mounts) > 0 {
 				x.Image = c.Image
 				x.Args = c.Args
+			}
+			if c.Image != nil && (len(c.Mounts) > 0 || c.Policy == v1.FreshOnly) {
+				value := *c.Image
+				if value.Redacted {
+					value = snap.Secrets[c.Name+"/image"]
+				}
+				if r := value.Symbolic; r != nil && r.Kind == "build_image" {
+					x.BuildProducer = snap.Plan.BuildImages[r.Name].Producer
+				}
 			}
 			if c.Policy == v1.FreshOnly {
 				copy := c

@@ -22,7 +22,7 @@ import (
 func runtimeCommands() []*urfave.Command {
 	commands := []*urfave.Command{}
 	for _, name := range []string{"run", "restart", "reset"} {
-		commands = append(commands, &urfave.Command{Name: name, SkipFlagParsing: true, Usage: "Execute an isolated scene; restart retains data, reset replaces it", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "attached", Usage: "Own a persistent attempt until this client ends"}, &urfave.BoolFlag{Name: "keep-on-failure"}, &urfave.StringFlag{Name: "project"}, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s"}), Action: runNative})
+		commands = append(commands, &urfave.Command{Name: name, SkipFlagParsing: true, Usage: "Execute an isolated scene; restart retains data, reset replaces it", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "allow-image-change", Usage: "Restart only: accept changed build-image IDs with retained mounts and application/data compatibility risk"}, &urfave.BoolFlag{Name: "attached", Usage: "Own a persistent attempt until this client ends"}, &urfave.BoolFlag{Name: "keep-on-failure"}, &urfave.StringFlag{Name: "project"}, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s"}), Action: runNative})
 	}
 	commands = append(commands, &urfave.Command{Name: "stop", Usage: "Stop runtime; --force acknowledges potentially live native survivors", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force", Usage: "Relinquish unresolved native claims; survivors may still run/write"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
@@ -137,7 +137,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 		return output(c, nil, err)
 	}
 	defer cli.Close()
-	request := v1.RunRequest{Attached: c.Bool("attached"), APIVersion: v1.Version, Options: v1.ExecutionOptions{StartupTimeout: c.String("startup-timeout"), JobTimeout: c.String("job-timeout"), StopGrace: c.String("stop-grace"), KeepOnFailure: c.Bool("keep-on-failure")}}
+	request := v1.RunRequest{AllowImageChange: c.Bool("allow-image-change"), Attached: c.Bool("attached"), APIVersion: v1.Version, Options: v1.ExecutionOptions{StartupTimeout: c.String("startup-timeout"), JobTimeout: c.String("job-timeout"), StopGrace: c.String("stop-grace"), KeepOnFailure: c.Bool("keep-on-failure")}}
 	if c.Name == "restart" || c.Name == "reset" {
 		previous, err := cli.Inspect(ctx, args[0])
 		if err != nil {
@@ -214,7 +214,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 			if request.Options.StopGrace != "" {
 				grace, _ = time.ParseDuration(request.Options.StopGrace)
 			}
-			cleanup, cancel := context.WithDeadline(context.Background(), time.Now().Add(grace).Add(10*time.Second))
+			cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
 			response, err = cli.StopExecution(cleanup, id)
 			cancel()
 			if err != nil {
@@ -274,7 +274,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 			if request.Options.StopGrace != "" {
 				grace, _ = time.ParseDuration(request.Options.StopGrace)
 			}
-			cleanup, cancel := context.WithDeadline(context.Background(), time.Now().Add(grace).Add(10*time.Second))
+			cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
 			response, err = cli.StopExecution(cleanup, id)
 			cancel()
 			if err != nil {
@@ -320,6 +320,13 @@ func parseRuntimeArgs(c *urfave.Command) (string, []string, error) {
 		}
 		seen[arg] = true
 		switch arg {
+		case "--allow-image-change":
+			if c.Name != "restart" {
+				return "", nil, &v1.PlanError{Code: "invalid_arguments", Message: "--allow-image-change is only supported by restart"}
+			}
+			if err := c.Set("allow-image-change", "true"); err != nil {
+				return "", nil, err
+			}
 		case "--json", "--keep-on-failure", "--attached":
 			if err := c.Set(strings.TrimPrefix(arg, "--"), "true"); err != nil {
 				return "", nil, err

@@ -1,0 +1,47 @@
+# yaml-language-server: $schema=../../schemas/manifest-v1.schema.json
+version: backlot/v1
+project: native-playwright
+tools: {node: node}
+resources:
+  http: {kind: port}
+outputs:
+  reports: {path: reports, concurrency_group: reports}
+components:
+  reports:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: node, args: [prepare.mjs]}
+    outputs: [reports]
+  app:
+    kind: service
+    runtime: native
+    command: {tool: node, args: [app.mjs]}
+    resources: [http]
+    ports: {http: {resource: http}}
+    environment:
+      assign:
+        PORT: {ref: {kind: resource, name: http, field: port}}
+    readiness:
+      kind: tcp
+      target: {ref: {kind: service, name: app, field: port, port: http}}
+      timeout: 10s
+  tests:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: node, args: [node_modules/@playwright/test/cli.js, test]}
+    depends_on: [{component: reports, condition: completed}, {component: app, condition: ready}]
+    outputs: [reports]
+    environment:
+      pass_through: [PLAYWRIGHT_BROWSERS_PATH]
+      assign:
+        APP_PORT: {ref: {kind: service, name: app, field: port, port: http}}
+    artifacts:
+      reports: {path: reports}
+scenes:
+  browser:
+    lifetime: disposable
+    components: [reports, app, tests]
+    resources: [http]
+    terminal_job: tests

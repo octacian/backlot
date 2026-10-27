@@ -9,12 +9,12 @@ const Version = "v1"
 type VersionResponse struct {
 	// StateVersion identifies the supported durable state and configuration semantics.
 	StateVersion int `json:"state_version"`
-	// Version is the binary release identifier, or dev for a local build.
+	// Version is the release/module identifier, or a dev-prefixed local build.
 	Version string `json:"version"`
 	// APIVersion is the wire contract namespace supported by the executable.
 	APIVersion string `json:"api_version"`
-	// Commit is the source revision when supplied by the build.
+	// Commit is the source revision when available from the build.
 	Commit string `json:"commit,omitempty"`
-	// BuildTime is the UTC RFC3339 build timestamp when supplied by the build.
+	// BuildTime is the source commit's UTC RFC3339 time for linked builds.
 	BuildTime string `json:"build_time,omitempty"`
 }

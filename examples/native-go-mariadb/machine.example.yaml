@@ -1,0 +1,4 @@
+# yaml-language-server: $schema=../../schemas/machine-config-v1.schema.json
+version: backlot/v1
+docker:
+  endpoint: unix:///var/run/docker.sock

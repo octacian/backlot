@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -37,6 +38,8 @@ func TestRejectsUnsupportedCommandsAndArguments(t *testing.T) {
 	for _, args := range [][]string{
 		{"backlot", "run", "preview"},
 		{"backlot", "version", "extra"},
+		{"backlot", "licenses", "extra"},
+		{"backlot", "licenses", "--json"},
 		{"backlot", "version", "--unsupported"},
 	} {
 		t.Run(strings.Join(args[1:], "/"), func(t *testing.T) {
@@ -58,3 +61,28 @@ func TestOutputFailureIsReturned(t *testing.T) {
 type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+func TestLicensesIncludesCanonicalText(t *testing.T) {
+	license, err := os.ReadFile("../../LICENSE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	notices, err := os.ReadFile("../../THIRD_PARTY_NOTICES.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if err := NewCommand(apiv1.VersionResponse{}, &stdout, &stderr).Run(context.Background(), []string{"backlot", "licenses"}); err != nil {
+		t.Fatal(err)
+	}
+	if want := string(license) + "\n" + string(notices); stdout.String() != want || stderr.Len() != 0 {
+		t.Fatal("licenses output differs from canonical attribution")
+	}
+}
+
+func TestLicensesReturnsOutputFailure(t *testing.T) {
+	command := NewCommand(apiv1.VersionResponse{}, failingWriter{}, io.Discard)
+	if err := command.Run(context.Background(), []string{"backlot", "licenses"}); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("expected output error, got %v", err)
+	}
+}

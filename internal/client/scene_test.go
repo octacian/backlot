@@ -70,7 +70,7 @@ func TestSceneFollowAcrossAbsenceRecreationAndChangedPayload(t *testing.T) {
 	var records []v1.SceneFollowRecord
 	err := c.FollowScene(ctx, sceneRequest(), SceneFollowOptions{Interval: 100 * time.Millisecond, Duration: 2 * time.Second}, func(r v1.SceneFollowRecord) error {
 		records = append(records, r)
-		if r.Snapshot != nil && r.Snapshot.Result != nil && r.Snapshot.Result.Instance.ID == strings.Repeat("f", 64) {
+		if r.Type == "snapshot" && r.Snapshot != nil && r.Snapshot.Result != nil && r.Snapshot.Result.Instance.ID == strings.Repeat("f", 64) {
 			cancel()
 		}
 		return nil

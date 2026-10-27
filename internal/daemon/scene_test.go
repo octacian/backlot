@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -265,7 +266,7 @@ func TestSceneFollowInitialAbsenceRejectsReplacementThroughRealDaemon(t *testing
 	var frames []v1.SceneFollowRecord
 	err := cli.FollowScene(context.Background(), v1.SceneRequest{APIVersion: v1.Version, Target: v1.SceneTarget{CWD: root, Scene: "dev"}}, client.SceneFollowOptions{Interval: 100 * time.Millisecond, Duration: time.Second}, func(record v1.SceneFollowRecord) error {
 		frames = append(frames, record)
-		if record.Snapshot != nil {
+		if record.Type == "snapshot" && record.Snapshot != nil {
 			if record.Snapshot.Outcome != v1.SceneNotFound || record.Snapshot.Checkout == nil {
 				t.Fatal("initial absence lacked independent identity", record)
 			}
@@ -283,6 +284,12 @@ func TestSceneFollowInitialAbsenceRejectsReplacementThroughRealDaemon(t *testing
 	if len(frames) != 2 || frames[1].Type != "error" {
 		t.Fatal(frames)
 	}
+	if frames[0].Type != "snapshot" || frames[0].Snapshot == nil || !reflect.DeepEqual(frames[1].Snapshot, frames[0].Snapshot) {
+		t.Fatal("terminal error lost the original checkout snapshot", frames)
+	}
+	if frames[1].Error == nil || frames[1].Error.Code != "checkout_changed" || !strings.Contains(frames[1].Error.Message, "Last observed snapshot; current state is unknown.") {
+		t.Fatal("terminal error lacked last-observed checkout failure context", frames[1])
+	}
 }
 
 func TestSceneFollowRealDaemonCreationAndRecreation(t *testing.T) {
@@ -295,7 +302,7 @@ func TestSceneFollowRealDaemonCreationAndRecreation(t *testing.T) {
 	var ids []string
 	missing := 0
 	err := cli.FollowScene(ctx, v1.SceneRequest{APIVersion: v1.Version, Target: v1.SceneTarget{CWD: root, Scene: "dev"}}, client.SceneFollowOptions{Interval: 100 * time.Millisecond, Duration: 2 * time.Second}, func(record v1.SceneFollowRecord) error {
-		if record.Snapshot == nil {
+		if record.Type != "snapshot" || record.Snapshot == nil {
 			return nil
 		}
 		if record.Snapshot.Outcome == v1.SceneNotFound {
@@ -394,7 +401,7 @@ func TestSceneFollowFreezesCanonicalAliases(t *testing.T) {
 			snapshots := 0
 			recreated := ""
 			err = cli.FollowScene(ctx, v1.SceneRequest{APIVersion: v1.Version, Target: target}, client.SceneFollowOptions{Interval: 100 * time.Millisecond, Duration: 3 * time.Second}, func(record v1.SceneFollowRecord) error {
-				if record.Snapshot == nil {
+				if record.Type != "snapshot" || record.Snapshot == nil {
 					return nil
 				}
 				snapshots++
@@ -487,7 +494,7 @@ func TestSceneFollowExactIDLifetimeAndHistory(t *testing.T) {
 			var replacement string
 			err := cli.FollowScene(ctx, v1.SceneRequest{APIVersion: v1.Version, Target: v1.SceneTarget{InstanceID: id}}, client.SceneFollowOptions{Interval: 100 * time.Millisecond, Duration: 2 * time.Second}, func(record v1.SceneFollowRecord) error {
 				frames = append(frames, record)
-				if record.Snapshot == nil {
+				if record.Type != "snapshot" || record.Snapshot == nil {
 					return nil
 				}
 				snapshot := record.Snapshot

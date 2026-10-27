@@ -220,49 +220,31 @@ inspect through named fixtures and explicit `secret` access, or select persisten
 Database/user names have no grant wildcards. Databases start empty; project jobs
 own application schema.
 
-The first selected start pins the existing local image ID, records volume/network/
-server intent, then ensures readiness before allocating. Native connection values
-use 127.0.0.1 and a dynamically published loopback port. Containers attach to a
-separate owned shared network and receive its alias and internal port 3306 (MariaDB) or 5432 (PostgreSQL). No host DNS,
-extra gateway, runtime pull/build or widened bind is needed. The administrative
-password never enters consumer environment. Engine access is trusted administration.
-MariaDB checks identity and enabled grant enforcement. PostgreSQL checks identity,
-SCRAM storage/host rules and live wrong-password rejection, then verifies maintenance
-ACLs before allocating. PostgreSQL17 is the exercised compatibility target, without
-a hard major-version gate or an untested-version compatibility promise. See the
-[testing guide](testing.md#shared-postgresql-integration) for current validation gates.
-PostgreSQL uses its image entrypoint, postgres maintenance database and
-`PGDATA=/var/lib/postgresql/data` on the retained volume; incompatible image/layout
-or initialization settings preserve existing state. `PQGO_DEBUG=1` must be disabled
-before starting the daemon: the SQL driver captures it at process initialization
-and selected PostgreSQL work refuses unsafe protocol diagnostics.
+The first selected start pins the local image ID and records server/storage intent
+before readiness and allocation. Native consumers use 127.0.0.1 and a dynamic
+loopback port; containers use the shared network alias and port 3306 (MariaDB) or
+5432 (PostgreSQL). Administration stays private. Engine access is trusted.
 
-PostgreSQL grants application CONNECT/TEMPORARY/CREATE only in its allocation and
-USAGE/CREATE on admin-owned public, with no grant option, database ownership, owner
-role membership or server administration. It permits named schemas and PostgreSQL's
-trusted extensions/publications; project jobs own these objects. PUBLIC cannot
-connect to maintenance or peer allocation databases. Shared catalogs/comments remain
-visible metadata, and shared SQL does not provide tenant/resource containment.
+MariaDB verifies identity and grant enforcement. PostgreSQL verifies identity,
+SCRAM authentication and maintenance ACLs. Tested versions are MariaDB 11.4 and
+PostgreSQL 17; no hard PostgreSQL major-version gate or automatic upgrade applies.
+PostgreSQL requires the image entrypoint and `PGDATA=/var/lib/postgresql/data` on
+the retained volume. Disable `PQGO_DEBUG=1` before starting the daemon: selected
+PostgreSQL work refuses protocol diagnostics captured at process initialization.
 
-An extra derived NOLOGIN role owns each PostgreSQL database. Initial role creation
-and public ownership fingerprints are transactional; initial application roles have
-no password or LOGIN. Database OWNER and connection limit 0 bind its nontransactional
-creation before finalization installs retained password, LOGIN and grants atomically.
-Ready credentials must authenticate on reuse/default release. After database drop,
-remaining role witnesses permit cleanup without a connection to the absent database;
-no post-drop password-equality proof is claimed. Drift otherwise preserves targets;
-release never cascades or terminates SQL sessions.
+PostgreSQL applications can create objects, named schemas and trusted extensions/
+publications inside their allocation, without database ownership, grant option,
+role membership or server administration. PUBLIC cannot connect to maintenance or
+peer databases. Catalog metadata remains visible; shared SQL provides neither
+tenant containment nor resource isolation.
 
-One public fingerprint comment on postgres is committed with maintenance REVOKEs.
-Only supported pristine defaults with no retained allocation facts/effects permit
-initialization. Matching witnesses still require actual ACL/security checks; missing,
-changed or nonpristine witnesses preserve state rather than repair it. This SQL
-metadata shares the server volume lifetime; it is not an extra journal or deletion
-target. Bounded force allocation release never initializes/repairs maintenance or
-rewrites this marker. Restore the original configuration/authority or use the
-existing explicit retirement procedure; there is no marker-reset command.
-Use a matching binary for retained PostgreSQL manager values; older binaries do
-not understand them. The state10 layout and retained v9 migration remain unchanged.
+Unexpected configuration, credentials, privileges or maintenance witnesses preserve
+state. Restore the original configuration/authority or follow the explicit
+retirement procedure below; there is no marker-reset command. Release does not
+cascade or terminate SQL sessions. The
+[PostgreSQL decision](adr/20261025T202152388Z-add-bundled-postgresql-shared-allocations.md)
+defines SQL ownership and recovery. Use a matching binary for retained PostgreSQL
+records; the state-v10 layout and retained v9 migration are unchanged.
 
 List recorded services, then control the recorded service ID through the daemon:
 
@@ -304,11 +286,13 @@ backlot shared destroy --force --state-dir /absolute/private/daemon --json SERVI
 ```
 
 The flag is the acknowledgment; no second prompt is required. Instance force may
-drop its recorded database and exact application user even when the database comment,
-user authentication or grants no longer match. Shared force may remove its recorded
-server/container, volume and network despite capability-label mismatch. This can
-delete an externally replaced object at a recorded handle; Docker volume identities
-are names. Neither command accepts caller-selected SQL names or provider handles.
+drop its recorded database and application user despite ownership-witness,
+authentication or grant mismatch. PostgreSQL also drops the derived NOLOGIN owner
+role; its ownership witnesses are role comments, while MariaDB uses a database
+comment. Shared force may remove its recorded server/container, volume and network
+despite capability-label mismatch. This can delete an externally replaced object
+at a recorded handle; Docker volume identities are names. Neither command accepts
+caller-selected SQL names or provider handles.
 Container/network effects with no acknowledged immutable ID still require original
 capability recovery or manual exact removal, not adoption of a same-name replacement.
 
@@ -345,8 +329,9 @@ and verify both absent. Then force-destroy each affected recorded instance ID
 individually, followed by shared-destroy of the service ID to remove its remaining
 recorded network and metadata. This is destructive whole-server retirement decided
 by the operator, not an implicit instance-cleanup cascade. If consumers cannot be
-joined, resolve that first or restore access. Manual deletion of only an exact SQL
-database/user can also be reconciled by force while the original server is usable.
+joined, resolve that first or restore access. Manual deletion of exact SQL
+allocation objects can also be reconciled by force while the original server
+is usable.
 
 An unreadable, lost or corrupt state DB cannot supply a validated CLI target. Force
 does not repair/reconstruct it. Retain a private backup and diagnostic inventory;

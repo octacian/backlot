@@ -555,21 +555,16 @@ BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
   go test -race ./internal/daemon -run '^TestSharedPostgreSQLEarlyFlow$' -count=1 -v -timeout=8m
 ```
 
-The engine-aware shared fixture registers cleanup before effects, builds only a
-uniquely labeled static consumer from the inspected cached Alpine ID, and verifies
-owned SQL/runtime/image absence while preserving cached images and uncertainty.
-Missing opt-in configuration skips and supplies no provider evidence. Exact source,
-image/configuration/environment, failures and cleanup belong in revision-bound
-external evidence. The Linux runtime job pre-pulls PostgreSQL17 and runs the focused lifecycle,
-rollback/acknowledgment, force/dependency, bootstrap-drift and cancellation cases:
+The complete suite covers lifecycle, permissions, interrupted SQL effects,
+bootstrap/credential drift, force/dependency fences, stalled connections and
+cancellation. The Linux runtime job pre-pulls PostgreSQL 17 and runs:
 
 ```sh
 BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
   go test -race ./internal/daemon -run '^TestSharedPostgreSQL.*$' -count=1 -v -timeout=30m
 ```
 
-This command is a distinct evidence gate from the early flow.
-Full PostgreSQL/MariaDB/provider/gateway regressions,
-runnable example and applicable CI remain
-separate frozen-candidate gates; an early-flow pass or prior architecture SQL proof
-must not be relabeled as those passes.
+The early-flow check does not replace this suite, the runnable example or applicable
+repository/provider/CI gates. Follow the linked shared fixture rules for owned
+cleanup and revision-bound evidence; missing opt-in configuration supplies no
+provider evidence.

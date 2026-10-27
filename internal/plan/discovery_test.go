@@ -79,6 +79,18 @@ func TestDiscoverySelectedGraphAndProviders(t *testing.T) {
 	if err != nil || !r.Prerequisites.Caddy || r.Publication == nil || len(r.Publication.Routes) == 0 || len(r.Resources) == 0 {
 		t.Fatal(r, err)
 	}
+	for _, kind := range []string{"volume", "network"} {
+		t.Run(kind, func(t *testing.T) {
+			project, _ := setupFixture(t)
+			fixture := strings.Replace(setupManifest, "test: {", "test: {resources: [selected], ", 1)
+			fixture += "\nresources:\n selected: {kind: " + kind + "}\n"
+			writeSetup(t, filepath.Join(project, "backlot.yaml"), fixture)
+			r, err := DescribeScene(project, "test")
+			if err != nil || !r.Prerequisites.Docker {
+				t.Fatal(r, err)
+			}
+		})
+	}
 }
 
 func TestConfigurationUsesCapturedLayersWithoutValues(t *testing.T) {

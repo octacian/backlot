@@ -94,6 +94,9 @@ func DescribeScene(project, name string) (v1.SceneDescriptionResponse, error) {
 	for _, n := range scene.Resources {
 		resource := m.Resources[n]
 		r.Resources[n] = resource
+		if resource.Kind == "volume" || resource.Kind == "network" {
+			r.Prerequisites.Docker = true
+		}
 		if resource.SharedService != "" {
 			s := m.SharedServices[resource.SharedService]
 			r.SharedServices[resource.SharedService] = v1.DeclaredSharedService{Manager: s.Manager, Storage: s.Storage, Admin: s.Admin, Port: s.Port}

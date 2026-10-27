@@ -16,18 +16,15 @@ import (
 )
 
 func projectCommand() *urfave.Command {
-	return &urfave.Command{Name: "project", Usage: "Manage explicit private project setup", Commands: []*urfave.Command{{Name: "setup", SkipFlagParsing: true, Usage: "Configure once or inspect registered inputs and tools", Flags: []urfave.Flag{
+	return &urfave.Command{Name: "project", Usage: "Manage explicit private project setup", Commands: []*urfave.Command{{Name: "setup", Usage: "Configure once or inspect registered inputs and tools", Flags: []urfave.Flag{
 		&urfave.StringFlag{Name: "project"}, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "from", Usage: "Import bounded private YAML/JSON document; - reads stdin"},
 		&urfave.StringSliceFlag{Name: "generate", Usage: "Explicitly accept generation for a declared eligible input"},
 		&urfave.StringSliceFlag{Name: "remove-input"}, &urfave.StringSliceFlag{Name: "remove-tool"},
 		&urfave.BoolFlag{Name: "edit"}, &urfave.BoolFlag{Name: "reassociate"},
-		&urfave.BoolFlag{Name: "dangerously-reveal-secrets", Usage: "Reveal configured secrets in local inspection only"}, &urfave.BoolFlag{Name: "json"},
+		&urfave.BoolFlag{Name: "dangerously-reveal-secrets", Usage: "Reveal configured secrets in local inspection only"},
 	}, Action: func(ctx context.Context, c *urfave.Command) error {
-		if c.Args().Len() == 1 && (c.Args().First() == "--help" || c.Args().First() == "-h") {
-			return urfave.ShowSubcommandHelp(c)
-		}
-		if err := parseSetupFlags(c); err != nil {
-			return output(c, nil, err)
+		if c.Args().Len() != 0 {
+			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "project setup takes flags only; use --from FILE/- for values"})
 		}
 		return projectSetup(ctx, c)
 	}}}}
@@ -214,46 +211,4 @@ func walkSetup(ctx context.Context, c *urfave.Command, status v1.ProjectSetupRes
 		}
 	}
 	return update, nil
-}
-
-func parseSetupFlags(c *urfave.Command) error {
-	args := c.Args().Slice()
-	for _, arg := range args {
-		if arg == "--json" {
-			if err := c.Set("json", "true"); err != nil {
-				return err
-			}
-		}
-	}
-	seen := map[string]bool{}
-	for i := 0; i < len(args); i++ {
-		flag := args[i]
-		value := "true"
-		repeat := false
-		switch flag {
-		case "--generate", "--remove-input", "--remove-tool":
-			repeat = true
-			fallthrough
-		case "--project", "--config", "--from":
-			if i+1 >= len(args) {
-				return &v1.PlanError{Code: "invalid_arguments", Message: "setup path/name flag requires a separate value"}
-			}
-			i++
-			value = args[i]
-		case "--edit", "--reassociate", "--dangerously-reveal-secrets", "--json":
-		default:
-			return &v1.PlanError{Code: "invalid_arguments", Message: "unknown setup argument; use --from FILE/- or hidden terminal entry for values"}
-		}
-		if seen[flag] && !repeat {
-			return &v1.PlanError{Code: "invalid_arguments", Message: "duplicate setup flag"}
-		}
-		seen[flag] = true
-		if flag == "--json" {
-			continue
-		}
-		if err := c.Set(flag[2:], value); err != nil {
-			return &v1.PlanError{Code: "invalid_arguments", Message: "invalid setup flag value"}
-		}
-	}
-	return nil
 }

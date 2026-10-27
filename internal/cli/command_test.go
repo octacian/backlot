@@ -39,7 +39,6 @@ func TestRejectsUnsupportedCommandsAndArguments(t *testing.T) {
 		{"backlot", "run", "preview"},
 		{"backlot", "version", "extra"},
 		{"backlot", "licenses", "extra"},
-		{"backlot", "licenses", "--json"},
 		{"backlot", "version", "--unsupported"},
 	} {
 		t.Run(strings.Join(args[1:], "/"), func(t *testing.T) {

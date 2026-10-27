@@ -24,8 +24,9 @@ func attachedRecord(c *urfave.Command, record v1.AttachedRecord) error {
 		return writeLogRecord(c, *record.Log)
 	}
 	if record.Error != nil {
-		_, err := fmt.Fprintln(c.ErrWriter, record.Error)
-		return err
+		if _, err := fmt.Fprintln(c.ErrWriter, record.Error); err != nil {
+			return err
+		}
 	}
 	if record.Gap != "" {
 		_, err := fmt.Fprintln(c.ErrWriter, record.Gap)
@@ -37,19 +38,6 @@ func attachedRecord(c *urfave.Command, record v1.AttachedRecord) error {
 	if record.Result != nil {
 		if err := output(c, *record.Result, nil); err != nil {
 			return err
-		}
-		if result := record.Result.Instance.Execution; result != nil {
-			for _, failure := range []struct{ label, reason string }{
-				{"Runtime failure", result.Failure},
-				{"Collection failure", result.CollectionFailure},
-				{"Cleanup failure", result.CleanupFailure},
-			} {
-				if failure.reason != "" {
-					if _, err := fmt.Fprintln(c.Writer, failure.label+":", failure.reason); err != nil {
-						return err
-					}
-				}
-			}
 		}
 	}
 	return nil
@@ -72,25 +60,40 @@ func runAttached(ctx context.Context, c *urfave.Command, cli *client.Client, gra
 	response.Attachment = nil
 	request := v1.AttachedRequest{APIVersion: v1.Version, InstanceID: response.Instance.ID, Owner: a.Owner}
 	grace, _ := time.ParseDuration(graceText)
+	cleanupAttempted := false
 	cleanup := func() (v1.SceneResponse, error) {
+		cleanupAttempted = true
 		bounded, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
 		defer cancel()
 		return cli.Attached(bounded, request, true)
 	}
 	// Errors (including a closed output pipe) never leave a renewing owner behind.
 	defer func() {
-		if err != nil {
-			var exit *ExitError
-			if !errors.As(err, &exit) {
-				detail := &v1.PlanError{Code: "attached_failed", Message: "attached execution failed"}
-				var typed *v1.PlanError
-				if errors.As(err, &typed) {
-					detail = typed
-				}
-				_ = attachedRecord(c, v1.AttachedRecord{APIVersion: v1.Version, Type: "failure", Error: detail})
+		if err == nil {
+			return
+		}
+		var stopped v1.SceneResponse
+		var cleanupErr error
+		if !cleanupAttempted {
+			stopped, cleanupErr = cleanup()
+		}
+		if cleanupErr == nil && stopped.Result != nil && stopped.Result.Instance.ID == request.InstanceID && startupAttempt(stopped.Result.Instance) == request.Owner.Attempt {
+			response = *stopped.Result
+		}
+		var exit *ExitError
+		if !errors.As(err, &exit) || cleanupErr != nil {
+			cause := err
+			if cleanupErr != nil {
+				cause = cleanupErr
 			}
-			_, cleanupErr := cleanup()
-			err = errors.Join(err, cleanupErr)
+			observed := lastObserved(response, cause)
+			observed.Error = nil
+			if writeErr := attachedRecord(c, v1.AttachedRecord{APIVersion: v1.Version, Type: "failure", Result: &observed, Error: observationError(cause)}); writeErr != nil {
+				err = errors.Join(err, writeErr)
+			}
+		}
+		if cleanupErr != nil {
+			err = fmt.Errorf("attached cleanup result unavailable: %w", cleanupErr)
 		}
 	}()
 	emit := func(kind string, result *v1.InstanceResponse, log *v1.LogRecord, gap string) error {
@@ -119,6 +122,9 @@ func runAttached(ctx context.Context, c *urfave.Command, cli *client.Client, gra
 			stopped, stopErr := cleanup()
 			if stopErr != nil {
 				return stopErr
+			}
+			if stopped.Result == nil || stopped.Result.Instance.ID != request.InstanceID || startupAttempt(stopped.Result.Instance) != request.Owner.Attempt {
+				return startupConflict()
 			}
 			response = *stopped.Result
 		}
@@ -215,6 +221,9 @@ func runAttached(ctx context.Context, c *urfave.Command, cli *client.Client, gra
 				continue
 			}
 			return renewErr
+		}
+		if next.Result == nil || next.Result.Instance.ID != request.InstanceID || startupAttempt(next.Result.Instance) != request.Owner.Attempt {
+			return startupConflict()
 		}
 		response = *next.Result
 	}

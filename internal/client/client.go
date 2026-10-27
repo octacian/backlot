@@ -57,7 +57,7 @@ func transportFailure(err error) string {
 // Close releases idle socket connections without affecting accepted preparations.
 func (c *Client) Close() { c.transport.CloseIdleConnections() }
 
-func (c *Client) call(ctx context.Context, method, path string, request, response any) error {
+func (c *Client) call(ctx context.Context, method, path string, request, response any) (callErr error) {
 	// Resolve compatibility afresh at every configuration-consuming boundary.
 	// Historical reads and snapshot-based cleanup remain available; incompatible
 	// state must retain its ownership records (see docs/containers.md).
@@ -108,6 +108,13 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 	if path == "/v1/shared/start" || path == "/v1/shared/stop" || path == "/v1/shared/restart" || path == "/v1/shared/destroy" || path == "/v1/attached/cancel" || path == "/v1/scenes/stop" || path == "/v1/export" || path == "/v1/doctor" || path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
 		httpClient.Timeout = 0
 	}
+	rejected := false
+	// After dispatch a missing/unusable reply cannot establish mutation rejection.
+	defer func() {
+		if !rejected {
+			callErr = mutationError(path, request, callErr)
+		}
+	}()
 	res, err := httpClient.Do(req)
 	if err != nil {
 		if strings.HasPrefix(path, "/v1/scenes/") && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
@@ -138,6 +145,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 		if err := manifest.Decode(data, ".json", &envelope); err != nil || envelope.APIVersion != v1.Version || envelope.Error.Code == "" || envelope.Error.Message == "" {
 			return &v1.PlanError{Code: "invalid_response", Message: "invalid daemon error envelope"}
 		}
+		rejected = true
 		return &envelope.Error
 	}
 	if err := manifest.Decode(data, ".json", response); err != nil {
@@ -278,4 +286,55 @@ func (c *Client) Doctor(ctx context.Context, request v1.DoctorRequest) (v1.Docto
 	}
 	err := c.call(ctx, http.MethodPost, "/v1/doctor", request, &response)
 	return response, err
+}
+
+func mutationPath(path string) bool {
+	switch path {
+	case "/v1/export", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/runtime/stop", "/v1/destroy", "/v1/stop", "/v1/cancel", "/v1/renew", "/v1/scenes/start", "/v1/scenes/stop", "/v1/attached/renew", "/v1/attached/cancel", "/v1/gateway/start", "/v1/gateway/stop", "/v1/gateway/restart", "/v1/shared/start", "/v1/shared/stop", "/v1/shared/restart", "/v1/shared/destroy":
+		return true
+	}
+	return false
+}
+
+// mutationError preserves target context when a dispatched mutation has no usable reply.
+func mutationError(path string, request any, err error) error {
+	if err == nil || !mutationPath(path) {
+		return err
+	}
+
+	var detail *v1.PlanError
+	if !errors.As(err, &detail) && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		detail = &v1.PlanError{Code: "daemon_unavailable"}
+	}
+	if detail != nil && (detail.Code == "daemon_unavailable" || detail.Code == "invalid_response" || detail.Code == "api_version") {
+		target := ""
+		switch value := request.(type) {
+		case v1.ExportRequest:
+			target = value.InstanceID
+		case v1.RunRequest:
+			target = value.InstanceID
+		case v1.InstanceRequest:
+			target = value.InstanceID
+		case v1.StopRequest:
+			target = value.InstanceID
+		case v1.DestroyRequest:
+			target = value.InstanceID
+		case v1.AttachedRequest:
+			target = value.InstanceID
+		case v1.LeaseRequest:
+			target = value.InstanceID
+		case v1.SceneRequest:
+			target = value.Target.InstanceID
+		case v1.SharedRequest:
+			target = value.ServiceID
+		case v1.SharedDestroyRequest:
+			target = value.ServiceID
+		}
+		resultContext := "acceptance/result is unknown"
+		if validID(target) {
+			resultContext += " for recorded ID " + target
+		}
+		err = &v1.PlanError{Code: detail.Code, Message: "daemon exchange failed (" + path + "); " + resultContext + "; inspect status/recorded targets with the same --state-dir before explicit recovery; do not automatically retry"}
+	}
+	return err
 }

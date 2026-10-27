@@ -13,8 +13,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"slices"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -22,11 +20,23 @@ import (
 func runtimeCommands() []*urfave.Command {
 	commands := []*urfave.Command{}
 	for _, name := range []string{"run", "restart", "reset"} {
-		commands = append(commands, &urfave.Command{Name: name, SkipFlagParsing: true, Usage: "Execute an isolated scene; restart retains data, reset replaces it", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "allow-image-change", Usage: "Restart only: accept changed build-image IDs with retained mounts and application/data compatibility risk"}, &urfave.BoolFlag{Name: "attached", Usage: "Own a persistent attempt until this client ends"}, &urfave.BoolFlag{Name: "keep-on-failure"}, &urfave.StringFlag{Name: "project"}, &urfave.StringFlag{Name: "config"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s"}), Action: runNative})
+		flags := append(daemonFlags(false), &urfave.StringFlag{Name: "config", Usage: "Machine configuration path"}, &urfave.StringFlag{Name: "startup-timeout", Value: "5m", Usage: "Startup budget; 0s is unlimited"}, &urfave.StringFlag{Name: "job-timeout", Value: "30m", Usage: "Job budget; 0s is unlimited"}, &urfave.StringFlag{Name: "stop-grace", Value: "10s", Usage: "Grace before cleanup escalation"})
+		usage, args := "Start a scene and wait for readiness or disposable completion", "<scene> [terminal-job args...]"
+		if name == "run" {
+			flags = append(flags, &urfave.BoolFlag{Name: "attached", Usage: "Own a persistent attempt until this client ends"}, &urfave.BoolFlag{Name: "keep-on-failure", Usage: "Keep disposable resources after failure"}, &urfave.StringFlag{Name: "project", Usage: "Project directory or manifest path"})
+		} else {
+			usage, args = "Restart a recorded persistent instance, retaining data", "<instance-id>"
+			if name == "restart" {
+				flags = append(flags, &urfave.BoolFlag{Name: "allow-image-change", Usage: "Accept changed build-image IDs with retained-data compatibility risk"})
+			} else {
+				usage = "Stop and replace a recorded persistent instance's data, then start fresh"
+			}
+		}
+		commands = append(commands, &urfave.Command{Name: name, Usage: usage, ArgsUsage: args, Flags: flags, Action: runNative})
 	}
 	commands = append(commands, &urfave.Command{Name: "stop", Usage: "Stop runtime; --force acknowledges potentially live native survivors", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force", Usage: "Relinquish unresolved native claims; survivors may still run/write"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
-			return fmt.Errorf("stop requires one recorded instance ID")
+			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "stop requires one recorded instance ID"})
 		}
 		cli, err := runtimeClient(c)
 		if err != nil {
@@ -48,7 +58,7 @@ func runtimeCommands() []*urfave.Command {
 	}})
 	commands = append(commands, &urfave.Command{Name: "destroy", Usage: "Remove runtime/data; --force waives shared ownership proof only, retaining consumer/native/private-resource fences", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
-			return fmt.Errorf("destroy requires one recorded instance ID")
+			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "destroy requires one recorded instance ID"})
 		}
 		cli, err := runtimeClient(c)
 		if err != nil {
@@ -60,7 +70,7 @@ func runtimeCommands() []*urfave.Command {
 	}})
 	commands = append(commands, &urfave.Command{Name: "logs", Usage: "Read retained component logs", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "follow"}, &urfave.StringFlag{Name: "component"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
-			return fmt.Errorf("logs requires one recorded instance ID")
+			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "logs requires one recorded instance ID"})
 		}
 		cli, err := runtimeClient(c)
 		if err != nil {
@@ -124,14 +134,14 @@ func runtimeClient(c *urfave.Command) (*client.Client, error) {
 	return client.New(daemon.SocketPath(dir)), nil
 }
 func runNative(ctx context.Context, c *urfave.Command) error {
-	if c.Args().Len() == 1 && (c.Args().First() == "--help" || c.Args().First() == "-h") {
-		return urfave.ShowSubcommandHelp(c)
+	if c.Args().Len() == 0 || c.Name != "run" && c.Args().Len() != 1 {
+		return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "run requires a scene; restart/reset require one recorded instance ID without terminal arguments"})
 	}
-	target, terminal, err := parseRuntimeArgs(c)
-	if err != nil {
-		return output(c, nil, err)
+	terminal := c.Args().Tail()
+	if c.Bool("attached") && (c.Bool("keep-on-failure") || len(terminal) != 0) {
+		return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "--attached cannot combine with terminal arguments or --keep-on-failure"})
 	}
-	args := []string{target}
+	args := c.Args().Slice()
 	cli, err := runtimeClient(c)
 	if err != nil {
 		return output(c, nil, err)
@@ -215,18 +225,23 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 				grace, _ = time.ParseDuration(request.Options.StopGrace)
 			}
 			cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
-			response, err = cli.StopExecution(cleanup, id)
+			stopped, stopErr := cli.StopExecution(cleanup, id)
 			cancel()
-			if err != nil {
-				return output(c, nil, err)
+			if stopErr != nil {
+				return observedFailure(c, response, stopErr)
 			}
+			if stopped.Instance.ID != id || startupAttempt(stopped.Instance) != attempt {
+				return observedFailure(c, response, startupConflict())
+			}
+			stopped.ManifestDrift, stopped.ConfigDrift = manifestDrift, configDrift
+			response = stopped
 			if err := output(c, response, nil); err != nil {
 				return err
 			}
 			return cancelledExit(response.Instance, cancellationCode())
 		}
-		if response.Instance.Plan.Lifetime == v1.Persistent && (attempt == "" || startupAttempt(response.Instance) != attempt) {
-			return output(c, nil, startupConflict())
+		if attempt == "" || startupAttempt(response.Instance) != attempt {
+			return observedFailure(c, response, startupConflict())
 		}
 		if response.Instance.Status == v1.RuntimeReady {
 			return startupOutput(signalCtx, c, cli, response)
@@ -258,13 +273,18 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 						continue
 					}
 					current, inspectErr := cli.Inspect(signalCtx, id)
-					if inspectErr == nil && current.Instance.Status != v1.Starting && current.Instance.Status != v1.RuntimeReady {
+					if inspectErr == nil && current.Instance.ID == id && startupAttempt(current.Instance) == attempt && current.Instance.Status != v1.Starting && current.Instance.Status != v1.RuntimeReady {
+						current.ManifestDrift, current.ConfigDrift = manifestDrift, configDrift
 						response = current
 						token = ""
 						continue
 					}
-					return output(c, nil, renewErr)
+					return observedFailure(c, response, renewErr)
 				}
+				if renewed.Instance.ID != id || startupAttempt(renewed.Instance) != attempt {
+					return observedFailure(c, response, startupConflict())
+				}
+				renewed.ManifestDrift, renewed.ConfigDrift = manifestDrift, configDrift
 				response = renewed
 			}
 		}
@@ -275,84 +295,36 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 				grace, _ = time.ParseDuration(request.Options.StopGrace)
 			}
 			cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
-			response, err = cli.StopExecution(cleanup, id)
+			stopped, stopErr := cli.StopExecution(cleanup, id)
 			cancel()
-			if err != nil {
-				return output(c, nil, err)
+			if stopErr != nil {
+				return observedFailure(c, response, stopErr)
 			}
+			if stopped.Instance.ID != id || startupAttempt(stopped.Instance) != attempt {
+				return observedFailure(c, response, startupConflict())
+			}
+			stopped.ManifestDrift, stopped.ConfigDrift = manifestDrift, configDrift
+			response = stopped
 			if err := output(c, response, nil); err != nil {
 				return err
 			}
 			return cancelledExit(response.Instance, cancellationCode())
 		case <-time.After(50 * time.Millisecond):
 		}
-		response, err = cli.Inspect(signalCtx, id)
-		response.ManifestDrift, response.ConfigDrift = manifestDrift, configDrift
+		next, inspectErr := cli.Inspect(signalCtx, id)
+		err = inspectErr
 		if err != nil {
 			if signalCtx.Err() != nil {
 				continue
 			}
-			return output(c, nil, err)
+			return observedFailure(c, response, err)
 		}
-	}
-}
-
-func parseRuntimeArgs(c *urfave.Command) (string, []string, error) {
-	args := c.Args().Slice()
-	var terminal []string
-	if index := slices.Index(args, "--"); index >= 0 {
-		terminal = slices.Clone(args[index+1:])
-		args = args[:index]
-	}
-	var target string
-	seen := map[string]bool{}
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if !strings.HasPrefix(arg, "--") {
-			if target != "" {
-				return "", nil, &v1.PlanError{Code: "invalid_arguments", Message: "forward terminal job arguments after --"}
-			}
-			target = arg
-			continue
+		if next.Instance.ID != id || startupAttempt(next.Instance) != attempt {
+			return observedFailure(c, response, startupConflict())
 		}
-		if seen[arg] {
-			return "", nil, &v1.PlanError{Code: "invalid_arguments", Message: "duplicate runtime flag"}
-		}
-		seen[arg] = true
-		switch arg {
-		case "--allow-image-change":
-			if c.Name != "restart" {
-				return "", nil, &v1.PlanError{Code: "invalid_arguments", Message: "--allow-image-change is only supported by restart"}
-			}
-			if err := c.Set("allow-image-change", "true"); err != nil {
-				return "", nil, err
-			}
-		case "--json", "--keep-on-failure", "--attached":
-			if err := c.Set(strings.TrimPrefix(arg, "--"), "true"); err != nil {
-				return "", nil, err
-			}
-		case "--state-dir", "--project", "--config", "--startup-timeout", "--job-timeout", "--stop-grace":
-			if i+1 >= len(args) {
-				return "", nil, &v1.PlanError{Code: "invalid_arguments", Message: "runtime flag requires a value"}
-			}
-			i++
-			if err := c.Set(strings.TrimPrefix(arg, "--"), args[i]); err != nil {
-				return "", nil, err
-			}
-		default:
-			return "", nil, &v1.PlanError{Code: "invalid_arguments", Message: "unknown runtime flag"}
-		}
+		next.ManifestDrift, next.ConfigDrift = manifestDrift, configDrift
+		response = next
 	}
-	if target == "" {
-		return "", nil, &v1.PlanError{Code: "invalid_arguments", Message: "run requires a scene; restart requires an instance ID"}
-	}
-	if (c.Name == "restart" || c.Name == "reset") && len(terminal) > 0 {
-		return "", nil, &v1.PlanError{Code: "invalid_arguments", Message: "persistent restart does not accept terminal arguments"}
-	}
-	if c.Bool("attached") && (c.Name != "run" || c.Bool("keep-on-failure") || len(terminal) != 0) {
-		return "", nil, &v1.PlanError{Code: "invalid_arguments", Message: "--attached requires run without terminal arguments or keep-on-failure"}
-	}
-	return target, terminal, nil
 }
 
 func writeLogRecord(c *urfave.Command, record v1.LogRecord) error {

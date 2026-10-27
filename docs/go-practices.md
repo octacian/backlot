@@ -61,3 +61,31 @@ server marshal/unmarshal the same named Go types. Validate decoded values;
 static Go typing does not validate untrusted JSON. Avoid `map[string]any` and
 anonymous structs as endpoint contracts. Keep internal persistence and secret
 values out of wire types unless the endpoint explicitly exposes them.
+
+## CLI adapters
+
+Use the pinned urfave/cli built-in parser for every public command. Register
+supported options on the commands that implement them, singleton flags with
+`OnlyOnce`, and deliberately repeatable flags as such. Inherit the root `--json`.
+Do not add manual flag parsing, public `SkipFlagParsing`, raw-argument JSON scans,
+argument reordering or delimiter-position recovery. Validate Backlot cardinality,
+option applicability and lifetime rules before effects; do not duplicate upstream
+parser guarantees in tests.
+
+Use framework usage hooks on leaves and groups. If JSON is already recognized,
+emit one typed `invalid_arguments` diagnostic without automatic help on stdout.
+Do not echo rejected option values. Malformed input can fail before JSON is
+recognized; no malformed-input flag-order guarantee applies. Main owns process
+exit and the final stderr diagnostic; the framework must not print it again.
+Explicit help, no-action root/group help and licenses remain human text.
+
+Keep finite results in the existing named API contracts, and existing observation,
+log and attached modes in their documented NDJSON contracts. Retain a validated
+accepted snapshot before subsequent calls; validate matching identity/attempt
+before replacing it. On observation/cleanup failure, label retained data as last
+observed with a presentation error, strip private capabilities and hydrated startup
+values, and preserve independent outcomes and drift. Never render partially decoded
+or rejected wire data as a result. Presentation errors are rejected on daemon wire
+snapshots and are not persisted. Missing mutation replies mean unknown acceptance
+or completion, not permission to retry. See the [CLI reference](operations.md#cli-invocation-and-results)
+and [decision](adr/20261027T183153280Z-use-framework-parsing-and-preserve-truthful-cli-results.md).

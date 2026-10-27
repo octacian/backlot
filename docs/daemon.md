@@ -450,6 +450,10 @@ Capabilities, protocol/purpose and boot identity remain private. See [state comp
 See [disposable results and evidence](evidence.md) for exact exit codes, kept
 failures, artifacts, fixture access and retention settings.
 
+Finite startup failures after acceptance retain the last validated instance/attempt
+with an optional presentation error, explicitly marked last observed. This does
+not establish current state or completed cleanup; see [CLI framing and recovery](operations.md#cli-invocation-and-results).
+
 The CLI waits for persistent ready or disposable terminal status through inspect;
 raw API callers must renew disposable capabilities while polling. Logs pages use
 an absolute unfiltered record offset, so component filtering preserves cursor

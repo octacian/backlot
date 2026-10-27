@@ -231,3 +231,89 @@ explicit start/restart lifecycle. See [daemon commands](daemon.md#commands).
 Never remove retained data while a consumer may still run. A cleanup failure is a
 failure, with remaining handles preserved for recovery. Private state and captured
 application logs may contain secrets; publish only reviewed sanitized evidence.
+
+## CLI invocation and results
+
+Use `backlot --help` and `backlot COMMAND --help` for targets, supported flags and
+defaults. `--json` is global and applies to commands and groups. Other options
+belong to their documented action; unsupported options and duplicate singleton
+flags fail. Project setup's `--generate`, `--remove-input` and `--remove-tool` are
+repeatable. Backlot delegates token handling to the built-in CLI parser.
+
+`plan` and `run` take the scene as their first positional argument and pass the
+remaining positional arguments to its designated terminal job. Both plain tails
+and tails after `--` are accepted. Use `--` to protect application options from
+Backlot flag handling. Values, including spaces and empty arguments, stay intact;
+Backlot does no shell expansion. For example:
+
+```sh
+backlot --json plan test --project . -- -run TestExample
+backlot run test --project . -- -run TestExample
+backlot run test focus
+```
+
+The last command forwards `focus`. Persistent scenes and attached starts do not
+accept terminal tails. `restart` and `reset` take exactly one recorded instance ID,
+never a scene or terminal tail. They derive the project from that record and
+reject `--project`; `--allow-image-change` belongs only to `restart`.
+`--keep-on-failure` belongs to disposable `run`; it cannot affect persistent work.
+`--attached` belongs to `run` or `scene start` and cannot combine with terminal
+arguments or keeping disposable failures.
+
+Choose the entry point by intent:
+
+| Intent | Command |
+| --- | --- |
+| Offline validation; no runtime readiness | `plan SCENE` |
+| Metadata snapshot only; no application work | `prepare SCENE` |
+| Start and await readiness or disposable completion | `run SCENE` |
+| Start a named persistent scene and await readiness | `scene start SCENE` |
+| Inspect a recorded ID, including history/disposable work | `inspect ID` or `status ID` |
+| Resolve recorded persistent state from a scene name | `scene status SCENE` |
+| Sample changes without owning/stopping work | `status ID --follow` or `scene status SCENE --follow` |
+| Own a persistent attempt and stop on client loss | `run --attached SCENE` or `scene start --attached SCENE` |
+| Explicit retained-data restart / fresh-data replacement | `restart ID` / `reset ID` |
+| Stop / explicitly remove runtime and data | `stop ID` / `destroy ID` |
+
+A prepared record proves metadata, not application readiness. Inspecting a failed
+execution can succeed because inspection itself succeeded. Doctor returns nonzero
+for failed checks while preserving its findings. Application exits and independent
+collection/cleanup results remain separate; see [results and evidence](evidence.md).
+Human summaries show the same observed facts as JSON and include inspection/log/
+export/cleanup steps. Carry the original `--state-dir` into those follow-up commands.
+An empty or missing terminal exit means unknown, never a synthesized zero.
+
+Machine stdout has these framing contracts:
+
+| Mode | Output |
+| --- | --- |
+| Finite operations, including plan/version/setup/doctor/export | One existing named JSON result, or `ErrorResponse` when no usable result exists |
+| `logs`, including a finite retained read | `LogRecord` NDJSON; zero records is valid; a failure adds one `ErrorResponse` line before or after log records |
+| ID or named status with `--follow` | `SceneFollowRecord` NDJSON |
+| Attached starts | `AttachedRecord` NDJSON |
+| `daemon serve` | Foreground service; no successful JSON document; ordinary error output on failure |
+| Explicit help, root/group help without an action, `licenses` | Human text even with `--json`; licenses retain canonical bytes |
+
+Usage and semantic failures emit `invalid_arguments` when the framework has
+already recognized JSON mode, suppressing automatic human help on machine stdout.
+Malformed input can fail before recognition, in which case stderr plus nonzero
+exit is sufficient. There is no flag-order guarantee for malformed input; do not
+rely on moving `--json` after an invalid option to obtain JSON. Diagnostics retain
+safe option names and help guidance while omitting rejected values.
+
+Finite postacceptance failures can return `InstanceResponse` or `SceneResponse`
+with an optional `error` and the last validated snapshot. This is last-observed
+identity and state, not a current/final success. Strict consumers must allow this
+optional field, check exit status/error and retain independent execution results.
+No usable validated snapshot means `ErrorResponse`. Retained errors omit lease/
+attachment capabilities and hydrated sensitive startup details. Ordinary successful
+startup disclosure and explicit secret/setup inspection keep their existing rules.
+Follow/attached error records likewise retain known snapshots/results. Logs retain
+their existing stderr warnings and retention-gap notices.
+
+A missing or invalid mutation reply may mean acceptance or completion is unknown.
+Inspect the known ID, scene or service with the same state directory before explicit
+recovery; Backlot does not automatically retry. A preflight compatibility refusal
+occurs before dispatch and instead directs matching-binary recovery. A successful
+`daemon stop` acknowledges stopping, not process exit or lock release. Output
+write failures are nonzero; a closed pipe cannot promise a final document/record.

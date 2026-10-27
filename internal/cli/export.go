@@ -52,8 +52,18 @@ func exportCommand() *urfave.Command {
 				}
 				return err
 			}
-			if err != nil {
+			if response.Result.InstanceID == "" {
 				return output(c, nil, err)
+			}
+			operationErr := err
+			if _, err := fmt.Fprintf(c.Writer, "Export instance %s, attempt %s: %s\n", response.Result.InstanceID, response.Result.Attempt, response.Result.Status); err != nil {
+				return err
+			}
+			if err := outcomeOutput(c.Writer, response.Result.TerminalExitCode, response.Result.Components, response.Result.Failure, response.Result.CollectionFailure, response.Result.CleanupFailure); err != nil {
+				return err
+			}
+			if operationErr != nil {
+				return operationErr
 			}
 			for _, warning := range response.Result.NativeOwnershipWarnings {
 				if _, err := fmt.Fprintln(c.ErrWriter, "Warning:", warning.Message); err != nil {

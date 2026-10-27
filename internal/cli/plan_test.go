@@ -70,21 +70,6 @@ func TestPlanCLIForwardingAndJSONErrors(t *testing.T) {
 	}
 }
 
-func TestPlanArguments(t *testing.T) {
-	for _, args := range [][]string{nil, {"--json"}, {"test", "extra"}, {"test", "--project"}, {"test", "--config", "--json"}, {"test", "--json", "--json"}, {"test", "--unsupported"}, {"test", "--project", "a", "--project", "b"}} {
-		if _, _, err := parsePlanArgs(args); err == nil {
-			t.Fatalf("invalid args accepted: %v", args)
-		}
-	}
-	request, jsonMode, err := parsePlanArgs([]string{"test", "--json", "--project", "a b", "--config", "machine.yaml", "--", "--project", "forwarded", ""})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !jsonMode || request.ProjectPath != "a b" || request.ConfigPath != "machine.yaml" || !reflect.DeepEqual(request.TerminalArgs, []string{"--project", "forwarded", ""}) {
-		t.Fatalf("request=%+v", request)
-	}
-}
-
 func TestPlanUnsafeKeyAndConfigVersionErrors(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", t.TempDir())

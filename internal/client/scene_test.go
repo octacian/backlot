@@ -317,3 +317,24 @@ func TestSceneFollowExactIDRejectsGenerationChangeRetargetAndLeaseLeak(t *testin
 		})
 	}
 }
+
+func TestSceneFollowErrorRetainsLastValidatedSnapshot(t *testing.T) {
+	c := New("unused")
+	defer c.Close()
+	calls := 0
+	c.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls > 1 {
+			return nil, io.EOF
+		}
+		response := sceneResponse()
+		response.Outcome = v1.SceneFound
+		response.Result = sceneInstance("e")
+		return sceneWire(t, r, response), nil
+	})
+	var records []v1.SceneFollowRecord
+	err := c.FollowScene(context.Background(), sceneRequest(), SceneFollowOptions{Interval: 100 * time.Millisecond, Duration: time.Second}, func(r v1.SceneFollowRecord) error { records = append(records, r); return nil })
+	if err == nil || len(records) != 2 || records[1].Type != "error" || records[1].Error == nil || records[1].Snapshot == nil || records[1].Snapshot.Result.Instance.ID != strings.Repeat("e", 64) {
+		t.Fatal(err, records)
+	}
+}

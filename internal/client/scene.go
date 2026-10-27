@@ -16,9 +16,10 @@ import (
 func (c *Client) StartScene(ctx context.Context, request v1.SceneStartRequest) (v1.SceneResponse, error) {
 	var response v1.SceneResponse
 	err := c.call(ctx, http.MethodPost, "/v1/scenes/start", request, &response)
-	if err == nil {
-		err = validateScene(response, v1.SceneTarget{Scene: request.Plan.Scene, CWD: request.CWD, ProjectPath: request.Plan.ProjectPath}, true)
+	if err != nil {
+		return response, err
 	}
+	err = validateScene(response, v1.SceneTarget{Scene: request.Plan.Scene, CWD: request.CWD, ProjectPath: request.Plan.ProjectPath}, true)
 	if err == nil && (response.Outcome != v1.SceneFound || response.Result == nil) {
 		err = responseError()
 	}
@@ -28,7 +29,7 @@ func (c *Client) StartScene(ctx context.Context, request v1.SceneStartRequest) (
 	if err == nil && request.Attached && response.Result.Attachment.Owner.DaemonGeneration != response.DaemonGeneration {
 		err = responseError()
 	}
-	return response, err
+	return response, mutationError("/v1/scenes/start", request, err)
 }
 
 // SceneStatus reads recorded state without current manifest inputs.
@@ -48,20 +49,21 @@ func (c *Client) sceneCall(ctx context.Context, action string, request v1.SceneR
 		return response, err
 	}
 	err := c.call(ctx, http.MethodPost, "/v1/scenes/"+action, request, &response)
-	if err == nil {
-		err = validateScene(response, request.Target, action == "stop" || request.Target.InstanceID == "")
+	if err != nil {
+		return response, err
 	}
+	err = validateScene(response, request.Target, action == "stop" || request.Target.InstanceID == "")
 	if err == nil && response.Result != nil && response.Result.Attachment != nil {
 		err = responseError()
 	}
 	if err == nil && (action == "status" && response.Outcome != v1.SceneFound && response.Outcome != v1.SceneNotFound || action == "stop" && response.Outcome == v1.SceneFound) {
 		err = responseError()
 	}
-	return response, err
+	return response, mutationError("/v1/scenes/"+action, request, err)
 }
 
 func validateScene(response v1.SceneResponse, target v1.SceneTarget, persistentOnly bool) error {
-	if response.APIVersion != v1.Version || !validID(response.DaemonGeneration) {
+	if response.Error != nil || response.APIVersion != v1.Version || !validID(response.DaemonGeneration) {
 		return responseError()
 	}
 	switch response.Outcome {
@@ -167,6 +169,7 @@ func (c *Client) FollowScene(ctx context.Context, request v1.SceneRequest, optio
 	}
 	ctx, cancel := context.WithTimeoutCause(ctx, options.Duration, errObservationExpired)
 	defer cancel()
+	var previous *v1.SceneResponse
 	terminal := func(err error) error {
 		record := v1.SceneFollowRecord{APIVersion: v1.Version, Time: time.Now().UTC().Format(time.RFC3339Nano), Type: "complete"}
 		if errors.Is(err, errObservationExpired) {
@@ -176,10 +179,16 @@ func (c *Client) FollowScene(ctx context.Context, request v1.SceneRequest, optio
 			record.Reason = "cancelled"
 		} else {
 			record.Type = "error"
+			record.Snapshot = previous
 			record.Error = &v1.PlanError{Code: "observation_failed", Message: "status observation failed"}
 			var detail *v1.PlanError
 			if errors.As(err, &detail) {
 				record.Error = detail
+			}
+			if previous != nil {
+				detail := *record.Error
+				detail.Message = "Last observed snapshot; current state is unknown. " + detail.Message
+				record.Error = &detail
 			}
 		}
 		if writeErr := emit(record); writeErr != nil {
@@ -187,7 +196,6 @@ func (c *Client) FollowScene(ctx context.Context, request v1.SceneRequest, optio
 		}
 		return err
 	}
-	var previous *v1.SceneResponse
 	for {
 		if err := context.Cause(ctx); err != nil {
 			return terminal(err)

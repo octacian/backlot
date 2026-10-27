@@ -135,6 +135,9 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	if err != nil {
 		return empty, err
 	}
+	if request.Options.KeepOnFailure && snapshot.Plan.Lifetime != v1.Disposable {
+		return empty, problem("invalid_arguments", "--keep-on-failure requires a disposable scene")
+	}
 	if persistentOnly && snapshot.Plan.Lifetime != v1.Persistent {
 		return empty, problem("invalid_lifetime", "scene start requires a persistent scene; use run for disposable work")
 	}

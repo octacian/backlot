@@ -76,8 +76,9 @@ func Validate(m v1.Manifest) error {
 		}
 	}
 	for name, shared := range m.SharedServices {
-		if shared.Manager != "mariadb" || shared.Image == "" || strings.ContainsRune(shared.Image, 0) || shared.Storage != "volume" || shared.Admin != "generated" || shared.Port != 3306 {
-			return invalid("shared_services."+name, "Gate 1 requires mariadb, an explicit image, volume storage, generated admin and port 3306")
+		validManager := (shared.Manager == "mariadb" && shared.Port == 3306) || (shared.Manager == "postgresql" && shared.Port == 5432)
+		if !validManager || shared.Image == "" || strings.ContainsRune(shared.Image, 0) || shared.Storage != "volume" || shared.Admin != "generated" {
+			return invalid("shared_services."+name, "requires mariadb/3306 or postgresql/5432, an explicit image, volume storage and generated admin")
 		}
 		duration, err := time.ParseDuration(shared.ReadinessTimeout)
 		if err != nil || duration <= 0 || duration > 24*time.Hour {

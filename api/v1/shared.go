@@ -1,15 +1,15 @@
 package v1
 
-// SharedService declares a retained project-owned MariaDB server independently
-// of scene allocations. Gate 1 supports explicitly owned volume storage and
+// SharedService declares a retained project-owned SQL server independently
+// of scene allocations. Bundled managers support explicitly owned volume storage and
 // generated private administration; it never adopts an external server.
 type SharedService struct {
-	Manager          string   `json:"manager" yaml:"manager" jsonschema:"enum=mariadb"`
+	Manager          string   `json:"manager" yaml:"manager" jsonschema:"enum=mariadb,enum=postgresql"`
 	Image            string   `json:"image" yaml:"image" jsonschema:"minLength=1"`
 	Args             []string `json:"args,omitempty" yaml:"args,omitempty"`
 	Storage          string   `json:"storage" yaml:"storage" jsonschema:"enum=volume"`
 	Admin            string   `json:"admin" yaml:"admin" jsonschema:"enum=generated"`
-	Port             int      `json:"port" yaml:"port" jsonschema:"minimum=3306,maximum=3306"`
+	Port             int      `json:"port" yaml:"port" jsonschema:"enum=3306,enum=5432"`
 	ReadinessTimeout string   `json:"readiness_timeout" yaml:"readiness_timeout" jsonschema:"minLength=1"`
 }
 

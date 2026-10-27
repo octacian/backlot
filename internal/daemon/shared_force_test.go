@@ -80,10 +80,27 @@ func TestForceCollisionAndDurableAuthority(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		code(t, state.checkSharedReleaseCollision(id, "db", target), "shared_in_use")
+		code(t, state.checkSharedReleaseCollision(id, "db", target, false), "shared_in_use")
 		if err = state.db.Update(func(tx *bolt.Tx) error { return tx.Bucket([]byte("shared_allocations")).Delete([]byte(peer)) }); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// PostgreSQL database owners and app users share one cluster role namespace.
+	other := target
+	other.Request.AllocationID = newID()
+	other.Request.Database, other.Request.Username = target.Request.Username, target.Request.Database
+	if err = state.saveSharedAllocations(id, map[string]sharedAllocation{"db": target}); err != nil {
+		t.Fatal(err)
+	}
+	if err = state.saveSharedAllocations(peer, map[string]sharedAllocation{"db": other}); err != nil {
+		t.Fatal(err)
+	}
+	code(t, state.checkSharedReleaseCollision(id, "db", target, true), "shared_in_use")
+	if err = state.checkSharedReleaseCollision(id, "db", target, false); err != nil {
+		t.Fatal("MariaDB separate namespaces changed", err)
+	}
+	if err = state.db.Update(func(tx *bolt.Tx) error { return tx.Bucket([]byte("shared_allocations")).Delete([]byte(peer)) }); err != nil {
+		t.Fatal(err)
 	}
 	target.Request.Force = true
 	code(t, state.saveSharedAllocations(id, map[string]sharedAllocation{"db": target}), "state_corrupt")
@@ -187,7 +204,7 @@ func TestForceSharedTopology(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = state.db.Close() }()
-			record := sharedServiceRecord{ID: newID(), Server: ownedResource{Kind: "container", ID: newID(), Token: newID()}, Network: ownedResource{Kind: "network", ID: newID(), Name: "recorded-network", Token: newID()}, Volume: ownedResource{Kind: "volume", ID: "recorded-volume", Name: "recorded-volume", Token: newID()}, ImageID: "sha256:recorded", EffectiveArgs: []string{"original"}, AdminPassword: newID(), Declaration: v1.SharedService{ReadinessTimeout: "10ms"}, Port: 1}
+			record := sharedServiceRecord{ID: newID(), Server: ownedResource{Kind: "container", ID: newID(), Token: newID()}, Network: ownedResource{Kind: "network", ID: newID(), Name: "recorded-network", Token: newID()}, Volume: ownedResource{Kind: "volume", ID: "recorded-volume", Name: "recorded-volume", Token: newID()}, ImageID: "sha256:recorded", EffectiveArgs: []string{"original"}, AdminPassword: newID(), Declaration: v1.SharedService{Port: 3306, ReadinessTimeout: "10ms"}, Port: 1}
 			config := map[string]any{"Cmd": record.EffectiveArgs, "Env": []string{"MARIADB_ROOT_PASSWORD=" + record.AdminPassword}, "Labels": map[string]string{"io.backlot.owner": newID()}}
 			mount := map[string]any{"Destination": "/var/lib/mysql", "Name": record.Volume.Name, "RW": true}
 			networks := map[string]any{record.Network.Name: map[string]string{"NetworkID": record.Network.ID}}

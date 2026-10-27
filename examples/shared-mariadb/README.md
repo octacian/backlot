@@ -86,4 +86,5 @@ The cached MariaDB image remains. No gateway, DNS or trust changes are needed.
 
 See [shared-service declarations](../../docs/manifest.md#shared-service-declarations)
 and [lifecycle and cleanup](../../docs/containers.md#project-scoped-shared-services).
-This example covers MariaDB 11.4; PostgreSQL and custom managers remain followups.
+This example covers MariaDB11.4; see the separate [PostgreSQL example](../shared-postgresql/README.md).
+Custom-command managers remain a followup.

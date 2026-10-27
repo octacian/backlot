@@ -390,8 +390,14 @@ connections, lifecycle/concurrency/recovery and bounded force cleanup. See the
 [validation commands](testing.md#shared-mariadb-integration).
 
 [Issue 43](https://github.com/octacian/backlot/issues/43) remains the umbrella:
-PR 2 adds PostgreSQL 17; PR 3 adds custom execution and a non-Go/non-database fixture.
-Those paths and overall issue completion remain follow-ups.
+PR2 implements PostgreSQL and the deferred shared-handle pre-save validation under
+its [accepted architecture](adr/20261025T202152388Z-add-bundled-postgresql-shared-allocations.md),
+with a [runnable example](../examples/shared-postgresql/README.md).
+[PR 89](https://github.com/octacian/backlot/pull/89) passed independent code reviews,
+full local runtime/regression suites and the example on `92cd101`. Subsequent
+integration changes require evidence reconciliation and published-head CI; current
+readiness is tracked in that PR. PR3 adds custom execution and a non-Go/non-database
+fixture. Overall issue/V1 acceptance remains a follow-up.
 
 ## Execution-scoped build images (issue 80)
 

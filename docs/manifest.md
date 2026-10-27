@@ -411,7 +411,7 @@ or change HOME/XDG or application pass-through. `version --json` reports
 
 ## Shared-service declarations
 
-Declare the bundled MariaDB service with an already-present local Engine
+Declare a bundled MariaDB or PostgreSQL service with an already-present local Engine
 image; prefer an immutable digest for reviewed configuration. See
 [current engine scope](implementation-plan.md#shared-services-issue-43).
 
@@ -447,11 +447,18 @@ credentials have no application reference. Existing resource kinds cannot name a
 Unselected declarations require no Docker contact; planning never provisions
 a server or allocation.
 
-The initial declaration requires explicit `manager: mariadb`, nonempty `image`,
-`storage: volume`, `admin: generated`, `port: 3306` and a positive
+The declaration requires `manager: mariadb` with `port: 3306`, or
+`manager: postgresql` with `port: 5432`, a nonempty `image`,
+`storage: volume`, `admin: generated` and a positive
 `readiness_timeout` up to 24h. Unknown fields remain errors. Native and
 container environments resolve the actual consumer's connection context, described
 in [shared runtime operation](containers.md#project-scoped-shared-services).
+
+The [PostgreSQL example](../examples/shared-postgresql/README.md) uses `postgres:17`.
+PostgreSQL application roles can create their own schemas and trusted extensions
+inside their allocation database, without database ownership or server/peer access.
+Image/storage/authentication compatibility is verified, with evidence scoped to the
+versions actually exercised; this declaration is not an automatic upgrade policy.
 
 ## Execution-scoped build images
 

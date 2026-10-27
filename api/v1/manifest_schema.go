@@ -316,3 +316,10 @@ func (StartupDetailSelection) JSONSchemaExtend(s *jsonschema.Schema) {
 	schemaProperty(s, "fixture").Pattern = schemaIdentifier
 	schemaProperty(s, "label").Pattern = `^[^\x00\r\n]*\S[^\x00\r\n]*$`
 }
+
+// JSONSchemaExtend pairs each bundled manager with its internal SQL port.
+func (SharedService) JSONSchemaExtend(s *jsonschema.Schema) {
+	s.AllOf = append(s.AllOf,
+		schemaWhen("manager", "mariadb", schemaProperties(map[string]*jsonschema.Schema{"port": {Const: 3306}})),
+		schemaWhen("manager", "postgresql", schemaProperties(map[string]*jsonschema.Schema{"port": {Const: 5432}})))
+}

@@ -11,6 +11,7 @@ require (
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/gofrs/flock v0.13.1
 	github.com/invopop/jsonschema v0.14.0
+	github.com/lib/pq v1.12.3
 	github.com/moby/moby/api v1.56.1
 	github.com/moby/moby/client v0.6.1
 	github.com/pb33f/ordered-map/v2 v2.3.1

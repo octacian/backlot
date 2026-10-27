@@ -48,10 +48,11 @@ type sharedAllocation struct {
 	Released  bool              `json:"released"`
 }
 type sharedConnection struct {
-	Request v1.ManagerRequest
-	Network ownedResource
-	Alias   string
-	Port    int
+	Request      v1.ManagerRequest
+	Network      ownedResource
+	Alias        string
+	Port         int
+	InternalPort int
 }
 
 // lockShared serializes effects and durable updates per service. Callers that
@@ -144,6 +145,11 @@ func validateSharedResourceHandle(r ownedResource) error {
 	return problem("state_corrupt", "invalid acknowledged shared resource handle; preserved")
 }
 func (s *store) saveShared(record sharedServiceRecord) error {
+	for _, resource := range []ownedResource{record.Server, record.Network, record.Volume} {
+		if err := validateSharedResourceHandle(resource); err != nil {
+			return err
+		}
+	}
 	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, "shared_services", record.ID, record) })
 }
 func decodeSharedAllocations(data []byte) (map[string]sharedAllocation, error) {
@@ -234,8 +240,35 @@ func (s *store) verifySharedServerMode(ctx context.Context, d *dockerEngine, rec
 	if out.Container.Config == nil || !slices.Equal(out.Container.Config.Cmd, record.EffectiveArgs) || out.Container.Image != record.ImageID || out.Container.HostConfig == nil || out.Container.HostConfig.RestartPolicy.Name != container.RestartPolicyDisabled {
 		return problem("shared_uncertain", "shared server configuration changed; preserved")
 	}
-	expectedEnv := "MARIADB_ROOT_PASSWORD=" + record.AdminPassword
-	if !contains(out.Container.Config.Env, expectedEnv) {
+	expectedEnv, storagePath := sharedServerSettings(record)
+	if record.Declaration.Manager != "postgresql" {
+		expectedEnv = expectedEnv[:1]
+	}
+	if record.Declaration.Manager == "postgresql" {
+		image, err := d.ImageInspect(ctx, record.ImageID)
+		if err != nil || image.Config == nil || !slices.Equal(out.Container.Config.Entrypoint, image.Config.Entrypoint) {
+			return problem("shared_uncertain", "PostgreSQL entrypoint changed; preserved")
+		}
+		for _, expected := range expectedEnv {
+			key, _, _ := strings.Cut(expected, "=")
+			count := 0
+			for _, value := range out.Container.Config.Env {
+				if strings.HasPrefix(value, key+"=") {
+					count++
+				}
+			}
+			if count != 1 {
+				return problem("shared_uncertain", "PostgreSQL environment ambiguous; preserved")
+			}
+		}
+		for _, value := range out.Container.Config.Env {
+			key, setting, _ := strings.Cut(value, "=")
+			if strings.HasSuffix(key, "_FILE") && strings.HasPrefix(key, "POSTGRES_") || key == "POSTGRES_USER" && setting != "postgres" {
+				return problem("shared_uncertain", "PostgreSQL initialization settings changed; preserved")
+			}
+		}
+	}
+	if slices.ContainsFunc(expectedEnv, func(value string) bool { return !contains(out.Container.Config.Env, value) }) {
 		return problem("shared_uncertain", "shared administration changed; preserved")
 	}
 	mounted := false
@@ -243,7 +276,7 @@ func (s *store) verifySharedServerMode(ctx context.Context, d *dockerEngine, rec
 		return problem("shared_uncertain", "shared mounts changed; preserved")
 	}
 	for _, m := range out.Container.Mounts {
-		if m.Destination == "/var/lib/mysql" && m.Name == record.Volume.Name && m.RW {
+		if m.Destination == storagePath && m.Name == record.Volume.Name && m.RW {
 			mounted = true
 		}
 	}
@@ -323,14 +356,15 @@ func (s *store) startSharedMode(ctx context.Context, record *sharedServiceRecord
 		if record.Server.ID != "" {
 			return problem("shared_missing", "retained shared server disappeared; preserved; explicit maintenance required")
 		}
-		port, _ := network.ParsePort("3306/tcp")
+		port, _ := network.ParsePort(strconv.Itoa(record.Declaration.Port) + "/tcp")
 		labels := resourceLabels(record.Server)
 		labels["io.backlot.shared-service"] = record.ID
-		cfg := &container.Config{Image: record.ImageID, Env: []string{"MARIADB_ROOT_PASSWORD=" + record.AdminPassword, "MARIADB_ROOT_HOST=%"}, Labels: labels, ExposedPorts: network.PortSet{port: {}}}
+		env, storagePath := sharedServerSettings(*record)
+		cfg := &container.Config{Image: record.ImageID, Env: env, Labels: labels, ExposedPorts: network.PortSet{port: {}}}
 		if len(record.Declaration.Args) > 0 {
 			cfg.Cmd = record.Declaration.Args
 		}
-		host := &container.HostConfig{RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled}, Mounts: []mount.Mount{{Type: mount.TypeVolume, Source: record.Volume.Name, Target: "/var/lib/mysql"}}, PortBindings: network.PortMap{port: []network.PortBinding{{HostIP: publishAddress(nil), HostPort: ""}}}}
+		host := &container.HostConfig{RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled}, Mounts: []mount.Mount{{Type: mount.TypeVolume, Source: record.Volume.Name, Target: storagePath}}, PortBindings: network.PortMap{port: []network.PortBinding{{HostIP: publishAddress(nil), HostPort: ""}}}}
 		networking := &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{record.Network.Name: {NetworkID: record.Network.ID, Aliases: []string{"shared-" + record.ID[:32]}}}}
 		created, createErr := d.ContainerCreate(ctx, client.ContainerCreateOptions{Name: record.Server.Name, Config: cfg, HostConfig: host, NetworkingConfig: networking})
 		if createErr != nil {
@@ -366,7 +400,7 @@ func (s *store) startSharedMode(ctx context.Context, record *sharedServiceRecord
 	if err != nil {
 		return providerFailure("inspect shared binding", err)
 	}
-	port, _ := network.ParsePort("3306/tcp")
+	port, _ := network.ParsePort(strconv.Itoa(record.Declaration.Port) + "/tcp")
 	if out.Container.NetworkSettings == nil || len(out.Container.NetworkSettings.Ports[port]) != 1 {
 		return problem("shared_uncertain", "shared loopback binding unavailable")
 	}
@@ -394,7 +428,7 @@ func (s *store) startSharedMode(ctx context.Context, record *sharedServiceRecord
 		}
 		select {
 		case <-ctx.Done():
-			return problem("shared_unavailable", "shared MariaDB readiness failed; retained intent permits explicit retry")
+			return problem("shared_unavailable", "shared SQL readiness failed; retained intent permits explicit retry")
 		case <-ticker.C:
 		}
 	}
@@ -403,19 +437,28 @@ func (s *store) startSharedMode(ctx context.Context, record *sharedServiceRecord
 		return err
 	}
 	defer func() { _ = db.Close() }()
-	var version string
-	var skipGrants int
-	if err = db.QueryRowContext(ctx, "SELECT VERSION(), @@skip_grant_tables").Scan(&version, &skipGrants); err != nil {
-		return problem("shared_unavailable", "cannot verify MariaDB server version/security mode")
-	}
-	if !strings.Contains(version, "MariaDB") || skipGrants != 0 {
-		return problem("shared_unsupported", "bundled manager requires MariaDB with privilege enforcement enabled")
+	if record.Declaration.Manager == "postgresql" {
+		if err = s.verifyPostgreSQL(ctx, db, *record, force); err != nil {
+			return err
+		}
+	} else {
+		var version string
+		var skipGrants int
+		if err = db.QueryRowContext(ctx, "SELECT VERSION(), @@skip_grant_tables").Scan(&version, &skipGrants); err != nil {
+			return problem("shared_unavailable", "cannot verify MariaDB server version/security mode")
+		}
+		if !strings.Contains(version, "MariaDB") || skipGrants != 0 {
+			return problem("shared_unsupported", "bundled manager requires MariaDB with privilege enforcement enabled")
+		}
 	}
 	record.Status = "running"
 	record.Failure = ""
 	return s.saveShared(*record)
 }
 func sharedDB(record sharedServiceRecord) (*sql.DB, error) {
+	if record.Declaration.Manager == "postgresql" {
+		return manager.PostgreSQLDB("127.0.0.1", record.Port, "postgres", "postgres", record.AdminPassword)
+	}
 	config := mysql.NewConfig()
 	config.User = "root"
 	config.Passwd = record.AdminPassword
@@ -515,6 +558,11 @@ func (s *service) ensureSharedAllocations(ctx context.Context, id string, snap p
 		if allocation.Released || allocation.Request.Operation == "release" || allocation.ServiceID != serviceID {
 			return problem("allocation_conflict", "retained allocation differs or was partially released; explicit reset/destroy required")
 		}
+		if record.Declaration.Manager == "postgresql" {
+			if err = s.store.checkSharedReleaseCollision(id, name, allocation, record.Declaration.Manager == "postgresql"); err != nil {
+				return err
+			}
+		}
 		db, err := sharedDB(record)
 		if err != nil {
 			return err
@@ -522,14 +570,14 @@ func (s *service) ensureSharedAllocations(ctx context.Context, id string, snap p
 		request := allocation.Request
 		if allocation.Result.Effect == "ready" {
 			request.Operation = "inspect"
-			observed, inspectErr := manager.MariaDB(ctx, db, request, s.store.sharedPoint)
+			observed, inspectErr := sharedManager(ctx, record, db, request, s.store.sharedPoint)
 			if inspectErr != nil || observed.Ownership != "owned" || observed.Effect != "ready" {
 				_ = db.Close()
 				return problem("allocation_missing", "retained allocation is missing or unverifiable; no automatic recreation; reset/destroy explicitly")
 			}
 		}
 		request.Operation = "allocate"
-		result, effectErr := manager.MariaDB(ctx, db, request, s.store.sharedPoint)
+		result, effectErr := sharedManager(ctx, record, db, request, s.store.sharedPoint)
 		_ = db.Close()
 		if err = s.store.sharedPoint("allocation-effect"); err != nil {
 			return err
@@ -545,7 +593,7 @@ func (s *service) ensureSharedAllocations(ctx context.Context, id string, snap p
 		if err = manager.ValidateResult(request, result); err != nil || result.Ownership != "owned" || result.Effect != "ready" {
 			return problem("allocation_uncertain", "manager did not verify a ready allocation; preserved")
 		}
-		entry.shared[name] = sharedConnection{Request: request, Network: record.Network, Alias: "shared-" + serviceID[:32], Port: record.Port}
+		entry.shared[name] = sharedConnection{Request: request, Network: record.Network, Alias: "shared-" + serviceID[:32], Port: record.Port, InternalPort: declaration.Port}
 	}
 	return nil
 }
@@ -593,8 +641,8 @@ func (s *store) releaseSharedAllocationsWithForce(ctx context.Context, id string
 		if err != nil {
 			return err
 		}
-		if force {
-			if err = s.checkSharedReleaseCollision(id, name, allocation); err != nil {
+		if force || record.Declaration.Manager == "postgresql" {
+			if err = s.checkSharedReleaseCollision(id, name, allocation, record.Declaration.Manager == "postgresql"); err != nil {
 				return err
 			}
 		}
@@ -939,4 +987,17 @@ func (s *store) sharedPendingReleases(serviceID string) (int, error) {
 		})
 	})
 	return count, err
+}
+
+func sharedServerSettings(record sharedServiceRecord) ([]string, string) {
+	if record.Declaration.Manager == "postgresql" {
+		return []string{"POSTGRES_PASSWORD=" + record.AdminPassword, "POSTGRES_DB=postgres", "PGDATA=/var/lib/postgresql/data", "POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256", "POSTGRES_HOST_AUTH_METHOD=scram-sha-256"}, "/var/lib/postgresql/data"
+	}
+	return []string{"MARIADB_ROOT_PASSWORD=" + record.AdminPassword, "MARIADB_ROOT_HOST=%"}, "/var/lib/mysql"
+}
+func sharedManager(ctx context.Context, record sharedServiceRecord, db *sql.DB, request v1.ManagerRequest, checkpoint func(string) error) (v1.ManagerResult, error) {
+	if record.Declaration.Manager == "postgresql" {
+		return manager.PostgreSQL(ctx, db, "127.0.0.1", record.Port, record.AdminPassword, request, checkpoint)
+	}
+	return manager.MariaDB(ctx, db, request, checkpoint)
 }

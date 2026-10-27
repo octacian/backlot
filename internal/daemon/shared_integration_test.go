@@ -26,17 +26,22 @@ type sharedMariaDBFixture struct {
 	h                                                  *nativeHarness
 	d                                                  *dockerEngine
 	binary, endpoint, configuration, linked, serviceID string
+	manager                                            string
+	internalPort                                       int
 	cli                                                func(...string) []byte
 	run                                                func(string, string) v1.InstanceResponse
 }
 
 func newSharedMariaDBFixture(t *testing.T, freshOnly bool, endpoints ...string) *sharedMariaDBFixture {
+	return newSharedSQLFixture(t, freshOnly, "mariadb", endpoints...)
+}
+func newSharedSQLFixture(t *testing.T, freshOnly bool, manager string, endpoints ...string) *sharedMariaDBFixture {
 	endpoint := os.Getenv("BACKLOT_DOCKER_TEST_ENDPOINT")
 	if len(endpoints) > 0 {
 		endpoint = endpoints[0]
 	}
 	if endpoint == "" {
-		t.Skip("requires explicit Docker endpoint and pre-pulled mariadb:11.4/alpine:3.21; skip is not provider evidence")
+		t.Skip("requires explicit Docker endpoint and pre-pulled SQL/alpine:3.21 images; skip is not provider evidence")
 	}
 	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	h := newNativeHarness(t, binary, "30s")
@@ -53,6 +58,18 @@ func newSharedMariaDBFixture(t *testing.T, freshOnly bool, endpoints ...string) 
 	t.Cleanup(func() {
 		h.close()
 		state, err := openStore(h.dir)
+		var sharedTargets []ownedResource
+		if err == nil {
+			services, listErr := state.sharedIDs()
+			err = errors.Join(err, listErr)
+			for _, id := range services {
+				record, readErr := state.sharedService(id)
+				err = errors.Join(err, readErr)
+				if readErr == nil {
+					sharedTargets = append(sharedTargets, record.Server, record.Network, record.Volume)
+				}
+			}
+		}
 		if err == nil {
 			err = state.recoverRuntime()
 			ids, idsErr := fixtureInstanceIDs(state)
@@ -76,6 +93,15 @@ func newSharedMariaDBFixture(t *testing.T, freshOnly bool, endpoints ...string) 
 			}
 			err = errors.Join(err, state.db.Close())
 		}
+		if err == nil {
+			for _, resource := range sharedTargets {
+				t.Log("exact owned shared cleanup target", resource.Kind, resourceHandle(resource))
+				if observed := verifyDockerResource(context.Background(), d, resource); !errdefs.IsNotFound(observed) {
+					err = errors.Join(err, errors.New("exact shared fixture target absence unverified"))
+				}
+			}
+		}
+
 		if err == nil && imageOwner != "" && buildStarted {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			err = removeSharedFixtureImages(ctx, d, imageOwner, fixtureImageIDs...)
@@ -102,16 +128,20 @@ func newSharedMariaDBFixture(t *testing.T, freshOnly bool, endpoints ...string) 
 		_ = d.Close()
 	})
 	ctx := context.Background()
-	maria, err := d.ImageInspect(ctx, "mariadb:11.4")
+	image, port := "mariadb:11.4", 3306
+	if manager == "postgresql" {
+		image, port = "postgres:17", 5432
+	}
+	maria, err := d.ImageInspect(ctx, image)
 	if err != nil {
-		t.Fatal("pre-pull mariadb:11.4 explicitly", err)
+		t.Fatal("pre-pull SQL image explicitly", err)
 	}
 	base, err := d.ImageInspect(ctx, "alpine:3.21")
 	if err != nil {
 		t.Fatal("pre-pull alpine:3.21 explicitly", err)
 	}
 	baseIDs = []string{maria.ID, base.ID}
-	t.Log("MariaDB local immutable image", maria.ID, "Alpine local immutable base", base.ID)
+	t.Log(manager, "local immutable image", maria.ID, "Alpine local immutable base", base.ID)
 	native := filepath.Join(t.TempDir(), "consumer")
 	if out, err := exec.Command("go", "build", "-o", native, "./testdata/shared-consumer").CombinedOutput(); err != nil {
 		t.Fatalf("build native consumer: %v %s", err, out)
@@ -171,7 +201,7 @@ func newSharedMariaDBFixture(t *testing.T, freshOnly bool, endpoints ...string) 
 	if err = os.WriteFile(configuration, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	env := v1.Environment{Assign: map[string]v1.Value{}}
+	env := v1.Environment{Assign: map[string]v1.Value{"DB_MANAGER": fixtureLiteral(manager)}}
 	fixtures := map[string]v1.Fixture{}
 	for _, field := range []string{"host", "port", "database", "username", "password"} {
 		value := fixtureRef("resource", "database", field)
@@ -188,7 +218,7 @@ func newSharedMariaDBFixture(t *testing.T, freshOnly bool, endpoints ...string) 
 	containerJob.Runtime = v1.Container
 	containerJob.Command = nil
 	containerJob.Image = ptrValue(fixtureLiteral(fixtureImage))
-	h.manifest = v1.Manifest{Version: v1.ManifestVersion, Project: "shared-gate-one", Tools: map[string]string{"consumer": native}, SharedServices: map[string]v1.SharedService{"sql": {Manager: "mariadb", Image: maria.ID, Storage: "volume", Admin: "generated", Port: 3306, ReadinessTimeout: "60s"}}, Resources: map[string]v1.Resource{"database": {Kind: "allocation", SharedService: "sql"}}, Components: map[string]v1.Component{"native": nativeJob, "container": containerJob}, Scenes: map[string]v1.Scene{"host": {Lifetime: v1.Persistent, Components: []string{"native"}, Resources: resources}, "bridge": {Lifetime: v1.Persistent, Components: []string{"container"}, Resources: resources}}}
+	h.manifest = v1.Manifest{Version: v1.ManifestVersion, Project: "shared-gate-one", Tools: map[string]string{"consumer": native}, SharedServices: map[string]v1.SharedService{"sql": {Manager: manager, Image: maria.ID, Storage: "volume", Admin: "generated", Port: port, ReadinessTimeout: "60s"}}, Resources: map[string]v1.Resource{"database": {Kind: "allocation", SharedService: "sql"}}, Components: map[string]v1.Component{"native": nativeJob, "container": containerJob}, Scenes: map[string]v1.Scene{"host": {Lifetime: v1.Persistent, Components: []string{"native"}, Resources: resources}, "bridge": {Lifetime: v1.Persistent, Components: []string{"container"}, Resources: resources}}}
 	h.write()
 	git(t, h.project, "init", "-q", "-b", "main")
 	git(t, h.project, "add", ".")
@@ -231,7 +261,7 @@ func newSharedMariaDBFixture(t *testing.T, freshOnly bool, endpoints ...string) 
 	if identityErr != nil {
 		t.Fatal(identityErr)
 	}
-	return &sharedMariaDBFixture{h: h, d: d, binary: binary, endpoint: endpoint, configuration: configuration, linked: linked, serviceID: hash(identity.ID + "/sql"), cli: cli, run: run}
+	return &sharedMariaDBFixture{manager: manager, internalPort: port, h: h, d: d, binary: binary, endpoint: endpoint, configuration: configuration, linked: linked, serviceID: hash(identity.ID + "/sql"), cli: cli, run: run}
 }
 
 // TestSharedMariaDBGate1 exercises real CLI consumers, isolation and lifecycle routes.

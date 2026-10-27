@@ -19,9 +19,9 @@ import (
 
 	"github.com/containerd/errdefs"
 	"github.com/go-sql-driver/mysql"
+	"github.com/lib/pq"
 	"github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
-	"github.com/octacian/backlot/internal/manager"
 )
 
 // Reuse the harness's sole Wait owner, including failure-path cleanup.
@@ -92,6 +92,12 @@ func (f *sharedMariaDBFixture) private(t *testing.T, id string) (sharedServiceRe
 func sharedSQLCounts(t *testing.T, db *sql.DB, request v1.ManagerRequest) (int, int) {
 	t.Helper()
 	var databases, users int
+	if _, postgres := db.Driver().(*pq.Driver); postgres {
+		if err := db.QueryRow("SELECT (SELECT count(*) FROM pg_database WHERE datname=$1),(SELECT count(*) FROM pg_roles WHERE rolname=$2)", request.Database, request.Username).Scan(&databases, &users); err != nil {
+			t.Fatal(err)
+		}
+		return databases, users
+	}
 	if err := db.QueryRow("SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=?", request.Database).Scan(&databases); err != nil {
 		t.Fatal("cannot observe SQL database effect", err)
 	}
@@ -141,10 +147,16 @@ func pendingSharedDestroy(t *testing.T, f *sharedMariaDBFixture, id string, shar
 	return func() error { joined = true; return <-done }
 }
 
-func TestSharedMariaDBSQLRecovery(t *testing.T) {
-	for _, point := range []string{"sql-allocate:database", "sql-allocate:user", "sql-allocate:grant", "sql-release:user", "sql-release:database", "release-effect"} {
+func TestSharedMariaDBSQLRecovery(t *testing.T)    { testSharedSQLRecovery(t, "mariadb") }
+func TestSharedPostgreSQLSQLRecovery(t *testing.T) { testSharedSQLRecovery(t, "postgresql") }
+func testSharedSQLRecovery(t *testing.T, engine string) {
+	points := []string{"sql-allocate:database", "sql-allocate:user", "sql-allocate:grant", "sql-release:user", "sql-release:database", "release-effect"}
+	if engine == "postgresql" {
+		points = []string{"sql-allocate:roles-before-commit", "sql-allocate:roles", "sql-allocate:database", "sql-allocate:grant-before-commit", "sql-allocate:grant", "sql-release:database", "sql-release:roles-before-commit", "sql-release:roles", "release-effect"}
+	}
+	for _, point := range points {
 		t.Run(point, func(t *testing.T) {
-			f := newSharedMariaDBFixture(t, true)
+			f := newSharedSQLFixture(t, true, engine)
 			ctx := context.Background()
 			peer := f.run("bridge", f.linked)
 			peerCredential := f.credential(t, peer.Instance.ID, "container")
@@ -186,12 +198,29 @@ func TestSharedMariaDBSQLRecovery(t *testing.T) {
 			if point == "sql-release:database" || point == "release-effect" {
 				wantDB, wantUser = 0, 0
 			}
+			if engine == "postgresql" {
+				wantDB, wantUser = 1, 1
+				switch point {
+				case "sql-allocate:roles-before-commit":
+					wantDB, wantUser = 0, 0
+				case "sql-allocate:roles":
+					wantDB, wantUser = 0, 1
+				case "sql-release:database", "sql-release:roles-before-commit":
+					wantDB, wantUser = 0, 1
+				case "sql-release:roles", "release-effect":
+					wantDB, wantUser = 0, 0
+				}
+				var owners int
+				if err := admin.QueryRow("SELECT count(*) FROM pg_roles WHERE rolname=$1", allocation.Request.Database).Scan(&owners); err != nil || owners != wantUser {
+					t.Fatal("ownership witness count differs", err)
+				}
+			}
 			if databases != wantDB || users != wantUser {
 				t.Fatal("checkpoint did not establish exact partial SQL effect", point, databases, users)
 			}
 			inspect := allocation.Request
 			inspect.Operation = "inspect"
-			observed, err := manager.MariaDB(ctx, admin, inspect, nil)
+			observed, err := sharedManager(ctx, record, admin, inspect, nil)
 			if err != nil {
 				t.Fatal("owned SQL effect unverifiable", err)
 			}
@@ -199,7 +228,7 @@ func TestSharedMariaDBSQLRecovery(t *testing.T) {
 			if point == "sql-allocate:grant" {
 				wantEffect = "ready"
 			}
-			if point == "sql-release:database" || point == "release-effect" {
+			if databases == 0 && users == 0 {
 				wantEffect = "released"
 			}
 			if observed.Effect != wantEffect {

@@ -613,6 +613,34 @@ per [targeted diagnostics](release-acceptance/README.md).
 Prior MariaDB evidence does not establish PostgreSQL/custom execution, other-platform,
 full-feature or published-revision CI readiness.
 
+## Shared PostgreSQL integration
+
+Use the same owned fixture rules as [shared MariaDB](#shared-mariadb-integration),
+with an explicit Docker Unix endpoint and cached `postgres:17` and `alpine:3.21`.
+Coordinate overlapping fixture windows; this requires no global engine/daemon
+ownership. Before broad provider regression, exercise the actual CLI/daemon native
+and bridge path, named-schema/trusted-extension permissions, wrong-auth/peer/admin
+denial, parent-written persistence and preserved credential-drift cleanup/retry:
+
+```sh
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^TestSharedPostgreSQLEarlyFlow$' -count=1 -v -timeout=8m
+```
+
+The complete suite covers lifecycle, permissions, interrupted SQL effects,
+bootstrap/credential drift, force/dependency fences, stalled connections and
+cancellation. The Linux runtime job pre-pulls PostgreSQL 17 and runs:
+
+```sh
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^TestSharedPostgreSQL.*$' -count=1 -v -timeout=30m
+```
+
+The early-flow check does not replace this suite, the runnable example or applicable
+repository/provider/CI gates. Follow the linked shared fixture rules for owned
+cleanup and revision-bound evidence; missing opt-in configuration supplies no
+provider evidence.
+
 ## Execution-scoped image handoff integration
 
 With the explicit private Docker fixture grant and cached `alpine:3.21`, run:

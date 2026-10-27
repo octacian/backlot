@@ -17,3 +17,16 @@ func TestSharedAllocationInitialization(t *testing.T) {
 		t.Fatal("unattached allocation initialization accepted")
 	}
 }
+
+func TestSharedManagerPorts(t *testing.T) {
+	m := v1.Manifest{Version: v1.ManifestVersion, Project: "ports", Tools: map[string]string{"true": "true"}, Components: map[string]v1.Component{"job": {Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "true"}}}, Scenes: map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"job"}}}}
+	for _, manager := range []string{"mariadb", "postgresql", "unsupported"} {
+		for _, port := range []int{3306, 5432, 0} {
+			m.SharedServices = map[string]v1.SharedService{"sql": {Manager: manager, Port: port, Image: "fixture", Storage: "volume", Admin: "generated", ReadinessTimeout: "1m"}}
+			want := (manager == "mariadb" && port == 3306) || (manager == "postgresql" && port == 5432)
+			if err := Validate(m); (err == nil) != want {
+				t.Fatal("manager/port validation mismatch", manager, port, err)
+			}
+		}
+	}
+}

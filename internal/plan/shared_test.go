@@ -10,9 +10,21 @@ import (
 )
 
 func TestSharedSelectionAndSecrets(t *testing.T) {
+	for _, postgres := range []bool{false, true} {
+		t.Run(map[bool]string{false: "mariadb", true: "postgresql"}[postgres], func(t *testing.T) { testSharedSelectionAndSecrets(t, postgres) })
+	}
+}
+func testSharedSelectionAndSecrets(t *testing.T, postgres bool) {
 	noDefaultConfig(t)
 	root := t.TempDir()
 	m := v1.Manifest{Version: v1.ManifestVersion, Project: "shared", Tools: map[string]string{"true": "true"}, SharedServices: map[string]v1.SharedService{"sql": {Manager: "mariadb", Image: "mariadb:11.4", Storage: "volume", Admin: "generated", Port: 3306, ReadinessTimeout: "1m"}}, Resources: map[string]v1.Resource{"data": {Kind: "allocation", SharedService: "sql"}}, Components: map[string]v1.Component{}, Scenes: map[string]v1.Scene{}}
+	if postgres {
+		shared := m.SharedServices["sql"]
+		shared.Manager = "postgresql"
+		shared.Port = 5432
+		shared.Image = "postgres:17"
+		m.SharedServices["sql"] = shared
+	}
 	m.Components["selected"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "true"}, Resources: []string{"data"}, Environment: v1.Environment{Assign: map[string]v1.Value{}}}
 	c := m.Components["selected"]
 	for _, field := range []string{"host", "port", "database", "username", "password"} {

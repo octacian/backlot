@@ -1,44 +1,62 @@
 # Preparing a release
 
-Follow the [release decision](adr/20261023T212448687Z-publish-immutable-versioned-releases-with-goreleaser.md)
-and [packaging checks](testing.md#release-packaging-and-publication). Current
-automation accepts only canonical stable `v0.x.y` tags, without leading zeros,
-prerelease identifiers or build suffixes. It rejects `v1.x.y`; changing that policy
-requires a reviewed change before tagging.
+Follow the [release decision](adr/20261026T020229927Z-reuse-exact-main-ci-and-prepare-verified-release-drafts.md)
+and [packaging checks](testing.md#release-packaging-and-publication).
 
-1. Finalize `docs/releases/<tag>.md` in the feature PR that introduces the release,
-   or a preparation PR when needed. Describe changes, supported targets,
-   compatibility and upgrade steps, known limitations, and revision-bound evidence
-   where available. Link the exact tag's installation guide and schemas. Remove
-   preparation-only instructions before review; do not claim publication or
-   evidence that does not yet exist.
-2. Review the candidate and require applicable PR CI to pass. Select additional
-   manual testing only for changed guarantees whose risks lack CI coverage;
-   record failures, skips and limits honestly. See [targeted diagnostics](release-acceptance/README.md).
-3. Squash-merge the reviewed PR, wait for applicable required CI on the resulting
-   `main` squash commit, then approve that exact full SHA for release. Notes
-   finalized in the feature PR need no separate preparation PR. Do not tag a local
-   candidate or an unreviewed follow-up. From the clean approved checkout, create
-   and push an annotated tag at that SHA (substitute the approved tag and full commit):
+1. Review the candidate and require applicable PR CI to pass. Keep compatibility
+   and migration instructions in durable repository docs such as
+   [operations and upgrades](operations.md) and [state compatibility](containers.md#state-compatibility).
+   Select [targeted diagnostics](release-acceptance/README.md) for changed guarantees
+   lacking CI coverage; record failures, skips and limits. Per-version checked-in
+   notes are no longer required; retain historical notes.
+2. Squash-merge and wait for all five workflows on the resulting exact full `main`
+   SHA. Each workflow's newest main-push run and latest attempt must succeed:
+
+   | Workflow | Path under `.github/workflows/` |
+   | --- | --- |
+   | Check | `check.yml` |
+   | Docs | `docs.yml` |
+   | Application scenes | `scenes.yml` |
+   | Current-head project inputs | `project-inputs.yml` |
+   | Release archives | `release.yml` |
+
+   Legitimate job-level path skips within successful workflows are allowed.
+   Missing, unknown, pending, failed, cancelled or skipped workflow evidence blocks
+   drafting; PR, manual and other-SHA runs do not qualify.
+3. Approve that exact main commit. From its clean checkout, create and push an
+   annotated canonical stable `v0.x.y` tag (no leading zeros, prerelease or build
+   suffix; `v1.x.y` requires a policy change). Substitute the approved tag and SHA:
 
    ```sh
-   git tag -a v0.1.0 <approved-main-commit> -m 'Backlot v0.1.0'
-   git push origin refs/tags/v0.1.0
+   git tag -a v0.1.1 <approved-main-commit> -m 'Backlot v0.1.1'
+   git push origin refs/tags/v0.1.1
    ```
 
-The [release workflow](../.github/workflows/release.yml) checks that event, local
-and remote tag resolve to the same commit, runs fresh `make check` on macOS ARM64
-and Ubuntu amd64, and builds both GoReleaser archives without publishing. It checks
-the exact archives' checksums, contents, identity, embedded attribution and private
-native daemon smoke on both targets. Only after all gates pass does the write-enabled
-job create, upload, verify and publish a complete draft using the reviewed notes.
-It does not rebuild after smoke, create/move tags or replace assets. PR/main runs
-package and smoke without publishing; they do not create a release.
+   Preserve the existing `v0.1.0` tag. Rerunning it uses its old workflow definition;
+   the fixes require newly merged source and a new tag.
+4. Wait for the [release workflow](../.github/workflows/release.yml) to verify tag
+   identity and main CI, freshly package and smoke both native archives, recheck
+   main CI, then upload and verify an unpublished draft. See the
+   [packaging checks](testing.md#release-packaging-and-publication) for coverage.
+5. Inspect the successful workflow and curate the draft's generated notes: changes,
+   targets, compatibility/migration links, known issues and evidence limits. Check
+   its tagged installation/upgrade, migration and schema links. GitHub uses the
+   ordinary previous-release baseline; the first actual release may include earlier
+   unreleased work. Confirm the mutable draft still contains the verified assets,
+   then explicitly publish in GitHub. CI is checked at drafting time, not continuously.
+   Verify public `go install github.com/octacian/backlot/cmd/backlot@<tag>` after
+   publication.
 
-An existing release (including a draft) or a failed API lookup aborts publication.
-A failed upload can leave an unpublished draft: inspect it manually and explicitly
+## Recovery
+
+If preflight or the pre-draft recheck blocks, inspect its workflow/run/attempt
+message, complete or rerun main CI for that SHA, then rerun the tag workflow.
+API errors and incomplete evidence fail closed; restore API access or resolve the
+missing evidence before retrying.
+
+An existing release, including a draft, aborts drafting. A failed upload or
+verification may leave an unpublished partial draft: inspect it and explicitly
 discard only that failed unpublished draft before retrying the unchanged tag.
-Published tags/assets are immutable; corrections require a new patch version.
-Verify public `go install github.com/octacian/backlot/cmd/backlot@<tag>` only after
-actual publication. Optional repository tag/release protections are separate
-operator decisions.
+Never delete a published release for recovery. Published tags/assets are immutable;
+corrections require a new patch version. Optional repository tag/release protections
+remain separate operator decisions.

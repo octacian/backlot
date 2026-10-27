@@ -134,23 +134,24 @@ or preserve diagnostic state and report residuals.
 
 ## Release packaging and publication
 
-[The release decision](adr/20261023T212448687Z-publish-immutable-versioned-releases-with-goreleaser.md)
-defines policy. Pinned GoReleaser OSS v2.19.0 owns target builds, deterministic
-archives and SHA-256 files. Make installs it under `.tools/bin`; its source build
-may download its required Go toolchain (currently Go 1.27.3), while Backlot builds
-continue using `go.mod`'s toolchain. GoReleaser configuration validation and the
-existing notice drift check run before packaging. Snapshot names start `dev-` and
-can include working changes; retain the dirty patch with evidence.
+Follow [Preparing a release](preparing-a-release.md) for release policy, CI
+readiness, note curation, manual publication and failed-draft recovery.
+
+Pinned GoReleaser OSS v2.19.0 owns target builds, deterministic archives and SHA-256
+files. Make installs it under `.tools/bin`; its source build may download its
+required Go toolchain (currently Go 1.27.3), while Backlot builds use `go.mod`'s
+toolchain. Configuration validation and notice drift checks precede packaging.
+Snapshot names start `dev-` and can include working changes; retain the dirty patch
+with evidence.
 
 The [Release archives workflow](../.github/workflows/release.yml) validates relevant
 PR/main changes without publication permission. It extracts the exact archives on
-macOS ARM64 and Ubuntu amd64, checks file lists/checksums/version and
-self-contained `licenses` output, then invokes the existing `TestInstalledBinary`
-native harness for private daemon startup, restart,
-startup failure and cleanup. Set `BACKLOT_INSTALLED_TEST_BINARY` to an absolute
-extracted binary to run that same fixture locally or on actual Debian; this is
-not evidence of the broader HTTPS/runtime gates. Only the final tag job receives
-`contents: write`; no fork PR receives release credentials.
+macOS ARM64 and Ubuntu amd64, checks file lists, checksums, version and standalone
+`licenses` output, then invokes `TestInstalledBinary` for private daemon startup,
+restart, startup failure and cleanup. Set `BACKLOT_INSTALLED_TEST_BINARY` to an
+absolute extracted binary to run that fixture locally or on actual Debian; it
+does not establish broader HTTPS/runtime coverage. Only the final draft job
+receives `contents: write`; fork PRs receive no release credentials.
 
 For reproducibility, prepare independent source trees and build caches at the
 same revision/dirty patch with the same Go/GoReleaser versions, run
@@ -158,13 +159,15 @@ same revision/dirty patch with the same Go/GoReleaser versions, run
 `cmp`, and inspect `go version -m` and extracted file modes. Real-tag packaging
 uses source commit time and normalized archive ownership/modes/time, not wall clock.
 Metadata unit checks cover Go-install module fallback and linked/local identity;
-publication guard tests cover invalid tags, existing draft refusal and lookup
-failure using read-only boundary stubs. They do not simulate or prove publication.
+release guard tests cover trusted exact-SHA main evidence, newest runs/latest
+attempts, pagination, invalid tags, existing draft refusal, upload verification
+and draft-only behavior using local boundary stubs. Workflow predicate fixtures
+exercise skipped-ancestor eligibility and required failure/cancellation paths;
+they do not prove live GitHub scheduling or publication.
 
-Follow [Preparing a release](preparing-a-release.md) for CI-led readiness, reviewed
-notes, tag publication and failed-draft recovery. The opt-in suites below provide
-[targeted diagnostics](release-acceptance/README.md) for risks lacking CI coverage.
-Report selected checks' actual coverage and limits without treating skips as passes.
+The opt-in suites below provide [targeted diagnostics](release-acceptance/README.md)
+for risks lacking CI coverage. Report actual coverage and limits without treating
+skips as passes.
 
 ## Daemon state migrations
 

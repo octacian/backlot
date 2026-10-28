@@ -1,6 +1,6 @@
 # Install and operate Backlot
 
-For macOS/Linux targets, prerequisites, WSL guidance and planned Windows work,
+For macOS/Linux targets, prerequisites, WSL guidance and platform exclusions,
 see [platforms](platforms.md). Install Go 1.27.1 or a compatible newer patch, Git
 for worktrees, and `lsof` (included with macOS); Make is needed only for source
 builds. Native commands must stay in their supervised process group.

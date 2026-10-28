@@ -81,8 +81,8 @@ and the [dependency policy](contributing.md) for contributor expectations.
 
 Platform-specific supervision and socket operations remain separate from domain
 code. The [platform policy](platforms.md) defines current targets and evidence
-limits; planned native Windows work belongs to epic #34 and the
-[Windows design](windows-design.md).
+limits. Native Windows releases and runtime support are outside project scope;
+the [Windows design](windows-design.md) is retained as historical reference.
 
 ## Configuration and routing
 

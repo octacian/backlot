@@ -1,8 +1,8 @@
 # Local daemon and execution
 
-The Windows equivalent is the [accepted design for #37](windows-design.md#windows-owned-runtime-37),
-not an implemented daemon. Unix permissions, signals and socket commands below
-describe the existing macOS/Linux boundary.
+Native Windows daemons and execution are outside project scope; see the
+[platform policy](platforms.md). Unix permissions, signals and socket commands
+below describe the existing macOS/Linux boundary.
 
 The local daemon owns execution, resource lifecycle and durable metadata.
 `prepared` means a validated snapshot was recorded. It never means an application

@@ -1,8 +1,8 @@
 # Containers and retained private state
 
-Windows Docker Desktop Linux-container integration is planned in #38; see the
-[Windows handoff](windows-design.md#docker-desktop-and-managed-https-design-38).
-Named-pipe endpoints and Windows mount identities are not implemented here.
+Native Windows Docker Desktop integration is outside project scope; see the
+[platform policy](platforms.md). Named-pipe endpoints and Windows mount identities
+are not implemented here.
 
 Backlot runs generic containers through the official Docker Go client alongside
 native commands, with private volumes, directories, secrets and networks,

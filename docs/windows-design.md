@@ -1,5 +1,17 @@
 # Native Windows architecture and implementation handoff
 
+Archived on 2026-10-28: native Windows releases and runtime support are outside
+project scope. Both Windows ADRs linked below are deprecated because demand does
+not justify ongoing platform maintenance and verification alongside macOS/Linux.
+The remaining implementation work in #34/#37/#38 is cancelled, not delivered.
+This document preserves the original design, links and acceptance anchors for
+historical reference; its requirements are inactive. See the current
+[platform policy](platforms.md), including WSL configuration guidance without a
+support guarantee. Revisit only with demonstrated demand and maintainer capacity
+for ongoing native Windows testing.
+
+## Historical design
+
 This is the accepted architecture and documentation-only design for [#36](https://github.com/octacian/backlot/issues/36),
 under the independent [Windows epic #34](https://github.com/octacian/backlot/issues/34).
 Windows is planned, **not supported or runtime-verified by this change**.

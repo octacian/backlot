@@ -1,14 +1,24 @@
 ---
 title: 'Use Windows job-object supervision and managed HTTPS'
 date: '2026-10-18'
-status: accepted
-summary: 'Use retained Windows job-object authority and explicit Docker Desktop and Caddy integration while requiring native runtime and desktop adoption evidence before support.'
+status: deprecated
+summary: 'Deprecate the unimplemented native Windows design because demand does not justify its platform maintenance and verification cost.'
 tags: [windows, lifecycle, ownership, docker, https, trust]
 supersedes: []
 superseded_by: []
 ---
 
 # Use Windows job-object supervision and managed HTTPS
+
+Deprecated on 2026-10-28: native Windows releases and runtime support are outside
+project scope. Maintainer-assessed demand does not justify the separate IPC,
+filesystem, supervision, provider and desktop verification work alongside macOS
+and Linux. No native Windows support shipped. The original decision below is
+retained as history, not implementation guidance; see the current
+[platform policy](../platforms.md). Reconsider only with demonstrated demand and
+maintainer capacity for implementation and ongoing native Windows testing.
+
+## Historical overview
 
 Use an outside guardian holding a private unnamed Windows job object, with
 authenticated durable control and bounded cleanup, plus explicit local Docker

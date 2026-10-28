@@ -1,14 +1,24 @@
 ---
 title: 'Use Windows private IPC and filesystem identity'
 date: '2026-10-18'
-status: accepted
-summary: 'Use local named pipes, explicit Windows ACLs and handle-derived filesystem identity to preserve the existing per-user daemon boundary on Windows.'
+status: deprecated
+summary: 'Deprecate the unimplemented native Windows design because demand does not justify its platform maintenance and verification cost.'
 tags: [windows, ipc, privacy, identity, platforms]
 supersedes: []
 superseded_by: []
 ---
 
 # Use Windows private IPC and filesystem identity
+
+Deprecated on 2026-10-28: native Windows releases and runtime support are outside
+project scope. Maintainer-assessed demand does not justify the separate IPC,
+filesystem, supervision, provider and desktop verification work alongside macOS
+and Linux. No native Windows support shipped. The original decision below is
+retained as history, not implementation guidance; see the current
+[platform policy](../platforms.md). Reconsider only with demonstrated demand and
+maintainer capacity for implementation and ongoing native Windows testing.
+
+## Historical overview
 
 Use a Windows-only named-pipe transport and handle-based privacy/identity
 adapter, preserving the shared typed HTTP/JSON API and macOS/Linux contracts.

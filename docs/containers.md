@@ -211,9 +211,7 @@ defines contributor provider checks; a local check is not full platform acceptan
 
 ## Project-scoped shared services
 
-Shared MariaDB and PostgreSQL servers retain independent instance allocations. See the
-[implementation plan](implementation-plan.md#shared-services-issue-43) for delivery
-status and custom execution follow-ups.
+Shared MariaDB and PostgreSQL servers retain independent instance allocations.
 
 Declare `shared_services` and select `kind: allocation` resources per the
 [manifest guide](manifest.md#shared-service-declarations); follow the runnable

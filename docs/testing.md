@@ -47,10 +47,10 @@ Run these from the repository root:
 | `make check-docs` | Run ADR tooling tests and verify ADR records |
 | `make check` | Run both implementation and documentation checks |
 
-Before committing scaffold or Go/tooling changes, run `make check`. Documentation
-changes require ADR verification when records change and manual checking of
-links, commands, and consistency with the product contract. Run additional
-focused checks when changed behavior warrants them; do not add tests that merely
+Before committing Go/tooling changes, run `make check`. Documentation changes
+require `make check-docs`, `git diff --check`, and manual checking of links,
+commands, and consistency with current behavior and applicable decisions. Run
+additional focused checks when changed behavior warrants them; do not add tests that merely
 duplicate implementation details.
 
 ## CI and platform evidence
@@ -111,10 +111,10 @@ shutdown, owned-child crashes and intent/effect recovery. See the
 [daemon guide](daemon.md). Native integration tests additionally build the real CLI, launch private fixture
 daemons and native descendants, and exercise readiness, cancellation, retained
 logs, leases, compatible restart and crash/uncertain-ownership recovery. They do
-not demonstrate Docker integration, HTTPS publication, or all V1 workflows.
-The [implementation plan](implementation-plan.md) defines those later acceptance
-checks. Runtime integration tests must use owned resources and must never modify
-an operator's unrelated containers, routes, files, or databases.
+not demonstrate Docker integration or HTTPS publication; select the relevant
+provider suites below for those boundaries. Runtime integration tests must use
+owned resources and must never modify an operator's unrelated containers, routes,
+files, or databases.
 
 The race gate disables Go test result caching with `-count=1`. Native integration
 builds and executes a separate CLI/guardian binary; changes to that subprocess's
@@ -233,7 +233,7 @@ prove Docker integration. When selecting this diagnostic, retain the tested
 revision, relevant inputs, failures/skips and cleanup as described in the
 [diagnostic guide](release-acceptance/README.md).
 
-Focused milestone 6 provider coverage (run serially with the same resource grant):
+Focused disposable provider coverage (run serially with the same resource grant):
 
 ```sh
 BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \

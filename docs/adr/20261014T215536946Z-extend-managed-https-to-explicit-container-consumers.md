@@ -118,6 +118,6 @@ different public-certificate delivery contract.
 - [HTTPS operation and explicit trust](../https.md)
 - [Container ownership and recovery](../containers.md)
 - [Manifest contracts](../manifest.md)
-- [PRD networking](../prd.md#networking-and-https)
+- [PRD networking](https://github.com/octacian/backlot/blob/c524670fc27ba76d4329ade36966d18fbd40105e/docs/prd.md#networking-and-https)
 - [Docker add-host token](https://docs.docker.com/reference/cli/docker/container/run/#add-entries-to-container-hosts-file---add-host)
 - [Engine host-gateway address semantics](https://docs.docker.com/reference/cli/dockerd/#configure-host-gateway-ip)

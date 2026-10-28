@@ -424,8 +424,7 @@ or change HOME/XDG or application pass-through. `version --json` reports
 ## Shared-service declarations
 
 Declare a bundled MariaDB or PostgreSQL service with an already-present local Engine
-image; prefer an immutable digest for reviewed configuration. See
-[current engine scope](implementation-plan.md#shared-services-issue-43).
+image; prefer an immutable digest for reviewed configuration.
 
 ```yaml
 shared_services:

@@ -120,7 +120,7 @@ Revisit version negotiation when actual daemon transport is implemented.
 - [Shared manifest contracts](../../api/v1/manifest.go)
 - [Planning contracts](../../api/v1/plan.go)
 - [Architecture](../architecture.md)
-- [PRD](../prd.md)
+- [PRD](https://github.com/octacian/backlot/blob/c524670fc27ba76d4329ade36966d18fbd40105e/docs/prd.md)
 - [Accepted generic containers and environment decision](20261007T052013841Z-declare-generic-containers-and-inject-configuration-through-environment.md)
 - [Accepted lifetimes and daemon execution decision](20261007T052013565Z-use-explicit-scene-lifetimes-and-daemon-owned-execution.md)
 - [YAML upstream repository and version intentions](https://github.com/yaml/go-yaml)

@@ -18,8 +18,10 @@ storage implementation. Add dependencies when used, not in anticipation of work.
 
 Plan meaningful work in reviewable steps and name affected packages. Exercise
 failure behavior as well as success. Report the resulting behavior, validation,
-remaining work, and material uncertainty. Do not present scaffold commands or
-mocked integration checks as a working runtime.
+remaining work, and material uncertainty. Track planned work in issues/epics and
+applicable proposed ADRs; current guides describe implemented behavior. Keep
+execution evidence in PRs and rationale in ADRs. Do not present mocked integration
+checks as a working runtime.
 
 Document a rule once in its relevant guide. Keep ADR rationale in the ADR and
 reference it elsewhere. Treat generated files as outputs: change the source and

@@ -18,10 +18,10 @@ Before planning or editing, read:
 
 | Task | Read |
 | --- | --- |
-| Product or runtime implementation | Relevant sections of the [V1 PRD](prd.md) and [architecture](architecture.md), applicable [ADRs](adr/README.md), and relevant integration sections in [Testing and tooling](testing.md) |
+| Product or runtime implementation | Relevant current guides and [architecture](architecture.md), applicable [ADRs](adr/README.md), and relevant integration sections in [Testing and tooling](testing.md) |
 | CLI or API contracts | [Architecture: shared API](architecture.md#shared-api), [Go practices](go-practices.md) |
 | Commits and pull requests | [Git workflow](git-workflow.md) |
-| Delivery scope or status | [Implementation plan](implementation-plan.md) and linked issues/PRs |
+| Delivery scope or status | Relevant issues/epics for scope and status; PRs for execution evidence |
 | ADR creation or changes | [ADR guide](adr/README.md), [template](adr/template.md) |
 
 ## Guides

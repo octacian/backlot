@@ -20,7 +20,7 @@ Checkouts isolate source but applications still collide through ports, origins, 
 
 Key persistent instances by project, distinct checkout/worktree identity, and scene. Give each disposable run a fresh identity. Stop preserves persistent data; reset replaces mutable resources; destroy removes owned runtime/data. Record fresh-only initialization separately from each-start jobs.
 
-Use explicit restart without automatic retry or Backlot watching. Graceful daemon shutdown interrupts work. Crash recovery stops verifiably owned survivors, preserves uncertain resources, and requires explicit restart. All four PRD workflows are release requirements using generic fixtures.
+Use explicit restart without automatic retry or Backlot watching. Graceful daemon shutdown interrupts work. Crash recovery stops verifiably owned survivors, preserves uncertain resources, and requires explicit restart. All four [PRD workflows](https://github.com/octacian/backlot/blob/c524670fc27ba76d4329ade36966d18fbd40105e/docs/prd.md#v1-boundary) are release requirements using generic fixtures.
 
 ## Consequences
 
@@ -36,5 +36,5 @@ A concrete need for seamless daemon upgrades or continuous previews may justify 
 
 ## References
 
-- [V1 PRD](../prd.md)
-- [Implementation plan](../implementation-plan.md)
+- [V1 PRD](https://github.com/octacian/backlot/blob/c524670fc27ba76d4329ade36966d18fbd40105e/docs/prd.md)
+- [Implementation plan](https://github.com/octacian/backlot/blob/c524670fc27ba76d4329ade36966d18fbd40105e/docs/implementation-plan.md)

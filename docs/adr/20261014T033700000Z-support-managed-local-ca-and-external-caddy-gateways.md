@@ -102,7 +102,7 @@ mechanisms or adopting applications require a broader supported configuration.
 ## References
 
 - [HTTPS operation and trust](../https.md)
-- [PRD networking](../prd.md#networking-and-https)
+- [PRD networking](https://github.com/octacian/backlot/blob/c524670fc27ba76d4329ade36966d18fbd40105e/docs/prd.md#networking-and-https)
 - [Native supervision](20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md)
 - [Caddy local HTTPS](https://caddyserver.com/docs/automatic-https#local-https)
 - [Caddy trust and resume](https://caddyserver.com/docs/command-line)

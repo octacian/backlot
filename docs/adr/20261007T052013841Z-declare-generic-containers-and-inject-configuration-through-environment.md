@@ -36,5 +36,5 @@ Revisit database resources for managed shared servers and Compose/CI reuse when 
 
 ## References
 
-- [Configuration contract](../prd.md#manifest-and-configuration)
-- [Networking contract](../prd.md#networking-and-https)
+- [Configuration contract](https://github.com/octacian/backlot/blob/c524670fc27ba76d4329ade36966d18fbd40105e/docs/prd.md#manifest-and-configuration)
+- [Networking contract](https://github.com/octacian/backlot/blob/c524670fc27ba76d4329ade36966d18fbd40105e/docs/prd.md#networking-and-https)

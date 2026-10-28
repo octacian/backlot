@@ -57,10 +57,7 @@ duplicate implementation details.
 
 GitHub Actions runs shared checks on macOS ARM64 and Ubuntu 24.04 amd64. A separate
 Ubuntu runtime job installs a reproducible Linux binary and runs real native,
-Docker, Caddy and disposable-browser gates. Native Windows is outside project
-scope: Windows cross-build CI is removed and native Windows runtime CI is not
-planned. The [archived Windows acceptance matrix](windows-design.md#epic-acceptance-and-evidence-matrix)
-is historical reference, not a current CI or release requirement.
+Docker, Caddy and disposable-browser gates.
 Debian actual-host results are distinct from Ubuntu CI; routine releases do not
 require a new Debian run. WSL is configuration guidance only. See [platform policy](platforms.md).
 Workflows start on every PR and push to `main` (the independent consumer

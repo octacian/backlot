@@ -1,9 +1,5 @@
 # Local daemon and execution
 
-Native Windows daemons and execution are outside project scope; see the
-[platform policy](platforms.md). Unix permissions, signals and socket commands
-below describe the existing macOS/Linux boundary.
-
 The local daemon owns execution, resource lifecycle and durable metadata.
 `prepared` means a validated snapshot was recorded. It never means an application
 was executed, a resource was reserved, or readiness was observed. Native execution

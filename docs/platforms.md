@@ -10,7 +10,7 @@ the tested revision, dependency versions, failures/skips and cleanup; a target i
 this policy is not evidence that an untested release passed. Other distributions,
 architectures, rootless/remote engines and alternative container runtimes are
 experimental. Native Windows releases and runtime support are outside project
-scope; the [Windows design](windows-design.md) is archived and its ADRs deprecated.
+scope.
 WSL guidance below is configuration guidance only, with no WSL QA or support guarantee.
 
 macOS and Linux use permissioned Unix sockets and authenticated guardians.
@@ -111,8 +111,6 @@ which current Chromium still honors when it exists.
 Run the Linux binary inside WSL2, preferably with the checkout, executable and
 private state on the distribution's Linux filesystem (`~/...`), rather than
 `/mnt/c`: Unix permissions, sockets and filesystem identity are part of the contract.
-This WSL guidance does not cover native Windows binaries, a Windows daemon or
-Windows process supervision, which are outside project scope.
 WSL has not been QA'd by this feature.
 
 Choose and configure the Docker endpoint explicitly. A Docker Desktop integration

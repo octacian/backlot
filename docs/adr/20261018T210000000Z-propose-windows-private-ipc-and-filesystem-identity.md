@@ -24,7 +24,7 @@ Use a Windows-only named-pipe transport and handle-based privacy/identity
 adapter, preserving the shared typed HTTP/JSON API and macOS/Linux contracts.
 Accepted on 2026-10-18 following maintainer review of the Windows design.
 Implementation and runtime evidence remain required in #37; this decision does not
-claim shipped support. The [Windows handoff](../windows-design.md) specifies the
+claim shipped support. The [Windows handoff](https://github.com/octacian/backlot/blob/6177c64f60654657a914857edbffb69b8316a41b/docs/windows-design.md) specifies the
 implementation and evidence matrix. This Windows-only extension leaves the
 accepted API and Linux decisions in force for macOS/Linux and does not supersede them.
 
@@ -82,7 +82,7 @@ requirements change. Resolve product consequences before dependent implementatio
 
 ## References
 
-- [Windows implementation and acceptance handoff](../windows-design.md)
+- [Windows implementation and acceptance handoff](https://github.com/octacian/backlot/blob/6177c64f60654657a914857edbffb69b8316a41b/docs/windows-design.md)
 - [Accepted typed local API](20261007T052013961Z-use-go-with-a-shared-typed-local-api-and-urfave-cli.md)
 - [Accepted Linux platform boundary](20261016T201500000Z-support-explicit-linux-managed-https-reachability.md)
 - [Microsoft named-pipe rights and default ACL caveats](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)

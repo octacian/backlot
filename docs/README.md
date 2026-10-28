@@ -37,7 +37,6 @@ Before planning or editing, read:
 | Gateway setup, publication and application trust | [HTTPS](https.md) |
 | Exits, logs, artifacts, fixtures and retention | [Results and evidence](evidence.md) |
 | macOS/Linux targets and WSL configuration | [Platforms](platforms.md) |
-| Archived native Windows plans (outside project scope) | [Historical design and acceptance](windows-design.md) |
 | GitHub Actions and Chromium scenes | [CI quickstart](ci.md), [Ubuntu example](../examples/ci-scenes/README.md) |
 | Small native test recipes | [Playwright over loopback HTTP](../examples/native-playwright/README.md), [Go tests with MariaDB](../examples/native-go-mariadb/README.md) |
 | Preparing a release | [Release procedure](preparing-a-release.md) |

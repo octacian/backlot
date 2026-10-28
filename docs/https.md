@@ -1,8 +1,5 @@
 # Published HTTPS and mixed execution
 
-Native Windows stock-Caddy/Edge/native/container HTTPS is outside project scope.
-See the [platform policy](platforms.md) for current targets and WSL guidance.
-
 Backlot supports an explicit daemon-managed native local-CA gateway and an
 externally managed Caddy JSON API. Omitted `caddy.mode` retains external mode.
 Only published scenes require a gateway; other scenes and metadata-only `prepare`

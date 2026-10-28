@@ -1,9 +1,5 @@
 # Containers and retained private state
 
-Native Windows Docker Desktop integration is outside project scope; see the
-[platform policy](platforms.md). Named-pipe endpoints and Windows mount identities
-are not implemented here.
-
 Backlot runs generic containers through the official Docker Go client alongside
 native commands, with private volumes, directories, secrets and networks,
 fresh-only initialization, retained restart, reset and destroy. Metadata `prepare`

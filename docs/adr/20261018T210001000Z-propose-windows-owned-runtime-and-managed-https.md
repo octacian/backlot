@@ -23,7 +23,7 @@ maintainer capacity for implementation and ongoing native Windows testing.
 Use an outside guardian holding a private unnamed Windows job object, with
 authenticated durable control and bounded cleanup, plus explicit local Docker
 Desktop Linux-container and native stock Caddy integration. The
-[Windows handoff](../windows-design.md) defines concrete rules and validation for
+[Windows handoff](https://github.com/octacian/backlot/blob/6177c64f60654657a914857edbffb69b8316a41b/docs/windows-design.md) defines concrete rules and validation for
 #37/#38. Accepted on 2026-10-18 following maintainer review of the Windows design.
 This Windows-only extension does not supersede the accepted cooperative Unix
 supervision or Linux HTTPS decisions. Windows execution remains unimplemented
@@ -62,7 +62,7 @@ without retained authority, name the possible suspended unassigned residual,
 quarantine the journal/state, block conflicting restart and report cleanup failure.
 No failed create, guardian exit or closed port proves absence.
 
-Require the [deterministic startup fault gates](../windows-design.md#deterministic-startup-fault-acceptance-37):
+Require the [deterministic startup fault gates](https://github.com/octacian/backlot/blob/6177c64f60654657a914857edbffb69b8316a41b/docs/windows-design.md#deterministic-startup-fault-acceptance-37):
 a reproduction-only two-step fixture crashes after creation/before assignment and
 exposes the surviving root; the creation-time adapter crashes after association/before
 resume and must demonstrate bounded root termination without activation. Before
@@ -139,7 +139,7 @@ decisions before dependent changes.
 
 ## References
 
-- [Windows implementation and acceptance handoff](../windows-design.md)
+- [Windows implementation and acceptance handoff](https://github.com/octacian/backlot/blob/6177c64f60654657a914857edbffb69b8316a41b/docs/windows-design.md)
 - [Accepted native supervision](20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md)
 - [Accepted lifecycle](20261007T052013565Z-use-explicit-scene-lifetimes-and-daemon-owned-execution.md)
 - [Accepted HTTPS boundary and retained decisions](20261016T201500000Z-support-explicit-linux-managed-https-reachability.md)

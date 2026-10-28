@@ -1,8 +1,8 @@
 ---
 title: 'Use Windows private IPC and filesystem identity'
 date: '2026-10-18'
-status: accepted
-summary: 'Use local named pipes, explicit Windows ACLs and handle-derived filesystem identity to preserve the existing per-user daemon boundary on Windows.'
+status: deprecated
+summary: 'Deprecate the unimplemented native Windows design because demand does not justify its platform maintenance and verification cost.'
 tags: [windows, ipc, privacy, identity, platforms]
 supersedes: []
 superseded_by: []
@@ -10,11 +10,21 @@ superseded_by: []
 
 # Use Windows private IPC and filesystem identity
 
+Deprecated on 2026-10-28: native Windows releases and runtime support are outside
+project scope. Maintainer-assessed demand does not justify the separate IPC,
+filesystem, supervision, provider and desktop verification work alongside macOS
+and Linux. No native Windows support shipped. The original decision below is
+retained as history, not implementation guidance; see the current
+[platform policy](../platforms.md). Reconsider only with demonstrated demand and
+maintainer capacity for implementation and ongoing native Windows testing.
+
+## Historical overview
+
 Use a Windows-only named-pipe transport and handle-based privacy/identity
 adapter, preserving the shared typed HTTP/JSON API and macOS/Linux contracts.
 Accepted on 2026-10-18 following maintainer review of the Windows design.
 Implementation and runtime evidence remain required in #37; this decision does not
-claim shipped support. The [Windows handoff](../windows-design.md) specifies the
+claim shipped support. The [Windows handoff](https://github.com/octacian/backlot/blob/6177c64f60654657a914857edbffb69b8316a41b/docs/windows-design.md) specifies the
 implementation and evidence matrix. This Windows-only extension leaves the
 accepted API and Linux decisions in force for macOS/Linux and does not supersede them.
 
@@ -72,7 +82,7 @@ requirements change. Resolve product consequences before dependent implementatio
 
 ## References
 
-- [Windows implementation and acceptance handoff](../windows-design.md)
+- [Windows implementation and acceptance handoff](https://github.com/octacian/backlot/blob/6177c64f60654657a914857edbffb69b8316a41b/docs/windows-design.md)
 - [Accepted typed local API](20261007T052013961Z-use-go-with-a-shared-typed-local-api-and-urfave-cli.md)
 - [Accepted Linux platform boundary](20261016T201500000Z-support-explicit-linux-managed-https-reachability.md)
 - [Microsoft named-pipe rights and default ACL caveats](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)

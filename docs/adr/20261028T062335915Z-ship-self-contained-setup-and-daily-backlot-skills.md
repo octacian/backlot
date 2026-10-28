@@ -1,0 +1,187 @@
+---
+title: 'Ship self-contained setup and daily Backlot skills'
+date: '2026-10-28'
+status: accepted
+summary: 'Distribute two procedural skills with generated local references and explicit executable compatibility checks so adopter agents can use Backlot without its source checkout.'
+tags: [skills, documentation, packaging, compatibility, agents]
+supersedes: []
+superseded_by: []
+---
+
+# Ship self-contained setup and daily Backlot skills
+
+Ship `skills/backlot-setup` for adopting Backlot and `skills/backlot` for operating
+an existing configured project. Each installs independently with its own generated
+references, schemas and examples. Compose the existing CLI; add no runtime, API,
+UI, orchestration wrapper or automatic installer/update behavior.
+
+Accepted after independent ADR review and coordinator acceptance on 2026-10-28.
+The owner approved development builds with capability/help checks and user-managed
+skill refreshes.
+
+## Context
+
+[Issue 59](https://github.com/octacian/backlot/issues/59) requires useful procedures
+in adopter projects without a Backlot checkout. Canonical documentation already
+explains configuration, lifecycle and evidence; copying and maintaining another
+manual would create drift. The owner approved two distinct skills, generated
+supporting material, selective project/global installation, compatibility checks
+and realistic evaluations while preserving existing authority and disclosure rules.
+
+The current [Agent Skills specification](https://agentskills.io/specification)
+requires named skill directories and YAML-frontmatter `SKILL.md` entry points.
+The [installer sources](https://github.com/vercel-labs/skills/tree/699d35b21bd3c97dbc0edeae062b2698898bb2e5)
+(version 1.7.4, inspected 2026-10-28 UTC) discover `skills/<name>`, support repeated
+`--skill`, default project installation and optional `--global`. They copy each
+selected skill independently and skip source symlinks escaping that directory.
+Node >=22.20.0 is an optional installer prerequisite, not a Backlot runtime or
+contributor-check requirement. Git is needed for Git repository sources.
+
+Existing `version`, `contracts`, `contracts --daemon`, `schema` and command help
+provide read-only compatibility evidence. Capabilities describe focused reads,
+not every mutation or flag; daemon capabilities expose no executable identity.
+A local probe found installed `v0.2.0` lacks `contracts` despite API `v1` and state
+11. Neither that namespace nor the label `dev` establishes matching semantics.
+
+## Decision
+
+### Procedures and ownership
+
+Use precise descriptions: setup adapts the application's existing commands and
+configuration or intentionally changes its Backlot adoption; daily use discovers,
+runs, diagnoses and cleans up already-configured scenes. Ordinary application
+coding and running existing tests do not trigger adoption. Daily use can identify
+a missing setup prerequisite and refer to the setup procedure without assuming
+that the other skill is installed. Do not add separate provider or troubleshooting
+skills without a demonstrated distinct workflow.
+
+Keep entry points short and load references by need. Preserve command argument
+vectors, caller-versus-daemon tool context, explicit private project setup and
+provider prerequisites. Record returned instance/attempt identity and daemon scope;
+distinguish an existing/reused persistent scene from task-created work. Observation
+never acquires attachment, renews a lease or grants stop authority. Attached mode
+owns only its accepted attempt and refuses existing runtime.
+
+Interpret original application exits, orchestration, collection, cleanup, drift
+and last-observed failures separately. Missing mutation replies leave acceptance
+unknown and do not authorize automatic retry. Keep failed evidence and uncertain
+resources available; stop kept runtime before export when required. Reset/destroy
+require deliberate data-removal intent. Routine cleanup never stops shared daemons,
+gateways, shared servers or another worktree's instances.
+
+Keep secrets in explicit private inputs, with no credential argv or project-owned
+instruction values. Declared persistent startup details can intentionally expose
+credentials even in JSON; protect that output. Explicit secret inspection remains
+separate from ordinary observation. Application logs/artifacts may contain secrets.
+A short adopter-owned instruction block may record scene names and conventions;
+creating it is part of an authorized project edit, not a new global configuration.
+
+### Self-contained assets and maintenance
+
+Add one bounded Go generation/check command following the existing schema-tool
+pattern. Select focused canonical guide sections, copy existing generated schemas
+and selected canonical examples, and materialize ordinary files inside each skill.
+Reuse the installed Markdown parser for section/link handling if needed; add no
+dependency. Keep schemas generated by the existing `api/v1` schema pipeline.
+Do not introduce a second field inventory or hand-maintained reference manual.
+
+Preserve section anchors and resolve bundled links locally. Rewrite supplemental
+links to unbundled repository material to explicit reviewed source URLs; essential
+procedures must work offline from the installed bundle. Rewrite example schema
+modelines to bundled schemas. Label declaration/adaptation examples as such;
+`examples/adoption` contains no runnable server application. Include application
+files and dependency metadata whenever presenting an example as runnable.
+
+Generate/check deterministically without timestamps or dependence on the current
+checkout's cleanliness. Do not stamp every generated output with HEAD, which
+would become stale on commit, or generate an executable identity allowlist.
+Validate missing sections, stale assets, unsafe local links, and examples using
+existing strict manifest/schema validation. Wire drift checks into Go-only
+repository checks and include skill executable/assets paths in CI selection.
+Canonical guide/contract/example changes then require regeneration in the same PR.
+
+### Compatibility and distribution
+
+Each entry point first records installed executable identity and checks required
+local read capabilities; before daemon operations check that selected daemon's
+required read capabilities and API/state contract. Inspect command help for the
+particular mutation/flags used. Use direct CLI instructions rather than another
+executable wrapper or runtime preflight subsystem.
+
+Allow development builds, including `dev` and `dev-dirty`, after these capability
+and targeted help checks. Maintain no exact commit or release allowlist. The owner
+accepts that capability/help presence cannot prove matching semantics or provider
+readiness. Record the executable's reported version and available commit for
+diagnosis rather than using identity as an allowlist gate. Users developing with
+global Backlot builds are responsible for keeping their installed skill copies
+current with runtime changes; refresh the skills together with the development
+runtime. Dirty builds need no special identity metadata update or exception.
+
+On mismatch, show the observed identity and missing capabilities, explain how to
+select a matching skill source or explicitly install a compatible binary, and
+preserve the task's recorded state. Never silently upgrade the binary, replace
+an active shared daemon, erase state or recommend a downgrade into newer state.
+Daemon replacement is explicit maintenance using the old matching binary and
+current upgrade guidance; daemon contracts do not prove an exact release match.
+
+Document `npx skills add octacian/backlot --skill backlot-setup --skill backlot`
+and optional `--global`, with supported agent selection. Support local staged
+sources and an immutable repository ref for reproducible installs. Use repository
+Git distribution, with no new npm package, postinstall hook or bundled Node code.
+Track remote moving installs with the installer's update commands; local development
+installs require explicit reinstallation from the updated local source. Recheck
+compatibility after updates, and reinstall the chosen immutable source for a pinned pairing.
+Command/contract changes must update the skill procedures, generated references
+and compatibility guidance together; release checks validate their current pairing.
+No automatic release watch, synchronization or backward-compatibility promise.
+
+## Consequences
+
+Two generated copies trade artifact size for independent installation and no
+cross-skill links. Maintained scope is approximately 500–900 lines across skills,
+generator/tests, integration/docs and this ADR; generated assets add thousands of
+lines and must be counted separately. Report material growth before expanding.
+Maintainers own focused section selection, compatibility evidence, regeneration
+and behavioral evaluations when procedures/contracts change.
+
+No new runtime persistence, writers, endpoints, timers, workers, migrations,
+subscriptions, credentials or background activity exists, even when skills are
+unused. The installer writes agent skill files/links and its own lock metadata;
+existing CLI commands retain all project/daemon/provider mutations. Tests must
+isolate installer HOME/config paths and owned runtime fixtures. Do not alter the
+operator's real installed skills, daemon, private registry or provider state.
+
+## Alternatives considered
+
+- Link only to repository docs: smallest packaging change, but requires network
+  and matching source material and does not satisfy independent installed use.
+- Hand-copy references or share sibling symlinks: adds drift or loses files during
+  selective installation; generated ordinary files preserve one maintained source.
+- Bundle every manual and runnable fixture: avoids section selection but increases
+  context, dependency/setup burden and copied artifacts beyond these workflows.
+- Trust API/state versions or `dev` alone: demonstrated insufficient; require
+  capabilities and targeted help while retaining their semantic evidence limit.
+- Exact commit/release allowlists: reject usable development builds and add an
+  identity-update duty; the owner chose user-managed skill refreshes instead.
+- Add a wrapper, npm distribution or runtime capability API: creates executable,
+  dependency or contract obligations beyond the approved CLI-and-skills boundary.
+
+## Revisit when
+
+Observed evaluations require missing bundled material, excessive reference loads
+or overlapping triggers; capability/help checks and user-managed refreshes
+repeatedly allow materially incompatible development workflows; the installer changes discovery/copy behavior; or a concrete shell-less
+consumer needs another integration. Reassess the smallest required guarantee first.
+
+## References
+
+- [Issue and discussion](https://github.com/octacian/backlot/issues/59)
+- [Canonical guides](../README.md), [CLI](../cli.md), [adoption](../adoption.md)
+- [Lifetime authority](20261007T052013565Z-use-explicit-scene-lifetimes-and-daemon-owned-execution.md)
+- [Observation](20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md)
+- [Attached authority](20261022T194804759Z-bind-attached-persistent-execution-to-one-daemon-owned-attempt.md)
+- [Startup disclosure](20261022T195459793Z-authorize-declared-sensitive-startup-details-for-persistent-scenes.md)
+- [CLI results](20261027T183153280Z-use-framework-parsing-and-preserve-truthful-cli-results.md)
+- [Release policy](20261026T020229927Z-reuse-exact-main-ci-and-prepare-verified-release-drafts.md)
+- [Discovery contracts](../../api/v1/discovery.go), [identity](../../cmd/backlot/main.go)
+- [Canonical schema generation](../../internal/schema/schema.go)

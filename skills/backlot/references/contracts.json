@@ -1,0 +1,36 @@
+{
+  "api_version": "v1",
+  "state_version": 11,
+  "context": "",
+  "schemas": [
+    "manifest",
+    "machine",
+    "private"
+  ],
+  "contracts": [
+    {
+      "id": "scene-declarations/v1",
+      "mode": "finite"
+    },
+    {
+      "id": "instance-filter/v1",
+      "mode": "finite"
+    },
+    {
+      "id": "log-page/v1",
+      "mode": "finite"
+    },
+    {
+      "id": "configuration/v1",
+      "mode": "finite"
+    },
+    {
+      "id": "logs/v1",
+      "mode": "ndjson"
+    },
+    {
+      "id": "backlot.export/v1",
+      "mode": "finite"
+    }
+  ]
+}

@@ -8,7 +8,7 @@ RELEASE_TIME := $(shell TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%S
 LINT := .tools/bin/golangci-lint-$(GOLANGCI_LINT_VERSION)
 GORELEASER := .tools/bin/goreleaser-$(GORELEASER_VERSION)
 
-.PHONY: build release-build release-snapshot release-package notices notices-check fmt fmt-check vet test race tools lint adr-create adr-verify adr-test schema-generate schema-check check-implementation check-docs check
+.PHONY: build release-build release-snapshot release-package notices notices-check fmt fmt-check vet test race tools lint adr-create adr-verify adr-test schema-generate schema-check skills-generate skills-check check-implementation check-docs check
 
 build:
 	go build -o bin/backlot ./cmd/backlot
@@ -82,7 +82,13 @@ schema-generate:
 schema-check:
 	go run ./cmd/schema -check
 
-check-implementation: schema-check notices-check fmt-check vet lint race build
+skills-generate:
+	go run ./cmd/skills
+
+skills-check:
+	go run ./cmd/skills -check
+
+check-implementation: skills-check schema-check notices-check fmt-check vet lint race build
 
 check-docs: adr-test adr-verify
 

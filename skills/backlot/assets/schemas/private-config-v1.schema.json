@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/octacian/backlot/main/schemas/private-config-v1.schema.json",
+  "$ref": "#/$defs/PrivateConfig",
+  "$defs": {
+    "PrivateConfig": {
+      "properties": {
+        "version": {
+          "type": "string",
+          "const": "backlot/v1"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object"
+        },
+        "tools": {
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "version"
+      ],
+      "description": "PrivateConfig holds only project-specific input and executable overrides."
+    }
+  },
+  "$comment": "Generated from api/v1; run make schema-generate. Editor assistance only; backlot plan remains authoritative."
+}

@@ -22,6 +22,9 @@ Make is needed only for the alternative source build.
 
 [Installation details and reproducible source builds](docs/operations.md).
 
+For shell coding agents, install the [setup and daily-use skills](docs/agent-skills.md)
+to use these workflows without a Backlot source checkout.
+
 ## Run an existing configured project
 
 Install the application's dependencies using its own instructions. From its

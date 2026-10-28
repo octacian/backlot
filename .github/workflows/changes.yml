@@ -44,6 +44,8 @@ jobs:
               - '!**/*.md'
               - '{go.mod,go.sum,Makefile,.golangci.yml,.gitattributes,.gitignore,.goreleaser.yaml}'
             repository:
+              - 'skills/**'
+              - 'docs/{adoption,cli,platforms,evidence,agent-skills,operations,manifest,daemon,containers,https}.md'
               - 'THIRD_PARTY_NOTICES.md'
               - 'LICENSE'
               - '*.go'

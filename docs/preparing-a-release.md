@@ -64,8 +64,7 @@ remain separate operator decisions.
 ## Installed agent skills
 
 Before release, run `make skills-check` and verify the skill procedures against the
-release CLI identity, required capabilities and targeted help. Update canonical
-guidance and regenerate bundled material with command changes; test installation
-from the selected published source when available. Keep Node optional and preserve
-the existing binary archive contents. Link [skill installation/update guidance](agent-skills.md)
-from release notes when the skill workflow changes.
+release CLI identity, required capabilities and targeted help. Follow
+[bundle maintenance](testing.md#agent-skills) for command changes and test installation from the selected published source when available. Keep Node optional
+and binary archive contents unchanged. Link [installation/update guidance](agent-skills.md)
+from release notes when skill workflows change.

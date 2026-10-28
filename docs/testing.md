@@ -663,13 +663,12 @@ runtime/disposable suites remain separate required frozen-candidate regressions.
 
 ## Agent skills
 
-`make skills-generate` materializes ordinary files in each `skills/*/references`
-and `assets` directory from canonical guides, schemas and examples. Do not edit
-generated copies. `make skills-check` runs in `make check-implementation`; changes
+`make skills-generate` copies canonical guide sections, schemas and examples into
+each skill's `references` and `assets` directories. Edit sources, not generated files.
+`make skills-check` runs in `make check-implementation`; changes
 to canonical docs or skills select that CI gate as well as applicable docs checks.
-Generation is Go-only; `npx skills` is an optional installation smoke, not a
-contributor/runtime dependency. Focused tests validate section selection, stale
-sources, independent local links/anchors, example modelines and schema acceptance.
+Generation is Go-only; the optional installer adds no contributor/runtime dependency.
+Focused tests cover section selection, drift, local links/anchors and example schemas.
 
 When command contracts/procedures change, update the two skill entry points and
 canonical guides, regenerate, and review maintained versus generated diff size.
@@ -680,13 +679,14 @@ peer worktrees and kept failures with independent agents on isolated owned fixtu
 Record source/model/environment, task outcome, unnecessary commands, reference
 consumption and cleanup mistakes outside the tree; fix demonstrated failures.
 
-Before broad coverage, prove one actual application success and failure outside a
-Backlot checkout. Supply an explicit private machine file with `--config` for
+First prove actual application success and failure outside a Backlot checkout.
+Supply an explicit private machine file with `--config` for
 every configuration-composing plan/start/restart/doctor/config call; private daemon
 and registry paths alone do not isolate operator machine defaults. Smoke selective
 local and remote installs, each skill alone and both together, project/global
 scopes, and source-independent references. Redirect
 HOME/XDG/agent configuration only for the installer process into private temporary
-directories; never overwrite real global skills. Remote updates track remote sources;
-reinstall changed local sources explicitly. Provider/platform checks establish only
-the tested environment. No raw private state or credentials belong in reports.
+directories; never overwrite real global skills. Follow
+[installation/update guidance](agent-skills.md#installation-and-updates).
+Provider/platform checks establish only the tested environment. Keep raw private
+state and credentials out of reports.

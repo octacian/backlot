@@ -14,10 +14,9 @@ mutation catalog.
 Before a mutation, inspect that installed command's `--help` for its target and
 flags (for example `backlot run --help` or `backlot scene start --help`). Accept
 `dev` and `dev-dirty` builds after required capabilities/help checks; there is no
-exact commit/release allowlist. Capability/help presence does not prove matching
-semantics or provider readiness. Users of global development builds are responsible
-for keeping installed skills current as they develop; refresh skills together
-with runtime changes. Unexpected behavior still requires diagnosis, not retries.
+exact commit/release allowlist. These checks do not prove semantics or provider
+readiness. Users of global development builds must refresh installed skills with
+runtime changes. Diagnose unexpected behavior before considering retries.
 
 Before daemon operations run `backlot contracts --daemon --json`, including the
 same `--state-dir PATH` used for the task when nondefault. Require matching API/state

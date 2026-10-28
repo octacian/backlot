@@ -74,7 +74,7 @@ Test Backlot command construction and semantics; trust upstream parser guarantee
 Install usage hooks on leaves and groups. When JSON is recognized, emit one typed
 `invalid_arguments` error without automatic help on stdout or rejected values.
 Main owns process exits and the final stderr diagnostic; suppress framework
-duplicates. The [CLI reference](operations.md#cli-invocation-and-results) defines
+duplicates. The [CLI reference](cli.md#cli-invocation-and-results) defines
 framing, text exceptions and errors before JSON recognition.
 
 Retain only validated snapshots matching the accepted identity/attempt. Preserve

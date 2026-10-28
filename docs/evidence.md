@@ -5,7 +5,7 @@ to the disposable scene's designated terminal job. Other components receive only
 their declared arguments. Arguments containing spaces remain single arguments;
 Backlot performs no shell expansion. Plain positional tails are also accepted;
 use `--` to protect flag-like application arguments. See [CLI invocation and
-framing](operations.md#cli-invocation-and-results).
+framing](cli.md#cli-invocation-and-results).
 
 On an otherwise clean run, the executable returns the terminal job's exact exit
 code. SIGINT and SIGTERM request bounded cancellation and return 130 and 143.

@@ -4,8 +4,8 @@ Windows Docker Desktop Linux-container integration is planned in #38; see the
 [Windows handoff](windows-design.md#docker-desktop-and-managed-https-design-38).
 Named-pipe endpoints and Windows mount identities are not implemented here.
 
-Milestone 4 runs generic containers through the official Docker Go client, alongside
-native commands. It adds private volumes, directories, secrets and networks,
+Backlot runs generic containers through the official Docker Go client alongside
+native commands, with private volumes, directories, secrets and networks,
 fresh-only initialization, retained restart, reset and destroy. Metadata `prepare`
 still validates and records a snapshot without contacting Docker or allocating
 provider resources. HTTPS publication follows the [gateway guide](https.md).
@@ -37,8 +37,8 @@ bin/backlot destroy --state-dir /absolute/private/backlot --json INSTANCE_ID
 bin/backlot logs --state-dir /absolute/private/backlot --json INSTANCE_ID
 ```
 
-`run`/`restart`/`reset` take flags after the target. `stop`/`destroy`/`logs` take
-flags before the recorded ID. Reset and restart load the recorded project/config
+See the [CLI reference](cli.md#cli-invocation-and-results) for flag placement and
+terminal argument forwarding. Reset and restart load the recorded project/config
 paths by default; explicit `--config` may select a new machine file. Destroy uses
 only recorded ownership, so a missing or changed checkout cannot redirect cleanup.
 
@@ -205,7 +205,7 @@ The CLI/client and daemon use the same named Go contracts; see the canonical
 [endpoint/type table](daemon.md#local-api-and-doctor), including command-specific destroy
 requests and strict API-version/ID rules. Logs retain their typed paged/NDJSON
 contracts; capabilities and credentials stay private. [Testing](testing.md)
-defines provider commands; local milestone evidence is separate from V1 acceptance.
+defines contributor provider checks; a local check is not full platform acceptance.
 
 <a id="project-scoped-shared-services-gate-1"></a>
 

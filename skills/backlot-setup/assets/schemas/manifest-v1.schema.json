@@ -1,0 +1,1770 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/octacian/backlot/main/schemas/manifest-v1.schema.json",
+  "$ref": "#/$defs/Manifest",
+  "$defs": {
+    "ArtifactSource": {
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "description": "ArtifactSource names a file or directory collected before runtime removal."
+    },
+    "BuildImage": {
+      "properties": {
+        "producer": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "producer"
+      ],
+      "description": "BuildImage names a native each-start job producing an attempt-scoped local image."
+    },
+    "Command": {
+      "properties": {
+        "tool": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name from the project tools map; no implicit shell interpretation."
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Direct argument vector; shell expansion requires an explicit shell command."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "tool"
+      ],
+      "description": "Command declares an executable tool and direct argument vector."
+    },
+    "Component": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "runtime": {
+                "const": "native"
+              }
+            },
+            "required": [
+              "runtime"
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "required": [
+                  "command"
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "not": {
+                      "required": [
+                        "image"
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "properties": {
+                  "args": {
+                    "maxItems": 0
+                  },
+                  "host_mappings": {
+                    "maxItems": 0
+                  },
+                  "mounts": {
+                    "maxItems": 0
+                  },
+                  "ports": {
+                    "additionalProperties": {
+                      "properties": {
+                        "container_port": {
+                          "const": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "runtime": {
+                "const": "container"
+              }
+            },
+            "required": [
+              "runtime"
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "required": [
+                  "image"
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "not": {
+                      "required": [
+                        "command"
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "properties": {
+                  "image": {
+                    "properties": {
+                      "literal": {
+                        "minLength": 1
+                      },
+                      "ref": {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "kind": {
+                                "const": "input"
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "field": {
+                                "const": "id"
+                              },
+                              "kind": {
+                                "const": "build_image"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "ports": {
+                    "additionalProperties": {
+                      "allOf": [
+                        {
+                          "required": [
+                            "container_port"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "container_port": {
+                              "minimum": 1
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "service"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "required": [
+                  "readiness"
+                ]
+              },
+              {
+                "properties": {
+                  "initializes": {
+                    "maxItems": 0
+                  },
+                  "policy": {
+                    "const": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "job"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "required": [
+                  "policy"
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "not": {
+                      "required": [
+                        "readiness"
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "properties": {
+                  "policy": {
+                    "type": "string",
+                    "enum": [
+                      "fresh-only",
+                      "each-start"
+                    ]
+                  },
+                  "ports": {
+                    "maxProperties": 0
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "policy": {
+                "const": "fresh-only"
+              }
+            },
+            "required": [
+              "policy"
+            ]
+          },
+          "then": {
+            "properties": {
+              "initializes": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "initializes"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "policy": {
+                "const": "each-start"
+              }
+            },
+            "required": [
+              "policy"
+            ]
+          },
+          "then": {
+            "properties": {
+              "initializes": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "artifacts": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ArtifactSource"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object"
+        },
+        "fixtures": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Fixture"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "service",
+            "job"
+          ],
+          "description": "Explicit discriminator; see the supported values and conditional fields."
+        },
+        "runtime": {
+          "type": "string",
+          "enum": [
+            "native",
+            "container"
+          ],
+          "description": "Native command or generic container; selects command versus image."
+        },
+        "command": {
+          "$ref": "#/$defs/Command",
+          "description": "Explicit native executable tool and argument vector."
+        },
+        "image": {
+          "$ref": "#/$defs/Value",
+          "description": "Container image literal, declared input or build_image id reference."
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Direct argument vector; shell expansion requires an explicit shell command."
+        },
+        "policy": {
+          "type": "string",
+          "enum": [
+            "",
+            "fresh-only",
+            "each-start"
+          ],
+          "description": "Job scheduling policy; services omit this field."
+        },
+        "initializes": {
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Attached volume/directory/allocation generations initialized by a fresh-only job."
+        },
+        "depends_on": {
+          "items": {
+            "$ref": "#/$defs/Dependency"
+          },
+          "type": "array",
+          "description": "Explicit ready-service or completed-job dependencies."
+        },
+        "environment_sets": {
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Reusable environment sets included in this order."
+        },
+        "environment": {
+          "$ref": "#/$defs/Environment",
+          "description": "Component environment layers applied after included sets."
+        },
+        "resources": {
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Instance-owned allocations selected explicitly; planning does not provision them."
+        },
+        "outputs": {
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Checkout output paths and serialization groups."
+        },
+        "ports": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ServicePort"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object",
+          "description": "Named allocated host ports with explicit container listeners when needed."
+        },
+        "host_mappings": {
+          "items": {
+            "$ref": "#/$defs/HostMapping"
+          },
+          "type": "array",
+          "description": "Explicit managed origin hostname mappings to the Engine host gateway at each container create."
+        },
+        "mounts": {
+          "items": {
+            "$ref": "#/$defs/Mount"
+          },
+          "type": "array",
+          "description": "Container storage/output mounts with exactly one source each."
+        },
+        "readiness": {
+          "$ref": "#/$defs/Probe",
+          "description": "Required service probe; process liveness alone is insufficient."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind",
+        "runtime"
+      ],
+      "description": "Component declares native or container work with explicit dependencies."
+    },
+    "Dependency": {
+      "properties": {
+        "component": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Selected dependency component name."
+        },
+        "condition": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "completed"
+          ],
+          "description": "Wait for a service to be ready or a job to complete successfully."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "component",
+        "condition"
+      ],
+      "description": "Dependency gates execution on another selected component."
+    },
+    "Environment": {
+      "properties": {
+        "pass_through": {
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Selected inherited environment variable names; never inherit the full environment."
+        },
+        "seeds": {
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Read-only checkout-relative KEY=value files, layered in declaration order."
+        },
+        "assign": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Value",
+            "allOf": [
+              {
+                "properties": {
+                  "ref": {
+                    "allOf": [
+                      {
+                        "if": {
+                          "properties": {
+                            "kind": {
+                              "const": "build_image"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ]
+                        },
+                        "then": {
+                          "properties": {
+                            "field": {
+                              "const": "tag"
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "type": "object",
+          "description": "Explicit environment assignments applied after seeds."
+        },
+        "required": {
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Environment keys that must be present after layering."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Environment explicitly layers selected inherited values, literal seeds and assignments."
+    },
+    "Fixture": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/Value"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "value"
+      ],
+      "description": "Fixture declares a discoverable identity or credential for a component."
+    },
+    "HostMapping": {
+      "properties": {
+        "origin": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "description": "Attached and published origin whose canonical hostname is mapped."
+        },
+        "host": {
+          "type": "string",
+          "enum": [
+            "host-gateway"
+          ],
+          "description": "Explicit Engine host-gateway token, expanded by Docker at each container create; no copied IP or resolver helper."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "origin",
+        "host"
+      ],
+      "description": "HostMapping explicitly maps a published origin hostname to Docker's host gateway."
+    },
+    "Input": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "generate": {
+                "const": "random-hex-32"
+              }
+            },
+            "required": [
+              "generate"
+            ]
+          },
+          "then": {
+            "properties": {
+              "secret": {
+                "const": true
+              }
+            },
+            "required": [
+              "secret"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "generate": {
+          "type": "string",
+          "enum": [
+            "",
+            "random-hex-32"
+          ]
+        },
+        "secret": {
+          "type": "boolean",
+          "description": "Treat the value as sensitive in ordinary plan output."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Input declares a required externally supplied value and its sensitivity."
+    },
+    "Manifest": {
+      "properties": {
+        "build_images": {
+          "additionalProperties": {
+            "$ref": "#/$defs/BuildImage"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object"
+        },
+        "shared_services": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SharedService"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object"
+        },
+        "version": {
+          "type": "string",
+          "const": "backlot/v1",
+          "description": "Contract version; use backlot/v1."
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "description": "Stable project identifier, independent of branch names."
+        },
+        "tools": {
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object",
+          "description": "Named executables; planning checks availability without running them."
+        },
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Input"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object",
+          "description": "Explicit external inputs; keep machine credentials out of projects."
+        },
+        "environments": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Environment"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object",
+          "description": "Reusable environment layers; include them explicitly."
+        },
+        "resources": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Resource"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object",
+          "description": "Instance-owned allocations selected explicitly; planning does not provision them."
+        },
+        "outputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Output"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object",
+          "description": "Checkout output paths and serialization groups."
+        },
+        "components": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Component"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object",
+          "minProperties": 1,
+          "description": "Reusable native or container services and jobs."
+        },
+        "scenes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Scene"
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object",
+          "minProperties": 1,
+          "description": "Named workflows with explicit selection and lifetime."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "version",
+        "project",
+        "components",
+        "scenes"
+      ],
+      "description": "Manifest declares reusable components and independently selected scenes."
+    },
+    "Mount": {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "required": [
+                "resource"
+              ]
+            },
+            {
+              "properties": {
+                "resource": {
+                  "minLength": 1
+                }
+              }
+            },
+            {
+              "properties": {
+                "output": {
+                  "const": ""
+                }
+              }
+            },
+            {
+              "properties": {
+                "origin_ca_cert": {
+                  "const": ""
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "required": [
+                "output"
+              ]
+            },
+            {
+              "properties": {
+                "output": {
+                  "minLength": 1
+                }
+              }
+            },
+            {
+              "properties": {
+                "resource": {
+                  "const": ""
+                }
+              }
+            },
+            {
+              "properties": {
+                "origin_ca_cert": {
+                  "const": ""
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "required": [
+                "origin_ca_cert",
+                "read_only"
+              ]
+            },
+            {
+              "properties": {
+                "origin_ca_cert": {
+                  "minLength": 1
+                },
+                "read_only": {
+                  "const": true
+                }
+              }
+            },
+            {
+              "properties": {
+                "resource": {
+                  "const": ""
+                }
+              }
+            },
+            {
+              "properties": {
+                "output": {
+                  "const": ""
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "properties": {
+        "origin_ca_cert": {
+          "type": "string",
+          "description": "Attached published managed origin whose public root is mounted as a read-only file; never a key or CA directory."
+        },
+        "resource": {
+          "type": "string",
+          "description": "Declared resource name; selection and kind are checked by backlot plan."
+        },
+        "output": {
+          "type": "string",
+          "description": "Declared checkout output name attached to the component."
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^/",
+          "description": "Probe destination or absolute mount target, according to this contract."
+        },
+        "read_only": {
+          "type": "boolean",
+          "description": "Mount the declared source read-only."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "target"
+      ],
+      "description": "Mount connects declared storage, checkout output or a public origin CA to a container path."
+    },
+    "Output": {
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Safe checkout-relative mutable output path."
+        },
+        "concurrency_group": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "description": "Named serialization group for overlapping checkout outputs."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path",
+        "concurrency_group"
+      ],
+      "description": "Output declares a checkout-relative mutable path and serialization group."
+    },
+    "Probe": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "command"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "required": [
+                  "command"
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "not": {
+                      "required": [
+                        "target"
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "tcp"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "required": [
+                  "target"
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "not": {
+                      "required": [
+                        "command"
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "properties": {
+                  "target": {
+                    "properties": {
+                      "ref": {
+                        "properties": {
+                          "field": {
+                            "const": "port"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "service",
+                              "resource"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "http"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "required": [
+                  "target"
+                ]
+              },
+              {
+                "allOf": [
+                  {
+                    "not": {
+                      "required": [
+                        "command"
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "properties": {
+                  "target": {
+                    "properties": {
+                      "ref": {
+                        "properties": {
+                          "field": {
+                            "const": "url"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "resource"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "tcp",
+            "http",
+            "command"
+          ],
+          "description": "Explicit discriminator; see the supported values and conditional fields."
+        },
+        "target": {
+          "$ref": "#/$defs/Value",
+          "description": "Probe destination or absolute mount target, according to this contract."
+        },
+        "command": {
+          "$ref": "#/$defs/Command",
+          "description": "Explicit native executable tool and argument vector."
+        },
+        "timeout": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Nonnegative Go duration, at most 24h; 0s is unlimited subject to other execution budgets."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind",
+        "timeout"
+      ],
+      "description": "Probe declares observed availability and a bounded deadline."
+    },
+    "Publication": {
+      "allOf": [
+        {
+          "properties": {
+            "probe": {
+              "properties": {
+                "kind": {
+                  "const": "http"
+                },
+                "target": {
+                  "required": [
+                    "ref"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "resource": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Declared resource name; selection and kind are checked by backlot plan."
+        },
+        "routes": {
+          "items": {
+            "$ref": "#/$defs/Route"
+          },
+          "type": "array",
+          "minItems": 1,
+          "description": "Nonempty bounded routes inside the owned publication."
+        },
+        "probe": {
+          "$ref": "#/$defs/Probe",
+          "description": "Aggregate HTTP readiness through the published origin."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "resource",
+        "routes",
+        "probe"
+      ],
+      "description": "Publication requests a symbolic HTTPS origin and owned routes."
+    },
+    "Reference": {
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "enum": [
+                    "tag",
+                    "id"
+                  ]
+                },
+                "kind": {
+                  "const": "build_image"
+                }
+              }
+            },
+            {
+              "properties": {
+                "name": {
+                  "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+                }
+              },
+              "required": [
+                "name",
+                "field"
+              ]
+            },
+            {
+              "properties": {
+                "port": {
+                  "const": ""
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "properties": {
+                "kind": {
+                  "const": "input"
+                }
+              }
+            },
+            {
+              "properties": {
+                "name": {
+                  "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+                }
+              },
+              "required": [
+                "name"
+              ]
+            },
+            {
+              "properties": {
+                "field": {
+                  "const": ""
+                },
+                "port": {
+                  "const": ""
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "enum": [
+                    "id",
+                    "checkout",
+                    "project",
+                    "scene"
+                  ]
+                },
+                "kind": {
+                  "const": "instance"
+                }
+              }
+            },
+            {
+              "required": [
+                "field"
+              ]
+            },
+            {
+              "properties": {
+                "name": {
+                  "const": ""
+                },
+                "port": {
+                  "const": ""
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "enum": [
+                    "port",
+                    "path",
+                    "name",
+                    "value",
+                    "url",
+                    "ca_cert_path",
+                    "host",
+                    "database",
+                    "username",
+                    "password"
+                  ]
+                },
+                "kind": {
+                  "const": "resource"
+                }
+              }
+            },
+            {
+              "properties": {
+                "name": {
+                  "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+                }
+              },
+              "required": [
+                "name",
+                "field"
+              ]
+            },
+            {
+              "properties": {
+                "port": {
+                  "const": ""
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "properties": {
+                "field": {
+                  "const": "path"
+                },
+                "kind": {
+                  "const": "output"
+                }
+              }
+            },
+            {
+              "properties": {
+                "name": {
+                  "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+                }
+              },
+              "required": [
+                "name",
+                "field"
+              ]
+            },
+            {
+              "properties": {
+                "port": {
+                  "const": ""
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "properties": {
+                "field": {
+                  "const": "host"
+                },
+                "kind": {
+                  "const": "service"
+                }
+              }
+            },
+            {
+              "properties": {
+                "name": {
+                  "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+                }
+              },
+              "required": [
+                "name",
+                "field"
+              ]
+            },
+            {
+              "properties": {
+                "port": {
+                  "const": ""
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "properties": {
+                "field": {
+                  "const": "port"
+                },
+                "kind": {
+                  "const": "service"
+                },
+                "port": {
+                  "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+                }
+              }
+            },
+            {
+              "properties": {
+                "name": {
+                  "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+                }
+              },
+              "required": [
+                "name",
+                "field",
+                "port"
+              ]
+            }
+          ]
+        }
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "input",
+            "instance",
+            "resource",
+            "output",
+            "service",
+            "build_image"
+          ],
+          "description": "Explicit discriminator; see the supported values and conditional fields."
+        },
+        "name": {
+          "type": "string",
+          "description": "Declared identifier used by this reference; graph lookup happens in backlot plan."
+        },
+        "field": {
+          "type": "string",
+          "description": "Bounded field selected from the referenced object."
+        },
+        "port": {
+          "type": "string",
+          "description": "Named service port, required by service port references."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "description": "Reference identifies a value without expression evaluation or interpolation."
+    },
+    "Resource": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "allocation"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "shared_service"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "shared_service": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "port",
+            "volume",
+            "directory",
+            "secret",
+            "network",
+            "origin",
+            "allocation"
+          ],
+          "description": "Explicit discriminator; see the supported values and conditional fields."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "description": "Resource declares an instance-owned allocation; planning never provisions it."
+    },
+    "Route": {
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^/([A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*)?$",
+          "description": "Checkout-relative output path or absolute route path, according to this contract."
+        },
+        "service": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Selected service name receiving this route."
+        },
+        "port": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Named service port, required by service port references."
+        },
+        "prefix": {
+          "type": "string",
+          "enum": [
+            "preserve",
+            "strip"
+          ],
+          "description": "Preserve or strip the matched route prefix."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path",
+        "service",
+        "port",
+        "prefix"
+      ],
+      "description": "Route is a case-sensitive literal segment-prefix route to a selected service port."
+    },
+    "Scene": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "lifetime": {
+                "const": "disposable"
+              }
+            },
+            "required": [
+              "lifetime"
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "required": [
+                  "terminal_job"
+                ]
+              },
+              {
+                "properties": {
+                  "startup_details": {
+                    "maxItems": 0
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "terminal_job": {
+                    "minLength": 1
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "lifetime": {
+                "const": "persistent"
+              }
+            },
+            "required": [
+              "lifetime"
+            ]
+          },
+          "then": {
+            "properties": {
+              "terminal_job": {
+                "const": ""
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "startup_details": {
+          "items": {
+            "$ref": "#/$defs/StartupDetailSelection"
+          },
+          "type": "array",
+          "description": "Ordered fixtures automatically displayed after persistent startup, including selected sensitive values."
+        },
+        "lifetime": {
+          "type": "string",
+          "enum": [
+            "persistent",
+            "disposable"
+          ],
+          "description": "Persistent retains data; disposable runs finish at a terminal job."
+        },
+        "components": {
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Explicit nonempty selection of component names; dependencies are never included implicitly."
+        },
+        "resources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Instance-owned allocations selected explicitly; planning does not provision them."
+        },
+        "terminal_job": {
+          "type": "string",
+          "description": "Selected each-start job; required for disposable scenes."
+        },
+        "publish": {
+          "$ref": "#/$defs/Publication",
+          "description": "Optional owned HTTPS origin, routes and aggregate readiness."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "lifetime",
+        "components"
+      ],
+      "description": "Scene explicitly selects all work and resources for one workflow."
+    },
+    "ServicePort": {
+      "properties": {
+        "resource": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Declared resource name; selection and kind are checked by backlot plan."
+        },
+        "container_port": {
+          "type": "integer",
+          "maximum": 65535,
+          "minimum": 0,
+          "description": "Container listener port 1..65535; native services omit this or use zero."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "resource"
+      ],
+      "description": "ServicePort maps an allocated host port to an explicit container listener when needed."
+    },
+    "SharedService": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "manager": {
+                "const": "mariadb"
+              }
+            },
+            "required": [
+              "manager"
+            ]
+          },
+          "then": {
+            "properties": {
+              "port": {
+                "const": 3306
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "manager": {
+                "const": "postgresql"
+              }
+            },
+            "required": [
+              "manager"
+            ]
+          },
+          "then": {
+            "properties": {
+              "port": {
+                "const": 5432
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "manager": {
+          "type": "string",
+          "enum": [
+            "mariadb",
+            "postgresql"
+          ]
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "storage": {
+          "type": "string",
+          "enum": [
+            "volume"
+          ]
+        },
+        "admin": {
+          "type": "string",
+          "enum": [
+            "generated"
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "enum": [
+            3306,
+            5432
+          ]
+        },
+        "readiness_timeout": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "manager",
+        "image",
+        "storage",
+        "admin",
+        "port",
+        "readiness_timeout"
+      ],
+      "description": "SharedService declares a retained project-owned SQL server independently of scene allocations."
+    },
+    "StartupDetailSelection": {
+      "properties": {
+        "component": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+        },
+        "fixture": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^\\x00\\r\\n]*\\S[^\\x00\\r\\n]*$"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "component",
+        "fixture",
+        "label"
+      ],
+      "description": "StartupDetailSelection authorizes displaying one selected component fixture."
+    },
+    "Value": {
+      "oneOf": [
+        {
+          "required": [
+            "literal"
+          ],
+          "title": "literal"
+        },
+        {
+          "required": [
+            "ref"
+          ],
+          "title": "reference"
+        }
+      ],
+      "properties": {
+        "literal": {
+          "type": "string",
+          "description": "Literal string, including an empty string; mutually exclusive with ref."
+        },
+        "ref": {
+          "$ref": "#/$defs/Reference",
+          "description": "Bounded symbolic reference; mutually exclusive with literal."
+        },
+        "secret": {
+          "type": "boolean",
+          "description": "Treat the value as sensitive in ordinary plan output."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Value is exactly one literal or bounded discriminated reference."
+    }
+  },
+  "$comment": "Generated from api/v1; run make schema-generate. Editor assistance only; backlot plan remains authoritative."
+}

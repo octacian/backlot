@@ -22,6 +22,17 @@ Make is needed only for the alternative source build.
 
 [Installation details and reproducible source builds](docs/operations.md).
 
+## Install agent skills
+
+For shell coding agents, with Node >=22.20.0 and Git, run from your project:
+
+```sh
+npx skills add octacian/backlot --skill backlot-setup --skill backlot
+```
+
+This installs setup and daily-use guidance without a Backlot source checkout.
+See [agent selection, global installation, updates and compatibility](docs/agent-skills.md).
+
 ## Run an existing configured project
 
 Install the application's dependencies using its own instructions. From its

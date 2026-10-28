@@ -29,6 +29,7 @@ Before planning or editing, read:
 | Topic | Guide |
 | --- | --- |
 | User entry points | [README quickstart](../README.md), [project adoption](adoption.md), [daily loop](operations.md#daily-loop) |
+| Agent skill installation | [Setup and daily-use skills](agent-skills.md) |
 | Current CLI contract | [CLI reference](cli.md), [identity and lifecycle](daemon.md#identity-and-lifecycle), [machine-result interpretation](cli.md#interpreting-machine-results) |
 | Installation and HTTPS | [Installation and operations](operations.md), [runnable macOS HTTPS example](../examples/macos-quickstart/README.md) |
 | Manifest and offline planning | [Manifest](manifest.md) |

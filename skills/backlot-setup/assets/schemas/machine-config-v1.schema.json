@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/octacian/backlot/main/schemas/machine-config-v1.schema.json",
+  "$ref": "#/$defs/MachineConfig",
+  "$defs": {
+    "CaddyConfig": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "managed"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "required": [
+                  "executable"
+                ]
+              },
+              {
+                "properties": {
+                  "executable": {
+                    "minLength": 1,
+                    "pattern": "^/"
+                  },
+                  "https_port": {
+                    "minimum": 1024
+                  }
+                }
+              }
+            ]
+          },
+          "else": {
+            "allOf": [
+              {
+                "required": [
+                  "endpoint",
+                  "scope",
+                  "domain_suffix",
+                  "host_address"
+                ]
+              },
+              {
+                "properties": {
+                  "executable": {
+                    "const": ""
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "https_bind_address": {
+                    "const": ""
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "managed",
+            "external"
+          ],
+          "description": "Gateway ownership; omitted retains legacy external mode."
+        },
+        "executable": {
+          "type": "string",
+          "description": "Absolute stock native Caddy executable; required only in managed mode."
+        },
+        "https_bind_address": {
+          "not": {
+            "pattern": "^(22[4-9]|23[0-9])\\."
+          },
+          "type": "string",
+          "pattern": "^$|^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$",
+          "description": "Explicit additional IPv4 managed HTTPS reachability; omitted keeps IPv4/IPv6 loopback. 0.0.0.0 binds all IPv4 interfaces. Administration stays loopback."
+        },
+        "https_port": {
+          "type": "integer",
+          "maximum": 65535,
+          "minimum": 1,
+          "description": "Explicit HTTPS listener port; defaults to 8443 managed or 443 external. Nondefault ports appear in the canonical origin."
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^/?#@]+(/[^?#]*)?\\??#?$",
+          "description": "Admin HTTP(S) URL; managed defaults to http://127.0.0.1:2020."
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "description": "Owned external subroute ID; managed defaults to backlot-managed."
+        },
+        "domain_suffix": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9-]+(\\.[a-z0-9-]+)+$",
+          "description": "External lowercase domain suffix; managed defaults to backlot.localhost."
+        },
+        "host_address": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^/\u0000 \n\r]+$",
+          "description": "Gateway-reachable upstream address; managed fixes 127.0.0.1."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "CaddyConfig selects explicit managed or external gateway ownership."
+    },
+    "DockerConfig": {
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[Uu][Nn][Ii][Xx]:(/([^/?#][^?#]*)?|///[^?#]*)\\??#?$",
+          "description": "Local Docker unix socket URL or Caddy HTTP(S) admin URL."
+        },
+        "host_address": {
+          "type": "string",
+          "description": "Container-reachable host address for native service references; native apps must bind a reachable interface."
+        },
+        "publish_address": {
+          "type": "string",
+          "description": "Numeric host address for mapped container ports; defaults to 127.0.0.1. Exposure is explicitly operator-selected."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "endpoint"
+      ],
+      "description": "DockerConfig selects local engine access without contacting it during planning."
+    },
+    "MachineConfig": {
+      "properties": {
+        "version": {
+          "type": "string",
+          "const": "backlot/v1",
+          "description": "Contract version; use backlot/v1."
+        },
+        "tools": {
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "object",
+          "description": "Named executables; planning checks availability without running them."
+        },
+        "docker": {
+          "$ref": "#/$defs/DockerConfig",
+          "description": "Local engine configuration; planning does not contact Docker."
+        },
+        "caddy": {
+          "$ref": "#/$defs/CaddyConfig",
+          "description": "Explicit managed or external gateway settings; no health check during planning."
+        },
+        "storage": {
+          "$ref": "#/$defs/StorageConfig",
+          "description": "Future daemon storage and evidence retention settings."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "version"
+      ],
+      "description": "MachineConfig contains local provider settings and executable overrides."
+    },
+    "StorageConfig": {
+      "properties": {
+        "directory": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Future daemon state and evidence directory."
+        },
+        "retention_age": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Positive Go duration; for example 168h. Planning checks duration syntax."
+        },
+        "retention_bytes": {
+          "type": "integer",
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "description": "Positive evidence retention size in bytes."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "directory",
+        "retention_age",
+        "retention_bytes"
+      ],
+      "description": "StorageConfig describes future daemon storage and evidence retention bounds."
+    }
+  },
+  "$comment": "Generated from api/v1; run make schema-generate. Editor assistance only; backlot plan remains authoritative."
+}

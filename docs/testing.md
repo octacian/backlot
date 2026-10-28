@@ -42,6 +42,7 @@ Run these from the repository root:
 | `make adr-verify` | Verify all ADR records |
 | `make adr-test` | Run ADR tooling tests |
 | `make schema-generate` | Regenerate committed editor schemas from `api/v1` |
+| `make skills-generate`, `make skills-check` | Generate/verify independent installed skill references, schemas and examples |
 | `make schema-check` | Reject stale generated schemas without writing |
 | `make check-implementation` | Run schema/notice drift checks, formatting, vet, lint, Go race tests, and build |
 | `make check-docs` | Run ADR tooling tests and verify ADR records |
@@ -656,3 +657,33 @@ reconciles their private journals and removes only fixture-labelled images/tags;
 cached bases remain. Missing opt-in skips and does not establish provider evidence.
 Configured provider/tool/image failures are failures. The complete existing Docker
 runtime/disposable suites remain separate required frozen-candidate regressions.
+
+## Agent skills
+
+`make skills-generate` copies canonical guide sections, schemas and examples into
+each skill's `references` and `assets` directories. Edit sources, not generated files.
+`make skills-check` runs in `make check-implementation`; changes
+to canonical docs or skills select that CI gate as well as applicable docs checks.
+Generation is Go-only; the optional installer adds no contributor/runtime dependency.
+Focused tests cover section selection, drift, local links/anchors and example schemas.
+
+When command contracts/procedures change, update the two skill entry points and
+canonical guides, regenerate, and review maintained versus generated diff size.
+Supplemental upstream links in `cmd/skills` use a reviewed source baseline; review
+that baseline with link-target changes, without treating it as a binary allowlist.
+Evaluate unfamiliar setup, existing tests, manifest drift, missing prerequisites,
+peer worktrees and kept failures with independent agents on isolated owned fixtures.
+Record source/model/environment, task outcome, unnecessary commands, reference
+consumption and cleanup mistakes outside the tree; fix demonstrated failures.
+
+First prove actual application success and failure outside a Backlot checkout.
+Supply an explicit private machine file with `--config` for
+every configuration-composing plan/start/restart/doctor/config call; private daemon
+and registry paths alone do not isolate operator machine defaults. Smoke selective
+local and remote installs, each skill alone and both together, project/global
+scopes, and source-independent references. Redirect
+HOME/XDG/agent configuration only for the installer process into private temporary
+directories; never overwrite real global skills. Follow
+[installation/update guidance](agent-skills.md#installation-and-updates).
+Provider/platform checks establish only the tested environment. Keep raw private
+state and credentials out of reports.

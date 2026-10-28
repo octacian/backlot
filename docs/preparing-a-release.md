@@ -60,3 +60,11 @@ discard only that failed unpublished draft before retrying the unchanged tag.
 Never delete a published release for recovery. Published tags/assets are immutable;
 corrections require a new patch version. Optional repository tag/release protections
 remain separate operator decisions.
+
+## Installed agent skills
+
+Before release, run `make skills-check` and verify the skill procedures against the
+release CLI identity, required capabilities and targeted help. Follow
+[bundle maintenance](testing.md#agent-skills) for command changes and test installation from the selected published source when available. Keep Node optional
+and binary archive contents unchanged. Link [installation/update guidance](agent-skills.md)
+from release notes when skill workflows change.

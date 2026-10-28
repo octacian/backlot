@@ -242,3 +242,42 @@ archives); these fail export explicitly rather than truncate copied evidence.
 Application format assertions belong in application tests; Backlot does not parse framework reports or invent missing ones.
 Applications remain responsible for credentials printed into logs or artifacts.
 The same-user administrative socket remains the authorization boundary.
+
+## Finite retained-log pages
+
+```sh
+backlot logs INSTANCE_ID --page --component tests --attempt ATTEMPT_ID \
+  --stream stderr --limit 100 --json
+backlot logs INSTANCE_ID --page --component tests --attempt ATTEMPT_ID \
+  --stream stderr --after CURSOR --limit 100 --json
+```
+
+`--page` emits one `LogPageResponse`; ordinary logs retain LogRecord-only NDJSON.
+Page conflicts with follow; attempt, stream, after and limit require page. The
+record limit is 1–1000 (default 100). Each page scans at most 512 KiB and returns
+at most 512 KiB of encoded records; filtered-out records consume the scan budget.
+An empty filtered page can advance `continuation`. `more` means unscanned bytes
+at the observed source sizes, including an incomplete active tail, or later sources;
+`active` retains existing runtime/kept/cleanup-uncertain semantics.
+
+Resume with the same instance/component/attempt/stream filters. Limit may change.
+The bounded opaque cursor is caller-held metadata bound to daemon generation,
+query, retained source identity and complete-record byte position. At EOF it can
+be used for an explicit later read; there is no subscription or durable replay.
+An active partial record stays unread; a settled incomplete/corrupt record fails.
+A partial tail can return the same continuation while awaiting more bytes.
+
+Order is lexical retained filename then physical record order, never timestamp
+or causal order. Appends can appear on subsequent requests; new earlier sources
+may be missed. Enumeration scales with retained filenames. Separate pages are
+live, with no snapshot, restart, retention or private-state-tampering guarantee.
+A new daemon generation fails explicitly. Missing/replaced/truncated cursor
+sources report structured `source_changed` and require a fresh query.
+
+`gaps` independently reports `retention_expired`, `collection_incomplete` and
+`source_changed`, with safe detail and existing native ownership warnings. Current
+execution supplies known retention/collection facts; collection gaps name that
+attempt. Older attempts have no
+complete collection ledger, so `historical_collection` remains `unknown`.
+No records and no known gap never prove complete capture. Transport/corruption
+errors remain nonzero, distinct from successful partial-evidence pages.

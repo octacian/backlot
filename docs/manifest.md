@@ -487,3 +487,35 @@ running commands or looking up images. Valid unselected build-image declarations
 do not contact Docker. Existing literal/input images keep their existing behavior.
 See [retained ID and restart rules](containers.md#execution-scoped-image-retention)
 and the [decision](adr/20261025T202510851Z-pin-execution-scoped-build-images-from-native-jobs.md).
+
+## Discover declarations before setup
+
+```sh
+backlot scene list --project . --json
+backlot scene describe test --project . --json
+```
+
+Both commands strictly validate the entire manifest, including unselected scenes.
+They work without machine/private configuration, input values, seed files,
+application tools, providers or a daemon. List sorts scene summaries by name;
+describe returns the selected graph in dependency-first order, attachments,
+publication and deduplicated named prerequisites. Input sensitivity/generation,
+seed paths, required/pass-through keys, tools and provider requirements are
+_declarations_, not satisfied prerequisites or readiness. Commands, arguments,
+environment/fixture values and image literals are suppressed. Use `plan` after
+setup to resolve operational prerequisites.
+
+```sh
+backlot config show --project . --config /private/machine.yaml --json
+```
+
+This local view uses the same validated layers as setup. It reports manifest,
+machine/default-candidate and private association paths/presence, input presence,
+effective tool candidates with winning layers/sources, safe provider settings
+with defaults and declared storage intent. It performs no seed reads, executable
+lookup or provider calls and reveals no input values/digests. Relative tool
+candidates resolve from the project; bare names use the caller's PATH during
+planning. This view does not claim daemon executable resolution or original
+launch provenance; scoped `doctor` supplies current daemon lookup context.
+`--state-dir` selects a prospective directory/socket alongside execution, lease
+and retention defaults; machine storage declarations do not reconfigure a daemon.

@@ -10,6 +10,7 @@ import (
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/manifest"
+	"github.com/octacian/backlot/schemas"
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
 	"go.yaml.in/yaml/v3"
 )
@@ -107,6 +108,10 @@ func TestGeneratedArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, data := range generated {
+		embedded, err := schemas.Documents.ReadFile(name)
+		if err != nil || !bytes.Equal(embedded, data) {
+			t.Fatalf("installed schema %s differs from generator: %v", name, err)
+		}
 		actual, err := os.ReadFile(filepath.Join("../../schemas", name))
 		if err != nil {
 			t.Fatal(err)

@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/client"
@@ -22,7 +21,7 @@ import (
 func daemonFlags(lease bool) []urfave.Flag {
 	flags := []urfave.Flag{&urfave.StringFlag{Name: "state-dir", Usage: "Private daemon state/socket directory (absolute path)"}}
 	if lease {
-		flags = append(flags, &urfave.DurationFlag{Name: "retention-age", Value: 168 * time.Hour, Usage: "Completed evidence retention age"}, &urfave.Int64Flag{Name: "retention-bytes", Value: 1 << 30, Usage: "Daemon-wide evidence size cap"}, &urfave.DurationFlag{Name: "lease-duration", Value: daemon.DefaultLeaseDuration, Usage: "Disposable disconnect grace period (100ms to 24h)"})
+		flags = append(flags, &urfave.DurationFlag{Name: "retention-age", Value: daemon.DefaultRetentionAge, Usage: "Completed evidence retention age"}, &urfave.Int64Flag{Name: "retention-bytes", Value: daemon.DefaultRetentionBytes, Usage: "Daemon-wide evidence size cap"}, &urfave.DurationFlag{Name: "lease-duration", Value: daemon.DefaultLeaseDuration, Usage: "Disposable disconnect grace period (100ms to 24h)"})
 	}
 	return flags
 }
@@ -184,7 +183,7 @@ func output(c *urfave.Command, value any, err error) error {
 	return err
 }
 func daemonCommand() *urfave.Command {
-	children := []*urfave.Command{}
+	children := []*urfave.Command{daemonConfigurationCommand()}
 	for _, name := range []string{"serve", "start", "stop", "status"} {
 		children = append(children, &urfave.Command{Name: name, ArgsUsage: " ", Description: "Example: backlot daemon " + name, Usage: map[string]string{"serve": "Serve the local daemon in the foreground until shutdown or signal", "start": "Start the local daemon and wait for compatible access", "stop": "Request daemon shutdown (acknowledgment does not prove exit)", "status": "Observe daemon connectivity and API/state compatibility"}[name], Flags: daemonFlags(name == "serve" || name == "start"), Action: func(ctx context.Context, c *urfave.Command) error {
 			if c.Args().Len() != 0 {

@@ -652,3 +652,35 @@ Same-ID restart needs no flag. The flag is restart-only, invocation-only, and
 cannot bypass other safety checks or affect literal/input-image declarations.
 See [image retention](containers.md#execution-scoped-image-retention) and the
 [project example](../examples/build-images/README.md). Plans remain symbolic.
+
+## Bounded recorded discovery and active policy
+
+```sh
+backlot list --project . --scene dev --lifetime persistent --state stopped --limit 10 --json
+backlot list --checkout /absolute/worktree --project-id my-project --json
+backlot daemon config --state-dir /private/backlot --json
+```
+
+Unfiltered list remains global retained history, including destroyed instances.
+`--project` and `--checkout` are mutually exclusive explicit location selectors;
+project selects the exact recorded directory (a deleted recognized manifest path
+also works), while checkout selects all projects in that existing directory's
+verified checkout identity. Neither reads current manifest contents. Project ID,
+scene, lifetime and exact instance state intersect the location selection; state
+is `Instance.Status`, not historical execution outcome. Explicit IDs remain the
+inspection/cleanup fallback for unavailable, moved or replaced identity. Named
+scene lifecycle selection retains its nearest-project/ambiguity rules.
+
+Filters apply before the 1–100 page limit. Resume using `--after NEXT_AFTER_ID`
+with identical filters; the cursor is the last returned match only when another
+match exists. Empty results contain `instances: []`; corrupt records fail.
+Pages are independent live reads in lexical ID order: earlier insertions and
+changed membership can be missed. They are neither snapshots nor mutation authority.
+
+`daemon config` reports actual state/socket, API/state versions, generation,
+lease and evidence retention from captured **daemon-startup policy**. It does not
+reload files or invent original flag provenance. `daemon start` against a running
+daemon leaves that policy unchanged; inspect it, then explicitly stop/start to
+apply different settings. See [local composition](manifest.md#discover-declarations-before-setup)
+for prospective caller settings. New read contracts on an older daemon fail with
+`unsupported_feature`; no autostart, retry or fallback mutation occurs.

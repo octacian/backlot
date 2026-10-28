@@ -231,13 +231,8 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 func digest(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
 
 func tool(l layers, name, project, component, role string, snapshot *Snapshot) (string, error) {
-	selection := ToolSelection{Component: component, Role: role, Tool: name, Candidate: l.manifest.Tools[name], SourceLayer: "manifest", SourcePath: l.manifestPath}
-	if override, ok := l.machine.Tools[name]; ok {
-		selection.Candidate, selection.SourceLayer, selection.SourcePath = override, "machine", l.machinePath
-	}
-	if override, ok := l.private.Config.Tools[name]; ok {
-		selection.Candidate, selection.SourceLayer, selection.SourcePath = override, "private", l.private.Provenance.Path
-	}
+	selection := toolCandidate(l, name)
+	selection.Component, selection.Role = component, role
 	executable := selection.Candidate
 	if strings.ContainsAny(executable, "/\\") && !filepath.IsAbs(executable) {
 		executable = filepath.Join(project, executable)
@@ -323,4 +318,15 @@ func resolveValue(m v1.Manifest, c resolvedConfig, v v1.Value, project string, p
 		result.literal = &literal
 	}
 	return result, nil
+}
+
+func toolCandidate(l layers, name string) ToolSelection {
+	selection := ToolSelection{Tool: name, Candidate: l.manifest.Tools[name], SourceLayer: "manifest", SourcePath: l.manifestPath}
+	if override, ok := l.machine.Tools[name]; ok {
+		selection.Candidate, selection.SourceLayer, selection.SourcePath = override, "machine", l.machinePath
+	}
+	if override, ok := l.private.Config.Tools[name]; ok {
+		selection.Candidate, selection.SourceLayer, selection.SourcePath = override, "private", l.private.Provenance.Path
+	}
+	return selection
 }

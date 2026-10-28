@@ -8,7 +8,9 @@ macOS/Linux fixture evidence does not prove them.
 Backlot supports an explicit daemon-managed native local-CA gateway and an
 externally managed Caddy JSON API. Omitted `caddy.mode` retains external mode.
 Only published scenes require a gateway; other scenes and metadata-only `prepare`
-do not contact it. The [gateway decision](adr/20261016T201500000Z-support-explicit-linux-managed-https-reachability.md)
+do not contact it. Start with the [short HTTPS path](../README.md#enable-local-https)
+or [adopt an existing application](adoption.md); this guide owns topology, trust
+and publication guarantees. The [gateway decision](adr/20261016T201500000Z-support-explicit-linux-managed-https-reachability.md)
 records ownership and trust boundaries.
 
 <a id="managed-local-https-on-macos-arm64"></a>

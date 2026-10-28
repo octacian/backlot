@@ -11,8 +11,8 @@ secrets, local machine configuration, binaries, and unrelated work.
 Before committing, run the checks required by [Testing and tooling](testing.md).
 Describe PRs in terms of the problem, resulting behavior, relevant validation,
 and remaining limitations. Keep durable choices in ADRs and implementation
-tracking in the implementation plan or issues.
+tracking in issues/epics.
 
 Do not rewrite shared history, delete remote branches, or publish releases
-without authorization. Release automation and distribution beyond local builds
-will be specified when implemented.
+without authorization. Follow [Preparing a release](preparing-a-release.md) for
+release automation and distribution.

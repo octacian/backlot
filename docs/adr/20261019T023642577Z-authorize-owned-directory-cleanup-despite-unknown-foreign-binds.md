@@ -83,5 +83,5 @@ A future platform must establish its own filesystem/provider identity evidence.
 - [Runtime ownership and recovery](../containers.md#ownership-and-recovery)
 - [Daemon-owned lifetimes](20261007T052013565Z-use-explicit-scene-lifetimes-and-daemon-owned-execution.md)
 - [Native supervision](20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md)
-- [Implementation tracking](../implementation-plan.md#foreign-bind-cleanup-policy)
+- [Implementation tracking](https://github.com/octacian/backlot/blob/c524670fc27ba76d4329ade36966d18fbd40105e/docs/implementation-plan.md#foreign-bind-cleanup-policy)
 - [Docker consumer classifier](../../internal/daemon/docker.go)

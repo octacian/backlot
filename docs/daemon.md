@@ -4,16 +4,61 @@ The Windows equivalent is the [accepted design for #37](windows-design.md#window
 not an implemented daemon. Unix permissions, signals and socket commands below
 describe the existing macOS/Linux boundary.
 
-Milestone 2 adds explicit local daemon control and durable metadata preparation.
+The local daemon owns execution, resource lifecycle and durable metadata.
 `prepared` means a validated snapshot was recorded. It never means an application
 was executed, a resource was reserved, or readiness was observed. Native execution
 and retained logs are documented below. See [containers/private state](containers.md)
 for Docker execution and retained resource lifecycle; Publication and retained evidence are documented in the
 [HTTPS](https.md) and [evidence](evidence.md) guides.
 
+## Identity and lifecycle
+
+| Term | Meaning |
+| --- | --- |
+| Project | Stable manifest `project` identifier and project-directory location; a label alone is not ownership |
+| Checkout | Canonical filesystem/Git-directory identity; linked worktrees are distinct runtime scopes; branch/HEAD are provenance |
+| Scene | Named manifest selection of components/resources with explicit persistent or disposable lifetime |
+| Instance | Recorded runtime/metadata identity; persistent project + checkout + scene converges on one instance, disposable invocations get new IDs |
+| Attempt | One accepted execution within an instance; separates logs, results, attachment and build-image provenance across starts |
+| Retained generation | Owned data/resources and paired generated credentials; can survive multiple attempts until reset/destroy |
+
+A private project-configuration generation is a separate immutable input/tool
+file, shared by linked worktrees through registration. It is not the instance's
+data generation; resetting daemon state does not erase the registry or old secrets.
+See [private configuration](manifest.md#registered-private-project-configuration).
+
+| Intent or edit | Action | What applies or survives |
+| --- | --- | --- |
+| Discover declarations / resolve current prerequisites | `scene list`, `scene describe` / `plan` | No runtime mutation; plan resolves caller-side tools, inputs and seeds |
+| Record metadata only | `prepare SCENE` | Snapshot/identity, no application readiness or provider allocation |
+| First persistent start | `scene start SCENE` or `run SCENE` | Accept snapshot/attempt, allocate selected resources, await readiness |
+| Join running scene; or resume stopped scene | Repeat start/run | Existing identity, retained snapshot/data/credentials; report drift without applying edits |
+| Changed ordinary command, probe or non-sensitive environment | `restart ID` | Capture current sources and apply compatible drift; retain identity/data/paired credentials |
+| Changed protected resource/initialization/sensitive contract | `reset ID`, or `destroy ID` then start | Explicit destructive replacement required; reset keeps logical ID but replaces generation; later start after destroy gets a new ID |
+| Failed/interrupted persistent attempt | Inspect then `restart ID` | No implicit retry; compatibility/ownership fences apply before old work is stopped |
+| Stop development runtime | `scene stop SCENE` or `stop ID` | Stop owned consumers/routes, retain data, credentials, history and evidence |
+| Remove this instance's owned data | `destroy ID` | Stop/join before removal; history/evidence remain subject to retention |
+| Change daemon PATH/environment or policy | Explicit daemon stop/start in same state directory | Future daemon context changes; retained data/CA remain; no automatic scene restart |
+| Inspect or follow | `status`, `logs`, `export` | Observation only; no attachment, lease renewal or lifecycle ownership |
+| Own one new persistent attempt until client ends | `scene start --attached SCENE` or `run --attached SCENE` | Refuse existing runtime; signal/loss stops only the accepted attempt and retains data |
+
+Restart rejects protected drift **before stopping old work**: resource declarations,
+attachments/mounts, fresh-only contracts, protected container image/args, Docker
+endpoint and resolved sensitive/inherited/seed values. The authoritative detailed
+rules and build-image exception are in [generations and drift](containers.md#generations-jobs-and-drift).
+Reset/destroy are not rollback transactions once destructive cleanup begins.
+Cleanup uncertainty is a failure: retain ownership records and retry through the
+same scope. Never infer ownership from a name, PID, hostname or empty observation.
+
+Named status/stop use recorded location/identity, even with a broken/deleted
+manifest. Use recorded IDs if checkout identity is unavailable or selection is
+ambiguous. [Selection rules](#recorded-selection-and-stop) define the exact boundary.
+For the daily command sequence see [operations](operations.md#daily-loop); current
+flags/defaults and output framing live in the [CLI reference](cli.md).
+
 ## Commands
 
-Build with `make build`. Daemon flags precede positional arguments:
+Use an [installed executable](operations.md) (or `make build` for `bin/backlot`):
 
 ```sh
 bin/backlot daemon start --state-dir /absolute/private/backlot --json
@@ -35,8 +80,9 @@ stop request. `daemon stop` joins owned runtime cleanup before acknowledging
 not proof of final process exit or lock release; shutdown still finishes through
 the daemon's existing lifecycle. There is no service installer. Use the same `--state-dir` on each command;
 without it, the directory is `backlot/daemon` below Go's `os.UserConfigDir()`.
-State storage in this milestone uses that explicit flag/default; the manifest's
-machine `storage` retention settings remain intent for later evidence storage.
+Actual state/lease/evidence policy comes from daemon startup flags, not machine
+`storage` declarations. Inspect it with `daemon config`; see
+[effective versus reserved settings](manifest.md#machine-schema-and-results).
 Unix socket paths have OS length limits: choose a short private directory if a
 long configured path cannot bind.
 
@@ -91,7 +137,7 @@ manifest privately and resolved sensitive values in a separate protected databas
 bucket. Seeds and inherited/input values are retained as resolved values; snapshots
 are not reconstructed from the redacted public plan or reread during recovery.
 Allocation-dependent values stay symbolic; preparation does not generate resources
-or secrets for future providers. Do not put credentials in command arguments,
+or secrets. Do not put credentials in command arguments,
 identifiers or paths; use sensitive environment declarations.
 
 ## Named persistent scenes
@@ -383,16 +429,10 @@ to later expiries and daemon shutdown; shutdown joins execution and cancellation
 owners before releasing their store, or reports failure and retains ownership.
 
 Persistent startup is daemon-owned after acceptance, so closing a client leaves
-it running. Concurrent starts join the same instance, and repeated starts report
-manifest/config drift without replacing the accepted private snapshot. Failed,
-interrupted instances require explicit `restart`, which revalidates
-checkout identity, applies compatible command/environment/graph/probe drift, and
-retains logical identity. Resource contract changes are rejected before stopping
-old work and require explicit `reset` or `destroy`. Stop/run reuses the retained
-snapshot and storage; restart can apply safe drift. Reset removes the generation
-and starts fresh under the same identity; destroy removes it and retains historical
-results/logs. See the [private-state contract](containers.md#generations-jobs-and-drift)
-for initialization, credentials, conservative drift and cleanup behavior.
+it running. See the [lifecycle table](#identity-and-lifecycle) for join/resume,
+restart/reset/destroy and drift decisions, and the
+[private-state contract](containers.md#generations-jobs-and-drift) for protected
+initialization, credentials and cleanup fences.
 Instance mutations and declared checkout-output groups serialize across
 scenes/runs. Ctrl-C/SIGTERM during a CLI
 run cancels and joins the supervised work. Ordinary persistent client disconnect
@@ -452,7 +492,7 @@ failures, artifacts, fixture access and retention settings.
 
 Finite startup failures after acceptance retain the last validated instance/attempt
 with an optional presentation error, explicitly marked last observed. This does
-not establish current state or completed cleanup; see [CLI framing and recovery](operations.md#cli-invocation-and-results).
+not establish current state or completed cleanup; see [CLI framing and recovery](cli.md#cli-invocation-and-results).
 
 The CLI waits for persistent ready or disposable terminal status through inspect;
 raw API callers must renew disposable capabilities while polling. Logs pages use

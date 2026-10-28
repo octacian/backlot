@@ -18,9 +18,33 @@ storage implementation. Add dependencies when used, not in anticipation of work.
 
 Plan meaningful work in reviewable steps and name affected packages. Exercise
 failure behavior as well as success. Report the resulting behavior, validation,
-remaining work, and material uncertainty. Do not present scaffold commands or
-mocked integration checks as a working runtime.
+remaining work, and material uncertainty. Track planned work in issues/epics and
+applicable proposed ADRs; current guides describe implemented behavior. Keep
+execution evidence in PRs and rationale in ADRs. Do not present mocked integration
+checks as a working runtime.
 
 Document a rule once in its relevant guide. Keep ADR rationale in the ADR and
 reference it elsewhere. Treat generated files as outputs: change the source and
 regenerate, review the diff, and document generation commands when introduced.
+
+## Maintain adopter documentation
+
+When a command, default, schema or result contract changes, update its help and
+the [CLI reference](cli.md) together, including targets, side effects, errors,
+exits, cancellation, framing and unknown/partial outcomes. Update affected
+[adoption](adoption.md), [daily-use](operations.md#daily-loop) and runnable example
+paths in the same change. Keep contributor build/test/release tooling in its own
+guides; current adopter contracts must not depend on milestone history or Go types.
+
+Keep each rule in one authoritative reference and link to it; preserve inbound
+anchors when moving sections. Project examples must use declared private inputs
+and portable tool names rather than secrets or machine-specific paths. Provider
+settings belong in external machine configuration. Reuse runnable recipes rather
+than adding parallel acceptance harnesses to tutorials.
+
+Check help and shared types/schemas against the executable revision being audited,
+check local links/anchors, and exercise affected success/failure paths with owned
+fixtures and authenticated cleanup. Record revision, commands, results and unavailable
+provider/platform evidence outside the committed tree. For docs-only changes,
+run `make check-docs` and `git diff --check`; select existing example checks for the
+changed guidance, without claiming skipped checks passed.

@@ -111,7 +111,7 @@ rather than inference from compilation.
 
 ## References
 
-- [PRD execution contract](../prd.md#execution-and-dependencies)
+- [PRD execution contract](https://github.com/octacian/backlot/blob/c524670fc27ba76d4329ade36966d18fbd40105e/docs/prd.md#execution-and-dependencies)
 - [Native daemon guide](../daemon.md#native-execution)
 - [Daemon-owned lifetimes](20261007T052013565Z-use-explicit-scene-lifetimes-and-daemon-owned-execution.md)
 - [Apple XNU process-event header](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/event.h)

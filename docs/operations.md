@@ -155,51 +155,87 @@ notice identifies covered source obligations; the fixture driver is not linked
 into `backlot`. Docker/Chromium distributions carry their own license notices;
 their images are operator-built setup dependencies, not bundled binary contents.
 
-For the shortest existing-project path, start with the [README quickstart](../README.md#run-an-existing-configured-project).
-For included application code, a minimal manifest and explicit trust settings, use
-the [macOS HTTPS quickstart](../examples/macos-quickstart/README.md). Contributor
-validation (`make check`) is required when changing Backlot, not to run a project.
+<a id="explicit-setup-and-daily-use"></a>
 
-## Explicit setup and daily use
+## Daily loop
 
-Choose a short absolute private daemon state directory (0700). Put machine
-configuration outside the repository (0600); do not commit credentials. Machine
-provider settings and daemon state flags are separate. Follow
-[manifest/configuration](manifest.md), [native daemon](daemon.md),
-[containers/private state](containers.md) and [HTTPS setup](https.md) for exact
-contracts. The [runnable fixture](../examples/release-acceptance/README.md) supplies
-all four application workflows and explicit image setup commands as optional
-diagnostics. Follow [release preparation](preparing-a-release.md) for readiness checks.
+From an unfamiliar checkout, discover declarations before installing application
+tools, entering credentials or starting providers:
 
 ```sh
-backlot daemon start --state-dir /private/backlot --json
-backlot doctor --state-dir /private/backlot --json
-backlot plan dev --project /absolute/project --config /private/machine.yaml --json
-backlot scene start dev --project /absolute/project --config /private/machine.yaml --state-dir /private/backlot --json
-backlot list --state-dir /private/backlot --limit 100 --json
-backlot status --state-dir /private/backlot --json INSTANCE_ID
-backlot daemon stop --state-dir /private/backlot --json
+backlot scene list --json
+backlot scene describe test --json
+backlot config show --json
 ```
 
-`list` emits one bounded identity-ordered page, including historical/destroyed
-instances. Continue with `--after NEXT_AFTER_ID`; concurrent additions with earlier
-random IDs may require a fresh traversal. `status ID` inspects one recorded instance;
-add `--follow` for bounded sampled observation. Use [named scenes](daemon.md#named-persistent-scenes) for checkout-based
-start/status/stop; `daemon status` reports daemon connectivity and `gateway status`
-reports managed process/listener readiness independently of TLS trust. Neither ordinary command
-reveals private ownership authority or fixture secrets. bare `doctor` checks local
-access/compatibility and shows state/socket/log paths plus an unloaded default
-config candidate. Use `doctor --project PATH --scene NAME --config PATH` or
-`doctor --instance ID` for scoped provider observations and defining/storage paths;
-see [scoped diagnostics and opt-in container probes](daemon.md#scoped-provider-diagnostics). Raw API clients use the local permissioned Unix
-socket, required API headers and named [contracts](daemon.md#local-api-and-doctor).
+List/describe validate declarations without machine/private configuration, seeds,
+tools, providers or a daemon. `config show` composes validated local sources and
+shows input presence and safe settings; it does not resolve executables or prove
+provider availability. Install the application's dependencies separately. If
+inputs or local tool overrides are needed, use `backlot project setup` once;
+repeat it to inspect, or use `--edit` to change the private registration.
+See [configuration layers](manifest.md#registered-private-project-configuration).
 
-Closing a persistent run client leaves accepted startup daemon-owned. Disposable
-runs have a finite renewing lease; client loss cancels after expiry. Ctrl-C and
-SIGTERM request bounded cancellation. JSON run output is a single typed result;
-application streams go through `logs` (JSON logs are NDJSON). Test exit status,
-cancellation, infrastructure/collection/cleanup failures are independent fields.
-A zero test exit cannot override failed collection/cleanup.
+Start the daemon explicitly from the intended tool/environment context. Start a
+managed gateway only for published scenes, after [HTTPS setup](https.md).
+Use the same `--state-dir` throughout if overriding the default:
+
+```sh
+backlot daemon start --json
+backlot plan test --json -- APPLICATION_TEST_ARGS
+backlot doctor --scene test --json
+backlot run test --json -- APPLICATION_TEST_ARGS
+```
+
+Plan is an offline operational check of selected tools, inputs and seeds in the
+**caller** context. Doctor checks selected providers and tool lookup in the
+**daemon** context; `healthy` means no observed failure, even when some checks are
+`deferred` or `unsupported`. Compare requested scope with completed checks.
+Neither command proves a test ran. A long-lived daemon retains its startup PATH
+and inherited environment; changing your shell does not update it. See
+[tool selection](daemon.md#scoped-provider-diagnostics).
+
+For a persistent scene use `scene start dev` instead of the disposable run above.
+It returns at readiness and leaves accepted startup/runtime daemon-owned. To own
+one persistent attempt until your client ends, use `scene start dev --attached`;
+this refuses existing runtime rather than adopting it. Status/follow/logs and
+export only observe: disconnecting them does not stop work or renew its lease.
+
+Record the returned instance ID and original CLI exit. Named startup nests the
+instance under `result`; ordinary `run` uses `instance`. To investigate:
+
+```sh
+backlot list --project . --limit 10 --json
+backlot status INSTANCE_ID --json
+backlot doctor --instance INSTANCE_ID --json
+backlot logs INSTANCE_ID --page --limit 100 --json
+backlot fixtures INSTANCE_ID --json
+backlot export INSTANCE_ID --output ./saved-run --wait=45s --json
+```
+
+Use the returned list/log continuation with unchanged filters; pages are live
+reads, not a consistent snapshot. Status can succeed while reporting failed
+execution. Check original test exit, orchestration, collection and cleanup
+independently; see [machine-result examples](cli.md#interpreting-machine-results).
+Export needs settled producers and a new destination beneath a private caller-owned
+parent outside daemon state. A kept failure must be stopped first. Captured logs
+and application artifacts can contain secrets: review evidence before sharing.
+
+End only your selected work:
+
+```sh
+backlot scene stop dev --json
+backlot destroy INSTANCE_ID --json
+```
+
+Stop preserves persistent data; destroy removes that instance's owned data and
+keeps historical evidence subject to retention. Use destroy only when the data
+is no longer needed. Named stop still works with a broken/deleted manifest;
+recorded IDs are the fallback when checkout identity is unavailable. Never prune
+by resource name, hostname or observed PID. Preserve state on uncertain cleanup
+and retry through the same daemon scope. See the
+[lifecycle decision table](daemon.md#identity-and-lifecycle).
+`daemon stop` is for deliberate daemon shutdown, not routine scene cleanup.
 
 ## Diagnosis and recovery
 
@@ -232,96 +268,13 @@ Never remove retained data while a consumer may still run. A cleanup failure is 
 failure, with remaining handles preserved for recovery. Private state and captured
 application logs may contain secrets; publish only reviewed sanitized evidence.
 
-## CLI invocation and results
+## Command and machine-output reference
 
-Use `backlot --help` or `backlot COMMAND --help` for targets, flags and defaults.
-`--json` is global; other options belong to their documented action. Unsupported
-options and duplicate singleton flags fail. Project setup's `--generate`,
-`--remove-input` and `--remove-tool` are repeatable.
+See the [CLI reference](cli.md) for current commands, defaults, framing, errors,
+exit status, cancellation and installed contract/schema discovery.
 
-`plan` and `run` take the scene first and forward remaining positionals to its
-terminal job, with or without `--`. Use `--` to protect application flags. Spaces
-and empty arguments stay intact; Backlot performs no shell expansion:
+<a id="cli-invocation-and-results"></a>
+<a id="installed-read-contracts-and-schemas"></a>
 
-```sh
-backlot --json plan test --project . -- -run TestExample
-backlot run test --project . -- -run TestExample
-backlot run test focus
-```
-
-The last command forwards `focus`. Persistent scenes and attached starts reject
-terminal tails. `restart` and `reset` take one recorded instance ID and derive its
-project; they reject `--project` and terminal tails. `--allow-image-change` is
-restart-only. `--keep-on-failure` requires disposable `run`; `--attached` requires
-`run` or `scene start` without terminal arguments or `--keep-on-failure`.
-
-| Intent | Command |
-| --- | --- |
-| Offline validation; no runtime readiness | `plan SCENE` |
-| Metadata snapshot only; no application work | `prepare SCENE` |
-| Await readiness or disposable completion | `run SCENE` |
-| Start a named persistent scene and await readiness | `scene start SCENE` |
-| Inspect a recorded ID, including history/disposable work | `inspect ID` or `status ID` |
-| Resolve recorded persistent state by name | `scene status SCENE` |
-| Sample changes without owning/stopping work | `status ID --follow` or `scene status SCENE --follow` |
-| Own a persistent attempt and stop on client loss | `run --attached SCENE` or `scene start --attached SCENE` |
-| Retain data on restart / replace data | `restart ID` / `reset ID` |
-| Stop / remove runtime and data | `stop ID` / `destroy ID` |
-
-Inspection can succeed for a failed execution; doctor returns nonzero for failed
-checks while retaining findings. Application exits and collection/cleanup outcomes
-remain separate; an absent terminal exit means unknown. Human and JSON output use
-the same observed facts. Carry the original `--state-dir` into follow-up commands.
-See [results and evidence](evidence.md) for exit and cancellation rules.
-
-| Machine stdout mode | Framing |
-| --- | --- |
-| Finite operations | One named JSON result, or `ErrorResponse` without a usable result |
-| `logs`, including finite reads | `LogRecord` NDJSON; zero records is valid; failure adds one `ErrorResponse` line before or after records |
-| ID or named status with `--follow` | `SceneFollowRecord` NDJSON |
-| Attached starts | `AttachedRecord` NDJSON |
-| `daemon serve` | Foreground service; no successful JSON document; ordinary error output on failure |
-| Explicit help, no-action root/group help, `licenses` | Human text even with `--json`; canonical license bytes |
-
-Usage/semantic failures emit `invalid_arguments` without human help on stdout
-when JSON is already recognized. Earlier parser failures may use stderr and a
-nonzero exit; moving `--json` after an invalid option does not guarantee JSON.
-Diagnostics include safe option names and help guidance, omitting rejected values.
-
-Postacceptance failures can return `InstanceResponse` or `SceneResponse` with an
-optional `error` and the last validated snapshot. Consumers must allow that field,
-check exit status/error, and treat the snapshot as last observed, not current or
-final. Without a usable snapshot, output is `ErrorResponse`. Follow/attached errors
-also retain known snapshots/results. Retained failures omit lease/attachment
-capabilities and hydrated startup secrets; authorized disclosure is unchanged.
-Logs keep their stderr warnings and retention-gap notices.
-
-A missing or invalid mutation reply leaves acceptance/completion uncertain. Inspect
-the known ID, scene or service with the same state directory before recovery;
-Backlot does not automatically retry. Preflight compatibility refusal instead
-requires matching-binary recovery. `daemon stop` acknowledges stopping, not process
-exit or lock release. Output-write failures are nonzero; a closed pipe cannot
-promise a final document or record.
-
-## Installed read contracts and schemas
-
-```sh
-backlot contracts --json
-backlot contracts --daemon --state-dir /private/backlot --json
-backlot schema manifest > manifest.schema.json
-backlot schema machine > machine.schema.json
-backlot schema private > private.schema.json
-```
-
-Local contracts reports existing executable version identity, matching schema
-selectors and focused supported reads/output modes. Daemon contracts reports
-API/state/generation and its finite read endpoints (excluding local declarations),
-without attributing the caller's
-build identity to the daemon. Capabilities do not prove provider readiness.
-This inventory is not a command/flag catalog. `version --json` remains unchanged.
-
-`schema` emits the exact embedded Draft 2020-12 document in both human and JSON
-modes, a finite raw-schema exception to ordinary result envelopes. Runtime strict
-validation remains authoritative. See [declaration/configuration discovery](manifest.md#discover-declarations-before-setup),
-[recorded filters and active policy](daemon.md#bounded-recorded-discovery-and-active-policy)
-and [finite log pages](evidence.md#finite-retained-log-pages).
+The former invocation/result and installed-schema sections now live in that
+reference; these anchors remain for existing links.

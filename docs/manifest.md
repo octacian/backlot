@@ -1,25 +1,19 @@
 # Offline planning and manifest v1
 
-Milestone 1 implements read-only planning. It does not run a daemon, execute
-application commands, reserve ports, generate secrets, inspect provider health,
-create containers, or register routes. Later milestones consume this contract.
+A project manifest declares reusable components, resources and scenes. Offline
+`plan` validates selected tools, inputs and seeds without running a daemon,
+executing application commands, allocating resources, inspecting provider health
+or publishing routes. Use [declaration discovery](#discover-declarations-before-setup)
+when prerequisites are not installed yet; use [project adoption](adoption.md) to
+translate an existing application's commands.
 
 ```sh
-go run ./cmd/backlot plan test --project examples/adoption --json -- -run TestExample
-go run ./cmd/backlot plan backend-test --project examples/fullstack \
-  --config examples/fullstack/machine.example.yaml --json -- -run TestOrders
+backlot plan test --project examples/adoption --json -- -run TestExample
 ```
 
-The full command is `backlot plan <scene> [--project PATH] [--config PATH]
-[--json] -- <terminal-job args>`. Flags follow the scene. Each flag occurs once;
-path flags take separate values. Everything after the first `--` goes unchanged
-to the disposable scene's terminal job only, after its declared arguments.
-Arguments without a terminal job are errors. Scene names are project-defined.
-Human output summarizes selected work. JSON emits exactly one shared
-`api/v1.PlanResponse` or `api/v1.ErrorResponse` on stdout; failures return nonzero
-and diagnostics go to stderr. Errors include a code, field context and recovery
-instruction. Argument-parser failures before entering the plan action follow the
-CLI library's normal diagnostic behavior.
+Scene names are project-defined. Only a disposable terminal job receives forwarded
+arguments. See the [CLI reference](cli.md#cli-invocation-and-results) for syntax,
+errors and framing; a plan establishes neither runtime readiness nor execution.
 
 ## Editor completion and validation
 
@@ -39,8 +33,8 @@ Git checkout, search to the filesystem root. Exactly one of `backlot.yaml`,
 candidates are an error, even with an explicit file override. `--project` selects
 an exact directory or one of those filenames. Paths are canonicalized through
 symlinks; the checkout path is the nearest Git root, or the project directory.
-No Git subprocess runs. This is path provenance, not a durable runtime identity;
-moved-checkout reconciliation belongs to milestone 2.
+No Git subprocess runs. Planning reports path provenance; runtime identity and
+recorded targeting follow the [daemon contract](daemon.md#identity-and-lifecycle).
 
 `--config` reads an explicit YAML/JSON machine file relative to the working
 directory. Otherwise use `backlot/config.yaml` beneath Go's `os.UserConfigDir()`
@@ -91,7 +85,7 @@ Build jobs may invoke the project's existing tools.
 `shared_service`; see [shared-service declarations](#shared-service-declarations).
 Every resource is instance-owned intent, never an existing
 external resource to adopt by name. A scene selects its resources, and components
-explicitly attach the resources they consume. Secret generations will be retained
+explicitly attach the resources they consume. Secret generations are retained
 with persistent storage; the offline planner does not generate or rotate them.
 
 `outputs` maps names to `{path: web/dist, concurrency_group: web-build}`. Paths
@@ -99,7 +93,7 @@ are safe project-relative paths, without traversal, backslashes or drive names.
 Overlapping paths must share a group, including canonical aliases through
 symlinks and missing suffixes, across scene declarations. Selected existing output
 ancestors cannot escape the project through symlinks. Components list their
-outputs. A future executor must serialize these groups per canonical checkout
+outputs. The executor serializes these groups per canonical checkout
 across scenes and runs; a plan is not a lock. Backlot cannot infer undeclared
 command side effects.
 
@@ -139,13 +133,12 @@ numeric port in 1..65535 (TCP service-name ports are unsupported). HTTP uses a
 symbolic origin or literal HTTP(S) URL without credentials. Explicit
 HTTP(S) ports, including Caddy admin endpoint ports, must be in 1..65535; omitted
 ports retain the scheme default and an explicitly empty port is invalid. A symbolic
-service port carries enough identity for a future adapter to resolve its address;
-no numeric port is invented here.
+service port is resolved at execution; offline planning invents no numeric port.
 
 Jobs require `policy: fresh-only|each-start`. Fresh-only jobs declare nonempty
 `initializes`, naming attached volume/directory/allocation generations. Two selected jobs
 cannot initialize the same generation. Each-start jobs cannot declare initializes.
-The executor will record fresh initialization only after successful completion;
+The executor records fresh initialization only after successful completion;
 planning preserves eligibility policy, without claiming a job was run or skipped.
 
 `depends_on` is an array of `{component: name, condition: ready|completed}`.
@@ -269,13 +262,32 @@ Machine configuration uses the same version and may declare:
 - `docker`: `endpoint` as a local Unix socket URL (canonical `unix:///...`;
   `unix:/...` is also accepted), optional container-to-native `host_address` and
   numeric mapped-port `publish_address` (default `127.0.0.1`).
-- `caddy`: HTTP(S) admin `endpoint` without credentials/query/fragment, owned
-  identifier `scope`, concrete `domain_suffix`, gateway-reachable `host_address`
-  and optional `https_port` (default 443). See [HTTPS setup and routing](https.md).
+- `caddy`: explicit `mode: managed` selects stock native Caddy, its `executable`,
+  loopback admin `endpoint` (default `http://127.0.0.1:2020`) and HTTPS port
+  (default 8443). Optional `https_bind_address` is an explicit Linux/container
+  reachability choice. Omitted mode selects external Caddy with operator-owned
+  `endpoint`, `scope`, `domain_suffix`, `host_address` and `https_port` (default
+  443). See [HTTPS setup and routing](https.md).
 - `storage`: `directory`, positive duration `retention_age` and positive integer
   `retention_bytes`. These scene configuration settings remain validated intent. Configure the running
   daemon with `--state-dir`, `--retention-age` and `--retention-bytes`; scene input
   never changes the daemon-wide policy.
+
+These are **effective** tool/provider settings for selected work. Machine
+`storage` fields are validated but **reserved intent**, not active daemon policy.
+`config show` reports local composition/prospective defaults; `daemon config`
+reports actual captured state/socket/lease/retention policy. Changing a machine
+file or repeating `daemon start` does not change a running daemon's policy.
+Stop/start it deliberately to change startup flags or inherited environment.
+
+Configuration sources are distinct: the manifest declares names/default tools;
+the optional machine file provides shared tools/providers; the registered private
+project layer supplies input values and tool overrides. Private tools win over
+machine tools, which win over manifest defaults. Relative paths resolve from the
+project; planning uses caller PATH while execution uses daemon PATH. Source byte
+digests and effective configuration drift are different facts; see
+[private provenance](#registered-private-project-configuration) and
+[current versus recorded diagnostics](daemon.md#scoped-provider-diagnostics).
 
 The plan records canonical checkout and manifest paths, SHA-256 digests of source
 manifest/config bytes, lifetime, terminal job, selected components/resources,
@@ -283,7 +295,7 @@ outputs/groups and publication intent. Digests capture drift/provenance, not
 provider health or completed allocations. They should be treated as local
 provenance metadata, not as a way to publish sensitive input files. Shared
 [planning request/result/error types](../api/v1/plan.go) are the actual offline
-operation contract; this milestone adds no speculative HTTP endpoints.
+operation contract.
 
 The [adoption fixture](../examples/adoption/backlot.yaml) shows a small native
 project. The [fullstack fixture](../examples/fullstack/backlot.yaml) shows shared
@@ -412,8 +424,7 @@ or change HOME/XDG or application pass-through. `version --json` reports
 ## Shared-service declarations
 
 Declare a bundled MariaDB or PostgreSQL service with an already-present local Engine
-image; prefer an immutable digest for reviewed configuration. See
-[current engine scope](implementation-plan.md#shared-services-issue-43).
+image; prefer an immutable digest for reviewed configuration.
 
 ```yaml
 shared_services:

@@ -3,7 +3,8 @@
 ADRs preserve consequential choices and rationale: system boundaries, data
 contracts, dependencies, security, and durable conventions. Routine implementation
 details belong in code or PR descriptions. Acceptance of a decision does not mean
-its implementation is complete; track progress in the implementation plan/issues.
+its implementation is complete; track scope and progress in issues/epics and
+execution evidence in PRs.
 
 ## Consult decisions
 

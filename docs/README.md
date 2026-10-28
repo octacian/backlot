@@ -18,17 +18,19 @@ Before planning or editing, read:
 
 | Task | Read |
 | --- | --- |
-| Product or runtime implementation | Relevant sections of the [V1 PRD](prd.md) and [architecture](architecture.md), applicable [ADRs](adr/README.md), and relevant integration sections in [Testing and tooling](testing.md) |
+| Product or runtime implementation | Relevant current guides and [architecture](architecture.md), applicable [ADRs](adr/README.md), and relevant integration sections in [Testing and tooling](testing.md) |
 | CLI or API contracts | [Architecture: shared API](architecture.md#shared-api), [Go practices](go-practices.md) |
 | Commits and pull requests | [Git workflow](git-workflow.md) |
-| Delivery scope or status | [Implementation plan](implementation-plan.md) and linked issues/PRs |
+| Delivery scope or status | Relevant issues/epics for scope and status; PRs for execution evidence |
 | ADR creation or changes | [ADR guide](adr/README.md), [template](adr/template.md) |
 
 ## Guides
 
 | Topic | Guide |
 | --- | --- |
-| User entry points | [README quickstart](../README.md), [installation and operations](operations.md), [runnable macOS HTTPS example](../examples/macos-quickstart/README.md) |
+| User entry points | [README quickstart](../README.md), [project adoption](adoption.md), [daily loop](operations.md#daily-loop) |
+| Current CLI contract | [CLI reference](cli.md), [identity and lifecycle](daemon.md#identity-and-lifecycle), [machine-result interpretation](cli.md#interpreting-machine-results) |
+| Installation and HTTPS | [Installation and operations](operations.md), [runnable macOS HTTPS example](../examples/macos-quickstart/README.md) |
 | Manifest and offline planning | [Manifest](manifest.md) |
 | Daemon, native execution and scene targeting | [Local daemon](daemon.md) |
 | Containers and private state | [Containers](containers.md) |
@@ -41,4 +43,5 @@ Before planning or editing, read:
 | Preparing a release | [Release procedure](preparing-a-release.md) |
 | Targeted runtime diagnostics | [Diagnostics and evidence](release-acceptance/README.md), [four-workflow fixture](../examples/release-acceptance/README.md) |
 
-[Testing and tooling](testing.md#commands) is the contributor command reference.
+[Testing and tooling](testing.md#commands) is the contributor build/test command
+reference; user commands belong in the [CLI reference](cli.md).

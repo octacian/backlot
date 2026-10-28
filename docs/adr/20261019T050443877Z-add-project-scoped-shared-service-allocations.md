@@ -19,7 +19,6 @@ private containers remain available for stronger separation.
 Use existing planning, storage and execution boundaries. The referenced private
 configuration, attached execution, native supervision and startup-disclosure
 contracts remain in force; this decision adds only shared-service behavior.
-Delivery status belongs in the [implementation plan](../implementation-plan.md#shared-services-issue-43).
 
 ## Context
 

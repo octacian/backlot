@@ -29,6 +29,9 @@ no numeric-PID signal fallback. See [installation](operations.md) and
 
 ## Linux prerequisites and installation
 
+For adapting application commands across supported platforms, start with
+[project adoption](adoption.md); use this guide for host/topology prerequisites.
+
 Install Go at the version in `go.mod` (1.27.1, or a compatible newer patch), Git,
 Make, `lsof`, and a C compiler/libc headers for the contributor race gate. Install
 stock Caddy 2.11.6 separately for managed HTTPS and explicitly configure its

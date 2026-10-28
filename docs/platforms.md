@@ -9,8 +9,9 @@ coverage under the [release policy](preparing-a-release.md). Reports must identi
 the tested revision, dependency versions, failures/skips and cleanup; a target in
 this policy is not evidence that an untested release passed. Other distributions,
 architectures, rootless/remote engines and alternative container runtimes are
-experimental. Native Windows releases and runtime support are outside project
-scope.
+experimental. Native Windows releases and runtime support are outside the current
+project scope due to limited demand. Reconsider with sufficient interest and
+contributors willing to share ongoing maintenance and native Windows testing.
 WSL guidance below is configuration guidance only, with no WSL QA or support guarantee.
 
 macOS and Linux use permissioned Unix sockets and authenticated guardians.

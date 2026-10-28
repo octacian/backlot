@@ -43,7 +43,10 @@ func newSharedSQLFixture(t *testing.T, freshOnly bool, manager string, endpoints
 	if endpoint == "" {
 		t.Skip("requires explicit Docker endpoint and pre-pulled SQL/alpine:3.21 images; skip is not provider evidence")
 	}
-	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
+	if err := sharedSQLBinaries.load(); err != nil {
+		t.Fatal(err)
+	}
+	binary := sharedSQLBinaries.cli
 	h := newNativeHarness(t, binary, "30s")
 	d, err := newDocker(endpoint)
 	if err != nil {
@@ -142,15 +145,14 @@ func newSharedSQLFixture(t *testing.T, freshOnly bool, manager string, endpoints
 	}
 	baseIDs = []string{maria.ID, base.ID}
 	t.Log(manager, "local immutable image", maria.ID, "Alpine local immutable base", base.ID)
-	native := filepath.Join(t.TempDir(), "consumer")
-	if out, err := exec.Command("go", "build", "-o", native, "./testdata/shared-consumer").CombinedOutput(); err != nil {
-		t.Fatalf("build native consumer: %v %s", err, out)
-	}
+	native := sharedSQLBinaries.native
 	buildDir := t.TempDir()
-	build := exec.Command("go", "build", "-o", filepath.Join(buildDir, "consumer"), "./testdata/shared-consumer")
-	build.Env = append(os.Environ(), "GOOS=linux", "CGO_ENABLED=0")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build container consumer: %v %s", err, out)
+	consumer, err := os.ReadFile(sharedSQLBinaries.linuxConsumer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "consumer"), consumer, 0755); err != nil {
+		t.Fatal(err)
 	}
 	imageOwner = newID()
 	dockerfile := "FROM " + base.ID + "\nLABEL io.backlot.owner=" + imageOwner + "\nCOPY consumer /consumer\nENTRYPOINT [\"/consumer\"]\n"
@@ -158,7 +160,7 @@ func newSharedSQLFixture(t *testing.T, freshOnly bool, manager string, endpoints
 		t.Fatal(err)
 	}
 	iid := filepath.Join(buildDir, "iid")
-	build = exec.Command("docker", "--host", endpoint, "build", "--pull=false", "--network=none", "--force-rm=true", "--iidfile", iid, buildDir)
+	build := exec.Command("docker", "--host", endpoint, "build", "--pull=false", "--network=none", "--force-rm=true", "--iidfile", iid, buildDir)
 	build.Env = append(os.Environ(), "DOCKER_BUILDKIT=0")
 	buildStarted = true
 	buildOutput, buildErr := build.CombinedOutput()

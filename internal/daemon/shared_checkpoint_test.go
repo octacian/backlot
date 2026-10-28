@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -209,5 +210,10 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	if err := sharedSQLBinaries.close(code != 0); err != nil {
+		fmt.Fprintln(os.Stderr, "shared SQL build cleanup failed:", err)
+		code = 1
+	}
+	os.Exit(code)
 }

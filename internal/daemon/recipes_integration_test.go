@@ -154,6 +154,10 @@ func TestNativePlaywrightRecipe(t *testing.T) {
 	binary := recipeBinary(t, "BACKLOT_INSTALLED_TEST_BINARY", "../../cmd/backlot")
 	h := newNativeHarness(t, binary, "30s")
 	copyRecipe(t, h, "native-playwright", "app.mjs", "prepare.mjs", "playwright.config.mjs", "package.json", "tests/application.spec.mjs")
+	config := filepath.Join(filepath.Dir(h.dir), "machine.json")
+	if err := os.WriteFile(config, []byte(`{"version":"backlot/v1"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(filepath.Join(project, "node_modules"), filepath.Join(h.project, "node_modules")); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +179,7 @@ func TestNativePlaywrightRecipe(t *testing.T) {
 		selector string
 		exit     int
 	}{{"counter interaction", 0}, {"intentional failure", 1}, {"counter interaction", 0}} {
-		instance, exported := recipeCLI(t, h, "", "browser", []string{"--grep", tc.selector}, tc.exit)
+		instance, exported := recipeCLI(t, h, config, "browser", []string{"--grep", tc.selector}, tc.exit)
 		if firstExport == "" {
 			first, firstExport = instance, exported
 		}
@@ -199,7 +203,7 @@ func TestNativePlaywrightRecipe(t *testing.T) {
 	server := h.manifest.Components["app"]
 	server.Outputs = []string{"reports"}
 	h.manifest.Components["app"] = server
-	recipeCancellation(t, h, nil, "browser", []string{"--grep", "held browser"}, os.Interrupt)
+	recipeCancellation(t, h, nil, config, "browser", []string{"--grep", "held browser"}, os.Interrupt)
 	verifyRecipeExport(t, first, firstExport, []string{"--grep", "counter interaction"}, 0)
 }
 
@@ -255,7 +259,7 @@ func TestNativeGoMariaDBRecipe(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h.project, "held_test.go"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	recipeCancellation(t, h.nativeHarness, h, "test", []string{"-run", "^TestHeld$", "-v"}, syscall.SIGTERM)
+	recipeCancellation(t, h.nativeHarness, h, h.config, "test", []string{"-run", "^TestHeld$", "-v"}, syscall.SIGTERM)
 	verifyRecipeExport(t, first, firstExport, []string{"-run", "^TestDatabase$", "-v"}, 0)
 }
 

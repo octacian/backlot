@@ -304,6 +304,17 @@ func TestMariaDBRecipeCompatibility(t *testing.T) {
 				t.Fatal("application readiness rejection result", result)
 			}
 			absent := h.observeDisposableDockerObjects(id, "")
+			stopped, err := h.cli.StopExecution(context.Background(), id)
+			if err != nil {
+				t.Fatal("stop kept recipe before export", err)
+			}
+			settled := stopped.Instance.Execution
+			if stopped.Instance.Status != v1.Stopped || settled == nil || settled.Kept || settled.Attempt != result.Attempt ||
+				settled.TerminalExitCode == nil || *settled.TerminalExitCode != 1 || settled.Cancelled != result.Cancelled ||
+				settled.CompletedAt != result.CompletedAt || settled.Failure != "" || settled.CollectionFailure != "" || settled.CleanupFailure != "" {
+				t.Fatal("stop changed original recipe diagnosis", settled)
+			}
+			bundle := exportRecipe(t, h.nativeHarness, stopped.Instance, []string{"-run", "^TestDatabase$"}, 0)
 			if _, err := h.cli.Destroy(context.Background(), id); err != nil {
 				t.Fatal(err)
 			}
@@ -311,7 +322,7 @@ func TestMariaDBRecipeCompatibility(t *testing.T) {
 				h.cleanupUnverified = true
 				t.Fatal(err)
 			}
-			exportRecipe(t, h.nativeHarness, instance, []string{"-run", "^TestDatabase$"}, 0)
+			verifyRecipeExport(t, stopped.Instance, bundle, []string{"-run", "^TestDatabase$"}, 0)
 		})
 	}
 }

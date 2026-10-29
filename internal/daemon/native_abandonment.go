@@ -130,9 +130,10 @@ func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Insta
 	if instance.Execution == nil || instance.Execution.Attempt != attempt || journal.Attempt != attempt {
 		return instance, problem("conflict", "native waiver target attempt changed or journal mismatched; preserved")
 	}
+	var networkFailure *v1.PlanError
 	for _, detail := range instance.Execution.CleanupDetails {
 		if detail.Field == "resources.network" {
-			return instance, &detail
+			networkFailure = &detail
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -177,6 +178,18 @@ func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Insta
 		}
 		if err := d.noConsumers(cleanupCtx, networks); err != nil {
 			return instance, err
+		}
+		if networkFailure != nil {
+			for name, r := range networks.Resources {
+				// Only independent absence can settle this failure beneath uncertain native work.
+				if !r.Removed {
+					return instance, networkFailure
+				}
+				resources.Resources[name] = r
+			}
+			if err := s.saveResources(id, resources); err != nil {
+				return instance, err
+			}
 		}
 	}
 	var unknown []native.Identity

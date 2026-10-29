@@ -81,7 +81,7 @@ func TestDirectoryOwnershipPreserved(t *testing.T) {
 }
 
 func TestInstanceNetworkLifecycle(t *testing.T) {
-	for _, mode := range []string{"stopped", "missing", "pending", "remove-gap", "create-gap", "provider", "delete-denied", "ownership", "consumer", "container", "collision"} {
+	for _, mode := range []string{"stopped", "missing", "pending", "remove-gap", "create-gap", "provider", "delete-denied", "native-waiver", "ownership", "consumer", "container", "collision"} {
 		t.Run(mode, func(t *testing.T) {
 			root, dir := shortTemp(t), shortTemp(t)
 			config := writeFixture(t, root)
@@ -96,16 +96,20 @@ func TestInstanceNetworkLifecycle(t *testing.T) {
 				t.Fatal(err)
 			}
 			id, attempt := prepared.Instance.ID, newID()
+			deleteDenied := mode == "delete-denied" || mode == "native-waiver"
 			n := ownedResource{Kind: "network", Name: "backlot-" + newID(), Token: newID(), ID: newID()}
-			var present, fail, foreign, mismatch atomic.Bool
+			var present, fail, foreign, mismatch, unavailable atomic.Bool
 			present.Store(mode != "missing")
-			fail.Store(mode == "provider" || mode == "delete-denied")
+			fail.Store(mode == "provider" || deleteDenied)
 			foreign.Store(mode == "consumer")
 			mismatch.Store(mode == "ownership")
-			var creates, removes atomic.Int32
+			var creates, removes, deleteAttempts atomic.Int32
 			d := forceEngine(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodDelete {
+					deleteAttempts.Add(1)
+				}
 				switch {
-				case fail.Load() && (mode != "delete-denied" || r.Method == http.MethodDelete):
+				case unavailable.Load() || fail.Load() && (!deleteDenied || r.Method == http.MethodDelete):
 					w.WriteHeader(http.StatusServiceUnavailable)
 				case r.URL.Path == "/containers/json":
 					if r.URL.Query().Get("all") != "1" {
@@ -152,6 +156,18 @@ func TestInstanceNetworkLifecycle(t *testing.T) {
 			secret := ownedResource{Kind: "secret", Name: "secret", Token: newID(), Value: newID()}
 			secret.ID = secret.Token
 			g := resourceGeneration{ID: newID(), Endpoint: d.DaemonHost(), Resources: map[string]ownedResource{"@network": n, "secret": secret}, Initialized: map[string]bool{"init": true}, BuildImages: map[string]v1.BuildImageResult{"image": {ID: "sha256:" + newID()}}}
+			witness := filepath.Join(shortTemp(t), "data")
+			if mode == "native-waiver" {
+				if err := os.WriteFile(witness, []byte("retained data"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				data := ownedResource{Kind: "directory", Name: filepath.Dir(witness), Token: newID()}
+				data.ID = data.Token
+				if err := os.WriteFile(filepath.Join(data.Name, ".backlot-owner"), []byte(data.Token), 0600); err != nil {
+					t.Fatal(err)
+				}
+				g.Resources["data"] = data
+			}
 			if mode == "pending" || mode == "create-gap" {
 				pending := n
 				pending.ID = ""
@@ -184,7 +200,7 @@ func TestInstanceNetworkLifecycle(t *testing.T) {
 			} else {
 				stopped, err = svc.stopExecution(id)
 			}
-			wantFailure := mode == "provider" || mode == "delete-denied" || mode == "ownership" || mode == "consumer" || mode == "container" || mode == "remove-gap"
+			wantFailure := mode == "provider" || deleteDenied || mode == "ownership" || mode == "consumer" || mode == "container" || mode == "remove-gap"
 			if (err != nil) != wantFailure || stopped.Status != v1.Stopped || stopped.Execution.CollectionFailure != "" {
 				t.Fatal("selected stop lost completion or failure facts", err)
 			}
@@ -202,8 +218,14 @@ func TestInstanceNetworkLifecycle(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				if mode == "provider" || mode == "delete-denied" || mode == "ownership" || mode == "consumer" {
-					if mode == "delete-denied" {
+				if mode == "provider" || deleteDenied || mode == "ownership" || mode == "consumer" {
+					if mode == "native-waiver" {
+						stopped.Execution.NativeCleanup = []v1.NativeCleanupResult{{Component: "test", Attempt: attempt, Confidence: v1.CleanupAuthorityLost, Detail: "guardian authority lost"}}
+						if _, err := state.execution(id, v1.Stopped, stopped.Execution); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if deleteDenied {
 						if err := state.saveRuntime(id, runtimeRecord{Attempt: attempt, LaunchPending: true}); err != nil {
 							t.Fatal(err)
 						}
@@ -213,6 +235,69 @@ func TestInstanceNetworkLifecycle(t *testing.T) {
 					}
 					if _, err := state.abandonNative(context.Background(), id, attempt); err == nil {
 						t.Fatal("native waiver erased independent network failure")
+					}
+					if mode == "native-waiver" {
+						before := storedBytes(t, state, "resources", id)
+						deletes := deleteAttempts.Load()
+						force := v1.StopRequest{InstanceID: id, Force: true, ExpectedAttempt: attempt}
+						for _, refusal := range []string{"delete-denied", "present", "provider", "ownership", "consumer"} {
+							present.Store(refusal != "provider")
+							fail.Store(refusal == "delete-denied")
+							unavailable.Store(refusal == "provider")
+							mismatch.Store(refusal == "ownership")
+							foreign.Store(refusal == "consumer")
+							blocked, err := svc.stopRuntimeRequest(context.Background(), force)
+							journal, _ := state.runtime(id)
+							if err == nil || !journal.LaunchPending || len(blocked.NativeOwnershipWarnings) != 0 || blocked.Execution.CleanupFailure == "" || blocked.Execution.CollectionFailure == "" || !bytes.Equal(before, storedBytes(t, state, "resources", id)) || deleteAttempts.Load() != deletes {
+								t.Fatal("native force bypassed current network fence", refusal, err)
+							}
+							if !reflect.DeepEqual(blocked.Execution.NativeCleanup, stopped.Execution.NativeCleanup) {
+								t.Fatal("refusal erased native uncertainty", refusal)
+							}
+							if data, err := os.ReadFile(witness); err != nil || string(data) != "retained data" {
+								t.Fatal("refusal changed retained data", refusal, err)
+							}
+						}
+						foreign.Store(false)
+						present.Store(false) // Independent operator removal; native fence remains intact.
+						forced, err := svc.stopRuntimeRequest(context.Background(), force)
+						if err != nil || forced.Status != v1.Stopped || len(forced.NativeOwnershipWarnings) != 1 || forced.Execution.CleanupFailure != "" || len(forced.Execution.CleanupDetails) != 0 || forced.Execution.CollectionFailure == "" || !reflect.DeepEqual(forced.Execution.NativeCleanup, stopped.Execution.NativeCleanup) {
+							t.Fatal("authoritative network absence did not permit native-only waiver", err)
+						}
+						journal, _ := state.runtime(id)
+						retired, err := state.resources(id)
+						want := g
+						want.Resources = map[string]ownedResource{}
+						for name, r := range g.Resources {
+							want.Resources[name] = r
+							if r.Kind == "network" {
+								r.Removed = true
+								want.Resources[name] = r
+							}
+						}
+						if err != nil || !reflect.DeepEqual(retired, want) || journal.LaunchPending || deleteAttempts.Load() != deletes {
+							t.Fatal("waiver changed retained generation or deleted uncertain resources", err)
+						}
+						var history record
+						if err := json.Unmarshal(storedBytes(t, state, "instances", id), &history); err != nil {
+							t.Fatal(err)
+						}
+						if len(history.NativeAbandonments) != 1 || !history.NativeAbandonments[0].Pending || history.NativeAbandonments[0].Attempt != attempt || history.NativeAbandonments[0].Result.CollectionFailure == "" || len(history.NativeAbandonments[0].Result.CleanupDetails) == 0 {
+							t.Fatal("waiver lost original uncertainty and independent failure history")
+						}
+						original := history.NativeAbandonments[0].Result
+						networkFailure := false
+						for _, detail := range original.CleanupDetails {
+							networkFailure = networkFailure || detail.Field == "resources.network"
+						}
+						if !networkFailure || !reflect.DeepEqual(original.NativeCleanup, forced.Execution.NativeCleanup) {
+							t.Fatal("waiver rewrote original native or network observation")
+						}
+						code(t, state.removeResources(context.Background(), id), "native_ownership_relinquished")
+						if data, err := os.ReadFile(witness); err != nil || string(data) != "retained data" {
+							t.Fatal("native waiver permitted data removal", err)
+						}
+						return
 					}
 					if err := state.saveRuntime(id, runtimeRecord{Attempt: attempt}); err != nil {
 						t.Fatal(err)

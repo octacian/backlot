@@ -251,42 +251,44 @@ func TestReleaseJobEligibility(t *testing.T) {
 	if err := yaml.Unmarshal(data, &workflow); err != nil {
 		t.Fatal(err)
 	}
-	for _, tag := range []bool{false, true} {
-		for _, cancelled := range []bool{false, true} {
-			for _, status := range []string{"success", "failure", "cancelled", "skipped"} {
-				for _, dependency := range []string{"preflight", "package", "smoke"} {
-					for _, job := range []string{"package", "smoke", "draft"} {
-						expr := workflow.Jobs[job].If
-						if !strings.Contains(expr, "!cancelled()") {
-							t.Fatalf("%s lacks skipped-ancestor status override", job)
-						}
-						values := map[string]string{"preflight": "success", "package": "success", "smoke": "success", "changes": "skipped"}
-						values[dependency] = status
-						// These workflow predicates use only Boolean operators/comparisons;
-						// substitute the contexts and exercise the actual expression in Bash.
-						expr = strings.TrimSuffix(strings.TrimPrefix(expr, "${{ "), " }}")
-						expr = strings.ReplaceAll(expr, "!cancelled()", fmt.Sprint(!cancelled))
-						expr = strings.ReplaceAll(expr, "!startsWith(github.ref, 'refs/tags/')", fmt.Sprint(!tag))
-						expr = strings.ReplaceAll(expr, "startsWith(github.ref, 'refs/tags/')", fmt.Sprint(tag))
-						expr = strings.ReplaceAll(expr, "needs.changes.outputs.check", "'true'")
-						for name, result := range values {
-							expr = strings.ReplaceAll(expr, "needs."+name+".result", "'"+result+"'")
-						}
-						// Bash Boolean literals need comparisons inside [[ ... ]].
-						expr = strings.NewReplacer("true", "1 == 1", "false", "1 == 0").Replace(expr)
-						cmd := exec.Command("bash", "-c", "if [[ "+expr+" ]]; then exit 0; else exit 1; fi")
-						out, err := cmd.CombinedOutput()
-						want := !cancelled
-						switch job {
-						case "package":
-							want = want && (!tag || values["preflight"] == "success")
-						case "smoke":
-							want = want && values["package"] == "success"
-						case "draft":
-							want = want && tag && values["preflight"] == "success" && values["package"] == "success" && values["smoke"] == "success"
-						}
-						if (err == nil) != want || len(out) != 0 {
-							t.Fatalf("%s tag=%v cancelled=%v %s=%s: want %v, %v %s", job, tag, cancelled, dependency, status, want, err, out)
+	for _, changed := range []bool{false, true} {
+		for _, tag := range []bool{false, true} {
+			for _, cancelled := range []bool{false, true} {
+				for _, status := range []string{"success", "failure", "cancelled", "skipped"} {
+					for _, dependency := range []string{"changes", "preflight", "package", "smoke"} {
+						for _, job := range []string{"package", "smoke", "draft"} {
+							expr := workflow.Jobs[job].If
+							if !strings.Contains(expr, "!cancelled()") {
+								t.Fatalf("%s lacks skipped-ancestor status override", job)
+							}
+							values := map[string]string{"preflight": "success", "package": "success", "smoke": "success", "changes": "skipped"}
+							values[dependency] = status
+							// These workflow predicates use only Boolean operators/comparisons;
+							// substitute the contexts and exercise the actual expression in Bash.
+							expr = strings.TrimSuffix(strings.TrimPrefix(expr, "${{ "), " }}")
+							expr = strings.ReplaceAll(expr, "!cancelled()", fmt.Sprint(!cancelled))
+							expr = strings.ReplaceAll(expr, "!startsWith(github.ref, 'refs/tags/')", fmt.Sprint(!tag))
+							expr = strings.ReplaceAll(expr, "startsWith(github.ref, 'refs/tags/')", fmt.Sprint(tag))
+							expr = strings.ReplaceAll(expr, "needs.changes.outputs.check", "'"+fmt.Sprint(changed)+"'")
+							for name, result := range values {
+								expr = strings.ReplaceAll(expr, "needs."+name+".result", "'"+result+"'")
+							}
+							// Bash Boolean literals need comparisons inside [[ ... ]].
+							expr = strings.NewReplacer("true", "1 == 1", "false", "1 == 0").Replace(expr)
+							cmd := exec.Command("bash", "-c", "if [[ "+expr+" ]]; then exit 0; else exit 1; fi")
+							out, err := cmd.CombinedOutput()
+							want := !cancelled
+							switch job {
+							case "package":
+								want = want && (tag && values["preflight"] == "success" || !tag && (values["changes"] != "success" || changed))
+							case "smoke":
+								want = want && values["package"] == "success"
+							case "draft":
+								want = want && tag && values["preflight"] == "success" && values["package"] == "success" && values["smoke"] == "success"
+							}
+							if (err == nil) != want || len(out) != 0 {
+								t.Fatalf("%s tag=%v cancelled=%v %s=%s: want %v, %v %s", job, tag, cancelled, dependency, status, want, err, out)
+							}
 						}
 					}
 				}

@@ -213,7 +213,7 @@ func TestMutationExchangeFailuresDistinguishPreflightRejectionAndUnknownResult(t
 func TestPresentationErrorsAreNotTrustedWireSnapshots(t *testing.T) {
 	instance := sceneInstance("e")
 	instance.Error = &v1.PlanError{Code: "wire", Message: "wire presentation"}
-	if err := validateInstance(*instance); err == nil {
+	if err := ValidateInstance(*instance); err == nil {
 		t.Fatal("trusted wire presentation error")
 	}
 	response := sceneResponse()

@@ -10,7 +10,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -164,30 +163,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 			return responseError()
 		}
 	case *v1.ListResponse:
-		if value.APIVersion != v1.Version || len(value.Instances) > 100 || value.Instances == nil {
-			return responseError()
-		}
-		last := ""
-		for _, instance := range value.Instances {
-			if !validID(instance.ID) || instance.ID <= last || instance.Project == "" || instance.Scene == "" || !filepath.IsAbs(instance.Checkout) || (instance.Lifetime != v1.Persistent && instance.Lifetime != v1.Disposable) {
-				return responseError()
-			}
-			if err := validateOrigin(instance.ID, instance.Origin); err != nil {
-				return err
-			}
-			if _, err := time.Parse(time.RFC3339Nano, instance.CreatedAt); err != nil {
-				return responseError()
-			}
-			switch instance.Status {
-			case v1.Preparing, v1.Prepared, v1.Cancelled, v1.Interrupted, v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Destroyed, v1.Succeeded, v1.Failed:
-			default:
-				return responseError()
-			}
-			last = instance.ID
-		}
-		if value.NextAfterID != "" && (last == "" || value.NextAfterID != last) {
-			return responseError()
-		}
+		return ValidateList(*value)
 	case *v1.LogsResponse:
 		if value.APIVersion != v1.Version || value.NextOffset < 0 {
 			return responseError()
@@ -223,7 +199,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 		if value.APIVersion != v1.Version {
 			return &v1.PlanError{Code: "api_version", Message: "incompatible daemon response version"}
 		}
-		return validateInstance(*value)
+		return ValidateInstance(*value)
 	}
 	return nil
 }

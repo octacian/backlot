@@ -75,7 +75,7 @@ multi-commit pushes.
 | Changed files | Jobs that run |
 | --- | --- |
 | `docs/` files or Markdown anywhere, including ADR additions/deletions | Docs workflow: ADR tooling tests and record verification |
-| Go/runtime sources, schemas, non-CI examples, module/build/lint configuration | macOS/Ubuntu repository checks, Linux runtime, current-head scenes and project inputs |
+| Go/runtime sources, schemas, non-CI examples, `install.sh`, module/build/lint configuration | macOS/Ubuntu repository checks, Linux runtime, current-head scenes and project inputs |
 | `THIRD_PARTY_NOTICES.md` | Repository and Linux installation checks, plus Docs |
 | `actions/` implementation | Current-head scenes and project inputs |
 | `examples/ci-scenes/` implementation | Scenes |

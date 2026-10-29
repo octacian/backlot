@@ -35,3 +35,7 @@ daemon from the same installation. Replacing a shared daemon is deliberate
 maintenance: coordinate existing users, stop with its old matching binary, retain
 state and CA, then explicitly start the intended binary in the same scope. Never
 auto-upgrade, delete state to bypass compatibility, or downgrade into newer state.
+When binary maintenance is authorized, use the installation guide's supported
+release installer or matching manual procedure; skill refresh and project pins
+remain separate. A running daemon still requires the installer terminal consent;
+noninteractive agents must report that requirement rather than synthesize consent.

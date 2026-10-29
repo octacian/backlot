@@ -1,14 +1,76 @@
 # Install and operate Backlot
 
 For macOS/Linux targets, prerequisites and WSL guidance,
-see [platforms](platforms.md). Install Go 1.27.1 or a compatible newer patch, Git
-for worktrees, and `lsof` (included with macOS); Make is needed only for source
-builds. Native commands must stay in their supervised process group.
+see [platforms](platforms.md). Git is needed for worktrees and `lsof`
+for runtime diagnostics (included with macOS). Go/source installations need Go
+1.27.1 or a compatible newer patch; Make is needed only for source builds. Native commands must stay in their supervised process group.
 
 Install Docker only for container scenes. Published scenes require
 [managed local HTTPS or external Caddy](https.md). Trust, external DNS/public
 certificates, toolchains and system services remain explicit operator setup;
 Backlot never installs system/browser trust.
+
+## Release installer and updates
+
+The repository's [install.sh](https://github.com/octacian/backlot/blob/main/install.sh) downloads macOS ARM64 or Linux amd64
+release archives using stock `sh`, `curl`, `tar` and SHA-256 tools; Go is not
+required for this path. It requires a published release containing
+`backlot install-replace`. This change introduces that capability: before the
+first supporting release is published, use Go installation or the manual archive
+procedure below. Older helperless releases such as v0.3.0 remain manual installs;
+the installer refuses them before daemon lifecycle effects. Installing source does
+not publish a release.
+
+Download the script from the reviewed repository/ref, inspect it, then run it:
+
+```sh
+curl --fail --location --proto '=https' --tlsv1.2 \
+  https://raw.githubusercontent.com/octacian/backlot/main/install.sh -o install.sh
+sh install.sh
+```
+
+By default this selects GitHub's latest published stable release and installs
+`~/.local/bin/backlot`. `--destination /absolute/path/backlot` selects one
+executable path; its parent must be canonical, owned by you and not writable by
+others. Symlink destinations and unrecognized existing executables are refused.
+The installer reports which `backlot` PATH selects, including shadowing; use the
+printed absolute path or adjust PATH yourself. It never edits shell profiles.
+
+For a fresh destination, `--version v0.X.Y` selects an exact canonical stable
+helper-bearing tag (substitute a published supporting version). An existing
+destination accepts only a latest-stable update: specifying `--version` is refused,
+downgrades are refused, and an identity-verified same-version rerun is a no-op.
+This changes only that installation; consuming-project versions/pins and other
+installed executables are not updated.
+
+The default daemon state root or one explicit `--state-dir /absolute/private/state`
+is checked, with no unrelated scanning. An absent daemon permits immediate
+replacement. For a running daemon, the installer warns with the observed
+running/kept count and separate unresolved-cleanup count, then asks `y`/`n`/`l`:
+`n` cancels, `l` lists affected instances and asks `y`/`n` again, and `y` authorizes
+the old compatible executable to stop that daemon and its resources. Reads are
+bounded live observations, not an atomic inventory. Consent comes from the
+controlling terminal even with `curl ... | sh -s -- ...`; if consent is needed
+without a terminal, installation cancels. Interrupting also cancels; already
+accepted shutdown may still complete.
+
+The foreground helper requires successful old-CLI cleanup and holds the selected
+state lock through the final atomic rename. A stop acknowledgment alone is not
+completion. Failed/uncertain cleanup, incompatible/malformed output, lock timeout,
+unsafe files, changed installation bytes or replacement failure preserve the old
+executable for diagnosis. Owned download/stage directories are cleaned on normal
+completion, failure and handled signals; SIGKILL/power loss can leave private
+temporary directories for manual inspection. The daemon remains stopped after
+upgrade; explicitly start it with the installed binary and the same state root.
+State, data, evidence and CA identity remain intact. Existing bounded native
+cleanup limitations still apply; success does not promise universal descendant
+absence or a historical daemon's final exit code.
+
+Archives are checked against the release's versioned SHA-256 manifest, validated
+before extraction and checked for executable/API identity. Checksums detect
+corruption, **not publisher authentication**. Releases are unsigned/unnotarized;
+macOS security policy remains an operator decision. There is no sudo, dependency
+installer, trust modification, package-manager integration or background updater.
 
 ## Go installation
 
@@ -71,7 +133,9 @@ Docker, dependencies or trust. Keep macOS security policy decisions explicit.
 
 ## Upgrade, removal and compatibility
 
-Prefer CLI and daemon from the same release. Before replacing the binary, use
+Prefer CLI and daemon from the same release. The [release installer](#release-installer-and-updates)
+performs bounded selected-state maintenance and leaves the daemon stopped. For
+manual/Go replacement, use
 the old matching binary to stop the daemon in each selected state directory:
 `/path/to/old/backlot daemon stop --state-dir /absolute/private/state --json`.
 Wait for exit/lock release, install the verified new binary, then explicitly run

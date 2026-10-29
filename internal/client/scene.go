@@ -104,7 +104,7 @@ func validateScene(response v1.SceneResponse, target v1.SceneTarget, persistentO
 		if response.Result.APIVersion != v1.Version {
 			return responseError()
 		}
-		if err := validateInstance(*response.Result); err != nil {
+		if err := ValidateInstance(*response.Result); err != nil {
 			return err
 		}
 		i := response.Result.Instance

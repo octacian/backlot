@@ -175,8 +175,9 @@ result with a transient `startup_details` object containing `attempt`, ordered
 readiness. If summary retrieval fails after readiness, startup still succeeds
 with its identity/URL and an unavailable warning; incomplete details are omitted.
 
-Repeated start and stop/run use actual retained selections/values despite current
-manifest/config drift. Restart/reset adopt current selections through existing
+Starting/ready joins use actual retained selections/values despite current
+manifest/config drift. Eligible new starts adopt compatible current inputs and
+startup-details selections. Restart/reset adopt current selections through existing
 compatibility and snapshot rules. A startup replaced before observed readiness
 conflicts instead of reporting a replacement attempt's summary. Ordinary plans,
 status/follow, inspect, diagnostics, fixture discovery, execution results and

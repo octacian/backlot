@@ -1,14 +1,60 @@
 # Install and operate Backlot
 
 For macOS/Linux targets, prerequisites and WSL guidance,
-see [platforms](platforms.md). Install Go 1.27.1 or a compatible newer patch, Git
-for worktrees, and `lsof` (included with macOS); Make is needed only for source
-builds. Native commands must stay in their supervised process group.
+see [platforms](platforms.md). Git is needed for worktrees and `lsof`
+for runtime diagnostics (included with macOS). Go/source installations need Go
+1.27.1 or a compatible newer patch; Make is needed only for source builds. Native commands must stay in their supervised process group.
 
 Install Docker only for container scenes. Published scenes require
 [managed local HTTPS or external Caddy](https.md). Trust, external DNS/public
 certificates, toolchains and system services remain explicit operator setup;
 Backlot never installs system/browser trust.
+
+## Release installer and updates
+
+[install.sh](https://github.com/octacian/backlot/blob/main/install.sh) installs macOS
+ARM64/Linux amd64 releases using stock `sh`, `curl`, `tar` and SHA-256 tools; Go is
+not required. The target release must contain `backlot install-replace`. Use
+[Go installation](#go-installation) or [manual archives](#release-archive-installation)
+for older helperless releases.
+
+Download the script from a reviewed repository/ref, inspect it, then run:
+
+```sh
+curl --fail --location --proto '=https' --tlsv1.2 \
+  https://raw.githubusercontent.com/octacian/backlot/main/install.sh -o install.sh
+sh install.sh
+```
+
+The default is latest stable at `~/.local/bin/backlot`. Set an absolute
+`--destination /path/backlot` whose parent is canonical, user-owned and not writable
+by others; symlinks and unrecognized executables are refused. Check the printed
+PATH selection for shadowing and adjust PATH yourself; profiles are never edited.
+
+Fresh destinations accept `--version v0.X.Y` for an exact supporting tag. Existing
+installs accept only latest-stable updates: explicit versions and downgrades are
+refused; a verified same-version rerun is a no-op. Other installations and project
+pins are unchanged.
+
+Only the default state root or explicit `--state-dir /absolute/private/state` is
+checked. With a running daemon, the installer reports observed running/kept and
+separate unresolved-cleanup counts, then asks `y`/`n`/`l`: `y` authorizes shutdown,
+`n` cancels, and `l` lists affected instances before asking `y`/`n` again. Consent
+uses the controlling terminal even with `curl ... | sh -s -- ...`; no terminal
+means cancellation when consent is required. Counts are live observations.
+
+The old compatible CLI performs cleanup before lock-held atomic replacement.
+Failed/uncertain cleanup, validation or replacement errors preserve the old binary.
+Interruption cancels replacement, though accepted shutdown may finish. Owned
+temporary files are cleaned after children settle; SIGKILL/power loss may leave
+them for inspection. After replacement, explicitly start the installed binary
+in the same state root; the daemon remains stopped. State, data, evidence and CA
+identity are preserved.
+See the [helper contract](cli.md) for deadlines and completion limits.
+
+Checksums detect corruption, **not publisher authentication**. The shared
+[archive trust and security policy](#release-archive-installation) also applies to
+the installer.
 
 ## Go installation
 
@@ -65,13 +111,18 @@ On Linux substitute the Linux archive name and use `sha256sum -c -` for the
 checksum command. Require an `OK` result and matching `v0.1.0` identity; missing
 or mismatched checksum entries are failures. Put `$HOME/.local/bin` on PATH and
 use `command -v backlot` to check which installation wins. Archives contain just
-the executable, LICENSE and notices. Checksums detect damaged bytes; they do not
-authenticate a publisher. Archives are unsigned/unnotarized and install no Caddy,
-Docker, dependencies or trust. Keep macOS security policy decisions explicit.
+the executable, LICENSE and notices.
+
+For both release-installation paths, checksums detect corruption, not publisher
+authentication. Archives are unsigned/unnotarized; macOS security policy remains
+an operator decision. Neither method installs Caddy, Docker, dependencies or trust.
+The installer uses no sudo or background updater and never edits shell profiles.
 
 ## Upgrade, removal and compatibility
 
-Prefer CLI and daemon from the same release. Before replacing the binary, use
+Prefer CLI and daemon from the same release. The [release installer](#release-installer-and-updates)
+performs bounded selected-state maintenance and leaves the daemon stopped. For
+manual/Go replacement, use
 the old matching binary to stop the daemon in each selected state directory:
 `/path/to/old/backlot daemon stop --state-dir /absolute/private/state --json`.
 Wait for exit/lock release, install the verified new binary, then explicitly run

@@ -54,6 +54,9 @@ flags/defaults and output framing live in the [CLI reference](cli.md).
 
 ## Commands
 
+For binary maintenance, use the [release installer](operations.md#release-installer-and-updates).
+`daemon stop` still acknowledges stopping, not final exit or lock release.
+
 Use an [installed executable](operations.md) (or `make build` for `bin/backlot`):
 
 ```sh

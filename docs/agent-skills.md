@@ -66,11 +66,12 @@ If the executable/daemon lacks required capabilities, recognized output or comma
 flags, stop that dependent operation and report observed identity and the missing
 requirement. Check PATH for an older binary. Refresh the installed skill from the
 matching development source or reviewed ref, or explicitly install an appropriate
-Backlot executable using the [installation guide](operations.md). Prefer CLI and
-daemon from the same installation. Replacing a shared daemon is deliberate
-maintenance: coordinate existing users, stop with its old matching binary, retain
-state and CA, then explicitly start the intended binary in the same scope. Never
-auto-upgrade, delete state to bypass compatibility, or downgrade into newer state.
+Backlot executable using the [installation guide](operations.md). For authorized
+binary maintenance, coordinate existing users and follow that guide in the selected
+state scope, retaining state and CA. Skill refresh and project pins remain separate.
+Never auto-upgrade, delete state to bypass compatibility, or downgrade into newer
+state. Noninteractive agents must report the installer's terminal-consent
+requirement rather than synthesize consent.
 
 ## Bundle maintenance
 

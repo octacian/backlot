@@ -24,7 +24,7 @@ const sourceURL = "https://github.com/octacian/backlot/blob/6177c64f60654657a914
 var guides = map[string][]string{
 	"adoption": nil, "cli": nil, "platforms": nil, "evidence": nil,
 	"agent-skills": {"Compatibility"},
-	"operations":   {"Go installation", "Release archive installation", "Upgrade, removal and compatibility", "Daily loop", "Diagnosis and recovery"},
+	"operations":   {"Release installer and updates", "Go installation", "Release archive installation", "Upgrade, removal and compatibility", "Daily loop", "Diagnosis and recovery"},
 	"manifest":     {"Project declarations", "Components and scenes", "Values and environment", "Machine schema and results", "Registered private project configuration", "Shared-service declarations", "Execution-scoped build images"},
 	"daemon":       {"Identity and lifecycle", "Named persistent scenes", "Scoped provider diagnostics", "Declared startup details", "Bounded recorded discovery and active policy"},
 	"containers":   {"State compatibility", "Generations, jobs and drift", "Ownership and recovery", "Project-scoped shared services"},

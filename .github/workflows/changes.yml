@@ -38,6 +38,7 @@ jobs:
           filters: |
             implementation:
               - '{api,cmd,internal,schemas}/**'
+              - 'install.sh'
               - 'examples/**'
               - '!examples/ci-scenes/**'
               - '!examples/ci-inputs/**'

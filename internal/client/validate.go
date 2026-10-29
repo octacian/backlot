@@ -21,7 +21,9 @@ func validID(id string) bool {
 	_, err := hex.DecodeString(id)
 	return err == nil
 }
-func validateInstance(response v1.InstanceResponse) error {
+
+// ValidateInstance checks a decoded public instance without transport or state access.
+func ValidateInstance(response v1.InstanceResponse) error {
 	instance := response.Instance
 	if response.StartupDetails != nil || response.Error != nil {
 		return responseError()
@@ -203,5 +205,35 @@ func validateNativeCleanup(results []v1.NativeCleanupResult, attempt string, com
 		}
 		seen[r.Component] = true
 	}
+	return nil
+}
+
+// ValidateList checks one public discovery page without transport access.
+func ValidateList(value v1.ListResponse) error {
+	if value.APIVersion != v1.Version || len(value.Instances) > 100 || value.Instances == nil {
+		return responseError()
+	}
+	last := ""
+	for _, instance := range value.Instances {
+		if !validID(instance.ID) || instance.ID <= last || instance.Project == "" || instance.Scene == "" || !filepath.IsAbs(instance.Checkout) || (instance.Lifetime != v1.Persistent && instance.Lifetime != v1.Disposable) {
+			return responseError()
+		}
+		if err := validateOrigin(instance.ID, instance.Origin); err != nil {
+			return err
+		}
+		if _, err := time.Parse(time.RFC3339Nano, instance.CreatedAt); err != nil {
+			return responseError()
+		}
+		switch instance.Status {
+		case v1.Preparing, v1.Prepared, v1.Cancelled, v1.Interrupted, v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Destroyed, v1.Succeeded, v1.Failed:
+		default:
+			return responseError()
+		}
+		last = instance.ID
+	}
+	if value.NextAfterID != "" && (last == "" || value.NextAfterID != last) {
+		return responseError()
+	}
+
 	return nil
 }

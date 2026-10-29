@@ -48,7 +48,24 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `shared stop SERVICE_ID` / `shared destroy SERVICE_ID` | Stop/retain storage or remove allocation-free server/data; consumer fences still apply |
 | `contracts [--daemon]` | Focused installed/daemon read capabilities, not a complete flag catalog; state-dir requires daemon mode |
 | `schema manifest\|machine\|private` | Raw installed schema, without runtime effects |
+| `install-replace --stage PATH --destination PATH --version TAG [--state-dir PATH]` | Foreground installer helper; terminal consent and lock-held atomic replacement; see below |
 | `version` / `licenses` | Executable/API/state identity / embedded license and notices; no daemon |
+
+`install-replace` is the text-only foreground adapter for the verified
+[release installer](operations.md#release-installer-and-updates), not a general
+command runner. It requires distinct absolute stage/destination executable paths,
+a private stage directory directly beneath the safe destination parent, and a
+matching stable release identity. It opens no database. The default or explicit
+selected state root may be created with its standard private lock if missing.
+It runs only the recognized old executable's compatible read/stop commands,
+requires tty `y`/`n`/`l` consent for a running daemon, and holds state ownership
+through fixed rename. Success leaves the daemon stopped; cancellation, unknown
+cleanup or pre-rename failure preserves the old executable. Inspection is bounded
+by one minute, individual old commands by 45 seconds, and shutdown lock waiting
+by 30 seconds; interrupt cancels subprocesses and joins them. Human consent waits
+until answered, EOF or interruption. `--json` is rejected with `invalid_arguments`;
+there is no successful JSON result. Shell installation options/policy and
+capability requirements are maintained in the installation guide.
 
 `list` filters intersect: `--project PATH` (exact recorded project directory) or
 `--checkout PATH` (verified checkout), plus `--project-id`, `--scene`,
@@ -129,6 +146,7 @@ See [results and evidence](evidence.md) for exit and cancellation rules.
 | `logs --page` | One `LogPageResponse`, including continuation and evidence gaps |
 | ID or named status with `--follow` | `SceneFollowRecord` NDJSON |
 | Attached starts | `AttachedRecord` NDJSON |
+| `install-replace` | Terminal/text only; `--json` rejected with `invalid_arguments`, no successful JSON document |
 | `daemon serve` | Foreground service; no successful JSON document; normal error framing on failure |
 | `schema` | Raw finite JSON Schema in all modes |
 | Explicit help, no-action root/group help, `licenses` | Human text even with `--json`; canonical license bytes |

@@ -59,7 +59,7 @@ func TestForceHTTPRejectsReplacedClaimBeforeCleanup(t *testing.T) {
 				}
 			} else {
 				b := &v1.ExecutionResult{Attempt: newID()}
-				if _, err := s.store.execution(instance.ID, v1.RuntimeReady, b); err != nil {
+				if _, err := s.store.replaceTestExecution(instance.ID, v1.RuntimeReady, b); err != nil {
 					t.Fatal(err)
 				}
 				if err := s.store.saveRuntime(instance.ID, runtimeRecord{Attempt: b.Attempt, LaunchPending: true}); err != nil {

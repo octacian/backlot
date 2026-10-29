@@ -1085,12 +1085,19 @@ func TestDockerRuntime(t *testing.T) {
 		if h.sql(r, "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='fixture'") != "0" || fingerprint(r) == secret {
 			t.Fatal("reset did not replace data and credential generation")
 		}
-		if _, err = h.cli.Destroy(context.Background(), id); err != nil {
+		if _, err = h.cli.StopExecution(context.Background(), id); err != nil {
 			t.Fatal(err)
 		}
 		logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id})
 		if err != nil || len(logs.Records) == 0 {
 			t.Fatal("historical container logs missing", err)
+		}
+		if _, err := h.cli.Destroy(context.Background(), id); err != nil {
+			t.Fatal(err)
+		}
+		erased, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id})
+		if err != nil || len(erased.Records) != 0 {
+			t.Fatal("destroy retained provider logs", err)
 		}
 	})
 	t.Run("fresh-only-failed-init-retry-and-each-start", func(t *testing.T) {
@@ -1260,7 +1267,7 @@ func TestDockerRuntime(t *testing.T) {
 			t.Fatal("disposable identities shared")
 		}
 	})
-	t.Run("bounded-log-records-retained-after-destroy", func(t *testing.T) {
+	t.Run("bounded-log-records-retained-before-destroy", func(t *testing.T) {
 		h := newDockerHarness(t, binary, endpoint)
 		job := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"sh", "-c", "head -c 16384 /dev/zero; printf '\\377\\376'; printf 'ordinary-output\\n'"}}
 		job.Environment = v1.Environment{Assign: map[string]v1.Value{"BACKLOT_FIXTURE": fixtureLiteral(h.token), "INSTANCE": fixtureRef("instance", "", "id")}}
@@ -1281,7 +1288,7 @@ func TestDockerRuntime(t *testing.T) {
 		if err := reader.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := h.cli.Destroy(context.Background(), id); err != nil {
+		if _, err := h.cli.StopExecution(context.Background(), id); err != nil {
 			t.Fatal(err)
 		}
 		command := exec.Command(binary, "logs", "--state-dir", h.dir, "--json", id)
@@ -1318,6 +1325,13 @@ func TestDockerRuntime(t *testing.T) {
 		}
 		if !bytes.HasPrefix(raw.Bytes(), make([]byte, 16384)) || !bytes.HasSuffix(raw.Bytes(), []byte("ordinary-output\n")) {
 			t.Fatal("control/ordinary output incomplete")
+		}
+		if _, err := h.cli.Destroy(context.Background(), id); err != nil {
+			t.Fatal(err)
+		}
+		erased, err := exec.Command(binary, "logs", "--state-dir", h.dir, "--json", id).Output()
+		if err != nil || len(erased) != 0 {
+			t.Fatal("destroy retained provider byte output", err)
 		}
 	})
 	t.Run("declared-native-docker-build-before-container", func(t *testing.T) {

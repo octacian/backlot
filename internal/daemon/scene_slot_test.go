@@ -147,7 +147,7 @@ func TestSceneSlotLifecycleHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.store.execution(disposable.Instance.ID, v1.Destroyed, &v1.ExecutionResult{Attempt: newID(), Components: []v1.ComponentResult{}}); err != nil {
+	if _, err := s.store.execution(disposable.Instance.ID, v1.Destroyed, &v1.ExecutionResult{Attempt: original.Instance.Operation.ID, Components: []v1.ComponentResult{}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -155,7 +155,7 @@ func TestSceneSlotLifecycleHistory(t *testing.T) {
 	// Exercise the real status writer with a retained logical slot. None of these
 	// non-destroyed states releases the persistent identity.
 	for _, status := range []v1.InstanceStatus{v1.Preparing, v1.Prepared, v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Failed, v1.Cancelled, v1.Interrupted, v1.Succeeded} {
-		if _, err := s.store.execution(original.Instance.ID, status, &v1.ExecutionResult{Attempt: newID(), Components: []v1.ComponentResult{}}); err != nil {
+		if _, err := s.store.execution(original.Instance.ID, status, &v1.ExecutionResult{Attempt: original.Instance.Operation.ID, Components: []v1.ComponentResult{}}); err != nil {
 			t.Fatal(err)
 		}
 		response, err := s.scene(target, false)
@@ -165,7 +165,7 @@ func TestSceneSlotLifecycleHistory(t *testing.T) {
 	}
 	// Match destroy's first transaction: a destroyed owner may still have its exact
 	// slot until the separate delete transaction, including after interruption.
-	if _, err := s.store.execution(original.Instance.ID, v1.Destroyed, &v1.ExecutionResult{Attempt: newID(), Components: []v1.ComponentResult{}}); err != nil {
+	if _, err := s.store.execution(original.Instance.ID, v1.Destroyed, &v1.ExecutionResult{Attempt: original.Instance.Operation.ID, Components: []v1.ComponentResult{}}); err != nil {
 		t.Fatal(err)
 	}
 	response, err := s.scene(target, false)

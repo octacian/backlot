@@ -24,7 +24,7 @@ import (
 // fence the selected attempt until copied bytes and the report are published.
 func (s *service) export(ctx context.Context, request v1.ExportRequest) (v1.ExportResponse, error) {
 	var response v1.ExportResponse
-	if !validID(request.InstanceID) || !filepath.IsAbs(request.Output) || filepath.Clean(request.Output) != request.Output {
+	if request.Attempt != "" && !validID(request.Attempt) || !validID(request.InstanceID) || !filepath.IsAbs(request.Output) || filepath.Clean(request.Output) != request.Output {
 		return response, problem("invalid_request", "export requires a recorded instance ID and clean absolute output path")
 	}
 	if request.WaitTimeout != "" {
@@ -51,8 +51,20 @@ func (s *service) export(ctx context.Context, request v1.ExportRequest) (v1.Expo
 				s.evidence.mu.Unlock()
 				return response, err
 			}
+			if request.Attempt != "" {
+				selected, selectErr := s.store.attempt(v1.AttemptRequest{InstanceID: request.InstanceID, Attempt: request.Attempt})
+				if selectErr != nil {
+					lock.Unlock()
+					s.evidence.mu.Unlock()
+					return response, selectErr
+				}
+				instance = historicalInstance(instance, selected.Attempt)
+			}
 			s.mu.Lock()
 			entry := s.executions[request.InstanceID]
+			if entry != nil && (instance.Execution == nil || entry.attempt != instance.Execution.Attempt) {
+				entry = nil
+			}
 			s.mu.Unlock()
 			joined := true
 			if entry != nil {
@@ -179,11 +191,17 @@ func (s *service) exportSnapshot(ctx context.Context, request v1.ExportRequest, 
 		Result:   v1.ExportResult{BuildImages: append([]v1.BuildImageResult(nil), e.BuildImages...), ImageChangeWarnings: append([]v1.ImageChangeWarning(nil), e.ImageChangeWarnings...), NativeCleanup: append([]v1.NativeCleanupResult(nil), e.NativeCleanup...), NativeOwnershipWarnings: instance.NativeOwnershipWarnings, InstanceID: instance.ID, Attempt: e.Attempt, Status: instance.Status, TerminalExitCode: e.TerminalExitCode, Cancelled: e.Cancelled, Failure: e.Failure, CollectionFailure: e.CollectionFailure, CleanupFailure: e.CleanupFailure, Components: append([]v1.ComponentResult{}, e.Components...)},
 		Source:   v1.ExportSource{Project: instance.Plan.Project, Scene: instance.Plan.Scene, Lifetime: instance.Plan.Lifetime, CheckoutID: instance.Checkout.ID, ManifestDigest: instance.Plan.ManifestDigest, ConfigDigest: instance.Plan.ConfigDigest, EffectiveConfigDigest: instance.Plan.EffectiveConfigDigest},
 		Complete: true, Omissions: []string{}, Evidence: []v1.ExportEvidence{}}
+	selected, selectErr := s.store.attempt(v1.AttemptRequest{InstanceID: instance.ID, Attempt: e.Attempt})
 	journal, err := s.store.runtime(instance.ID)
 	if err != nil {
 		return response, err
 	}
-	if journal.Attempt == e.Attempt && journal.ExportSource != nil {
+	if selectErr == nil {
+		report.Source = selected.Attempt.Source
+		report.StartedAt = selected.Attempt.StartedAt
+	} else if request.Attempt != "" {
+		return response, selectErr
+	} else if journal.Attempt == e.Attempt && journal.ExportSource != nil {
 		report.Source = *journal.ExportSource
 		// Older journals may contain symbolic HEAD text, which is not a revision.
 		report.Source.GitHead = immutableGitCommit(report.Source.GitHead)
@@ -209,7 +227,10 @@ func (s *service) exportSnapshot(ctx context.Context, request v1.ExportRequest, 
 				expectedLogs = true
 			}
 		}
-		logPath := filepath.Join("logs", instance.ID+"-output.ndjson")
+		logPath := filepath.Join("logs", instance.ID+"-"+e.Attempt+"-output.ndjson")
+		if _, err := source.Lstat(logPath); os.IsNotExist(err) {
+			logPath = filepath.Join("logs", instance.ID+"-output.ndjson")
+		}
 		if expectedLogs {
 			if _, err := source.Lstat(logPath); os.IsNotExist(err) {
 				omit("Retained log file is unavailable.")
@@ -425,7 +446,7 @@ func (s *service) exportLogs(ctx context.Context, source, stage *os.Root, instan
 			_ = file.Close()
 			return err
 		}
-		page, err := s.logsSourceLocked(v1.LogsRequest{InstanceID: instance.ID, Offset: offset}, source)
+		page, err := s.logsForInstance(v1.LogsRequest{InstanceID: instance.ID, Offset: offset}, source, &instance)
 		if err != nil {
 			var detail *v1.PlanError
 			if allowPartial && errors.As(err, &detail) && detail.Code == "collection_failed" {
@@ -435,7 +456,7 @@ func (s *service) exportLogs(ctx context.Context, source, stage *os.Root, instan
 			_ = file.Close()
 			return err
 		}
-		if page.Gap != "" {
+		if page.Gap != "" && instance.Execution.CollectionFailure != "" {
 			omit("Retained logs have a known collection gap.")
 		}
 		for _, record := range page.Records {

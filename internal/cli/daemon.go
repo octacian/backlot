@@ -21,7 +21,7 @@ import (
 func daemonFlags(lease bool) []urfave.Flag {
 	flags := []urfave.Flag{&urfave.StringFlag{Name: "state-dir", Usage: "Private daemon state/socket directory (absolute path)"}}
 	if lease {
-		flags = append(flags, &urfave.DurationFlag{Name: "retention-age", Value: daemon.DefaultRetentionAge, Usage: "Completed evidence retention age"}, &urfave.Int64Flag{Name: "retention-bytes", Value: daemon.DefaultRetentionBytes, Usage: "Daemon-wide evidence size cap"}, &urfave.DurationFlag{Name: "lease-duration", Value: daemon.DefaultLeaseDuration, Usage: "Disposable disconnect grace period (100ms to 24h)"})
+		flags = append(flags, &urfave.IntFlag{Name: "retention-attempts", Value: daemon.DefaultRetentionAttempts, Usage: "Positive completed attempt count per instance"}, &urfave.DurationFlag{Name: "retention-age", Value: daemon.DefaultRetentionAge, Usage: "Completed evidence retention age"}, &urfave.Int64Flag{Name: "retention-bytes", Value: daemon.DefaultRetentionBytes, Usage: "Daemon-wide evidence size cap"}, &urfave.DurationFlag{Name: "lease-duration", Value: daemon.DefaultLeaseDuration, Usage: "Disposable disconnect grace period (100ms to 24h)"})
 	}
 	return flags
 }
@@ -193,7 +193,10 @@ func daemonCommand() *urfave.Command {
 			if err != nil {
 				return output(c, nil, err)
 			}
-			options := daemon.Options{Directory: dir, LeaseDuration: c.Duration("lease-duration"), RetentionAge: c.Duration("retention-age"), RetentionBytes: c.Int64("retention-bytes")}
+			if (c.Name == "start" || c.Name == "serve") && c.Int("retention-attempts") <= 0 {
+				return output(c, nil, &v1.PlanError{Code: "invalid_retention", Message: "retention-attempts must be positive"})
+			}
+			options := daemon.Options{RetentionAttempts: c.Int("retention-attempts"), Directory: dir, LeaseDuration: c.Duration("lease-duration"), RetentionAge: c.Duration("retention-age"), RetentionBytes: c.Int64("retention-bytes")}
 			if c.Name == "serve" {
 				signalCtx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 				defer cancel()
@@ -255,6 +258,9 @@ func preparationCommands() []*urfave.Command {
 	}}}
 	for _, name := range []string{"inspect", "status", "cancel", "renew"} {
 		flags := daemonFlags(false)
+		if name == "inspect" {
+			flags = append(flags, &urfave.StringFlag{Name: "attempt", Usage: "Inspect an exact retained attempt"}, &urfave.BoolFlag{Name: "last-completed", Usage: "Inspect newest completed retained attempt"})
+		}
 		if name == "status" {
 			flags = append(flags, statusFollowFlags()...)
 		}
@@ -264,6 +270,9 @@ func preparationCommands() []*urfave.Command {
 		commands = append(commands, &urfave.Command{Name: name, Description: "Example: backlot " + name + map[string]string{"inspect": " INSTANCE_ID", "status": " --follow INSTANCE_ID", "cancel": " INSTANCE_ID", "renew": " --lease-token TOKEN INSTANCE_ID"}[name], ArgsUsage: "<instance-id>", Usage: map[string]string{"inspect": "Read recorded metadata and execution without changing runtime", "status": "Read a recorded instance; --follow samples without lifecycle ownership", "cancel": "Cancel metadata preparation without executing work", "renew": "Renew a disposable lease with its private capability"}[name], Flags: flags, Action: func(ctx context.Context, c *urfave.Command) error {
 			if c.Args().Len() != 1 {
 				return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "command requires one recorded instance ID"})
+			}
+			if c.Name == "inspect" && c.IsSet("attempt") && c.Bool("last-completed") {
+				return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "attempt and last-completed are mutually exclusive"})
 			}
 			if c.Name == "status" {
 				if _, err := statusFollowOptions(c); err != nil {
@@ -282,6 +291,11 @@ func preparationCommands() []*urfave.Command {
 			}
 			cli := client.New(daemon.SocketPath(dir))
 			defer cli.Close()
+			if c.Name == "inspect" && (c.IsSet("attempt") || c.Bool("last-completed")) {
+
+				response, err := cli.Attempt(ctx, v1.AttemptRequest{APIVersion: v1.Version, InstanceID: c.Args().First(), Attempt: c.String("attempt"), LastCompleted: c.Bool("last-completed")})
+				return discoveryOutput(c, response, err)
+			}
 			var response v1.InstanceResponse
 			switch c.Name {
 			case "inspect", "status":

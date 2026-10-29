@@ -20,7 +20,8 @@ import (
 
 var stateNineBuckets = []string{"meta", "instances", "checkouts", "paths", "persistent", "snapshots", "secrets", "runtime", "resources"}
 var sharedBuckets = []string{"shared_projects", "shared_paths", "shared_services", "shared_allocations"}
-var bucketNames = append(append([]string{}, stateNineBuckets...), sharedBuckets...)
+var stateElevenBuckets = append(append([]string{}, stateNineBuckets...), sharedBuckets...)
+var bucketNames = append(append([]string{}, stateElevenBuckets...), "attempts", "attempt_sequences", "evidence_deletions")
 
 type record struct {
 	Instance           v1.Instance         `json:"instance"`
@@ -131,6 +132,13 @@ func jsonObject(data []byte) bool {
 }
 
 func put(tx *bolt.Tx, bucket, key string, value any) error {
+	if bucket == "instances" && tx.Bucket([]byte("attempts")) != nil {
+		if r, ok := value.(record); ok {
+			if err := syncAttempt(tx, key, r); err != nil {
+				return err
+			}
+		}
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err

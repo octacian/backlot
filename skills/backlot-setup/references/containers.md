@@ -78,8 +78,8 @@ require explicit restart. Stop/run reuses the old snapshot, reporting drift.
 
 Reset stops and joins owned consumers, removes the old generation, accepts the new
 validated snapshot and initializes/starts a new generation under the same logical
-instance ID. Destroy stops work and removes owned data, retaining snapshots,
-results and historical logs under a `destroyed` status. A later run gets a new
+instance ID. Destroy stops work and removes owned data, then erases snapshots, current results,
+retained attempts, logs and artifacts, keeping a minimal `destroyed` identity. A later run gets a new
 instance ID. Repeated destroy is idempotent. Cleanup failures return nonzero and
 retain remaining handles for explicit cleanup retry. Neither reset nor destroy
 promises atomic rollback after destructive cleanup has begun.
@@ -140,7 +140,8 @@ collection gap, because output/status around the interruption may be incomplete.
 
 Docker log drivers may transform output before returning it; Backlot preserves
 the bytes supplied by the engine. Container stdout/stderr is collected outside Docker containers while running and
-joined before deletion. Historical `logs` remains available after destroy.
+joined before deletion. Logs remain after ordinary stop and disposable cleanup; successful explicit destroy
+erases them. Export before destroy to retain caller-owned diagnostics.
 Application output is captured as emitted and can contain application-printed
 credentials; ordinary Backlot plans/status never expose private secret values.
 See [disposable evidence](evidence.md) for artifacts, keep-on-failure, explicit

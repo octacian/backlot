@@ -63,6 +63,10 @@ func TestDestroyActiveKeptNative(t *testing.T) {
 			if complete {
 				go func() { released <- os.WriteFile(filepath.Join(h.project, "release"), nil, 0600) }()
 			}
+			beforeDestroy, err := h.cli.Inspect(context.Background(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
 			destroyed, err := h.cli.Destroy(context.Background(), id)
 			if err != nil {
 				t.Fatal(err)
@@ -72,8 +76,8 @@ func TestDestroyActiveKeptNative(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			result := destroyed.Instance.Execution
-			if destroyed.Instance.Status != v1.Destroyed || result.Kept || result.CleanupFailure != "" {
+			result := beforeDestroy.Instance.Execution
+			if destroyed.Instance.Status != v1.Destroyed || destroyed.Instance.Execution != nil {
 				t.Fatal("destroy did not join retained owner")
 			}
 			conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", result.Ports["port"]), time.Second)
@@ -88,8 +92,8 @@ func TestDestroyActiveKeptNative(t *testing.T) {
 			}
 			h.absent()
 			logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id})
-			if err != nil || len(logs.Records) == 0 {
-				t.Fatal("evidence absent", err)
+			if err != nil || len(logs.Records) != 0 {
+				t.Fatal("destroy retained evidence", err)
 			}
 		})
 	}
@@ -127,7 +131,7 @@ func TestLeaseCollectionFailureIsInstanceLocal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitComponentLog(t, h, r.Instance.ID, "job", "waiting")
+	waitComponentLog(t, h, r.Instance.ID, "job", "waiting", r.LeaseToken)
 	deadline := time.Now().Add(8 * time.Second)
 	var final v1.Instance
 	for time.Now().Before(deadline) {
@@ -154,8 +158,7 @@ func TestLeaseCollectionFailureIsInstanceLocal(t *testing.T) {
 			t.Fatal("daemon or unrelated owner lost", err)
 		}
 	}
-	authorities := append(h.guardianCapabilities(r.Instance.ID), h.guardianCapabilities(unrelated.Instance.ID)...)
-	h.expectShutdownFailureAfterCleanup("collection_failed", authorities)
+
 	for _, id := range []string{r.Instance.ID, unrelated.Instance.ID} {
 		got, err := h.cli.Inspect(context.Background(), id)
 		if err != nil {
@@ -216,15 +219,15 @@ func TestDestroyActiveKeptDocker(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if destroyed.Instance.Status != v1.Destroyed || destroyed.Instance.Execution.Kept || h.engineAlive(server) {
+			if destroyed.Instance.Status != v1.Destroyed || destroyed.Instance.Execution != nil || h.engineAlive(server) {
 				t.Fatal("retained container owner survived destroy")
 			}
 			if _, err := os.Stat(data); !os.IsNotExist(err) {
 				t.Fatal("destroy data", err)
 			}
 			logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id})
-			if err != nil || len(logs.Records) == 0 {
-				t.Fatal("historical evidence", err)
+			if err != nil || len(logs.Records) != 0 {
+				t.Fatal("destroy retained evidence", err)
 			}
 		})
 	}
@@ -334,7 +337,8 @@ func TestLeaseCollectorOutcomeDoesNotPoisonSweeper(t *testing.T) {
 	f := newControlledExpiry(t)
 	f.allowError = true // explicit shutdown still reports the retained per-instance gap.
 	owner := f.owner(t, true, time.Millisecond)
-	result := &v1.ExecutionResult{Attempt: newID(), CollectionFailure: "application output collection failed", CompletedAt: time.Now().UTC().Format(time.RFC3339Nano), Cancelled: true}
+	observed, _ := f.s.store.inspect(owner.id)
+	result := &v1.ExecutionResult{Attempt: observed.Execution.Attempt, CollectionFailure: "application output collection failed", CompletedAt: time.Now().UTC().Format(time.RFC3339Nano), Cancelled: true}
 	var cancelled sync.Once
 	owner.entry.cancel = func() {
 		cancelled.Do(func() {

@@ -445,7 +445,7 @@ func (s *store) captureContainer(ctx context.Context, id string, d *dockerEngine
 	if err := localipc.Directory(directory, true); err != nil {
 		return nil, nil, nil, err
 	}
-	path := filepath.Join(directory, id+"-output.ndjson")
+	path := filepath.Join(directory, id+"-"+r.Attempt+"-output.ndjson")
 	if _, err := os.Lstat(path); err == nil {
 		if err = localipc.File(path, false); err != nil {
 			return nil, nil, nil, err

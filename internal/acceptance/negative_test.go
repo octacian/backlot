@@ -307,6 +307,15 @@ func (h *harness) negativeWorkflows() {
 		if string(artifactFile(t, i, "collection", "present", "report")) != "retained-evidence\n" {
 			t.Fatal("available evidence not retained")
 		}
+		h.stopDaemonCollection("collection/missing")
+		h.start()
+		recovered := h.require("inspect", i.ID)
+		if recovered.Execution == nil || recovered.Execution.CollectionFailure != i.Execution.CollectionFailure || recovered.Execution.TerminalExitCode == nil || *recovered.Execution.TerminalExitCode != 17 {
+			t.Fatal("shutdown lost retained diagnostic outcome")
+		}
+		if string(artifactFile(t, recovered, "collection", "present", "report")) != "retained-evidence\n" {
+			t.Fatal("shutdown lost retained artifact")
+		}
 		h.require("destroy", i.ID)
 	})
 	h.test("uncertain-ownership-cleanup-and-retry", func(t *testing.T) {

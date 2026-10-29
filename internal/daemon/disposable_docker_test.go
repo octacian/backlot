@@ -16,7 +16,6 @@ import (
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
-	bolt "go.etcd.io/bbolt"
 )
 
 func TestDisposableEvidenceDocker(t *testing.T) {
@@ -168,6 +167,12 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 				if err := os.WriteFile(marker, proof, 0600); err != nil {
 					t.Fatal(err)
 				}
+				recovered, err := h.cli.StopExecution(context.Background(), id)
+				expected := *result
+				expected.CleanupFailure, expected.CleanupDetails = "", nil
+				if err != nil || !reflect.DeepEqual(recovered.Instance.Execution, &expected) {
+					t.Fatal("cleanup retry changed original execution result", err)
+				}
 				if _, err := h.cli.Destroy(context.Background(), id); err != nil {
 					t.Fatal("cleanup could not recover", err)
 				}
@@ -175,8 +180,8 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 				t.Fatal(err)
 			}
 			logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "each"})
-			if err != nil || len(logs.Records) < 2 {
-				t.Fatal("historical logs missing", logs, err)
+			if err != nil || len(logs.Records) != 0 {
+				t.Fatal("destroy retained logs", logs, err)
 			}
 			for _, record := range logs.Records {
 				if record.Attempt != result.Attempt || record.Time == "" || record.Stream == "" {
@@ -185,20 +190,13 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			}
 			// No cleanup error may be forgotten by the final explicit destroy.
 			inspected, err := h.cli.Inspect(context.Background(), id)
-			if err != nil || inspected.Instance.Status != v1.Destroyed || inspected.Instance.Execution.CleanupFailure != "" {
+			if err != nil || inspected.Instance.Status != v1.Destroyed || inspected.Instance.Execution != nil {
 				t.Fatal("destroy failed", inspected, err)
 			}
-			if mode == "cleanup-failure" {
-				expected := *result
-				expected.CleanupFailure, expected.CleanupDetails = "", nil
-				if !reflect.DeepEqual(inspected.Instance.Execution, &expected) {
-					t.Fatal("cleanup retry changed original execution result")
-				}
+			if proveObjectsAbsent != nil {
 				if err := proveObjectsAbsent(); err != nil {
 					t.Fatal(err)
 				}
-			} else if proveObjectsAbsent != nil {
-				h.expectDisposableDockerCollectionFailure(inspected.Instance, proveObjectsAbsent)
 			}
 		})
 	}
@@ -298,77 +296,5 @@ func (h *dockerHarness) observeDisposableDockerObjects(id, directoryComponent st
 			}
 		}
 		return nil
-	}
-}
-
-// This exception is deliberately limited to the one fully destroyed Docker-only
-// disposable attempt. Native/Caddy authority, extra instances, pending effects or
-// changed historical results require their own proof and fail this one closed.
-func (h *dockerHarness) expectDisposableDockerCollectionFailure(want v1.Instance, proveObjectsAbsent func() error) {
-	h.t.Helper()
-	if want.Status != v1.Destroyed || want.Execution == nil || want.Execution.CollectionFailure == "" || want.Execution.CleanupFailure != "" || want.Execution.TerminalExitCode == nil || *want.Execution.TerminalExitCode != 0 {
-		h.t.Fatal("expected destroyed original collection-failure result missing")
-	}
-	h.shutdownFailureCode = "collection_failed"
-	h.shutdownFailureProof = func() error {
-		db, err := bolt.Open(filepath.Join(h.dir, "state.db"), 0600, &bolt.Options{ReadOnly: true, Timeout: time.Second})
-		if err != nil {
-			return err
-		}
-		err = db.View(func(tx *bolt.Tx) error {
-			count := 0
-			if err := tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
-				var r record
-				if err := decodeRecord(data, string(key), &r); err != nil {
-					return err
-				}
-				count++
-				if r.Instance.ID != want.ID || !reflect.DeepEqual(r.Instance.Execution, want.Execution) || r.Instance.Status != v1.Destroyed || len(r.NativeAbandonments) != 0 || r.Instance.Plan.Publish != nil {
-					return errors.New("destroyed original attempt/history or authority changed")
-				}
-				for _, c := range r.Instance.Plan.Components {
-					if c.Runtime != v1.Container {
-						return errors.New("native authority requires independent authenticated cleanup proof")
-					}
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-			if count != 1 || tx.Bucket([]byte("meta")).Get([]byte("managed_gateway")) != nil {
-				return errors.New("unexpected instance or managed gateway authority")
-			}
-			for _, name := range []string{"resources", "runtime"} {
-				entries := 0
-				if err := tx.Bucket([]byte(name)).ForEach(func(key, data []byte) error {
-					entries++
-					if string(key) != want.ID {
-						return errors.New("unexpected private resource/runtime journal")
-					}
-					if name == "resources" {
-						g, err := decodeResources(data)
-						if err != nil || g.ID != "" {
-							return errors.New("recorded resource cleanup incomplete")
-						}
-					} else {
-						r, err := decodeRuntime(data)
-						if err != nil || r.LaunchPending || len(r.Groups) != 0 || r.Gateway != nil {
-							return errors.New("recorded native/pending/gateway cleanup incomplete")
-						}
-					}
-					return nil
-				}); err != nil {
-					return err
-				}
-				if entries != 1 {
-					return errors.New("original private resource/runtime journal missing")
-				}
-			}
-			return nil
-		})
-		if err := errors.Join(err, db.Close()); err != nil {
-			return err
-		}
-		return proveObjectsAbsent()
 	}
 }

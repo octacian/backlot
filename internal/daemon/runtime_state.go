@@ -78,8 +78,14 @@ func (s *store) execution(id string, status v1.InstanceStatus, result *v1.Execut
 		if err != nil {
 			return err
 		}
+		if result != nil && r.Instance.Execution != nil && r.Instance.Execution.Attempt != result.Attempt {
+			return problem("conflict", "execution writer no longer owns current attempt")
+		}
 		if result != nil && status != v1.Starting && status != v1.RuntimeReady && status != v1.Stopping && status != v1.Destroyed && result.Outcome == "" {
 			result.Outcome = status
+		}
+		if result != nil && r.Instance.Execution != nil && r.Instance.Execution.EvidenceExpired {
+			result.EvidenceExpired = true
 		}
 		r.Instance.Status = status
 		r.Instance.Operation.Status = status

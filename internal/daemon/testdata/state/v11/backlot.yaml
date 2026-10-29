@@ -1,0 +1,41 @@
+version: backlot/v1
+project: predecessor-v11-fixture
+tools:
+  shell: /bin/sh
+components:
+  success:
+    kind: job
+    runtime: native
+    policy: each-start
+    command:
+      tool: shell
+      args: ['-c', 'mkdir -p reports; printf "success-fixture\n" > reports/success.txt; printf "success-stdout\n"; printf "success-stderr\n" >&2; exit 0']
+    environment:
+      assign:
+        FIXTURE_VALUE: {literal: public-v11-fixture-only}
+    artifacts:
+      report: {path: reports/success.txt}
+  failure:
+    kind: job
+    runtime: native
+    policy: each-start
+    command:
+      tool: shell
+      args: ['-c', 'mkdir -p reports; printf "failure-fixture\n" > reports/failure.txt; printf "failure-stdout\n"; printf "failure-stderr\n" >&2; exit 17']
+    environment:
+      assign:
+        FIXTURE_VALUE: {literal: public-v11-fixture-only}
+    artifacts:
+      report: {path: reports/failure.txt}
+scenes:
+  prepared:
+    lifetime: persistent
+    components: [success]
+  completed:
+    lifetime: disposable
+    components: [success]
+    terminal_job: success
+  failed:
+    lifetime: disposable
+    components: [failure]
+    terminal_job: failure

@@ -165,23 +165,25 @@ type ConfigurationResponse struct {
 
 // ExecutionDefaults describes prospective CLI/daemon defaults, not running policy.
 type ExecutionDefaults struct {
-	Execution      ExecutionOptions `json:"execution"`
-	LeaseDuration  string           `json:"lease_duration"`
-	RetentionAge   string           `json:"retention_age"`
-	RetentionBytes int64            `json:"retention_bytes"`
+	Execution         ExecutionOptions `json:"execution"`
+	LeaseDuration     string           `json:"lease_duration"`
+	RetentionAge      string           `json:"retention_age"`
+	RetentionBytes    int64            `json:"retention_bytes"`
+	RetentionAttempts int              `json:"retention_attempts"`
 }
 
 // DaemonConfigurationResponse reports policy captured by the active daemon.
 type DaemonConfigurationResponse struct {
-	APIVersion       string `json:"api_version"`
-	StateVersion     int    `json:"state_version"`
-	DaemonGeneration string `json:"daemon_generation"`
-	Context          string `json:"context"`
-	Directory        string `json:"directory"`
-	Socket           string `json:"socket"`
-	LeaseDuration    string `json:"lease_duration"`
-	RetentionAge     string `json:"retention_age"`
-	RetentionBytes   int64  `json:"retention_bytes"`
+	APIVersion        string `json:"api_version"`
+	StateVersion      int    `json:"state_version"`
+	DaemonGeneration  string `json:"daemon_generation"`
+	Context           string `json:"context"`
+	Directory         string `json:"directory"`
+	Socket            string `json:"socket"`
+	LeaseDuration     string `json:"lease_duration"`
+	RetentionAge      string `json:"retention_age"`
+	RetentionAttempts int    `json:"retention_attempts"`
+	RetentionBytes    int64  `json:"retention_bytes"`
 }
 
 // ReadContract identifies a supported finite or record-oriented interface.
@@ -203,12 +205,12 @@ type ContractsResponse struct {
 
 // SupportedReadContracts returns the installed discovery and existing evidence modes.
 func SupportedReadContracts() []ReadContract {
-	return []ReadContract{{ID: "scene-declarations/v1", Mode: "finite"}, {ID: "instance-filter/v1", Mode: "finite"}, {ID: "log-page/v1", Mode: "finite"}, {ID: "configuration/v1", Mode: "finite"}, {ID: "logs/v1", Mode: "ndjson"}, {ID: "backlot.export/v1", Mode: "finite"}}
+	return []ReadContract{{ID: "scene-declarations/v1", Mode: "finite"}, {ID: "instance-filter/v1", Mode: "finite"}, {ID: "log-page/v1", Mode: "finite"}, {ID: "attempt-history/v1", Mode: "finite"}, {ID: "configuration/v1", Mode: "finite"}, {ID: "logs/v1", Mode: "ndjson"}, {ID: "backlot.export/v1", Mode: "finite"}}
 }
 
 // SupportedDaemonReadContracts lists finite daemon reads, excluding local declarations.
 func SupportedDaemonReadContracts() []ReadContract {
-	return []ReadContract{{ID: "instance-filter/v1", Mode: "finite"}, {ID: "log-page/v1", Mode: "finite"}, {ID: "configuration/v1", Mode: "finite"}, {ID: "logs/v1", Mode: "finite"}, {ID: "backlot.export/v1", Mode: "finite"}}
+	return []ReadContract{{ID: "instance-filter/v1", Mode: "finite"}, {ID: "log-page/v1", Mode: "finite"}, {ID: "attempt-history/v1", Mode: "finite"}, {ID: "configuration/v1", Mode: "finite"}, {ID: "logs/v1", Mode: "finite"}, {ID: "backlot.export/v1", Mode: "finite"}}
 }
 
 // LogPageRequest selects a bounded scan of retained output with transient continuation.
@@ -280,7 +282,7 @@ func (r DaemonConfigurationResponse) Validate() error {
 	if r.APIVersion != Version || r.StateVersion != StateVersion {
 		return &PlanError{Code: "api_version", Message: "incompatible daemon API or state format"}
 	}
-	if !buildImageHex(r.DaemonGeneration) || r.Context != "daemon-startup policy" || !scenePath(r.Directory) || r.Socket != filepath.Join(r.Directory, "daemon.sock") || err != nil || lease < 100*time.Millisecond || lease > 24*time.Hour || ageErr != nil || age <= 0 || r.RetentionBytes <= 0 {
+	if !buildImageHex(r.DaemonGeneration) || r.Context != "daemon-startup policy" || !scenePath(r.Directory) || r.Socket != filepath.Join(r.Directory, "daemon.sock") || err != nil || lease < 100*time.Millisecond || lease > 24*time.Hour || ageErr != nil || age <= 0 || r.RetentionBytes <= 0 || r.RetentionAttempts <= 0 {
 		return invalidDiscoveryResponse()
 	}
 	return nil
@@ -310,7 +312,7 @@ func (r LogPageResponse) Validate(q LogPageRequest) error {
 	if limit == 0 {
 		limit = 100
 	}
-	if r.APIVersion != Version || r.InstanceID != q.InstanceID || r.Records == nil || r.Gaps == nil || len(r.Records) > limit || len(r.Continuation) > 2048 || r.More && r.Continuation == "" || r.HistoricalCollection != "unknown" {
+	if r.APIVersion != Version || r.InstanceID != q.InstanceID || r.Records == nil || r.Gaps == nil || len(r.Records) > limit || len(r.Continuation) > 2048 || r.More && r.Continuation == "" || r.HistoricalCollection != "unknown" && r.HistoricalCollection != "known" {
 		return invalidDiscoveryResponse()
 	}
 	size := 0

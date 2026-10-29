@@ -229,7 +229,8 @@ backlot destroy INSTANCE_ID --json
 ```
 
 Stop preserves persistent data; destroy removes that instance's owned data and
-keeps historical evidence subject to retention. Use destroy only when the data
+erases attempt results/logs/artifacts. Export needed diagnostics before destroy;
+caller-owned bundles survive. Use destroy only when the data
 is no longer needed. Named stop still works with a broken/deleted manifest;
 recorded IDs are the fallback when checkout identity is unavailable. Never prune
 by resource name, hostname or observed PID. Preserve state on uncertain cleanup
@@ -251,12 +252,12 @@ and retry through the same daemon scope. See the
 | Container origin fails while host succeeds | Use explicit `--instance ID --container-probe-image ALREADY_PRESENT_IMAGE`; compare default image trust against optional `--probe-public-ca`, DNS, TCP and normally verified TLS. Follow the documented image contract; no implicit pull/workload/resolver override occurs. |
 | Public origin unavailable | Verify selected gateway status, normal DNS and TLS trust, and exact owned scope first. Check host and container consumers separately. Keep unrelated routes intact; never reload a stale bootstrap. |
 | Manifest drift | Repeated run reports preserved snapshot drift. Restart applies compatible changes; retained storage/initialization/sensitive contract changes require explicit reset/destroy. |
-| Kept disposable failure | Inspect status/logs/artifacts/fixtures, then explicitly destroy by ID. Successful runs still clean up. |
+| Kept disposable failure | Inspect results/logs/fixtures; stop runtime and export needed diagnostics before destroy by ID. Successful runs still clean up. |
 | Cleanup uncertain or foreign consumer present | Preserve journal/resources; restore provider access or remove only your verified consumer, then retry stop/destroy. Never prune by name, PID or hostname. |
 | Daemon crash | Start the same binary/state directory; recovery stops verifiably owned survivors and marks interrupted, retains data/managed CA and reports evidence gaps. Inspect, explicitly start the managed gateway, then restart scenes. Unavailable gateway retains exact route cleanup uncertainty for retry. |
 | Managed gateway uncertain after temporary control loss | Retry `gateway stop` in the same state directory. If still fenced, choose restored authority, controlled reboot or explicit survivor-risk acknowledgement with force; follow [managed recovery](https.md#managed-gateway-recovery). Retain configuration and CA. |
 | State upgrade or unsupported version | Follow [state compatibility](containers.md#state-compatibility): stop the old daemon with its matching binary before upgrading, wait for exit/lock release, then explicitly start the newest binary in the same directory. Version 9 is the minimum supported baseline; retained steps from v9 support skipped releases without reset. Pre-v9 and other unsupported formats are rejected unchanged; preserve them for matching-binary diagnosis and lifecycle. |
-| Evidence expired | Status retains `evidence_expired`; expired logs/artifacts cannot be recovered from deleted containers. Configure daemon age/size retention before runs. |
+| Evidence expired | Status retains `evidence_expired`; expired logs/artifacts cannot be recovered from deleted containers. Configure daemon age/size/count retention before runs; see [history and pruning](evidence.md#retained-attempt-history). |
 
 To refresh the daemon's startup PATH after changing shell/tool setup, stop it
 normally, wait for exit/lock release, then explicitly start it from the intended

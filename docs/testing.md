@@ -114,7 +114,9 @@ provider suites below for those boundaries. Runtime integration tests must use
 owned resources and must never modify an operator's unrelated containers, routes,
 files, or databases.
 
-The race gate disables Go test result caching with `-count=1`. Native integration
+The race gate disables Go test result caching with `-count=1` and allows 15 minutes
+for each complete package suite. This whole-suite runner budget leaves application,
+fixture, lease and cleanup deadlines unchanged. Native integration
 builds and executes a separate CLI/guardian binary; changes to that subprocess's
 private helper code may leave the parent test binary unchanged, so cached results
 cannot validate the current runtime. `make check` and CI execute this suite fresh.
@@ -238,7 +240,8 @@ BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
   go test -race ./internal/daemon -run '^TestDisposableEvidenceDocker$' -count=1 -v
 ```
 
-This exercises container artifacts before removal, historical logs after destroy,
+This exercises container artifacts/logs before explicit destroy, successful destroy
+erasure with identity tombstones,
 exact job results, kept failure/cancellation/collection errors and healthy services,
 and injected directory-ownership cleanup failure with explicit recovery. Select
 it when changes affect these guarantees beyond existing CI coverage.

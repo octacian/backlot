@@ -1,7 +1,7 @@
 package v1
 
 // StateVersion identifies the supported durable database format.
-const StateVersion = 11
+const StateVersion = 12
 
 // InstanceStatus distinguishes metadata preparation from observed execution.
 type InstanceStatus string
@@ -126,9 +126,13 @@ type DaemonStatusResponse struct {
 	LeaseDuration string `json:"lease_duration"`
 }
 
-// DestroyRequest authorizes explicit cleanup of one recorded instance.
+// DestroyContract acknowledges irreversible attempt-history erasure.
+const DestroyContract = "erase-attempt-history/v1"
+
+// DestroyRequest acknowledges erasure and authorizes explicit cleanup.
 // Force waives shared-resource ownership proof only for this invocation.
 type DestroyRequest struct {
+	Contract   string `json:"contract"`
 	APIVersion string `json:"api_version"`
 	InstanceID string `json:"instance_id"`
 	Force      bool   `json:"force,omitempty"`

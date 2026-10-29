@@ -1,0 +1,13 @@
+version: backlot/v1
+project: mixed-v11-fixture
+tools: {shell: /bin/sh}
+components:
+  job:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: shell, args: [-c, "cat marker; cp marker report"]}
+    artifacts: {report: {path: report}}
+scenes:
+  dev: {lifetime: persistent, components: [job]}
+  destroyed: {lifetime: persistent, components: [job]}

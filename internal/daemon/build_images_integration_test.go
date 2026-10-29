@@ -210,6 +210,10 @@ func TestBuildImagesDocker(t *testing.T) {
 		t.Fatal("changed mounted ID was accepted", denied.Instance.Execution)
 	}
 	changed := restart(true, v1.RuntimeReady)
+	historicalPin, historyErr := h.cli.Attempt(context.Background(), v1.AttemptRequest{APIVersion: v1.Version, InstanceID: id, Attempt: first.Instance.Execution.Attempt})
+	if historyErr != nil || len(historicalPin.Attempt.Result.BuildImages) != 1 || historicalPin.Attempt.Result.BuildImages[0].ID != pin.ID {
+		t.Fatal("direct image writer lost historical accepted pin", historyErr)
+	}
 	next := changed.Instance.Execution.BuildImages[0]
 	if next.ID == pin.ID || len(changed.Instance.Execution.ImageChangeWarnings) != 1 {
 		t.Fatal("missing replacement/warning")

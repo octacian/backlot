@@ -25,7 +25,6 @@ import (
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
-	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
 	bolt "go.etcd.io/bbolt"
@@ -486,9 +485,9 @@ func TestDockerRuntime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var networkID string
-		for _, attachment := range inspect.Container.NetworkSettings.Networks {
-			networkID = attachment.NetworkID
+		var networkID, networkName string
+		for name, attachment := range inspect.Container.NetworkSettings.Networks {
+			networkName, networkID = name, attachment.NetworkID
 			break
 		}
 		foreign := ownedResource{Kind: "container", Name: "backlot-fixture-" + newID(), Token: newID()}
@@ -497,13 +496,27 @@ func TestDockerRuntime(t *testing.T) {
 			if err := removeContainer(context.Background(), h.engine, foreign); err != nil {
 				h.cleanupUnverified = true
 				t.Error(err)
+				return
+			}
+			if _, err := h.engine.ContainerInspect(context.Background(), resourceHandle(foreign), client.ContainerInspectOptions{}); !errdefs.IsNotFound(err) {
+				h.cleanupUnverified = true
+				t.Error("exact foreign fixture container absence unverified", err)
 			}
 		})
-		created, err := h.engine.ContainerCreate(context.Background(), client.ContainerCreateOptions{Name: foreign.Name, Config: &container.Config{Image: "alpine:3.21", Cmd: []string{"sleep", "300"}, Labels: resourceLabels(foreign)}, NetworkingConfig: &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{networkID: {NetworkID: networkID}}}})
+		created, err := h.engine.ContainerCreate(context.Background(), client.ContainerCreateOptions{Name: foreign.Name, Config: &container.Config{Image: "alpine:3.21", Cmd: []string{"sleep", "300"}, Labels: resourceLabels(foreign)}, HostConfig: &container.HostConfig{NetworkMode: container.NetworkMode(networkName)}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		foreign.ID = created.ID
+		declared, err := h.engine.ContainerInspect(context.Background(), foreign.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		endpoint := declared.Container.NetworkSettings.Networks[networkName]
+		if declared.Container.HostConfig.NetworkMode != container.NetworkMode(networkName) || endpoint == nil || endpoint.NetworkID != "" || declared.Container.State.Running {
+			t.Fatal("fixture did not reproduce a never-started name-only network declaration")
+		}
+		t.Logf("never-started foreign consumer %s declares network %s with blank endpoint ID", foreign.ID, networkName)
 		for _, running := range []bool{false, true} {
 			if running {
 				if _, err := h.engine.ContainerStart(context.Background(), foreign.ID, client.ContainerStartOptions{}); err != nil {
@@ -516,6 +529,10 @@ func TestDockerRuntime(t *testing.T) {
 			if _, err := h.engine.NetworkInspect(context.Background(), networkID, client.NetworkInspectOptions{}); err != nil {
 				t.Fatal("foreign-consumed network lost", err)
 			}
+			state, err := h.cli.Inspect(context.Background(), id)
+			if err != nil || state.Instance.Execution == nil || state.Instance.Execution.CleanupFailure == "" {
+				t.Fatal("failed stop lost cleanup obligation", err)
+			}
 			got, err := h.engine.ContainerInspect(context.Background(), foreign.ID, client.ContainerInspectOptions{})
 			if err != nil || got.Container.State.Running != running {
 				t.Fatal("foreign consumer changed", err)
@@ -525,13 +542,40 @@ func TestDockerRuntime(t *testing.T) {
 		if err := removeContainer(context.Background(), h.engine, foreign); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := h.engine.ContainerInspect(context.Background(), foreign.ID, client.ContainerInspectOptions{}); !errdefs.IsNotFound(err) {
+			t.Fatal("exact foreign fixture container absence unverified", err)
+		}
 		if out, err := cli("stop", id); err != nil {
 			t.Fatalf("explicit stop retry: %v %s", err, out)
+		}
+		state, err := h.cli.Inspect(context.Background(), id)
+		if err != nil || state.Instance.Execution == nil || state.Instance.Execution.CleanupFailure != "" {
+			t.Fatal("successful retry retained cleanup failure", err)
 		}
 		if _, err := h.engine.NetworkInspect(context.Background(), networkID, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
 			t.Fatal("retry left exact network", err)
 		}
-		t.Log("explicit retry released the formerly consumed network; fixture journal owns all remaining cleanup")
+		h.close()
+		journal, err := openStore(h.dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = journal.db.Close() }()
+		g, err := journal.resources(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range g.Resources {
+			if r.Kind == "network" {
+				if !r.Removed {
+					t.Fatal("retry left a journaled network cleanup obligation")
+				}
+				if _, err := h.engine.NetworkInspect(context.Background(), r.ID, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+					t.Fatal("journaled exact network absence unverified", err)
+				}
+			}
+		}
+		t.Logf("explicit retry settled journaled networks; exact fixture consumer %s and network %s absent", foreign.ID, networkID)
 	})
 	t.Run("native-stale-foreign-bind-cleanup", func(t *testing.T) {
 		h := newDockerHarness(t, binary, endpoint)

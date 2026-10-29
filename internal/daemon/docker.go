@@ -195,9 +195,16 @@ func (d *dockerEngine) noConsumers(ctx context.Context, g resourceGeneration) er
 					return problem("cleanup_failed", "directory has a positively identified Docker bind consumer; preserved; remove the consumer before retrying reset/destroy")
 				}
 			}
-			if r.Kind == "network" && c.NetworkSettings != nil {
-				for _, n := range c.NetworkSettings.Networks {
-					if n.NetworkID == r.ID {
+			if r.Kind == "network" {
+				// Never-started declarations can retain only the name, with no endpoint ID.
+				if c.HostConfig != nil && (r.Name != "" && string(c.HostConfig.NetworkMode) == r.Name || r.ID != "" && string(c.HostConfig.NetworkMode) == r.ID) {
+					return problem("cleanup_failed", "network still has a Docker consumer; preserved")
+				}
+				if c.NetworkSettings == nil {
+					continue
+				}
+				for name, n := range c.NetworkSettings.Networks {
+					if r.Name != "" && name == r.Name || r.ID != "" && (name == r.ID || n != nil && n.NetworkID == r.ID) {
 						return problem("cleanup_failed", "network still has a Docker consumer; preserved")
 					}
 				}

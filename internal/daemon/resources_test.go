@@ -459,7 +459,8 @@ func TestForeignBindUncertaintyAndAliases(t *testing.T) {
 
 func TestDockerConsumerInventoryFailuresAndMixedIdentities(t *testing.T) {
 	owned := t.TempDir()
-	for _, mode := range []string{"list-error", "inspect-error", "unknown-then-known", "known-then-unknown", "unknown-only"} {
+	n := ownedResource{Kind: "network", Name: "owned-network", ID: "owned-network-id"}
+	for _, mode := range []string{"list-error", "inspect-error", "unknown-then-known", "known-then-unknown", "unknown-only", "network-mode-name", "network-mode-id", "network-key-name", "network-key-id", "network-endpoint-id", "network-unrelated"} {
 		t.Run(mode, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -476,6 +477,23 @@ func TestDockerConsumerInventoryFailuresAndMixedIdentities(t *testing.T) {
 				case strings.HasSuffix(r.URL.Path, "/containers/foreign/json"):
 					if mode == "inspect-error" {
 						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					}
+					if strings.HasPrefix(mode, "network-") {
+						modeValue, key, endpointID := "unrelated", "unrelated", "unrelated-id"
+						switch mode {
+						case "network-mode-name":
+							modeValue = n.Name
+						case "network-mode-id":
+							modeValue = n.ID
+						case "network-key-name":
+							key, endpointID = n.Name, ""
+						case "network-key-id":
+							key, endpointID = n.ID, ""
+						case "network-endpoint-id":
+							endpointID = n.ID
+						}
+						_ = json.NewEncoder(w).Encode(map[string]any{"Id": "foreign", "HostConfig": map[string]string{"NetworkMode": modeValue}, "NetworkSettings": map[string]any{"Networks": map[string]any{key: map[string]string{"NetworkID": endpointID}, "nil-endpoint": nil}}})
 						return
 					}
 					sources := []string{filepath.Join(owned, "absent")}
@@ -500,8 +518,8 @@ func TestDockerConsumerInventoryFailuresAndMixedIdentities(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = engine.Close() })
-			err = (&dockerEngine{engine}).noConsumers(context.Background(), resourceGeneration{Resources: map[string]ownedResource{"data": {Kind: "directory", Name: owned}}})
-			if (err == nil) != (mode == "unknown-only") {
+			err = (&dockerEngine{engine}).noConsumers(context.Background(), resourceGeneration{Resources: map[string]ownedResource{"data": {Kind: "directory", Name: owned}, "network": n}})
+			if (err == nil) != (mode == "unknown-only" || mode == "network-unrelated") {
 				t.Fatal("consumer classification", err)
 			}
 		})

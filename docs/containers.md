@@ -95,9 +95,10 @@ releases implicit and declared instance networks and recreates them on later
 start within the same data generation. Recorded network names, including
 `network.name` references retained by initialization jobs, stay stable; Engine IDs
 and subnets may change. Shared-service networks remain retained separately.
-Generated credentials remain paired with their storage. Host port values
-are scoped to an attempt and bound on loopback by default; explicit machine
-`docker.publish_address` selects another numeric interface. Containers use service
+Credentials stay paired with storage; shutdown retains disposable data too.
+Host port values are scoped to an attempt and bound on loopback by default;
+explicit machine `docker.publish_address` selects another numeric interface.
+Containers use service
 references for private DNS names and internal ports. Container-to-native references
 require explicit `docker.host_address` and reachable native listener interfaces;
 see the [HTTPS/mixed guide](https.md). Managed HTTPS consumers on

@@ -379,10 +379,7 @@ and restart. Artifact collection, keep-on-failure and configurable evidence rete
 documented in the [evidence guide](evidence.md).
 
 Generic containers, private volumes/directories/secrets/networks and fresh-only
-jobs follow the [private-state lifecycle](containers.md), including instance network
-release on stop, shutdown and recovery with stable names on later recreation.
-Disposable shutdown retains data while releasing verified-unused instance networks.
-Publication follows the
+jobs follow the [private-state lifecycle](containers.md). Publication follows the
 [HTTPS guide](https.md). Metadata `prepare` retains its allocation-free semantics for all
 supported declarations. Native TCP/HTTP probes additionally require `lsof` on the
 daemon PATH, to prove the listener belongs to the authenticated application session at the actual

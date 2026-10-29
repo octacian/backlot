@@ -50,11 +50,9 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `schema manifest\|machine\|private` | Raw installed schema, without runtime effects |
 | `version` / `licenses` | Executable/API/state identity / embedded license and notices; no daemon |
 
-Stop also retries network release for a selected already-stopped record. Bounded
-cleanup returns failure if consumers, provider inspection or ownership prevent
-release; restore those conditions and retry stop. Named stop can still report
-`already_stopped` after releasing old unused networks. Later start preserves names
-and recreates allocations under the [private-state lifecycle](containers.md#generations-jobs-and-drift).
+Stop retries network cleanup even for stopped records; named stop may report
+`already_stopped` after releasing networks. Consumer, provider or ownership failures
+require correction and retry; see [network cleanup](containers.md#ownership-and-recovery).
 
 `list` filters intersect: `--project PATH` (exact recorded project directory) or
 `--checkout PATH` (verified checkout), plus `--project-id`, `--scene`,

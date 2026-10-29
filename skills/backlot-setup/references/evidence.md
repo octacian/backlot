@@ -261,7 +261,8 @@ Without `--wait`, active execution is rejected. Bare `--wait` observes indefinit
 `--wait=45`, `--wait=45s` and `--wait=2m` set positive bounds. Interrupting export
 does not cancel the run. SIGINT/SIGTERM, caller cancellation and wait deadlines
 report `export_interrupted`, independently of daemon availability. All evidence
-producers must settle, including services kept for investigation; explicitly stop/destroy them before exporting. Unknown IDs
+producers must settle, including services kept for investigation: explicitly stop
+them, export the settled evidence, then destroy only if authorized. Unknown IDs
 and instances with no execution are errors. Omitted `--attempt` selects the current
 attempt. Exact selection requires a retained attempt and never falls back; a settled
 older attempt can export while a replacement is active. Export uses the selected

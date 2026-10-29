@@ -50,7 +50,7 @@ func (s *service) logsForInstance(request v1.LogsRequest, source *os.Root, selec
 			if selected != nil {
 				return response, nil
 			}
-			other, err := s.store.otherRetainedEvidence(instance.ID, instance.Execution.Attempt)
+			other, err := s.otherRetainedEvidence(instance.ID, instance.Execution.Attempt)
 			if err != nil {
 				return response, err
 			}

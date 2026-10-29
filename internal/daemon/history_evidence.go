@@ -24,6 +24,39 @@ type evidenceDeletion struct {
 	Attempt    string `json:"attempt,omitempty"`
 }
 
+// otherRetainedEvidence includes overwritten legacy attempts without history rows.
+func (s *service) otherRetainedEvidence(id, attempt string) (bool, error) {
+	entries, err := s.store.attempts(id)
+	if err != nil {
+		return false, err
+	}
+	represented := map[string]bool{}
+	for _, a := range entries {
+		represented[a.Result.Attempt] = true
+		if a.Result.Attempt != attempt && !a.Result.EvidenceExpired {
+			return true, nil
+		}
+	}
+	if err := s.validateEvidencePaths("logs"); err != nil {
+		return false, err
+	}
+	other := false
+	err = s.legacyRecords(id, func(record v1.LogRecord, _ []byte) error {
+		if record.Attempt != attempt && !represented[record.Attempt] {
+			other = true
+			return io.EOF
+		}
+		return nil
+	})
+	// An unattributable partial/corrupt tail alone must not reopen expired data.
+	// If another attempt was found, the normal reader reports any collection error.
+	var detail *v1.PlanError
+	if err == io.EOF || errors.As(err, &detail) && detail.Code == "collection_failed" {
+		err = nil
+	}
+	return other, err
+}
+
 // deleteAttempt commits absence/expiry before touching files. Residual deletion
 // intent survives crashes and is retried by the existing retention owner.
 func (s *service) deleteAttempt(a v1.Attempt, history bool) error {

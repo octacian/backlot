@@ -318,16 +318,3 @@ func validateHistoryDeletionState(tx *bolt.Tx) error {
 		return nil
 	})
 }
-
-func (s *store) otherRetainedEvidence(id, attempt string) (bool, error) {
-	entries, err := s.attempts(id)
-	if err != nil {
-		return false, err
-	}
-	for _, a := range entries {
-		if a.Result.Attempt != attempt && !a.Result.EvidenceExpired {
-			return true, nil
-		}
-	}
-	return false, nil
-}

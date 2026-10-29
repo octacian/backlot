@@ -567,6 +567,20 @@ func TestHistoryPruneRejectsEvidenceParentLinks(t *testing.T) {
 	if err == nil {
 		t.Fatal("evidence link admitted")
 	}
+	expired := a.Result
+	expired.EvidenceExpired = true
+	if _, err := s.store.execution(id, v1.Stopped, &expired); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(application, filepath.Join(s.directory, "logs")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.logs(v1.LogsRequest{InstanceID: id}); err == nil {
+		t.Fatal("aggregate logs followed evidence parent link")
+	}
+	if _, err := s.logPage(v1.LogPageRequest{APIVersion: v1.Version, InstanceID: id}); err == nil {
+		t.Fatal("aggregate page followed evidence parent link")
+	}
 	if data, err := os.ReadFile(sentinel); err != nil || string(data) != "keep" {
 		t.Fatal("prune followed evidence link", err)
 	}
@@ -752,6 +766,18 @@ func TestUnrepresentedLegacyEvidenceRetention(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(s.directory, "artifacts", i.ID, unknown)); err != nil {
 			t.Fatal("manual selected prune removed unknown evidence", err)
 		}
+		logs, err := s.logs(v1.LogsRequest{InstanceID: i.ID})
+		if err != nil || len(logs.Records) != 1 || logs.Records[0].Attempt != unknown || logs.Gap != "evidence expired by retention policy" {
+			t.Error("aggregate logs hid retained unknown evidence or lost current expiry gap", logs, err)
+		}
+		page, err := s.logPage(v1.LogPageRequest{APIVersion: v1.Version, InstanceID: i.ID, Limit: 1})
+		if err != nil || len(page.Records) != 1 || page.Records[0].Attempt != unknown || len(page.Gaps) != 1 || page.Gaps[0].Code != "retention_expired" {
+			t.Error("aggregate page hid retained unknown evidence or lost current expiry gap", page, err)
+		}
+		_, err = s.logPage(v1.LogPageRequest{APIVersion: v1.Version, InstanceID: i.ID, Attempt: i.Execution.Attempt})
+		code(t, err, "attempt_unavailable")
+		_, err = s.store.attempt(v1.AttemptRequest{InstanceID: i.ID, Attempt: unknown})
+		code(t, err, "attempt_unavailable")
 		s.evidence.age = time.Nanosecond
 		if err := s.pruneEvidence(); err != nil {
 			t.Fatal(err)
@@ -763,6 +789,14 @@ func TestUnrepresentedLegacyEvidenceRetention(t *testing.T) {
 		current, err := s.store.inspect(i.ID)
 		if err != nil || current.Execution.CompletedAt != i.Execution.CompletedAt {
 			t.Fatal("legacy cleanup fabricated/renewed completion time", err)
+		}
+		logs, err = s.logs(v1.LogsRequest{InstanceID: i.ID})
+		if err != nil || len(logs.Records) != 0 || logs.Gap == "" {
+			t.Fatal("expired unknown evidence remained readable", logs, err)
+		}
+		page, err = s.logPage(v1.LogPageRequest{APIVersion: v1.Version, InstanceID: i.ID})
+		if err != nil || len(page.Records) != 0 || len(page.Gaps) != 1 || page.Gaps[0].Code != "retention_expired" {
+			t.Fatal("expired unknown evidence remained paginatable", page, err)
 		}
 		rows, err := s.store.attempts(i.ID)
 		if err != nil || len(rows) != 0 {

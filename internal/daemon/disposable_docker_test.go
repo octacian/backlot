@@ -163,6 +163,15 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 					}
 				}
 			}
+			logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "each"})
+			if err != nil || len(logs.Records) < 2 {
+				t.Fatal("retained stdout/stderr logs missing before destroy", logs, err)
+			}
+			for _, record := range logs.Records {
+				if record.Attempt != result.Attempt || record.Time == "" || record.Stream == "" {
+					t.Fatal("context missing", record)
+				}
+			}
 			if mode == "cleanup-failure" {
 				if err := os.WriteFile(marker, proof, 0600); err != nil {
 					t.Fatal(err)
@@ -179,14 +188,9 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			} else if _, err := h.cli.Destroy(context.Background(), id); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "each"})
+			logs, err = h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "each"})
 			if err != nil || len(logs.Records) != 0 {
 				t.Fatal("destroy retained logs", logs, err)
-			}
-			for _, record := range logs.Records {
-				if record.Attempt != result.Attempt || record.Time == "" || record.Stream == "" {
-					t.Fatal("context missing", record)
-				}
 			}
 			// No cleanup error may be forgotten by the final explicit destroy.
 			inspected, err := h.cli.Inspect(context.Background(), id)

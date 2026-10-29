@@ -73,7 +73,7 @@ func (s *service) logPage(request v1.LogPageRequest) (v1.LogPageResponse, error)
 		if request.Attempt != "" {
 			return r, nil
 		}
-		other, err := s.store.otherRetainedEvidence(instance.ID, e.Attempt)
+		other, err := s.otherRetainedEvidence(instance.ID, e.Attempt)
 		if err != nil {
 			return r, err
 		}

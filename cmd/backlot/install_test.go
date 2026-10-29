@@ -10,7 +10,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -32,6 +31,7 @@ type installFixture struct {
 	t                                *testing.T
 	root, script, old, target, asset string
 	env                              []string
+	retain                           bool
 }
 
 func installPut(t *testing.T, path string, data []byte, mode os.FileMode) {
@@ -111,7 +111,12 @@ func newInstallFixture(t *testing.T, old, target string, asset []byte) *installF
 	if err != nil {
 		t.Fatal(err)
 	}
+	var f *installFixture
 	t.Cleanup(func() {
+		if f != nil && f.retain {
+			t.Log("preserved uncertain fixture", root)
+			return
+		}
 		if err := os.RemoveAll(root); err != nil {
 			t.Error(err)
 		}
@@ -120,7 +125,7 @@ func newInstallFixture(t *testing.T, old, target string, asset []byte) *installF
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &installFixture{t: t, root: root, script: script, old: old, target: target, asset: "backlot_v0.4.0_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"}
+	f = &installFixture{t: t, root: root, script: script, old: old, target: target, asset: "backlot_v0.4.0_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"}
 	f.putAsset(asset)
 	f.write("tools/curl", `#!/bin/sh
 set -eu
@@ -542,7 +547,7 @@ func mustInstallRead(t *testing.T, path string) []byte {
 }
 
 func testInstallTerminal(t *testing.T, fixture func(*testing.T) *installFixture) {
-	for _, answer := range []string{"n\n", "l\nn\n", "l\ny\n", "pipe"} {
+	for _, answer := range []string{"n\n", "l\nn\n", "l\ny\n", "pipe", "directTERM", "groupCtrlC"} {
 		t.Run(strings.ReplaceAll(answer, "\n", "-"), func(t *testing.T) {
 			f := fixture(t)
 			f.installOld()
@@ -605,31 +610,181 @@ func testInstallTerminal(t *testing.T, fixture func(*testing.T) *installFixture)
 			if err := command.Start(); err != nil {
 				t.Fatal(err)
 			}
-			commandJoined := make(chan error, 1)
-			go func() { commandJoined <- command.Wait() }()
+			commandJoined := make(chan struct{})
+			var commandErr error
+			go func() { commandErr = command.Wait(); close(commandJoined) }()
+			defer func() {
+				select {
+				case <-commandJoined:
+					return
+				default:
+				}
+				_ = command.Process.Signal(syscall.SIGTERM)
+				_, _ = master.Write([]byte("n\n"))
+				select {
+				case <-commandJoined:
+				case <-time.After(5 * time.Second):
+					f.retain = true
+					t.Error("installer did not join; preserve fixture", f.root)
+				}
+			}()
 			output := make(chan string, 1)
-			go func() { body, _ := io.ReadAll(master); output <- string(body) }()
-			// The master stays open while input is piped to the shell; consent is read from /dev/tty.
-			if _, err := master.Write([]byte(answer)); err != nil {
-				t.Fatal(err)
+			prompt := make(chan struct{})
+			go func() {
+				var body bytes.Buffer
+				chunk := make([]byte, 1024)
+				notified := false
+				for {
+					n, err := master.Read(chunk)
+					body.Write(chunk[:n])
+					if !notified && strings.Contains(body.String(), "Stop daemon and install?") {
+						close(prompt)
+						notified = true
+					}
+					if err != nil {
+						output <- body.String()
+						return
+					}
+				}
+			}()
+			select {
+			case <-prompt:
+			case <-time.After(10 * time.Second):
+				t.Fatal("installer never prompted")
+			}
+			// Consent still comes from /dev/tty when shell input is piped.
+			if answer == "directTERM" {
+				if err := command.Process.Signal(syscall.SIGTERM); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				input := answer
+				if answer == "groupCtrlC" {
+					input = "\x03" // Terminal delivery differs from signalling only the shell.
+				}
+				if _, err := master.Write([]byte(input)); err != nil {
+					t.Fatal(err)
+				}
 			}
 			select {
-			case err := <-commandJoined:
-				if (err == nil) != (answer == "l\ny\n") {
-					t.Fatal("tty installer", err)
+			case <-commandJoined:
+				if (commandErr == nil) != (answer == "l\ny\n") {
+					t.Fatal("tty installer", commandErr)
 				}
 			case <-time.After(20 * time.Second):
-				_ = command.Process.Kill()
-				<-commandJoined
 				t.Fatal("tty installer timed out")
 			}
 			_ = slave.Close()
 			text := <-output
-			if !strings.Contains(text, "0 running/kept instances; 0 unresolved") || strings.Contains(answer, "l") && !strings.Contains(text, "[y/n]") {
+			if !strings.Contains(text, "0 running/kept instances; 0 unresolved") || strings.HasPrefix(answer, "l\n") && !strings.Contains(text, "[y/n]") {
 				t.Fatal(text)
 			}
 			if answer != "l\ny\n" {
 				f.preserved()
+			}
+		})
+	}
+}
+
+func TestInstallerShellExitStatus(t *testing.T) {
+	for _, status := range []int{0, 23} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			helper := []byte(fmt.Sprintf("#!/bin/sh\n[ \"$2\" != --help ] || exit 0\nexit %d\n", status))
+			f := newInstallFixture(t, "", "", installArchive(t, helper, ""))
+			command := exec.Command("sh", f.args()...)
+			command.Env = f.env
+			output, err := command.CombinedOutput()
+			if command.ProcessState == nil || command.ProcessState.ExitCode() != status {
+				t.Fatalf("helper status %d lost: %v %s", status, err, output)
+			}
+		})
+	}
+}
+
+// The mock holds cancellation open so the parent must join before deleting its files.
+func TestInstallerShellCancellation(t *testing.T) {
+	for _, signal := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP} {
+		t.Run(signal.String(), func(t *testing.T) {
+			helper := []byte(`#!/bin/sh
+set -eu
+[ "$2" != --help ] || exit 0
+stage=$3
+cancelled=0
+trap 'cancelled=1; printf cancelled > "$FIXTURE_ROOT/cancelled"' TERM
+printf ready > "$FIXTURE_ROOT/ready"
+while [ ! -f "$FIXTURE_ROOT/answer" ]; do sleep 0.02; done
+if [ "$cancelled" = 1 ]; then
+    [ -f "$stage" ] && [ -f "$0" ] || exit 24
+    printf joined > "$FIXTURE_ROOT/joined"
+    exit 23
+fi
+if [ "$(cat "$FIXTURE_ROOT/answer")" = y ]; then printf effect > "$FIXTURE_ROOT/effect"; fi
+`)
+			f := newInstallFixture(t, "", "", installArchive(t, helper, ""))
+			master, slave := installPTY(t)
+			t.Cleanup(func() { _ = master.Close(); _ = slave.Close() })
+			command := exec.Command("sh", f.args()...)
+			command.Env = f.env
+			command.Stdin, command.Stdout, command.Stderr = slave, slave, slave
+			command.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 1}
+			if err := command.Start(); err != nil {
+				t.Fatal(err)
+			}
+			joined := make(chan struct{})
+			var result error
+			go func() { result = command.Wait(); close(joined) }()
+			// Release the helper on failure, then join before fixture deletion.
+			t.Cleanup(func() {
+				f.write("answer", "n")
+				select {
+				case <-joined:
+				case <-time.After(5 * time.Second):
+					f.retain = true
+					t.Error("installer did not join its helper; preserve fixture", f.root)
+				}
+			})
+			waitFile := func(name string) {
+				t.Helper()
+				deadline := time.Now().Add(3 * time.Second)
+				for {
+					if _, err := os.Stat(f.root + "/" + name); err == nil {
+						return
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("helper never reached", name)
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+			waitFile("ready")
+			if err := command.Process.Signal(signal); err != nil {
+				t.Fatal(err)
+			}
+			waitFile("cancelled")
+			select {
+			case <-joined:
+				t.Fatal("shell exited before helper joined", result)
+			case <-time.After(50 * time.Millisecond):
+			}
+			// A later y releases cancellation, never authorizes an effect.
+			f.write("answer", "y")
+			select {
+			case <-joined:
+				if result == nil {
+					t.Fatal("cancelled shell succeeded")
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("shell did not join cancelled helper")
+			}
+			waitFile("joined")
+			if _, err := os.Stat(f.root + "/effect"); !os.IsNotExist(err) {
+				t.Fatal("helper accepted consent after cancellation", err)
+			}
+			for _, pattern := range []string{"/temp/backlot-install.*", "/bin/.backlot-install.*"} {
+				matches, err := filepath.Glob(f.root + pattern)
+				if err != nil || len(matches) != 0 {
+					t.Fatal("temporary files retained", matches, err)
+				}
 			}
 		})
 	}

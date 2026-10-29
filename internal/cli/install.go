@@ -29,7 +29,8 @@ func installCommand() *urfave.Command {
 		ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 		return daemon.Install(ctx, daemon.InstallOptions{Directory: directory, Stage: c.String("stage"), Destination: c.String("destination"), Version: c.String("version"), Consent: func(instances []v1.Instance) error {
-			tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+			// Canonical tty reads must not block past the reader's cancellation check.
+			tty, err := os.OpenFile("/dev/tty", os.O_RDWR|syscall.O_NONBLOCK, 0)
 			if err != nil {
 				return fmt.Errorf("shutdown requires a controlling terminal; installation cancelled")
 			}

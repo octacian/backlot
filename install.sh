@@ -65,11 +65,25 @@ mkdir -p "$parent"
 stage=$(mktemp -d "$parent/.backlot-install.XXXXXXXX")
 cp "$work/backlot" "$stage/backlot"
 chmod 755 "$stage/backlot"
+cancel_helper() {
+    trap '' HUP INT TERM
+    kill -TERM "$helper" 2>/dev/null || :
+    wait "$helper" || :
+    exit 1
+}
+# An asynchronous child lets wait run traps promptly; keep launch-time cancellation.
+cancelled=0
+trap 'cancelled=1' HUP INT TERM
 if [ -n "$state" ]; then
-    "$work/backlot" install-replace --stage "$stage/backlot" --destination "$destination" --version "$version" --state-dir "$state"
+    "$work/backlot" install-replace --stage "$stage/backlot" --destination "$destination" --version "$version" --state-dir "$state" <&0 &
 else
-    "$work/backlot" install-replace --stage "$stage/backlot" --destination "$destination" --version "$version"
+    "$work/backlot" install-replace --stage "$stage/backlot" --destination "$destination" --version "$version" <&0 &
 fi
+helper=$!
+trap cancel_helper HUP INT TERM
+[ "$cancelled" = 0 ] || cancel_helper
+wait "$helper"
+trap 'exit 1' HUP INT TERM
 printf 'Backlot %s installed at %s\n' "$version" "$destination"
 selected=$(command -v backlot || :)
 if [ "$selected" != "$destination" ]; then printf 'PATH selects %s; add %s to PATH or invoke %s explicitly.\n' "${selected:-no backlot}" "$parent" "$destination"; fi

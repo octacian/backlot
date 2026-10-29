@@ -336,9 +336,9 @@ private-file override, recursive include, or deep merge.
 `config_digest` retains the machine-file byte digest. The additive
 `effective_config_digest` records composed validated inputs/tools/providers;
 source-only formatting or overridden tool changes do not become effective drift.
-Running attempts retain private launch values and provenance. Repeated run reports
-drift; explicit restart/reset resolves current layers subject to existing retained
-resource safety checks. Stop, destroy and recovery use recorded snapshots.
+Starting/ready joins use recorded configuration and report manifest/configuration
+drift; eligible new starts and explicit restart/reset resolve current layers subject
+to retained-resource safety checks. Stop, destroy and recovery use recorded snapshots.
 Diagnostics distinguish launch/current private sources and effective configuration;
 export records the attempt's effective digest without private contents.
 

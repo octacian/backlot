@@ -26,7 +26,7 @@ func sceneCommand() *urfave.Command {
 		if name == "status" {
 			flags = append(flags, statusFollowFlags()...)
 		}
-		children = append(children, &urfave.Command{Name: name, Description: "Example: backlot scene " + name + " dev\nNamed scenes resolve within the selected checkout; use status/inspect with an instance ID for exact recorded state.", ArgsUsage: "<scene>", Usage: map[string]string{"start": "Start a persistent scene and wait for readiness; --attached owns its attempt", "status": "Read a named persistent scene; --follow observes without lifecycle ownership", "stop": "Stop a recorded persistent scene, retaining data; current manifest is not required"}[name], Flags: flags, Action: sceneAction})
+		children = append(children, &urfave.Command{Name: name, Description: "Example: backlot scene " + name + " dev\nNamed scenes resolve within the selected checkout; use status/inspect with an instance ID for exact recorded state.", ArgsUsage: "<scene>", Usage: map[string]string{"start": "Ensure a persistent scene is running; --attached owns a new attempt", "status": "Read a named persistent scene; --follow observes without lifecycle ownership", "stop": "Stop a recorded persistent scene, retaining data; current manifest is not required"}[name], Flags: flags, Action: sceneAction})
 	}
 	return &urfave.Command{Name: "scene", Usage: "Discover declarations and manage recorded persistent scenes", Commands: children}
 }
@@ -237,7 +237,7 @@ func startScene(ctx context.Context, c *urfave.Command, cli *client.Client, targ
 		grace, _ := time.ParseDuration(request.Options.StopGrace)
 		cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
 		defer cancel()
-		result, err := cli.StopExecution(cleanup, id)
+		result, err := cli.StopExecutionWithRequest(cleanup, v1.StopRequest{APIVersion: v1.Version, InstanceID: id, ExpectedAttempt: attempt})
 		if err != nil {
 			return sceneOutput(c, response, err)
 		}

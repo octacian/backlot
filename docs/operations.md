@@ -196,7 +196,10 @@ and inherited environment; changing your shell does not update it. See
 [tool selection](daemon.md#scoped-provider-diagnostics).
 
 For a persistent scene use `scene start dev` instead of the disposable run above.
-It returns at readiness and leaves accepted startup/runtime daemon-owned. To own
+It returns at readiness and leaves accepted startup/runtime daemon-owned. After
+repairing a failed scene, repeat start for one new compatible attempt; starting/ready
+work is joined. See [current configuration and concurrency conflicts](cli.md#commands-and-defaults).
+To own
 one persistent attempt until your client ends, use `scene start dev --attached`;
 this refuses existing runtime rather than adopting it. Status/follow/logs and
 export only observe: disconnecting them does not stop work or renew its lease.
@@ -244,17 +247,17 @@ and retry through the same daemon scope. See the
 | --- | --- |
 | Cannot contact daemon | Use the same `--state-dir`; run `daemon status`/`doctor`, inspect the private startup log, then explicitly start. Never delete a live or uncertain socket/lock. |
 | Missing tool/input/seed | Compare offline `plan` paths with `doctor --project PATH --scene NAME` in the daemon context; errors show the attempted tool and declaration source. For a local tool override use `project setup --edit`; configure required inputs/seeds explicitly. |
-| Image unavailable | Explicitly pull/build the declared image with Docker tooling, then restart the failed instance. Backlot never pulls implicitly. |
+| Image unavailable | Explicitly pull/build the declared image with Docker tooling, then explicitly start the failed persistent scene again (restore a retained build-image pin or follow its explicit restart guidance). Backlot never pulls implicitly. |
 | Database TCP ready but application unavailable | Use application preparation or a command probe that verifies credentials/schema; do not equate an open port with application readiness. |
-| Probe or preparation failed | Inspect component logs and failure detail; correct the application, then explicitly restart. Failed fresh-only initialization is not recorded as successful. |
-| Scene failed after readiness | Read the required-service exit/supervision diagnostic and historical logs. No automatic restart; fix the cause before explicit restart. |
+| Probe or preparation failed | Inspect component logs and failure detail; correct the application, then explicitly start the persistent scene again after cleanup is established. Failed fresh-only initialization is not recorded as successful. |
+| Scene failed after readiness | Read the required-service exit/supervision diagnostic and historical logs. No automatic retry; fix the cause before another explicit persistent start. |
 | Need machine/project/public CA paths | Use scoped doctor; distinguish effective scene inputs, recorded launch files and current file drift. `public_ca_certificate` locates the actual public root for explicit manual trust; no key is printed or trust installed. |
 | Container origin fails while host succeeds | Use explicit `--instance ID --container-probe-image ALREADY_PRESENT_IMAGE`; compare default image trust against optional `--probe-public-ca`, DNS, TCP and normally verified TLS. Follow the documented image contract; no implicit pull/workload/resolver override occurs. |
 | Public origin unavailable | Verify selected gateway status, normal DNS and TLS trust, and exact owned scope first. Check host and container consumers separately. Keep unrelated routes intact; never reload a stale bootstrap. |
 | Manifest drift | Repeated run reports preserved snapshot drift. Restart applies compatible changes; retained storage/initialization/sensitive contract changes require explicit reset/destroy. |
 | Kept disposable failure | Inspect results/logs/fixtures; stop runtime and export needed diagnostics before destroy by ID. Successful runs still clean up. |
 | Cleanup uncertain or foreign consumer present | Preserve journal/resources; restore provider access or remove only your verified consumer, then retry stop/destroy. Never prune by name, PID or hostname. |
-| Daemon crash | Start the same binary/state directory; recovery stops verifiably owned survivors and marks interrupted, retains data/managed CA and reports evidence gaps. Inspect, explicitly start the managed gateway, then restart scenes. Unavailable gateway retains exact route cleanup uncertainty for retry. |
+| Daemon crash | Start the same binary/state directory; recovery stops verifiably owned survivors and marks interrupted, retains data/managed CA and reports evidence gaps. Inspect, explicitly start the managed gateway, then explicitly start eligible scenes after diagnosis. Unavailable gateway retains exact route cleanup uncertainty for retry. |
 | Managed gateway uncertain after temporary control loss | Retry `gateway stop` in the same state directory. If still fenced, choose restored authority, controlled reboot or explicit survivor-risk acknowledgement with force; follow [managed recovery](https.md#managed-gateway-recovery). Retain configuration and CA. |
 | State upgrade or unsupported version | Follow [state compatibility](containers.md#state-compatibility): stop the old daemon with its matching binary before upgrading, wait for exit/lock release, then explicitly start the newest binary in the same directory. Version 9 is the minimum supported baseline; retained steps from v9 support skipped releases without reset. Pre-v9 and other unsupported formats are rejected unchanged; preserve them for matching-binary diagnosis and lifecycle. |
 | Evidence expired | Status retains `evidence_expired`; expired logs/artifacts cannot be recovered from deleted containers. Configure daemon age/size/count retention before runs; see [history and pruning](evidence.md#retained-attempt-history). |

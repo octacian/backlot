@@ -41,7 +41,7 @@ backlot restart INSTANCE_ID --allow-image-change --json
 That flag applies only to this restart's produced-ID comparison. It cannot bypass
 other drift/ownership checks or change literal/input-image behavior. Reset instead
 replaces retained data. Missing pinned images fail; there is no automatic rebuild
-or fallback. Recovery preserves IDs and requires explicit restart.
+or fallback. Recovery preserves IDs; explicitly start eligible scenes after cleanup/diagnosis. Ordinary start retains pins and grants no changed-image consent.
 
 Build images/tags are project-owned. Stop/reset/destroy do not delete them;
 projects/operators manage disk use and preserve images needed by retained scenes.

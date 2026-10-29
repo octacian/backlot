@@ -157,7 +157,8 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 			return empty, problem("conflict", "restart must address the same persistent project, checkout and scene")
 		}
 	}
-	response, err := s.prepareCaptured(ctx, snapshot, identity, request.Plan.Scene, persistentOnly)
+	var observed startObservation
+	response, err := s.prepareCaptured(ctx, snapshot, identity, request.Plan.Scene, persistentOnly, &observed)
 	if err != nil {
 		return empty, err
 	}
@@ -172,7 +173,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		return empty, err
 	}
 	if response.Instance.Status == v1.Destroyed {
-		return empty, problem("destroyed", "instance was destroyed during start acceptance; run the scene again for a fresh identity")
+		return empty, startConflict(id, observed.attempt)
 	}
 	if persistentOnly {
 		if err := requireSceneLocation(response.Instance, identity.source.ProjectPath); err != nil {
@@ -180,27 +181,56 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		}
 	}
 
-	var legacyActivation *plan.Snapshot
-	if request.InstanceID == "" {
-		previous, loadErr := s.store.snapshot(id)
-		if loadErr != nil {
-			return empty, loadErr
+	var acceptanceSnapshot *plan.Snapshot
+	ordinaryPersistent := request.InstanceID == "" && snapshot.Plan.Lifetime == v1.Persistent
+	if ordinaryPersistent {
+		current, bound, err := s.store.boundStart(id, observed, request.Attached)
+		if err != nil {
+			return empty, err
 		}
-		// Only a predecessor snapshot lacks both provenance additions. Ordinary
-		// state9 stop/start retains its immutable snapshot, even after edits.
-		if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" &&
-			response.Instance.Plan.Lifetime == v1.Persistent &&
-			(response.Instance.Status == v1.Prepared || response.Instance.Status == v1.Stopped) {
-			if err := safeRestart(previous, snapshot); err != nil {
+		response.Instance = current
+		response.ManifestDrift = current.Plan.ManifestDigest != snapshot.Plan.ManifestDigest
+		response.ConfigDrift = plan.ConfigurationDrift(current.Plan, snapshot.Plan)
+		if bound {
+			if request.Attached {
+				return empty, problem("conflict", "attached start cannot adopt an existing execution; stop it first")
+			}
+			return response, nil
+		}
+		switch current.Status {
+		case v1.Prepared, v1.Stopped, v1.Failed, v1.Cancelled, v1.Interrupted, v1.Stopping:
+		default:
+			return empty, problem("conflict", "persistent instance is not eligible for a new start; inspect its status")
+		}
+		previous, err := s.store.snapshot(id)
+		if err != nil {
+			return empty, err
+		}
+		if err := safeRestart(previous, snapshot); err != nil {
+			return empty, err
+		}
+		if err := identity.verify(); err != nil {
+			return empty, err
+		}
+		if _, err := s.stopExecution(id); err != nil {
+			var typed *v1.PlanError
+			if !errors.As(err, &typed) || typed.Code != "collection_failed" {
 				return empty, err
 			}
-			legacyActivation = &snapshot
-		} else {
-			if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" {
-				return empty, problem("restart_required", "historical instance requires explicit restart with current project configuration")
-			}
-			snapshot = previous
 		}
+		if err := s.store.recoverExecution(id); err != nil {
+			return empty, err
+		}
+		acceptanceSnapshot = &snapshot
+	} else if request.InstanceID == "" {
+		previous, err := s.store.snapshot(id)
+		if err != nil {
+			return empty, err
+		}
+		if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" {
+			return empty, problem("restart_required", "historical instance requires explicit restart with current project configuration")
+		}
+		snapshot = previous
 		if err := executablePlan(snapshot.Plan); err != nil {
 			return empty, err
 		}
@@ -218,7 +248,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 			return empty, err
 		}
 		if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" {
-			legacyActivation = &snapshot
+			acceptanceSnapshot = &snapshot
 		}
 		if snapshot.Plan.Publish != nil && snapshot.Caddy != nil && response.Instance.Execution != nil && response.Instance.Execution.Origin != "" {
 			origin, err := url.Parse(response.Instance.Execution.Origin)
@@ -266,7 +296,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	if s.executions == nil {
 		s.executions = map[string]*execution{}
 	}
-	if existing := s.executions[id]; existing != nil && request.InstanceID == "" && response.Instance.Status != v1.Stopped {
+	if existing := s.executions[id]; existing != nil && request.InstanceID == "" && !ordinaryPersistent && response.Instance.Status != v1.Stopped {
 		if request.Attached {
 			return empty, problem("conflict", "attached start cannot adopt an existing execution; stop it first")
 		}
@@ -278,7 +308,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		return empty, err
 	}
 	if request.InstanceID != "" {
-		if legacyActivation == nil {
+		if acceptanceSnapshot == nil {
 			if err := s.store.replaceSnapshot(id, snapshot); err != nil {
 				return empty, err
 			}
@@ -301,11 +331,15 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		}
 	}
 	r := runtimeRecord{ExportSource: &v1.ExportSource{Project: snapshot.Plan.Project, Scene: snapshot.Plan.Scene, Lifetime: snapshot.Plan.Lifetime, CheckoutID: identity.checkout.ID, GitHead: launchGitCommit(ctx, identity.checkout), ManifestDigest: snapshot.Plan.ManifestDigest, ConfigDigest: snapshot.Plan.ConfigDigest, EffectiveConfigDigest: snapshot.Plan.EffectiveConfigDigest}, StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Attempt: attempt, Groups: []native.Identity{}, Options: request.Options, ConfigPath: request.Plan.ConfigPath}
-	response.Instance, err = s.store.acceptExecutionSnapshot(id, r, result, request.InstanceID != "" || response.Instance.Status == v1.Stopped, legacyActivation)
+	var expected *startObservation
+	if ordinaryPersistent {
+		expected = &observed
+	}
+	response.Instance, err = s.store.acceptExecutionSnapshot(id, r, result, request.InstanceID != "" || ordinaryPersistent || response.Instance.Status == v1.Stopped, acceptanceSnapshot, expected)
 	if err != nil {
 		return empty, err
 	}
-	if legacyActivation != nil {
+	if acceptanceSnapshot != nil {
 		response.ManifestDrift, response.ConfigDrift = false, false
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
@@ -877,9 +911,9 @@ func serviceFailure(services map[string]workload) error {
 	for name, g := range services {
 		if result := g.Result(); result != nil {
 			if !result.Known {
-				return fmt.Errorf("required service %s supervision failed: %s; explicit restart required", name, result.Error)
+				return fmt.Errorf("required service %s supervision failed: %s; inspect before another explicit start", name, result.Error)
 			}
-			return fmt.Errorf("required service %s exited unexpectedly (exit %d); explicit restart required", name, result.Code)
+			return fmt.Errorf("required service %s exited unexpectedly (exit %d); inspect before another explicit start", name, result.Code)
 		}
 		// Docker Result already performs a fresh running-state inspection. A second
 		// inspection through Alive could fail independently and discard its cause.
@@ -888,7 +922,7 @@ func serviceFailure(services map[string]workload) error {
 			continue
 		}
 		if !g.Alive() {
-			return fmt.Errorf("required service %s is unavailable without a verified exit; explicit restart required", name)
+			return fmt.Errorf("required service %s is unavailable without a verified exit; inspect before another explicit start", name)
 		}
 	}
 	return nil

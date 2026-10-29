@@ -1,10 +1,10 @@
 ---
 title: 'Ensure persistent start accepts one eligible current attempt'
 date: '2026-10-28'
-status: proposed
+status: accepted
 summary: 'Make explicit persistent start join running work or accept one compatible new attempt after prior work is reconciled without resetting identity or data.'
 tags: [daemon, lifecycle, identity, cli, attachment]
-supersedes: []
+supersedes: [20261007T052013565Z-use-explicit-scene-lifetimes-and-daemon-owned-execution.md, 20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md, 20261022T194804759Z-bind-attached-persistent-execution-to-one-daemon-owned-attempt.md, 20261022T195459793Z-authorize-declared-sensitive-startup-details-for-persistent-scenes.md, 20261021T001732173Z-register-private-project-configuration.md, 20261025T202510851Z-pin-execution-scoped-build-images-from-native-jobs.md]
 superseded_by: []
 ---
 
@@ -15,24 +15,22 @@ one daemon coordinator: join an accepted start, return ready with unapplied drif
 or accept one new eligible attempt using compatible current inputs. Preserve
 persistent identity, data and paired credentials, reconcile/join old work first,
 and block uncertain ownership. One explicit invocation requests one attempt;
-there is no background retry or crash continuation.
+there is no background retry or crash continuation. Overlapping ordinary starts
+share an accepted attempt only while it remains current. If it has been replaced,
+return a typed conflict with history guidance, never another launch or a
+historical success response.
 
 This is phase two of [issue 99](https://github.com/octacian/backlot/issues/99),
 after delivery/review of [bounded attempt history](20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md).
-Upon acceptance it will partially supersede the lifetime decision's requirement
-for explicit restart after interrupted work, recorded targeting's unhealthy-start
-rule and attachment's inherited failure/restart eligibility. It also replaces
-startup disclosure's stopped/start snapshot-selection rule and the image-pin
-recovery requirement for explicit restart, and overrides the inherited private
-configuration restriction requiring restart for failed/interrupted instances.
-Startup disclosure authorization, redaction and exact-attempt readiness polling,
-image acceptance/consent, native supervision, private registry/privacy and all
-unaffected identity, targeting, ownership, lease and cleanup rules continue by
-reference. Keep metadata unchanged while proposed. On acceptance, add reciprocal
-supersession links for lifetime, recorded targeting, attachment and startup
-disclosure; append this successor on the already-superseded private-configuration
-record and on the image-pin record superseded by phase one, preserving existing
-successors. Phase one must not activate this decision early.
+Accepted after independent architecture review and coordinator approval. This
+partially supersedes lifetime's explicit restart after interrupted work, recorded
+targeting's unhealthy-start rule, attachment's failure/restart eligibility, startup
+disclosure's stopped/start snapshot selection, image-pin recovery's explicit
+restart requirement, and the inherited private-configuration restriction requiring
+restart for failed/interrupted instances. All unaffected rules remain in force,
+including startup disclosure authorization/redaction and exact-attempt polling,
+image acceptance/consent, native supervision, private registry/privacy, identity,
+lease and cleanup. Phase one's history decision remains accepted and unchanged.
 
 ## Context
 
@@ -53,8 +51,11 @@ exits are outside the behavior change.
 
 Keep lifecycle policy in `runSelected` and the existing instance mutation lock,
 not CLI retries or a second scene coordinator. After admission, identity and
-current-input validation, retain the selected predecessor and its acceptance
-revision across serialization, then re-read the selected instance under the lock.
+current-input validation, capture the selected instance, observed attempt/status
+and existing acceptance highwater together in the preparation/selection transaction.
+Carry those facts only in request-local memory across serialization, then re-read
+the selected instance under the lock. A separate later highwater read can bind a
+queued caller to the wrong successor and is insufficient.
 Reconcile/join prior owned work before replacement and recheck eligibility at
 transactional acceptance. Do not infer absence from a failed status, missing
 in-memory owner, provider error or transport loss.
@@ -77,30 +78,64 @@ Completion/collection failure alone is not an ownership fence: preserve it in
 history, join collectors and require established runtime/resource cleanup before
 new acceptance. A cleanup failure or uncertain native claim blocks replacement
 until existing explicit recovery/force rules resolve it.
+Ordinary run and scene-start requests use the existing cleanup-aware client
+request policy, retaining caller cancellation and bounded daemon cleanup;
+attachment renewal and expiry timing are unchanged.
 
 Concurrent ordinary invocations are bounded by their pre-lock observation, not
 by whether the current attempt is still starting when they acquire the lock.
-Retain the observed predecessor/acceptance revision (including no accepted attempt)
-and compare it at transactional acceptance. If another acceptance overtakes that
-observation, return/join the first successor accepted after that revision, even if
-it has already failed, cancelled or completed cleanup. A caller that observed an
-already-starting attempt remains bound to that attempt if it becomes terminal
-while queued. Never reinterpret either case as permission to accept another
-attempt. Phase one's per-instance acceptance order and exact-attempt records can
-identify that successor; no durable request journal or network deduplication is
-needed. If the bound result has been pruned or destroyed, report it unavailable
-rather than substituting current work or launching again.
+An observed starting/ready attempt remains the binding even if it becomes terminal.
+For an eligible predecessor at acceptance sequence n (including no attempt at
+highwater zero), an intervening acceptance binds the caller to exactly n+1, not
+whichever attempt is current later. Prove current identity and highwater together
+under the mutation fence: current B at highwater n+1 is sufficient even when its
+history row was pruned. Return that coherent current snapshot, including terminal
+B, without another acceptance. Only consult the exact n+1 history key to recover
+an otherwise unknown bound identity for a replacement conflict; never choose the
+newest row. Highwater above n+1 conflicts regardless of retained history.
+Attached requests instead refuse any intervening acceptance.
 
-A genuinely later invocation observing an eligible terminal attempt can request
-its successor after reconciliation. Preserve missing mutation reply as unknown
-acceptance, with observation/diagnosis rather than automatic retry. Attached
-requests retain the stricter rule below: being overtaken by any other acceptance
-is refusal, never permission to join/adopt even a now-terminal attempt.
+If the binding has already been replaced before the daemon response is captured,
+return a typed conflict identifying the recorded instance and bound attempt when
+available, with guidance to inspect its retained history/logs/export. If its facts
+were pruned or destroyed, report unavailability/conflict without fallback. For
+example, two callers observe A, one accepts B, B fails, and a later caller accepts
+C: the queued A caller conflicts, leaving C intact and accepting no D. If B is
+still current and terminal, that queued caller returns B's coherent snapshot.
+Only a genuinely later invocation observing eligible terminal B may accept C.
+
+This deliberately weakens the earlier proposed exact-bound historical-result
+promise: sharing succeeds while the binding remains current; replacement is an
+acceptable visible failure. History remains an independent diagnostic path, not
+a successful start response or cleanup authority. Do not archive plans, hydrate
+historical success, substitute C's plan, or automatically try again. Missing
+mutation replies still mean unknown acceptance, requiring observation/diagnosis.
+
+Keep normal InstanceResponse/SceneResponse and PlanError shapes. Reuse
+`startup_conflict` for attempt replacement, through the normal daemon error
+envelope and CLI presentation-error fields; use HTTP conflict classification for
+that code. Safe messages carry public identities and exact-attempt history guidance,
+never snapshot secrets, private configuration paths or capabilities. No new start
+contract marker, matching-client gate or response union is needed. Existing API
+and state compatibility checks remain unchanged.
+
+CLI readiness polling stays pinned to the returned attempt. If B is replaced by
+C before the next poll, return conflict with the last validated B snapshot labelled
+last observed; never hydrate a successful summary from history or C. Preserve scene
+target/checkout/generation checks. Startup cancellation must send the existing
+StopRequest.ExpectedAttempt precondition before effects; comparing a stop response
+after an unfenced ID-only stop is too late to protect C. Ordinary joins acquire no
+attachment authority; existing operator stop semantics remain separate.
 
 For a newly accepted attempt, resolve current compatible configuration and run the
 existing retained-resource, private provenance, initialization, route identity,
-shared allocation and image-pin checks. Atomically install the accepted snapshot
-with the new attempt, so rejected acceptance cannot publish new launch provenance.
+shared allocation and image-pin checks. Use the explicit current machine path or
+the normal per-user default when omitted; ordinary start must not inherit the
+recorded ConfigPath. Existing explicit restart path inheritance is unchanged.
+Current inputs mean the single captured resolution for this request, not a promise
+that files remain unchanged while queued; retain source-identity verification.
+Atomically recheck the observed acceptance revision/eligibility and install that
+snapshot with the new attempt, so rejected acceptance cannot publish new launch provenance.
 Reuse paired generated credentials and retained data. Protected drift still needs
 reset/destroy; never perform those destructive operations as a start fallback.
 Ready/starting joins retain recorded runtime configuration and truthful drift,
@@ -121,8 +156,8 @@ after the same reconciliation/drift gates. Existing instance/attempt/generation
 capabilities, signal/loss cleanup, replacement fencing and expiry remain unchanged.
 
 Phase one's transaction preserves predecessor outcomes and evidence before new
-acceptance, and responses expose the exact new attempt. No copying old terminal
-exits or collection failures into a new attempt. Durable native-waiver warnings
+acceptance; successful responses expose only the bound current attempt. No copying
+old terminal exits or collection failures into a new attempt. Durable native-waiver warnings
 remain truthful historical warnings. Recovery still stops/reconciles owned work
 and records interruption; only a later explicit start invocation launches again.
 No daemon restart automatically starts scenes. Preserve disposable lease,
@@ -137,7 +172,10 @@ Until then these shipped-behavior guides remain unchanged.
 
 The change reuses the lifecycle lock, preparation deduplication, bbolt acceptance,
 retained-resource checks, attachment owner and phase-one history. It adds no
-worker, timer, dependency, durable retry state or independent cleanup authority.
+persistent field, state version, migration/predecessor fixture, worker, timer,
+dependency, durable retry state or independent cleanup authority. History writes
+remain in phase one's existing transactional hook; selection reads its highwater
+and acceptance adopts current configuration through the existing transaction.
 When unused, no additional work runs beyond phase-one history/retention; a start
 request may now perform reconciliation and compatibility checks before launching.
 
@@ -149,15 +187,20 @@ obligations; phase two needs race, drift, attachment and retained-data/credentia
 runtime evidence, with success and failure through actual CLI/client/daemon before
 broad suites. Race evidence must queue two ordinary callers observing failed A,
 accept B with one caller, let B fail and finish cleanup before releasing the
-second caller, and prove both receive B with no C accepted. Also cover a caller
-observing B starting before it becomes terminal, a later invocation accepting C,
-and refusal of an overtaken attached caller. Existing provider/native confidence
-limits remain unchanged.
+second caller, proving it returns coherent B with no extra acceptance. Then cover
+the full A/B/C race above: C accepted before the queued caller resumes must yield
+conflict and no D. Cover replacement between CLI reply and poll, exact successor
+pruning/destroy without fallback, attempt-fenced cancellation, and refusal of an
+overtaken attached caller. Existing provider/native confidence limits remain unchanged.
 
 ## Alternatives considered
 
 - Keep explicit restart for every unhealthy attempt: smallest code but preserves
   the reported operator trap and fails the approved ensure-running behavior.
+- Return the exact historical bound outcome after replacement: stronger convergence
+  needs a distinct response contract because bounded history intentionally lacks
+  full plans/snapshots. The owner declined this cost and chose visible conflict;
+  retaining full plans or adding a start marker/client gate is unnecessary.
 - Retry in CLI or automatically after failure: hides acceptance and can duplicate
   work or loop failures; no retry engine is required for one explicit attempt.
 - Invoke restart unconditionally: reuses code but would replace healthy runtime,
@@ -170,8 +213,9 @@ limits remain unchanged.
 ## Revisit when
 
 Users require automatic service restart, transparent daemon upgrade continuation,
-or explicit durable request deduplication. Those require a separate owner decision
-and failure/retention analysis; this change supplies none of them.
+exact historical start responses, or explicit durable request deduplication. Those
+require a separate owner decision and failure/retention analysis; this change
+supplies none of them.
 
 ## References
 

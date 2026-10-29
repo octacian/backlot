@@ -23,7 +23,7 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `plan SCENE [--project PATH] [--config PATH] [-- ARGS...]` | Offline selected input/seed/tool resolution; no daemon/provider effects |
 | `prepare SCENE [--project PATH] [--config PATH]` | Daemon records metadata only; returns disposable lease when applicable |
 | `run SCENE [--project PATH] [--config PATH] [-- ARGS...]` | Execute; persistent returns at readiness, disposable after collection/cleanup |
-| `scene start SCENE [--project PATH] [--config PATH]` | Execute/join a named persistent scene in the selected checkout |
+| `scene start SCENE [--project PATH] [--config PATH]` | Ensure a named persistent scene is running in the selected checkout |
 | `restart ID [--config PATH]` | Persistent only; read current recorded project/config sources and apply compatible drift, retaining data |
 | `reset ID [--config PATH]` | Persistent only; stop, remove old owned generation, then start fresh; destructive |
 | `stop ID` / `scene stop SCENE [--project PATH]` | Stop selected runtime/routes and retain data; named stop uses recorded selection |
@@ -75,6 +75,25 @@ nonnegative. `run --keep-on-failure` is disposable only; success still cleans up
 client cancellation/loss; no tails or keep-on-failure. `restart --allow-image-change`
 explicitly accepts changed build-image compatibility risk. See
 [lifecycle/drift](daemon.md#identity-and-lifecycle) before restart/reset.
+
+Persistent `run` and `scene start` join starting work, return ready work with
+unapplied drift, or accept one compatible new attempt after prepared/stopped/
+failed/cancelled/interrupted work is reconciled. Identity, data and paired
+credentials survive. New attempts use current configuration: explicit `--config`
+or the normal per-user default, never an inherited recorded path. Restart/reset
+keep their existing omitted-path selection. Healthy work needs `restart ID` to
+apply edits; protected drift needs an explicit reset/destroy decision.
+
+Overlapping ordinary starts share their accepted attempt only while it is current,
+even if it finishes before the response. If another attempt replaces it,
+`startup_conflict` is nonzero: inspect the returned instance/attempt's retained
+`history`, exact `inspect`, `logs --page --attempt`, or `export --attempt` before
+deciding on another explicit start. Polling conflicts retain the last observed
+snapshot, not a replacement's successful startup details. Missing mutation replies
+mean unknown acceptance, never permission to retry automatically. Startup
+cancellation targets only its accepted attempt; ID-only operator stop remains an
+override. Uncertain cleanup blocks new acceptance; collection failure alone remains
+a prior diagnostic. See [lifecycle](daemon.md#identity-and-lifecycle).
 
 Daemon startup accepts `--lease-duration 30s` (100ms–24h; zero selects the default),
 `--retention-attempts 100` (positive completed count), `--retention-age 168h`,

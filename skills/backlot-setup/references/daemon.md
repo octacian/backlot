@@ -21,10 +21,10 @@ See [private configuration](manifest.md#registered-private-project-configuration
 | Discover declarations / resolve current prerequisites | `scene list`, `scene describe` / `plan` | No runtime mutation; plan resolves caller-side tools, inputs and seeds |
 | Record metadata only | `prepare SCENE` | Snapshot/identity, no application readiness or provider allocation |
 | First persistent start | `scene start SCENE` or `run SCENE` | Accept snapshot/attempt, allocate selected resources, await readiness |
-| Join running scene; or resume stopped scene | Repeat start/run | Existing identity, retained snapshot/data/credentials; report drift without applying edits |
-| Changed ordinary command, probe or non-sensitive environment | `restart ID` | Capture current sources and apply compatible drift; retain identity/data/paired credentials |
+| Join starting/ready scene | Repeat start/run | Same current attempt and recorded runtime configuration; report unapplied drift |
+| Start prepared/stopped/failed/cancelled/interrupted scene | Repeat start/run after diagnosis/repair | One compatible current-input attempt after joined cleanup; retain identity/data/paired credentials |
+| Apply command, probe or non-sensitive environment edits to healthy work | `restart ID` | Capture current sources and apply compatible drift; retain identity/data/paired credentials |
 | Changed protected resource/initialization/sensitive contract | `reset ID`, or `destroy ID` then start | Explicit destructive replacement required; reset keeps logical ID but replaces generation; later start after destroy gets a new ID |
-| Failed/interrupted persistent attempt | Inspect then `restart ID` | No implicit retry; compatibility/ownership fences apply before old work is stopped |
 | Stop development runtime | `scene stop SCENE` or `stop ID` | Stop owned consumers/routes, retain data, credentials, history and evidence |
 | Remove this instance's owned data | `destroy ID` | Stop/join and remove data, then erase attempt results/logs/artifacts; export first |
 | Change daemon PATH/environment or policy | Explicit daemon stop/start in same state directory | Future daemon context changes; retained data/CA remain; no automatic scene restart |
@@ -66,12 +66,12 @@ recorded-ID commands work outside a checkout. Finite `status ID` keeps its exist
 `InstanceResponse` output. ID observation includes persistent, disposable and
 historical instances; use `run` to execute disposable scenes.
 
-Start accepts `--startup-timeout`, `--job-timeout` and `--stop-grace`. Repeated or
-concurrent starts converge on the existing instance and report manifest/config
-drift without reconciling retained data. Unhealthy execution needs explicit
-restart. A logical project/checkout/scene key recorded at a different canonical
-project directory conflicts before start/join. Cancelling startup uses existing
-run cleanup; cancelling observation leaves execution alone.
+Start accepts `--startup-timeout`, `--job-timeout` and `--stop-grace` and follows
+[the ordinary-start contract](cli.md#commands-and-defaults), including one explicit
+attempt, current compatible inputs, replacement conflicts and unknown replies.
+A logical project/checkout/scene key recorded at a different canonical project
+directory conflicts before start/join. Cancelling startup joins only its accepted
+attempt; cancelling observation leaves execution alone.
 
 ### Attached execution
 

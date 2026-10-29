@@ -85,5 +85,5 @@ func startupAttempt(instance v1.Instance) string {
 }
 
 func startupConflict() error {
-	return &v1.PlanError{Code: "startup_conflict", Message: "Accepted startup attempt was replaced before readiness; inspect the recorded instance."}
+	return &v1.PlanError{Code: "startup_conflict", Message: "Accepted startup attempt was replaced before readiness; inspect the recorded instance and its exact-attempt history/logs/export before another explicit start."}
 }

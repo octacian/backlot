@@ -54,11 +54,8 @@ flags/defaults and output framing live in the [CLI reference](cli.md).
 
 ## Commands
 
-For binary maintenance, the [release installer](operations.md#release-installer-and-updates)
-uses the old compatible CLI for cleanup and holds this selected root's existing
-lock through atomic replacement. It opens no database, scans no other roots and
-leaves the daemon stopped. This adds no completion promise to `daemon stop`
-itself; acknowledgment still does not establish lock release.
+For binary maintenance, use the [release installer](operations.md#release-installer-and-updates).
+`daemon stop` still acknowledges stopping, not final exit or lock release.
 
 Use an [installed executable](operations.md) (or `make build` for `bin/backlot`):
 

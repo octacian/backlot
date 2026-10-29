@@ -2,16 +2,13 @@
 
 ## Release installer and updates
 
-The repository's [install.sh](https://github.com/octacian/backlot/blob/main/install.sh) downloads macOS ARM64 or Linux amd64
-release archives using stock `sh`, `curl`, `tar` and SHA-256 tools; Go is not
-required for this path. It requires a published release containing
-`backlot install-replace`. This change introduces that capability: before the
-first supporting release is published, use Go installation or the manual archive
-procedure below. Older helperless releases such as v0.3.0 remain manual installs;
-the installer refuses them before daemon lifecycle effects. Installing source does
-not publish a release.
+[install.sh](https://github.com/octacian/backlot/blob/main/install.sh) installs macOS
+ARM64/Linux amd64 releases using stock `sh`, `curl`, `tar` and SHA-256 tools; Go is
+not required. The target release must contain `backlot install-replace`. Use
+[Go installation](operations.md#go-installation) or [manual archives](operations.md#release-archive-installation)
+for older helperless releases.
 
-Download the script from the reviewed repository/ref, inspect it, then run it:
+Download the script from a reviewed repository/ref, inspect it, then run:
 
 ```sh
 curl --fail --location --proto '=https' --tlsv1.2 \
@@ -19,48 +16,35 @@ curl --fail --location --proto '=https' --tlsv1.2 \
 sh install.sh
 ```
 
-By default this selects GitHub's latest published stable release and installs
-`~/.local/bin/backlot`. `--destination /absolute/path/backlot` selects one
-executable path; its parent must be canonical, owned by you and not writable by
-others. Symlink destinations and unrecognized existing executables are refused.
-The installer reports which `backlot` PATH selects, including shadowing; use the
-printed absolute path or adjust PATH yourself. It never edits shell profiles.
+The default is latest stable at `~/.local/bin/backlot`. Set an absolute
+`--destination /path/backlot` whose parent is canonical, user-owned and not writable
+by others; symlinks and unrecognized executables are refused. Check the printed
+PATH selection for shadowing and adjust PATH yourself; profiles are never edited.
 
-For a fresh destination, `--version v0.X.Y` selects an exact canonical stable
-helper-bearing tag (substitute a published supporting version). An existing
-destination accepts only a latest-stable update: specifying `--version` is refused,
-downgrades are refused, and an identity-verified same-version rerun is a no-op.
-This changes only that installation; consuming-project versions/pins and other
-installed executables are not updated.
+Fresh destinations accept `--version v0.X.Y` for an exact supporting tag. Existing
+installs accept only latest-stable updates: explicit versions and downgrades are
+refused; a verified same-version rerun is a no-op. Other installations and project
+pins are unchanged.
 
-The default daemon state root or one explicit `--state-dir /absolute/private/state`
-is checked, with no unrelated scanning. An absent daemon permits immediate
-replacement. For a running daemon, the installer warns with the observed
-running/kept count and separate unresolved-cleanup count, then asks `y`/`n`/`l`:
-`n` cancels, `l` lists affected instances and asks `y`/`n` again, and `y` authorizes
-the old compatible executable to stop that daemon and its resources. Reads are
-bounded live observations, not an atomic inventory. Consent comes from the
-controlling terminal even with `curl ... | sh -s -- ...`; if consent is needed
-without a terminal, installation cancels. Interrupting also cancels; already
-accepted shutdown may still complete.
+Only the default state root or explicit `--state-dir /absolute/private/state` is
+checked. With a running daemon, the installer reports observed running/kept and
+separate unresolved-cleanup counts, then asks `y`/`n`/`l`: `y` authorizes shutdown,
+`n` cancels, and `l` lists affected instances before asking `y`/`n` again. Consent
+uses the controlling terminal even with `curl ... | sh -s -- ...`; no terminal
+means cancellation when consent is required. Counts are live observations.
 
-The foreground helper requires successful old-CLI cleanup and holds the selected
-state lock through the final atomic rename. A stop acknowledgment alone is not
-completion. Failed/uncertain cleanup, incompatible/malformed output, lock timeout,
-unsafe files, changed installation bytes or replacement failure preserve the old
-executable for diagnosis. Owned download/stage directories are cleaned on normal
-completion, failure and handled signals; SIGKILL/power loss can leave private
-temporary directories for manual inspection. The daemon remains stopped after
-upgrade; explicitly start it with the installed binary and the same state root.
-State, data, evidence and CA identity remain intact. Existing bounded native
-cleanup limitations still apply; success does not promise universal descendant
-absence or a historical daemon's final exit code.
+The old compatible CLI performs cleanup before lock-held atomic replacement.
+Failed/uncertain cleanup, validation or replacement errors preserve the old binary.
+Interruption cancels replacement, though accepted shutdown may finish. Owned
+temporary files are cleaned after children settle; SIGKILL/power loss may leave
+them for inspection. After replacement, explicitly start the installed binary
+in the same state root; the daemon remains stopped. State, data, evidence and CA
+identity are preserved.
+See the [helper contract](cli.md) for deadlines and completion limits.
 
-Archives are checked against the release's versioned SHA-256 manifest, validated
-before extraction and checked for executable/API identity. Checksums detect
-corruption, **not publisher authentication**. Releases are unsigned/unnotarized;
-macOS security policy remains an operator decision. There is no sudo, dependency
-installer, trust modification, package-manager integration or background updater.
+Checksums detect corruption, **not publisher authentication**. The shared
+[archive trust and security policy](operations.md#release-archive-installation) also applies to
+the installer.
 
 ## Go installation
 
@@ -117,9 +101,12 @@ On Linux substitute the Linux archive name and use `sha256sum -c -` for the
 checksum command. Require an `OK` result and matching `v0.1.0` identity; missing
 or mismatched checksum entries are failures. Put `$HOME/.local/bin` on PATH and
 use `command -v backlot` to check which installation wins. Archives contain just
-the executable, LICENSE and notices. Checksums detect damaged bytes; they do not
-authenticate a publisher. Archives are unsigned/unnotarized and install no Caddy,
-Docker, dependencies or trust. Keep macOS security policy decisions explicit.
+the executable, LICENSE and notices.
+
+For both release-installation paths, checksums detect corruption, not publisher
+authentication. Archives are unsigned/unnotarized; macOS security policy remains
+an operator decision. Neither method installs Caddy, Docker, dependencies or trust.
+The installer uses no sudo or background updater and never edits shell profiles.
 
 ## Upgrade, removal and compatibility
 

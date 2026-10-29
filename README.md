@@ -21,8 +21,7 @@ Save any PATH change in your shell profile. Git is needed for project worktrees;
 Make is needed only for the alternative source build.
 
 [Release installer, upgrades, manual archives and reproducible source builds](docs/operations.md).
-The shell installer needs a helper-bearing published release; before the first
-such release is published, use Go or manual archives.
+The shell installer requires a release with `install-replace` support.
 
 ## Install agent skills
 

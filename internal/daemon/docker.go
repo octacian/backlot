@@ -88,6 +88,12 @@ func createDockerResource(ctx context.Context, d *dockerEngine, r ownedResource)
 		}
 		return out.Volume.Name, nil
 	case "network":
+		if _, err := d.NetworkInspect(ctx, r.Name, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+			if err == nil {
+				err = problem("conflict", "recorded network name already exists; preserved")
+			}
+			return "", err
+		}
 		out, err := d.NetworkCreate(ctx, r.Name, client.NetworkCreateOptions{Driver: "bridge", Labels: resourceLabels(r)})
 		if err != nil {
 			return "", err
@@ -112,6 +118,9 @@ func verifyDockerResource(ctx context.Context, d *dockerEngine, r ownedResource)
 		out, err := d.NetworkInspect(ctx, handle, client.NetworkInspectOptions{})
 		if err != nil {
 			return err
+		}
+		if r.ID != "" && out.Network.ID != r.ID {
+			return problem("cleanup_failed", "network immutable identity changed; preserved")
 		}
 		return owned(out.Network.Labels, r)
 	case "container":

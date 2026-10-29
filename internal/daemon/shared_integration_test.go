@@ -317,6 +317,10 @@ func TestSharedMariaDBGate1(t *testing.T) {
 		t.Fatal("did not observe exactly one actual owned shared server", err)
 	}
 	serverID := actualServers.Items[0].ID
+	serverNetwork, err := d.ContainerInspect(ctx, serverID, client.ContainerInspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ca, cb := f.credential(t, a.Instance.ID, "native"), f.credential(t, b.Instance.ID, "container")
 	if ca.database == cb.database || ca.user == cb.user || ca.password == cb.password {
 		t.Fatal("allocation identity collision")
@@ -352,6 +356,11 @@ func TestSharedMariaDBGate1(t *testing.T) {
 	for _, action := range []string{"stop-start", "restart"} {
 		if action == "stop-start" {
 			cli("stop", "--state-dir", h.dir, "--json", a.Instance.ID)
+			for _, attachment := range serverNetwork.Container.NetworkSettings.Networks {
+				if _, err := d.NetworkInspect(ctx, attachment.NetworkID, client.NetworkInspectOptions{}); err != nil {
+					t.Fatal("instance stop removed exact shared network", err)
+				}
+			}
 			run("host", h.project)
 		} else {
 			cli("restart", a.Instance.ID, "--state-dir", h.dir, "--startup-timeout", "90s", "--json")

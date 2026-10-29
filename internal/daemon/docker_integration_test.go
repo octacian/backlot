@@ -25,6 +25,7 @@ import (
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
 	bolt "go.etcd.io/bbolt"
@@ -391,6 +392,147 @@ func TestDockerRuntime(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, out)
 	}
+	t.Run("stopped-networks-recreated-with-data", func(t *testing.T) {
+		h := newDockerHarness(t, binary, endpoint)
+		h.alpine()
+		h.manifest.Resources["network"] = v1.Resource{Kind: "network"}
+		for _, name := range []string{"init", "server", "each"} {
+			c := h.manifest.Components[name]
+			c.Resources = append(c.Resources, "network")
+			c.Environment.Assign["NETWORK"] = fixtureRef("resource", "network", "name")
+			if name == "init" {
+				c.Args[2] += "; printf '%s' \"$NETWORK\" > /private/network"
+			}
+			h.manifest.Components[name] = c
+		}
+		for name, scene := range h.manifest.Scenes {
+			scene.Resources = append(scene.Resources, "network")
+			h.manifest.Scenes[name] = scene
+		}
+		h.write()
+		cli := func(args ...string) ([]byte, error) {
+			return exec.Command(binary, append(args, "--state-dir", h.dir, "--json")...).CombinedOutput()
+		}
+		var previous map[string]string
+		var id string
+		for cycle := range 3 {
+			out, err := cli("run", "dev", "--project", h.project, "--config", h.config, "--stop-grace", "1s")
+			if err != nil {
+				t.Fatalf("CLI start: %v %s", err, out)
+			}
+			var response v1.InstanceResponse
+			if err := json.Unmarshal(out, &response); err != nil {
+				t.Fatal(err)
+			}
+			if cycle > 0 && response.Instance.ID != id {
+				t.Fatal("stop/start replaced logical instance")
+			}
+			id = response.Instance.ID
+			server := h.container(id, "server")
+			inspect, err := h.engine.ContainerInspect(context.Background(), server.ID, client.ContainerInspectOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			current := map[string]string{}
+			for name, attachment := range inspect.Container.NetworkSettings.Networks {
+				current[name] = attachment.NetworkID
+				if cycle > 0 && (previous[name] == "" || previous[name] == attachment.NetworkID) {
+					t.Fatal("network name changed or Engine allocation reused")
+				}
+			}
+			if len(current) != 2 {
+				t.Fatal("implicit/declared attachments missing")
+			}
+			text, code := h.exec(server, []string{"sh", "-c", "test \"$(cat /private/network)\" = \"$NETWORK\" && test \"$(cat /private/secret)\" = \"$SECRET\" && test \"$(wc -l < /data/init)\" = 1 && echo witnesses-preserved"})
+			if code != 0 || strings.TrimSpace(text) != "witnesses-preserved" {
+				t.Fatal("retained network reference/data/credential/init witness", code)
+			}
+			if out, err := cli("stop", id); err != nil {
+				t.Fatalf("CLI stop: %v %s", err, out)
+			}
+			for name, networkID := range current {
+				if _, err := h.engine.NetworkInspect(context.Background(), networkID, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+					t.Fatal("stopped exact network survived", err)
+				}
+				t.Logf("cycle %d: name %s, exact network %s absent; retained witnesses passed", cycle, name, networkID)
+			}
+			previous = current
+		}
+		// Distinct stopped scenes must not accumulate their own idle networks.
+		for _, name := range []string{"other0", "other1"} {
+			h.manifest.Scenes[name] = h.manifest.Scenes["dev"]
+			h.write()
+			peer := h.run(name).Instance.ID
+			h.state(peer, v1.RuntimeReady)
+			server := h.container(peer, "server")
+			observed, err := h.engine.ContainerInspect(context.Background(), server.ID, client.ContainerInspectOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.cli.StopExecution(context.Background(), peer); err != nil {
+				t.Fatal(err)
+			}
+			for _, attachment := range observed.Container.NetworkSettings.Networks {
+				if _, err := h.engine.NetworkInspect(context.Background(), attachment.NetworkID, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+					t.Fatal("distinct stopped scene retained exact network", err)
+				}
+			}
+		}
+		if out, err := cli("run", "dev", "--project", h.project, "--config", h.config, "--stop-grace", "1s"); err != nil {
+			t.Fatalf("CLI foreign-case start: %v %s", err, out)
+		}
+		server := h.container(id, "server")
+		inspect, err := h.engine.ContainerInspect(context.Background(), server.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var networkID string
+		for _, attachment := range inspect.Container.NetworkSettings.Networks {
+			networkID = attachment.NetworkID
+			break
+		}
+		foreign := ownedResource{Kind: "container", Name: "backlot-fixture-" + newID(), Token: newID()}
+
+		t.Cleanup(func() {
+			if err := removeContainer(context.Background(), h.engine, foreign); err != nil {
+				h.cleanupUnverified = true
+				t.Error(err)
+			}
+		})
+		created, err := h.engine.ContainerCreate(context.Background(), client.ContainerCreateOptions{Name: foreign.Name, Config: &container.Config{Image: "alpine:3.21", Cmd: []string{"sleep", "300"}, Labels: resourceLabels(foreign)}, NetworkingConfig: &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{networkID: {NetworkID: networkID}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		foreign.ID = created.ID
+		for _, running := range []bool{false, true} {
+			if running {
+				if _, err := h.engine.ContainerStart(context.Background(), foreign.ID, client.ContainerStartOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if out, err := cli("stop", id); err == nil {
+				t.Fatalf("foreign consumer did not block CLI stop: %s", out)
+			}
+			if _, err := h.engine.NetworkInspect(context.Background(), networkID, client.NetworkInspectOptions{}); err != nil {
+				t.Fatal("foreign-consumed network lost", err)
+			}
+			got, err := h.engine.ContainerInspect(context.Background(), foreign.ID, client.ContainerInspectOptions{})
+			if err != nil || got.Container.State.Running != running {
+				t.Fatal("foreign consumer changed", err)
+			}
+			t.Logf("foreign consumer %s running=%t and exact network %s preserved after failed CLI stop", foreign.ID, running, networkID)
+		}
+		if err := removeContainer(context.Background(), h.engine, foreign); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := cli("stop", id); err != nil {
+			t.Fatalf("explicit stop retry: %v %s", err, out)
+		}
+		if _, err := h.engine.NetworkInspect(context.Background(), networkID, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+			t.Fatal("retry left exact network", err)
+		}
+		t.Log("explicit retry released the formerly consumed network; fixture journal owns all remaining cleanup")
+	})
 	t.Run("native-stale-foreign-bind-cleanup", func(t *testing.T) {
 		h := newDockerHarness(t, binary, endpoint)
 		// Cleanup authority is retained before creating a stopped foreign declaration.
@@ -1186,6 +1328,13 @@ func TestDockerRuntime(t *testing.T) {
 		h.witness(rb, "worktree-b", true)
 		h.witness(ra, "worktree-a", false)
 		h.witness(rb, "worktree-b", false)
+		if _, err := h.cli.StopExecution(context.Background(), a.Instance.ID); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(pb, h.privateState(rb)) {
+			t.Fatal("peer generation changed after stop")
+		}
+		h.witness(rb, "worktree-b", false)
 		h.restart(a.Instance.ID, true)
 		h.state(a.Instance.ID, v1.RuntimeReady)
 		fresh := h.privateState(h.container(a.Instance.ID, "server"))
@@ -1523,6 +1672,13 @@ func TestDockerRuntime(t *testing.T) {
 		if err := verifyDockerResource(context.Background(), h.engine, r); !errdefs.IsNotFound(err) {
 			t.Fatal("owned survivor not removed", err)
 		}
+		for _, resource := range g.Resources {
+			if resource.Kind == "network" {
+				if _, err := h.engine.NetworkInspect(context.Background(), resource.ID, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+					t.Fatal("crash recovery retained unused exact network", err)
+				}
+			}
+		}
 		h.restart(id, false)
 		h.state(id, v1.RuntimeReady)
 		r = h.container(id, "server")
@@ -1569,6 +1725,9 @@ func TestDockerRuntime(t *testing.T) {
 		interrupted := h.state(id, v1.Interrupted)
 		if interrupted.Instance.Execution.CleanupFailure == "" || !h.engineAlive(r) {
 			t.Fatal("uncertain ownership acted on")
+		}
+		if err := verifyDockerResource(context.Background(), h.engine, current.Resources["@network"]); err != nil {
+			t.Fatal("uncertain consumer lost its network", err)
 		}
 		if err := verifyDockerResource(context.Background(), h.engine, verifiedPeer); !errdefs.IsNotFound(err) {
 			t.Fatal("independently owned survivor not collected/removed", err)

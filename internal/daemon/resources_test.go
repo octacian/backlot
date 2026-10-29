@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -76,6 +77,201 @@ func TestDirectoryOwnershipPreserved(t *testing.T) {
 	}
 	if _, err := os.Stat(r.Name); err != nil {
 		t.Fatal("uncertain directory modified", err)
+	}
+}
+
+func TestInstanceNetworkLifecycle(t *testing.T) {
+	for _, mode := range []string{"stopped", "missing", "pending", "remove-gap", "create-gap", "provider", "delete-denied", "ownership", "consumer", "container", "collision"} {
+		t.Run(mode, func(t *testing.T) {
+			root, dir := shortTemp(t), shortTemp(t)
+			config := writeFixture(t, root)
+			state, err := openStore(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = state.db.Close() })
+			svc := &service{store: state, directory: dir, lease: time.Minute}
+			prepared, err := svc.prepare(context.Background(), request(root, config, "dev"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, attempt := prepared.Instance.ID, newID()
+			n := ownedResource{Kind: "network", Name: "backlot-" + newID(), Token: newID(), ID: newID()}
+			var present, fail, foreign, mismatch atomic.Bool
+			present.Store(mode != "missing")
+			fail.Store(mode == "provider" || mode == "delete-denied")
+			foreign.Store(mode == "consumer")
+			mismatch.Store(mode == "ownership")
+			var creates, removes atomic.Int32
+			d := forceEngine(t, func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case fail.Load() && (mode != "delete-denied" || r.Method == http.MethodDelete):
+					w.WriteHeader(http.StatusServiceUnavailable)
+				case r.URL.Path == "/containers/json":
+					if r.URL.Query().Get("all") != "1" {
+						t.Error("stopped consumers omitted")
+					}
+					if foreign.Load() {
+						_, _ = w.Write([]byte(`[{"Id":"foreign"}]`))
+					} else {
+						_, _ = w.Write([]byte(`[]`))
+					}
+				case r.URL.Path == "/containers/foreign/json":
+					_ = json.NewEncoder(w).Encode(map[string]any{"NetworkSettings": map[string]any{"Networks": map[string]any{n.Name: map[string]string{"NetworkID": n.ID}}}})
+				case r.URL.Path == "/networks/create":
+					var body struct {
+						Name   string
+						Labels map[string]string
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name != n.Name || body.Labels["io.backlot.owner"] == n.Token {
+						t.Error("replacement lost name or reused retired authority", err)
+					}
+					creates.Add(1)
+					_ = json.NewEncoder(w).Encode(map[string]string{"Id": newID()})
+				case strings.HasPrefix(r.URL.Path, "/networks/"):
+					if !present.Load() {
+						w.WriteHeader(http.StatusNotFound)
+						return
+					}
+					if r.Method == http.MethodDelete {
+						removes.Add(1)
+						present.Store(false)
+						w.WriteHeader(http.StatusNoContent)
+						return
+					}
+					labels := resourceLabels(n)
+					if mismatch.Load() {
+						labels["io.backlot.owner"] = newID()
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"Id": n.ID, "Name": n.Name, "Labels": labels})
+				default:
+					t.Error("unexpected provider mutation/target", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			})
+			secret := ownedResource{Kind: "secret", Name: "secret", Token: newID(), Value: newID()}
+			secret.ID = secret.Token
+			g := resourceGeneration{ID: newID(), Endpoint: d.DaemonHost(), Resources: map[string]ownedResource{"@network": n, "secret": secret}, Initialized: map[string]bool{"init": true}, BuildImages: map[string]v1.BuildImageResult{"image": {ID: "sha256:" + newID()}}}
+			if mode == "pending" || mode == "create-gap" {
+				pending := n
+				pending.ID = ""
+				g.Resources["@network"] = pending
+			}
+			if mode == "container" {
+				g.Containers = []ownedResource{{Kind: "container", Name: "owned", Token: newID(), Attempt: attempt}}
+			}
+			if err := state.saveResources(id, g); err != nil {
+				t.Fatal(err)
+			}
+			result := &v1.ExecutionResult{Attempt: attempt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano), Outcome: v1.Stopped}
+			if _, err := state.execution(id, v1.Stopped, result); err != nil {
+				t.Fatal(err)
+			}
+			if err := state.saveRuntime(id, runtimeRecord{Attempt: attempt}); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "remove-gap" {
+				state.sharedCheckpoint = func(string) error { return errors.New("remove effect not acknowledged") }
+			}
+			// Model an old stopped instance without an in-memory execution owner.
+			var stopped v1.Instance
+			if mode == "stopped" {
+				response, stopErr := svc.scene(v1.SceneTarget{CWD: root, ProjectPath: root, Scene: "dev"}, true)
+				if stopErr != nil || response.Result == nil || response.Outcome != v1.SceneAlreadyStopped {
+					t.Fatal("named stop of historical instance", stopErr)
+				}
+				stopped = response.Result.Instance
+			} else {
+				stopped, err = svc.stopExecution(id)
+			}
+			wantFailure := mode == "provider" || mode == "delete-denied" || mode == "ownership" || mode == "consumer" || mode == "container" || mode == "remove-gap"
+			if (err != nil) != wantFailure || stopped.Status != v1.Stopped || stopped.Execution.CollectionFailure != "" {
+				t.Fatal("selected stop lost completion or failure facts", err)
+			}
+			if wantFailure {
+				retained, _ := state.resources(id)
+				ids, _ := state.runtimeRecoveryIDs()
+				if retained.Resources["@network"].Removed || len(ids) != 1 || stopped.Execution.CleanupFailure == "" {
+					t.Fatal("unsettled authority or retry selection lost")
+				}
+				if mode != "remove-gap" && removes.Load() != 0 {
+					t.Fatal("unsafe removal attempted")
+				}
+				if mode == "remove-gap" {
+					if _, err := state.execution(id, v1.Stopping, stopped.Execution); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if mode == "provider" || mode == "delete-denied" || mode == "ownership" || mode == "consumer" {
+					if mode == "delete-denied" {
+						if err := state.saveRuntime(id, runtimeRecord{Attempt: attempt, LaunchPending: true}); err != nil {
+							t.Fatal(err)
+						}
+						if err := state.recoverExecution(id); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if _, err := state.abandonNative(context.Background(), id, attempt); err == nil {
+						t.Fatal("native waiver erased independent network failure")
+					}
+					if err := state.saveRuntime(id, runtimeRecord{Attempt: attempt}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				fail.Store(false)
+				foreign.Store(false)
+				mismatch.Store(false)
+				g.Containers = nil
+				retained.Containers = nil
+				if err := state.saveResources(id, retained); err != nil {
+					t.Fatal(err)
+				}
+				state.sharedCheckpoint = nil
+				wantStatus := v1.Stopped
+				if mode == "delete-denied" {
+					wantStatus = v1.Interrupted
+				}
+				if retried, err := svc.stopExecution(id); err != nil || retried.Status != wantStatus || (retried.Execution.CollectionFailure != "") != (mode == "delete-denied") {
+					t.Fatal("explicit retry", err)
+				}
+			}
+			retired, err := state.resources(id)
+			if err != nil || !retired.Resources["@network"].Removed || present.Load() {
+				t.Fatal("network retirement not settled", err)
+			}
+			if mode == "collision" {
+				present.Store(true)
+				mismatch.Store(true)
+			}
+			snap := plan.Snapshot{Docker: &v1.DockerConfig{Endpoint: g.Endpoint}, Plan: v1.PlanResponse{Resources: map[string]v1.Resource{"secret": {Kind: "secret"}}, Components: []v1.PlannedComponent{{Runtime: v1.Container}}}}
+			if mode == "missing" {
+				retired.Resources["@network"] = n
+			}
+			if mode == "create-gap" {
+				pending := n
+				pending.ID = ""
+				retired.Resources["@network"] = pending
+				present.Store(true)
+			}
+			if err := state.saveResources(id, retired); err != nil {
+				t.Fatal(err)
+			}
+			entry := &execution{}
+			err = svc.allocateResources(context.Background(), id, snap, entry)
+			if entry.docker != nil {
+				_ = entry.docker.Close()
+			}
+			if (err != nil) != (mode == "collision") {
+				t.Fatal("network replacement/reconciliation", err)
+			}
+			recreated, _ := state.resources(id)
+			if recreated.ID != g.ID || recreated.Resources["secret"] != secret || !reflect.DeepEqual(recreated.Initialized, g.Initialized) || !reflect.DeepEqual(recreated.BuildImages, g.BuildImages) || recreated.Resources["@network"].Name != n.Name {
+				t.Fatal("replacement changed retained generation or references")
+			}
+			if mode == "collision" && creates.Load() != 0 || mode == "create-gap" && (creates.Load() != 0 || recreated.Resources["@network"].ID != n.ID) {
+				t.Fatal("foreign collision mutated or interrupted create duplicated")
+			}
+		})
 	}
 }
 

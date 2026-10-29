@@ -32,7 +32,7 @@ See [private configuration](manifest.md#registered-private-project-configuration
 | Changed ordinary command, probe or non-sensitive environment | `restart ID` | Capture current sources and apply compatible drift; retain identity/data/paired credentials |
 | Changed protected resource/initialization/sensitive contract | `reset ID`, or `destroy ID` then start | Explicit destructive replacement required; reset keeps logical ID but replaces generation; later start after destroy gets a new ID |
 | Failed/interrupted persistent attempt | Inspect then `restart ID` | No implicit retry; compatibility/ownership fences apply before old work is stopped |
-| Stop development runtime | `scene stop SCENE` or `stop ID` | Stop owned consumers/routes, retain data, credentials, history and evidence |
+| Stop development runtime | `scene stop SCENE` or `stop ID` | Stop owned consumers/routes, release verified-unused instance networks, retain data, credentials, history and evidence |
 | Remove this instance's owned data | `destroy ID` | Stop/join before removal; history/evidence remain subject to retention |
 | Change daemon PATH/environment or policy | Explicit daemon stop/start in same state directory | Future daemon context changes; retained data/CA remain; no automatic scene restart |
 | Inspect or follow | `status`, `logs`, `export` | Observation only; no attachment, lease renewal or lifecycle ownership |
@@ -379,7 +379,10 @@ and restart. Artifact collection, keep-on-failure and configurable evidence rete
 documented in the [evidence guide](evidence.md).
 
 Generic containers, private volumes/directories/secrets/networks and fresh-only
-jobs follow the [private-state lifecycle](containers.md). Publication follows the
+jobs follow the [private-state lifecycle](containers.md), including instance network
+release on stop, shutdown and recovery with stable names on later recreation.
+Disposable shutdown retains data while releasing verified-unused instance networks.
+Publication follows the
 [HTTPS guide](https.md). Metadata `prepare` retains its allocation-free semantics for all
 supported declarations. Native TCP/HTTP probes additionally require `lsof` on the
 daemon PATH, to prove the listener belongs to the authenticated application session at the actual

@@ -29,7 +29,7 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, output)
 	}
-	for _, mode := range []string{"success", "job-failure", "cancellation", "collection-failure", "cleanup-failure"} {
+	for _, mode := range []string{"success", "job-failure", "cancellation", "collection-failure", "cleanup-failure", "shutdown"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newDockerHarness(t, binary, endpoint)
 			h.alpine()
@@ -38,7 +38,7 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			switch mode {
 			case "job-failure":
 				script += "; exit 17"
-			case "cancellation":
+			case "cancellation", "shutdown":
 				script += "; exec sleep 90"
 			case "cleanup-failure":
 				script += "; while [ ! -f /private/release ]; do sleep 0.1; done"
@@ -61,7 +61,7 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			id := response.Instance.ID
 			h.ids = append(h.ids, id)
 			h.tokens[id] = response.LeaseToken
-			if mode == "cancellation" || mode == "cleanup-failure" {
+			if mode == "cancellation" || mode == "cleanup-failure" || mode == "shutdown" {
 				h.waitTerminalRunning(id)
 			}
 			var proveObjectsAbsent func() error
@@ -100,11 +100,31 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if mode == "shutdown" {
+				if _, err := h.cli.Stop(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				if err := h.process.Wait(); err != nil {
+					t.Fatal(err)
+				}
+				h.waited = true
+				g := h.generation(id)
+				for _, r := range g.Resources {
+					if r.Kind == "network" {
+						if _, err := h.engine.NetworkInspect(context.Background(), r.ID, client.NetworkInspectOptions{}); !r.Removed || !errdefs.IsNotFound(err) {
+							t.Fatal("shutdown did not retire exact network", err)
+						}
+					} else if err := verifyResource(context.Background(), h.engine, r); err != nil {
+						t.Fatal("shutdown lost retained data/credentials", err)
+					}
+				}
+				h.start()
+			}
 			want := v1.Succeeded
 			if mode == "job-failure" || mode == "collection-failure" || mode == "cleanup-failure" {
 				want = v1.Failed
 			}
-			if mode == "cancellation" {
+			if mode == "cancellation" || mode == "shutdown" {
 				want = v1.Cancelled
 			}
 			final := h.state(id, want).Instance
@@ -124,7 +144,7 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			if mode == "cleanup-failure" && (result.CompletedAt == "" || result.CollectionFailure != "") {
 				t.Fatal("cleanup-only failure changed completed collection facts")
 			}
-			if mode == "cancellation" && !result.Cancelled {
+			if (mode == "cancellation" || mode == "shutdown") && !result.Cancelled {
 				t.Fatal("cancellation omitted")
 			}
 			if mode == "collection-failure" {
@@ -148,6 +168,20 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 				output, code := h.exec(server, []string{"sh", "-c", "test -f /private/secret && echo retained"})
 				if code != 0 || !strings.Contains(output, "retained") {
 					t.Fatal("investigation data lost", code)
+				}
+				if mode != "collection-failure" {
+					observed, err := h.engine.ContainerInspect(context.Background(), server.ID, client.ContainerInspectOptions{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := h.cli.StopExecution(context.Background(), id); err != nil {
+						t.Fatal("explicit kept stop", err)
+					}
+					for _, attachment := range observed.Container.NetworkSettings.Networks {
+						if _, err := h.engine.NetworkInspect(context.Background(), attachment.NetworkID, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+							t.Fatal("kept stop retained exact network", err)
+						}
+					}
 				}
 			} else {
 				list, err := h.engine.ContainerList(context.Background(), client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "io.backlot.owner")})

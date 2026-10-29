@@ -57,9 +57,13 @@ func (s *service) stopKept(id string, entry *execution) (v1.Instance, error) {
 	}
 	if cleanup == nil && entry.resources != nil {
 		cleanup = s.store.cleanupContainers(ctx, id, entry.resources, entry.docker)
+		if cleanup == nil {
+			cleanup = s.store.removeNetworks(ctx, id, entry.resources, entry.docker)
+		}
 	}
 	if cleanup != nil {
 		instance.Execution.CleanupFailure = "retained runtime cleanup failed"
+		instance.Execution.CleanupDetails = cleanupDetails(cleanup)
 		_, saveErr := s.store.execution(id, v1.Failed, instance.Execution)
 		return instance, errors.Join(problem("cleanup_failed", instance.Execution.CleanupFailure), saveErr)
 	}

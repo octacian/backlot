@@ -219,7 +219,9 @@ BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
 
 The suite builds the real race-instrumented CLI/daemon and uses uniquely owned
 containers, networks, volumes, private directories and loopback ports. It exercises
-MariaDB persistence/reset through CLI/daemon/Docker; drift rejection before stop;
+MariaDB persistence/reset through CLI/daemon/Docker; repeated instance network
+release/recreation with stable names and a retained `network.name` initializer
+witness; drift rejection before stop;
 failed/successful fresh-only jobs; each-start jobs; real concurrent worktrees and
 disposable runs; output serialization; partial allocation and interrupted cleanup;
 owned daemon crash recovery; uncertain ownership; foreign consumer blocking and
@@ -240,6 +242,7 @@ BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
 
 This exercises container artifacts before removal, historical logs after destroy,
 exact job results, kept failure/cancellation/collection errors and healthy services,
+explicit kept-stop network release, shutdown network release with retained data,
 and injected directory-ownership cleanup failure with explicit recovery. Select
 it when changes affect these guarantees beyond existing CI coverage.
 The provider-independent `TestDisposableEvidenceNative` runs in `make check` and

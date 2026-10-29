@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/containerd/errdefs"
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/native"
 	bolt "go.etcd.io/bbolt"
@@ -129,6 +130,12 @@ func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Insta
 	if instance.Execution == nil || instance.Execution.Attempt != attempt || journal.Attempt != attempt {
 		return instance, problem("conflict", "native waiver target attempt changed or journal mismatched; preserved")
 	}
+	var networkFailure *v1.PlanError
+	for _, detail := range instance.Execution.CleanupDetails {
+		if detail.Field == "resources.network" {
+			networkFailure = &detail
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return instance, err
 	}
@@ -143,6 +150,47 @@ func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Insta
 	}
 	if err := s.recoverContainers(id, &resources); err != nil {
 		return instance, err
+	}
+	// A native waiver cannot erase an independent network cleanup failure.
+	networks := resourceGeneration{Resources: map[string]ownedResource{}}
+	for name, r := range resources.Resources {
+		if r.Kind == "network" && !r.Removed {
+			networks.Resources[name] = r
+		}
+	}
+	if len(networks.Resources) > 0 {
+		d, err := newDocker(resources.Endpoint)
+		if err != nil {
+			return instance, err
+		}
+		defer func() { _ = d.Close() }()
+		for name, r := range networks.Resources {
+			if r.ID == "" {
+				r.ID, err = recoverResourceEffect(cleanupCtx, d, r)
+			} else {
+				err = verifyDockerResource(cleanupCtx, d, r)
+			}
+			if err != nil && !errdefs.IsNotFound(err) {
+				return instance, err
+			}
+			r.Removed = errdefs.IsNotFound(err)
+			networks.Resources[name] = r
+		}
+		if err := d.noConsumers(cleanupCtx, networks); err != nil {
+			return instance, err
+		}
+		if networkFailure != nil {
+			for name, r := range networks.Resources {
+				// Only independent absence can settle this failure beneath uncertain native work.
+				if !r.Removed {
+					return instance, networkFailure
+				}
+				resources.Resources[name] = r
+			}
+			if err := s.saveResources(id, resources); err != nil {
+				return instance, err
+			}
+		}
 	}
 	var unknown []native.Identity
 	for _, group := range journal.Groups {

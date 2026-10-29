@@ -496,37 +496,6 @@ func testSharedUnselectedOfflinePrivacy(t *testing.T, engine string) {
 	t.Log("private native lifecycle and symbolic offline plans make zero rejecting-provider contacts")
 }
 
-func TestSharedMariaDBOutputPrivacy(t *testing.T) {
-	f := newSharedMariaDBFixture(t, true)
-	ctx := context.Background()
-	target := f.run("host", f.h.project)
-	credential := f.credential(t, target.Instance.ID, "native")
-	private := f.liveAdminRecord(t)
-	inspected, err := f.h.cli.Inspect(ctx, target.Instance.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fixtures, err := f.h.cli.Fixtures(ctx, v1.FixturesRequest{APIVersion: v1.Version, InstanceID: target.Instance.ID, Component: "native"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	logs, err := f.h.cli.Logs(ctx, v1.LogsRequest{APIVersion: v1.Version, InstanceID: target.Instance.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, view := range []any{inspected, fixtures, logs, f.shared(t)} {
-		body, _ := json.Marshal(view)
-		for _, secret := range []string{credential.password, private.AdminPassword, private.Server.Token} {
-			if strings.Contains(string(body), secret) {
-				t.Fatal("ordinary view exposed private application/administrative authority")
-			}
-		}
-
-	}
-	f.destroy(t, target.Instance.ID)
-	t.Log("ordinary selected output remains redacted")
-}
-
 func TestSharedMariaDBMultipleAllocations(t *testing.T) {
 	f := newSharedMariaDBFixture(t, true)
 	ctx := context.Background()

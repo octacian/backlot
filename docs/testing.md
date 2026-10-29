@@ -604,6 +604,16 @@ retains the five-second API expectation; the aggregate timeout allows serial fix
 Prove SQL database/user and owned runtime/image absence; retain cached base images
 and uncertain diagnostics.
 
+Within each test process, shared SQL fixtures lazily build one race-enabled host
+CLI, one non-race host consumer and one static Linux consumer (`GOOS=linux`,
+`CGO_ENABLED=0`). TestMain owns these immutable binaries through all scenario
+cleanup and removes them after a successful suite; failures retain their directory
+for diagnosis. Each new test process builds from current sources using the existing
+Go build cache. Missing provider opt-in and private supervisor/anchor helper paths
+do not initialize the bundle. Images, private state and SQL allocations remain
+independently owned by each scenario. Both engines' MainContracts checks cover
+ordinary Inspect/Fixtures/Logs/Shared redaction alongside selected startup disclosure.
+
 Select related [DockerRuntime](#dockerprivate-state-integration) and disposable
 evidence checks where changed guarantees lack CI coverage. Run mutating fixtures
 serially and record the tested revision, relevant inputs, failures/skips and cleanup

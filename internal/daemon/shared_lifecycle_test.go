@@ -893,20 +893,32 @@ func testSharedMainContracts(t *testing.T, engine string) {
 	if started.StartupDetails.Details[0].Value != credential.password || !started.StartupDetails.Details[0].Sensitive || started.StartupDetails.Details[1].Value != "configured-shared-token" {
 		t.Fatal("selected shared application secrets were not displayed")
 	}
-	admin := f.liveAdminRecord(t).AdminPassword
+	private := f.liveAdminRecord(t)
 	inspect, err := f.h.cli.Inspect(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ordinary, _ := json.Marshal(inspect)
-	startup, _ := json.Marshal(started)
-	for _, secret := range []string{admin, credential.password, "configured-shared-token"} {
-		if bytes.Contains(ordinary, []byte(secret)) {
-			t.Fatal("ordinary shared observation leaked a secret")
+	fixtures, err := f.h.cli.Fixtures(context.Background(), v1.FixturesRequest{APIVersion: v1.Version, InstanceID: id, Component: "live-native"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs, err := f.h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, view := range []any{inspect, fixtures, logs, f.shared(t)} {
+		ordinary, _ := json.Marshal(view)
+		for _, secret := range []string{private.AdminPassword, private.Server.Token, credential.password, "configured-shared-token"} {
+			if bytes.Contains(ordinary, []byte(secret)) {
+				t.Fatal("ordinary shared observation leaked a secret")
+			}
 		}
 	}
-	if bytes.Contains(startup, []byte(admin)) {
-		t.Fatal("administration entered startup presentation")
+	startup, _ := json.Marshal(started)
+	for _, secret := range []string{private.AdminPassword, private.Server.Token} {
+		if bytes.Contains(startup, []byte(secret)) {
+			t.Fatal("administration entered startup presentation")
+		}
 	}
 	url := f.http(t, id)
 	configure("changed-shared-token")

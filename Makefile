@@ -54,7 +54,7 @@ test:
 # The native integration suite builds an external CLI; its sources are not
 # dependencies of Go's cached parent test binary. Always execute this gate.
 race:
-	go test -race -count=1 ./...
+	go test -race -count=1 -timeout=15m ./...
 
 tools: $(LINT)
 

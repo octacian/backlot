@@ -61,17 +61,18 @@ func (c *Client) Reset(ctx context.Context, request v1.RunRequest) (v1.InstanceR
 	return response, err
 }
 
-// Destroy removes owned runtime/data while preserving historical evidence.
+// Destroy removes owned runtime/data and erases retained attempt history/evidence.
 func (c *Client) Destroy(ctx context.Context, id string) (v1.InstanceResponse, error) {
-	return c.DestroyWithRequest(ctx, v1.DestroyRequest{APIVersion: v1.Version, InstanceID: id})
+	return c.DestroyWithRequest(ctx, v1.DestroyRequest{APIVersion: v1.Version, InstanceID: id, Contract: v1.DestroyContract})
 }
 
 // DestroyWithRequest removes a recorded instance with explicit invocation authority.
 func (c *Client) DestroyWithRequest(ctx context.Context, request v1.DestroyRequest) (v1.InstanceResponse, error) {
 	var response v1.InstanceResponse
-	if request.APIVersion != v1.Version || !validID(request.InstanceID) {
+	if request.APIVersion != v1.Version || !validID(request.InstanceID) || request.Contract != "" && request.Contract != v1.DestroyContract {
 		return response, &v1.PlanError{Code: "invalid_request", Message: "recorded instance_id and compatible API version required"}
 	}
+	request.Contract = v1.DestroyContract
 	err := c.call(ctx, http.MethodPost, "/v1/destroy", request, &response)
 	return response, err
 }
@@ -123,7 +124,7 @@ func (c *Client) Export(ctx context.Context, request v1.ExportRequest) (v1.Expor
 	}
 	// Never expose rejected wire fields as a usable publication. Valid failed
 	// publications below still retain their independently validated run result.
-	if response.APIVersion != v1.Version || response.Result.InstanceID != request.InstanceID || !validID(response.Result.Attempt) {
+	if response.APIVersion != v1.Version || response.Result.InstanceID != request.InstanceID || request.Attempt != "" && response.Result.Attempt != request.Attempt || !validID(response.Result.Attempt) {
 		return v1.ExportResponse{}, mutationError("/v1/export", request, responseError())
 	}
 	if err := validateExportResult(response.Result); err != nil {

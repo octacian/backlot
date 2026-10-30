@@ -290,7 +290,7 @@ func (c *Client) Doctor(ctx context.Context, request v1.DoctorRequest) (v1.Docto
 
 func mutationPath(path string) bool {
 	switch path {
-	case "/v1/export", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/runtime/stop", "/v1/destroy", "/v1/stop", "/v1/cancel", "/v1/renew", "/v1/scenes/start", "/v1/scenes/stop", "/v1/attached/renew", "/v1/attached/cancel", "/v1/gateway/start", "/v1/gateway/stop", "/v1/gateway/restart", "/v1/shared/start", "/v1/shared/stop", "/v1/shared/restart", "/v1/shared/destroy":
+	case "/v1/attempts/prune", "/v1/export", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/runtime/stop", "/v1/destroy", "/v1/stop", "/v1/cancel", "/v1/renew", "/v1/scenes/start", "/v1/scenes/stop", "/v1/attached/renew", "/v1/attached/cancel", "/v1/gateway/start", "/v1/gateway/stop", "/v1/gateway/restart", "/v1/shared/start", "/v1/shared/stop", "/v1/shared/restart", "/v1/shared/destroy":
 		return true
 	}
 	return false
@@ -309,6 +309,8 @@ func mutationError(path string, request any, err error) error {
 	if detail != nil && (detail.Code == "daemon_unavailable" || detail.Code == "invalid_response" || detail.Code == "api_version") {
 		target := ""
 		switch value := request.(type) {
+		case v1.HistoryPruneRequest:
+			target = value.InstanceID
 		case v1.ExportRequest:
 			target = value.InstanceID
 		case v1.RunRequest:

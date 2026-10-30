@@ -21,6 +21,7 @@ import (
 )
 
 type execution struct {
+	attempt          string
 	acceptImages     bool
 	allowImageChange bool
 	shared           map[string]sharedConnection
@@ -308,7 +309,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		response.ManifestDrift, response.ConfigDrift = false, false
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
-	entry := &execution{acceptImages: request.InstanceID != "", allowImageChange: request.AllowImageChange, caCertPath: caCertPath, cancel: cancel, done: make(chan struct{}), jobs: map[string]workload{}, services: map[string]workload{}, components: map[string]workload{}, source: identity, grace: mustGrace(request.Options)}
+	entry := &execution{attempt: attempt, acceptImages: request.InstanceID != "", allowImageChange: request.AllowImageChange, caCertPath: caCertPath, cancel: cancel, done: make(chan struct{}), jobs: map[string]workload{}, services: map[string]workload{}, components: map[string]workload{}, source: identity, grace: mustGrace(request.Options)}
 	if request.Attached {
 		entry.attachment = &attachment{owner: v1.AttachedOwner{DaemonGeneration: s.generation, Attempt: attempt, Token: newID()}, expires: time.Now().Add(s.lease)}
 		response.Attachment = &v1.Attachment{Owner: entry.attachment.owner, ExpiresAt: entry.attachment.expires.UTC().Format(time.RFC3339Nano), LeaseDuration: s.lease.String()}
@@ -973,7 +974,7 @@ func (s *service) launch(ctx context.Context, id, name, executable string, args 
 	if err := localipc.Directory(directory, true); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(directory, id+"-output.ndjson")
+	path := filepath.Join(directory, id+"-"+result.Attempt+"-output.ndjson")
 	if _, err := os.Lstat(path); err == nil {
 		if err := localipc.File(path, false); err != nil {
 			return nil, err

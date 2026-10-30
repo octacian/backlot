@@ -45,7 +45,8 @@ capability/help presence is not semantic or provider-readiness proof.
    reports old-snapshot drift; explicit `restart ID` applies compatible changes.
    Protected drift needs a deliberate reset/destroy data-removal decision. Do not
    destroy retained data or stop a reused/peer execution to force your change.
-6. Bound diagnostics: `status ID --json`, `logs ID --page --limit 100 --json`,
+6. Bound diagnostics: `history ID --limit 100 --json`, `inspect ID --last-completed --json`,
+   exact `inspect ID --attempt ATTEMPT --json`, `status ID --json`, `logs ID --page --limit 100 --json`,
    `fixtures ID --json`, or `doctor --instance ID --json`. Preserve page filters
    and continuation, and bound follow by duration/record limit. Read
    [evidence](references/evidence.md) for partial capture and export. A kept failure
@@ -53,7 +54,9 @@ capability/help presence is not semantic or provider-readiness proof.
    destination under a private parent, outside daemon state. Keep the original
    failure and evidence; do not claim successful tests from successful export.
 7. End only authorized task-owned work in the same daemon scope, using the recorded
-   ID: stop preserves data; destroy removes that instance's owned data after stop.
+   ID: stop preserves data/history; destroy removes owned data after stop and erases
+   attempts/logs/artifacts. Export needed exact-attempt evidence before destroy;
+   caller-owned bundles survive. History prune removes selected evidence, never data.
    Preserve uncertain resources/journals and report residuals. Do not prune by name,
    hostname or observed PID, stop peer worktrees, or routinely stop shared daemons,
    gateways or servers. Cancellation of observation does not stop runtime.

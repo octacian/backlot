@@ -1,11 +1,11 @@
 ---
 title: 'Separate declaration discovery from bounded recorded inspection'
 date: '2026-10-27'
-status: accepted
+status: superseded
 summary: 'Separate prerequisite-free declaration discovery from operational planning and add opt-in bounded recorded views without changing existing wire contracts.'
 tags: [cli, discovery, configuration, evidence, compatibility]
 supersedes: []
-superseded_by: []
+superseded_by: [20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md]
 ---
 
 # Separate declaration discovery from bounded recorded inspection

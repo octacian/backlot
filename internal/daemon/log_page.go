@@ -41,6 +41,14 @@ func (s *service) logPage(request v1.LogPageRequest) (v1.LogPageResponse, error)
 	if err != nil {
 		return r, err
 	}
+	if request.Attempt != "" {
+		selected, err := s.store.attempt(v1.AttemptRequest{InstanceID: request.InstanceID, Attempt: request.Attempt})
+		if err != nil {
+			return r, err
+		}
+		instance = historicalInstance(instance, selected.Attempt)
+		r.HistoricalCollection = "known"
+	}
 	r.Active = instance.Status == v1.Starting || instance.Status == v1.RuntimeReady || instance.Status == v1.Stopping
 	r.NativeOwnershipWarnings = instance.NativeOwnershipWarnings
 	if e := instance.Execution; e != nil {
@@ -62,7 +70,16 @@ func (s *service) logPage(request v1.LogPageRequest) (v1.LogPageResponse, error)
 	}
 	if e := instance.Execution; e != nil && e.EvidenceExpired {
 		r.Gaps = append(r.Gaps, v1.EvidenceGap{Code: "retention_expired", Detail: "evidence expired by retention policy"})
-		return r, nil
+		if request.Attempt != "" {
+			return r, nil
+		}
+		other, err := s.otherRetainedEvidence(instance.ID, e.Attempt)
+		if err != nil {
+			return r, err
+		}
+		if !other {
+			return r, nil
+		}
 	}
 	changed := func() (v1.LogPageResponse, error) {
 		r.Records = []v1.LogRecord{}
@@ -87,6 +104,9 @@ func (s *service) logPage(request v1.LogPageRequest) (v1.LogPageResponse, error)
 	paths, err := filepath.Glob(filepath.Join(dir, request.InstanceID+"-*.ndjson"))
 	if err != nil {
 		return r, err
+	}
+	if request.Attempt != "" {
+		paths = selectedLogPaths(paths, request.InstanceID, request.Attempt)
 	}
 	start := 0
 	if request.After != "" {
@@ -219,4 +239,15 @@ func (s *service) logPage(request v1.LogPageRequest) (v1.LogPageResponse, error)
 		}
 	}
 	return r, nil
+}
+
+func selectedLogPaths(paths []string, id, attempt string) []string {
+	out := paths[:0]
+	for _, path := range paths {
+		base := filepath.Base(path)
+		if base == id+"-output.ndjson" || base == id+"-"+attempt+"-output.ndjson" {
+			out = append(out, path)
+		}
+	}
+	return out
 }

@@ -41,6 +41,18 @@ func TestRetainedStateTen(t *testing.T) {
 	testRetainedState(t, dir, 10)
 }
 
+func TestRetainedStateEleven(t *testing.T) {
+	data, err := os.ReadFile("testdata/state/v11/state.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "state.db"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	testRetainedState(t, dir, 11)
+}
+
 func testRetainedState(t *testing.T, dir string, version int) {
 	t.Helper()
 	db, err := bolt.Open(filepath.Join(dir, "state.db"), 0600, nil)
@@ -63,13 +75,18 @@ func testRetainedState(t *testing.T, dir string, version int) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if before["meta"]["version"] != strconv.Itoa(version) || len(before["instances"]) != 2 || len(before["checkouts"]) != 1 || len(before["persistent"]) != 1 || len(before["snapshots"]) != 2 || len(before["secrets"]) != 2 {
+	wantInstances := 2
+	if version == 11 {
+		wantInstances = 3
+	}
+	if before["meta"]["version"] != strconv.Itoa(version) || len(before["instances"]) != wantInstances || len(before["checkouts"]) != 1 || len(before["persistent"]) != 1 || len(before["snapshots"]) != wantInstances || len(before["secrets"]) != wantInstances {
 		t.Fatal("fixture lost its historical record classes")
 	}
 	before["meta"]["version"] = strconv.Itoa(v1.StateVersion)
 	for _, name := range sharedBuckets {
 		before[name] = map[string]string{}
 	}
+	var migrated map[string]map[string]string
 	for range 2 {
 		s, err := openStore(dir)
 		if err != nil {
@@ -81,11 +98,27 @@ func testRetainedState(t *testing.T, dir string, version int) {
 					t.Error(err)
 				}
 			}()
-			if !reflect.DeepEqual(before, stateContents(t, s)) {
+			after := stateContents(t, s)
+			if migrated != nil && !reflect.DeepEqual(migrated, after) {
+				t.Fatal("reopen changed history")
+			}
+			migrated = after
+			wantAttempts := 1
+			if version == 11 {
+				wantAttempts = 2
+			}
+			if len(after["attempts"]) != wantAttempts || len(after["attempt_sequences"]) != wantAttempts || len(after["evidence_deletions"]) != 0 {
+				t.Fatal("migration did not seed only known current attempts")
+			}
+			comparable := stateContents(t, s)
+			for _, name := range []string{"attempts", "attempt_sequences", "evidence_deletions"} {
+				delete(comparable, name)
+			}
+			if !reflect.DeepEqual(before, comparable) {
 				t.Fatal("open/reopen rewrote retained records")
 			}
 			list, err := s.list(v1.ListRequest{APIVersion: v1.Version})
-			if err != nil || len(list.Instances) != 2 {
+			if err != nil || len(list.Instances) != wantInstances {
 				t.Fatal("cannot read historical instances", err)
 			}
 			prepared, completed := false, false

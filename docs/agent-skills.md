@@ -42,7 +42,8 @@ Before using either procedure, run `command -v backlot`, `backlot version --json
 and `backlot contracts --json`. Record the selected path, reported version and
 available commit. Compare API/state and required read IDs/modes using the
 [read-contract reference](cli.md#installed-read-contracts-and-schemas):
-scene-declarations, configuration, instance-filter, log-page, logs and export.
+scene-declarations, configuration, instance-filter, log-page, logs and export; require
+`attempt-history/v1` for retained-attempt operations.
 Each installed skill also supplies a generated `references/contracts.json`
 inventory from the shared API; it describes reads, not a complete command or
 mutation catalog.

@@ -126,14 +126,17 @@ backlot destroy --state-dir /private/backlot --json INSTANCE_ID
 ```
 
 Explicit stop or daemon shutdown stops verified kept runtime while retaining data.
-Explicit destroy removes owned runtime/data after verified stop. Both preserve
-historical results and evidence. Daemon crash recovery stops only verifiably owned
+Explicit destroy removes owned runtime/data after verified stop, then irreversibly
+erases this instance's attempt results, logs, artifacts and private original-result
+copies. Stop retains history and evidence. Export needed diagnostics before destroy;
+caller-owned exports survive. Failed or uncertain runtime/data cleanup retains
+diagnostics, and file-erasure failures return nonzero with retryable deletion intent. Daemon crash recovery stops only verifiably owned
 survivors, retains data/evidence, reports interruption/collection gaps and requires
 an explicit restart. Unknown ownership remains untouched with a cleanup failure unless a targeted
 `stop --force` explicitly relinquishes the native claim. That acknowledgement
 retains private history, known exits, a collection gap and safe public warnings;
 unknown survivors may still run/write. Replacement attempts retain the warning but
-do not inherit an old attempt's collection gap. Latest-attempt export can therefore
+do not inherit an old attempt's collection gap. Selected-attempt export can therefore
 be complete for a fully collected replacement while reporting prior waivers.
 
 ## Logs and retention
@@ -144,11 +147,12 @@ attempt, timestamp, stream and original output chunk. Non-UTF8 chunks use base64
 `data`. Component filters preserve the unfiltered cursor. Human logs include the
 same context. Collection and interruption gaps are reported explicitly.
 
-Daemon-wide evidence defaults to 168 hours and 1 GiB. Configure the daemon at
+Daemon-wide evidence defaults to 168 hours and 1 GiB, with 100 completed attempt
+records per instance. Configure the daemon at
 startup (independent of scene machine configuration):
 
 ```sh
-backlot daemon start --state-dir /private/backlot --retention-age 168h --retention-bytes 1073741824
+backlot daemon start --state-dir /private/backlot --retention-age 168h --retention-bytes 1073741824 --retention-attempts 100
 ```
 
 The daemon periodically prunes oldest completed evidence first when age or total
@@ -157,8 +161,12 @@ is protected even when it alone exceeds the size cap. Pruning never removes
 runtime or retained data. Expired result metadata remains discoverable with
 `execution.evidence_expired`; logs report that the evidence expired. A committed
 expiration with incomplete file removal is retried on subsequent sweeps/restart.
-Destroyed instances follow the same policy. Private snapshots and named fixture
-metadata are durable instance state, separate from retained log/artifact bytes.
+Count limits remove eligible completed history records and their evidence; age/byte
+limits retain metadata with expiration flags. Active, kept and unresolved cleanup
+obligations are protected and can exceed limits. Successful destroy erases history
+and evidence immediately; only a minimal identity/location tombstone remains.
+Private snapshots and named fixtures are current instance state; history never
+archives fixtures, private configuration or capabilities.
 
 Completed legacy results without a recorded completion time start their retention
 age at the upgraded daemon's first observation. That inferred timestamp
@@ -166,11 +174,73 @@ is persisted as `execution.evidence_observed_at` once; daemon restarts do not re
 it, and old file mtimes do not cause immediate age expiration. The size cap still
 applies. Active, kept and cleanup-uncertain runtime remains protected.
 
+Pre-history mixed logs/artifacts can contain overwritten attempts with no retained
+result. Automatic age/byte expiry still covers those unrepresented bytes using the
+instance's persisted completion/legacy observation clock, never file mtime or a
+restart-renewed timestamp. Preserve represented protected/unexpired evidence and
+all unknown bytes while any retained cleanup obligation makes the instance unsafe.
+Existing deletion intents and legacy rewrite fences apply; unknown results remain
+unavailable and no history/completeness ledger is fabricated. Manual/count pruning
+continues to select retained history only.
+
+## Retained attempt history
+
+```sh
+backlot history INSTANCE_ID --limit 100 --json
+backlot history INSTANCE_ID --after CURSOR --json
+backlot inspect INSTANCE_ID --last-completed --json
+backlot inspect INSTANCE_ID --attempt ATTEMPT_ID --json
+backlot history prune INSTANCE_ID --older-than 168h --keep 20 --dry-run --json
+backlot history prune INSTANCE_ID --older-than 168h --keep 20 --json
+```
+
+History lists bounded summaries newest first by acceptance sequence, including the
+current accepted attempt and retained predecessors. Page limit is 1–100, default
+100; summaries keep encoded pages below the client's 1 MiB bound. Continuations
+are live keysets bound to the instance, without a snapshot or replay guarantee.
+Concurrent insertion may be missed; removal never redirects an exact selection.
+
+`inspect --attempt` and `--last-completed` are mutually exclusive and return an
+`AttemptResponse`, separate from ordinary current `InstanceResponse` inspection.
+Last completed means the newest recorded completion, including failures, cancellation
+and kept work; it ignores newer incomplete attempts. No completed record returns
+`attempt_unavailable`. History is diagnostic data, never runtime recovery authority.
+All accepted attempts and result writers participate; previously overwritten outcomes
+cannot be reconstructed. Upgrades seed only the known current execution and known
+launch provenance; unknown historical facts remain unknown. Legacy identities already
+destroyed by an older daemon retain their known current result on upgrade; migration
+and reads do not erase it. A matching marked destroy/retry performs the new erasure. `provenance` labels
+new accepted execution (`accepted`), seeded current state (`legacy_current`), or
+cleanup-only synthetic results (`cleanup_only`); cleanup does not invent a launch.
+
+Prune requires at least one selector. `--older-than` takes a positive Go duration;
+`--keep` takes a nonnegative completed count, including zero. When combined they
+select the union. `--dry-run` reports selected attempt IDs, selector reasons, protection and evidence
+bytes without effects; it is advisory and apply rechecks protection under the same
+fences. Protected active/kept/cleanup-uncertain work is never deleted. Prune removes
+selected history and evidence, leaving application data, credentials and private
+snapshots intact. The current instance result remains current-state truth even if
+its history row is pruned, with expired evidence; exact history stays unavailable
+on later current-result updates. New attempts retain increasing acceptance order.
+File deletion intent survives a crash or incomplete removal and is retried by the
+existing retention sweep, without resurrecting metadata. Legacy mixed logs preserve
+unselected records; rewriting visibly invalidates affected log cursors.
+
+History features require matching client/daemon contracts (`attempt-history/v1`).
+Unsupported old endpoints reject explicitly; clients never substitute the current
+attempt. Successful destroy requires `DestroyRequest.contract` exactly
+`erase-attempt-history/v1`, including force/retry. Matching CLI/client sends it.
+A new daemon rejects absent/unsupported markers with `api_version`/426 before
+admission or effects; an old strict daemon rejects the unknown field with
+`invalid_document`/400. No marker-free fallback exists. Older clients must upgrade
+to destroy on a new daemon or read its execution-free destroyed tombstones.
+Lost/unusable mutation replies still mean unknown acceptance/completion.
+
 ## Portable per-instance export
 
 `backlot export INSTANCE_ID --output NEW_DIRECTORY [--allow-partial]
-[--wait[=SECONDS_OR_DURATION]] [--json] [--state-dir DIRECTORY]` copies the latest
-settled execution attempt into a new caller-owned directory. For example:
+[--attempt ATTEMPT_ID] [--wait[=SECONDS_OR_DURATION]] [--json]
+[--state-dir DIRECTORY]` copies the selected settled execution attempt into a new caller-owned directory. For example:
 
 ```sh
 backlot export INSTANCE_ID --output ./saved-run --wait=45s --json
@@ -191,9 +261,13 @@ Without `--wait`, active execution is rejected. Bare `--wait` observes indefinit
 `--wait=45`, `--wait=45s` and `--wait=2m` set positive bounds. Interrupting export
 does not cancel the run. SIGINT/SIGTERM, caller cancellation and wait deadlines
 report `export_interrupted`, independently of daemon availability. All evidence
-producers must settle, including services kept for investigation; explicitly stop/destroy them before exporting. Unknown IDs
-and instances with no execution are errors. Export selects one latest attempt,
-identified in both outputs; it never merges evidence from earlier restarts.
+producers must settle, including services kept for investigation: explicitly stop
+them, export the settled evidence, then destroy only if authorized. Unknown IDs
+and instances with no execution are errors. Omitted `--attempt` selects the current
+attempt. Exact selection requires a retained attempt and never falls back; a settled
+older attempt can export while a replacement is active. Export uses the selected
+launch provenance and original outcomes, identified in both outputs; it never
+merges attempts. An unavailable/pruned selection is `attempt_unavailable`.
 
 Strict default rejects known collection gaps, expired evidence and unavailable
 retained artifacts. `--allow-partial` publishes an explicitly incomplete bundle
@@ -277,9 +351,9 @@ A new daemon generation fails explicitly. Missing/replaced/truncated cursor
 sources report structured `source_changed` and require a fresh query.
 
 `gaps` independently reports `retention_expired`, `collection_incomplete` and
-`source_changed`, with safe detail and existing native ownership warnings. Current
-execution supplies known retention/collection facts; collection gaps name that
-attempt. Older attempts have no
-complete collection ledger, so `historical_collection` remains `unknown`.
+`source_changed`, with safe detail and existing native ownership warnings. Exact `--attempt` selection uses its retained retention/collection facts and reports
+`historical_collection: "known"`; collection gaps name that attempt. Missing/pruned
+selection returns `attempt_unavailable`. Aggregate pages retain current-state gaps
+and `historical_collection: "unknown"`, since they do not claim a combined ledger.
 No records and no known gap never prove complete capture. Transport/corruption
 errors remain nonzero, distinct from successful partial-evidence pages.

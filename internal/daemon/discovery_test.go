@@ -5,6 +5,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	bolt "go.etcd.io/bbolt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -127,6 +128,20 @@ func TestLogPageBoundsFiltersAndContinuation(t *testing.T) {
 		t.Fatal(r, err)
 	}
 	q.After = ""
+	historical := i
+	result := *i.Execution
+	result.Attempt = older
+	historical.Execution = &result
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		parent, err := load(tx, i.ID)
+		if err != nil {
+			return err
+		}
+		parent.Instance = historical
+		return seedAttempt(tx, parent, "legacy_current")
+	}); err != nil {
+		t.Fatal(err)
+	}
 	q.Attempt = older
 	q.Stream = "stderr"
 	q.Component = "test"

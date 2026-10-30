@@ -1,11 +1,11 @@
 ---
 title: 'Publish daemon-owned portable run reports'
 date: '2026-10-18'
-status: accepted
+status: superseded
 summary: 'Export a fenced settled attempt through the typed daemon API into an audited no-replacement directory with an independently versioned report.'
 tags: [evidence, api, security]
 supersedes: []
-superseded_by: []
+superseded_by: [20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md]
 ---
 
 # Publish daemon-owned portable run reports

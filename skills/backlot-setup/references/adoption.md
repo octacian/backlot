@@ -156,3 +156,13 @@ private data and environment-only credentials. They contain runnable application
 code; the manifest above is an adaptation outline. Add
 [HTTPS publication/application trust](https.md) or [containers/state](containers.md)
 when required, keeping those topology-specific settings explicit.
+
+## Keep diagnostics across attempts
+
+Use `history ID` and `inspect ID --last-completed` when validating replacement
+attempts; `inspect ID --attempt ATTEMPT` and `export ID --attempt ATTEMPT --output
+NEW_DIRECTORY` select retained evidence without using the current execution.
+Before successful destroy, export anything you need to keep: destroy erases the
+instance's results/logs/artifacts. Ordinary disposable completion still retains
+diagnostics under [age/byte/count retention](evidence.md#logs-and-retention).
+Manual history pruning removes selected evidence, never application data or credentials.

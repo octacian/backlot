@@ -56,7 +56,7 @@ func runtimeCommands() []*urfave.Command {
 		response, err := cli.StopExecutionWithRequest(ctx, request)
 		return output(c, response, err)
 	}})
-	commands = append(commands, &urfave.Command{Name: "destroy", ArgsUsage: "<instance-id>", Description: "Evidence remains subject to retention after runtime/data removal.\nExample: backlot destroy INSTANCE_ID", Usage: "Remove runtime/data; --force waives shared ownership proof only, retaining consumer/native/private-resource fences", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force", Usage: "Waive shared ownership proof only; consumer, native and private-resource fences still apply"}), Action: func(ctx context.Context, c *urfave.Command) error {
+	commands = append(commands, &urfave.Command{Name: "destroy", ArgsUsage: "<instance-id>", Description: "Successful destroy irreversibly erases attempt results, logs and artifacts; export first.\nExample: backlot destroy INSTANCE_ID", Usage: "Remove runtime/data; --force waives shared ownership proof only, retaining consumer/native/private-resource fences", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force", Usage: "Waive shared ownership proof only; consumer, native and private-resource fences still apply"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
 			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "destroy requires one recorded instance ID"})
 		}
@@ -65,7 +65,7 @@ func runtimeCommands() []*urfave.Command {
 			return output(c, nil, err)
 		}
 		defer cli.Close()
-		response, err := cli.DestroyWithRequest(ctx, v1.DestroyRequest{APIVersion: v1.Version, InstanceID: c.Args().First(), Force: c.Bool("force")})
+		response, err := cli.DestroyWithRequest(ctx, v1.DestroyRequest{Contract: v1.DestroyContract, APIVersion: v1.Version, InstanceID: c.Args().First(), Force: c.Bool("force")})
 		return output(c, response, err)
 	}})
 	commands = append(commands, &urfave.Command{Name: "logs", ArgsUsage: "<instance-id>", Description: "Reads retained logs after teardown too; follow interruption stops observation without stopping runtime. JSON emits log NDJSON.\nExample: backlot logs --follow --component app INSTANCE_ID", Usage: "Read retained component logs", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "page", Usage: "Emit one finite bounded log page"}, &urfave.StringFlag{Name: "attempt", Usage: "Page attempt ID"}, &urfave.StringFlag{Name: "stream", Usage: "Page stream stdout or stderr"}, &urfave.StringFlag{Name: "after", Usage: "Transient page continuation"}, &urfave.IntFlag{Name: "limit", Value: 100, Usage: "Page records, 1 through 1000"}, &urfave.BoolFlag{Name: "follow", Usage: "Stream new logs until runtime settles or observation is interrupted"}, &urfave.StringFlag{Name: "component", Usage: "Filter logs by component name (default: all components)"}), Action: func(ctx context.Context, c *urfave.Command) error {

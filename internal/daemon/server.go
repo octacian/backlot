@@ -21,11 +21,12 @@ import (
 
 // Options selects private state placement and the bounded disposable client lease.
 type Options struct {
-	sharedCheckpoint func(string) error
-	Directory        string
-	LeaseDuration    time.Duration
-	RetentionAge     time.Duration
-	RetentionBytes   int64
+	sharedCheckpoint  func(string) error
+	Directory         string
+	LeaseDuration     time.Duration
+	RetentionAge      time.Duration
+	RetentionBytes    int64
+	RetentionAttempts int
 }
 
 // DefaultLeaseDuration is the disposable disconnect grace period.
@@ -37,10 +38,13 @@ const DefaultRetentionAge = 168 * time.Hour
 // DefaultRetentionBytes is the evidence size limit absent startup overrides.
 const DefaultRetentionBytes int64 = 1 << 30
 
+// DefaultRetentionAttempts bounds completed public history per instance.
+const DefaultRetentionAttempts = 100
+
 // Serve owns the socket, database and lease sweeper until shutdown or cancellation.
 // Only the daemon opens state.db; it owns all accepted native execution.
 func Serve(ctx context.Context, options Options) (resultErr error) {
-	if options.RetentionAge < 0 || options.RetentionBytes < 0 {
+	if options.RetentionAttempts < 0 || options.RetentionAge < 0 || options.RetentionBytes < 0 {
 		return problem("invalid_retention", "evidence retention limits must be positive")
 	}
 	if options.LeaseDuration == 0 {
@@ -163,7 +167,7 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 	if err := os.Chmod(path, 0600); err != nil {
 		return problem("permissions", "cannot protect daemon socket")
 	}
-	svc := &service{generation: newID(), diagnosticRecoveryErr: diagnosticRecoveryErr, store: state, lease: options.LeaseDuration, directory: options.Directory, evidence: evidencePolicy{age: options.RetentionAge, bytes: options.RetentionBytes}}
+	svc := &service{generation: newID(), diagnosticRecoveryErr: diagnosticRecoveryErr, store: state, lease: options.LeaseDuration, directory: options.Directory, evidence: evidencePolicy{age: options.RetentionAge, attempts: options.RetentionAttempts, bytes: options.RetentionBytes}}
 	stopping := make(chan struct{})
 	var once sync.Once
 	status := v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, Status: "running", PID: os.Getpid(), LeaseDuration: options.LeaseDuration.String()}
@@ -303,6 +307,39 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				return
 			}
 			writeJSON(w, response)
+		case "/v1/attempts/list":
+			var q v1.HistoryRequest
+			if !decode(w, r, &q) || !compatible(w, q.APIVersion) {
+				return
+			}
+			response, err := s.store.history(q)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+		case "/v1/attempts/inspect":
+			var q v1.AttemptRequest
+			if !decode(w, r, &q) || !compatible(w, q.APIVersion) {
+				return
+			}
+			response, err := s.store.attempt(q)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+		case "/v1/attempts/prune":
+			var q v1.HistoryPruneRequest
+			if !decode(w, r, &q) || !compatible(w, q.APIVersion) {
+				return
+			}
+			response, err := s.pruneHistory(r.Context(), q)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
 		case "/v1/export":
 			var request v1.ExportRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
@@ -343,7 +380,7 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				return
 			}
 			age, size := s.evidenceLimits()
-			writeJSON(w, v1.DaemonConfigurationResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, DaemonGeneration: s.generation, Context: "daemon-startup policy", Directory: s.directory, Socket: SocketPath(s.directory), LeaseDuration: s.lease.String(), RetentionAge: age.String(), RetentionBytes: size})
+			writeJSON(w, v1.DaemonConfigurationResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, DaemonGeneration: s.generation, Context: "daemon-startup policy", Directory: s.directory, Socket: SocketPath(s.directory), LeaseDuration: s.lease.String(), RetentionAge: age.String(), RetentionBytes: size, RetentionAttempts: s.retentionAttempts()})
 		case "/v1/logs/page":
 			var request v1.LogPageRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
@@ -433,6 +470,10 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			}
 			if !validID(request.InstanceID) {
 				writeError(w, problem("invalid_request", "recorded instance_id required"))
+				return
+			}
+			if request.Contract != v1.DestroyContract {
+				writeError(w, problem("api_version", "destroy requires erase-attempt-history/v1; upgrade the client"))
 				return
 			}
 			instance, err := s.destroyWithForce(r.Context(), request.InstanceID, request.Force)

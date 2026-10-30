@@ -3,6 +3,7 @@ package daemon
 import (
 	"archive/tar"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -23,9 +24,10 @@ import (
 // Evidence operations serialize readers and pruning; producers are protected by
 // active instance status until collection and runtime cleanup have joined.
 type evidencePolicy struct {
-	mu    sync.Mutex
-	age   time.Duration
-	bytes int64
+	mu       sync.Mutex
+	age      time.Duration
+	bytes    int64
+	attempts int
 }
 
 func (s *service) collectArtifacts(id string, snapshot plan.Snapshot, entry *execution, result *v1.ExecutionResult) error {
@@ -166,93 +168,114 @@ func extractArtifact(input io.Reader, destination string) error {
 func (s *service) pruneEvidence() error {
 	s.evidence.mu.Lock()
 	defer s.evidence.mu.Unlock()
+	if err := s.retryEvidenceDeletions(); err != nil {
+		return err
+	}
 	if err := s.observeLegacyEvidence(); err != nil {
 		return err
 	}
 	age, limit := s.evidenceLimits()
-	var completed []v1.Instance
+	var ids []string
+	if err := s.store.db.View(func(tx *bolt.Tx) error {
+		return tx.Bucket([]byte("instances")).ForEach(func(k, _ []byte) error { ids = append(ids, string(k)); return nil })
+	}); err != nil {
+		return err
+	}
+	type candidate struct {
+		id, attempt string
+		start       time.Time
+		expired     bool
+	}
+	var all []candidate
 	var total int64
-	err := s.store.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
-			var r record
-			if err := decodeRecord(data, string(key), &r); err != nil {
-				return err
+	count := s.evidence.attempts
+	if count == 0 {
+		count = DefaultRetentionAttempts
+	}
+	for _, id := range ids {
+		entries, err := s.store.attempts(id)
+		if err != nil {
+			return err
+		}
+		completed := 0
+		for _, a := range entries {
+			if retentionStart(&a.Result) != "" {
+				completed++
 			}
-			size, err := s.evidenceSize(r.Instance.ID)
+			lock := s.mutationLock(id)
+			if !lock.TryLock() {
+				continue
+			}
+			if completed > count && !attemptProtected(a) {
+				err = s.deleteAttempt(a, true)
+			} else {
+				if !attemptProtected(a) {
+					start, err := time.Parse(time.RFC3339Nano, retentionStart(&a.Result))
+					if err != nil {
+						return err
+					}
+					all = append(all, candidate{id: id, attempt: a.Result.Attempt, start: start, expired: a.Result.EvidenceExpired})
+				}
+			}
+			lock.Unlock()
 			if err != nil {
 				return err
 			}
-			total += size
-			result := r.Instance.Execution
-			if result != nil && retentionStart(result) != "" && !active(r.Instance.Status) && !result.Kept && result.CleanupFailure == "" {
-				if _, err := time.Parse(time.RFC3339Nano, retentionStart(result)); err != nil {
-					return err
-				}
-				completed = append(completed, r.Instance)
-			}
-			return nil
-		})
-	})
-	if err != nil {
-		return err
-	}
-	sort.Slice(completed, func(i, j int) bool {
-		left, _ := time.Parse(time.RFC3339Nano, retentionStart(completed[i].Execution))
-		right, _ := time.Parse(time.RFC3339Nano, retentionStart(completed[j].Execution))
-		return left.Before(right)
-	})
-	for _, instance := range completed {
-		timestamp, err := time.Parse(time.RFC3339Nano, retentionStart(instance.Execution))
+		}
+		i, err := s.store.inspect(id)
 		if err != nil {
 			return err
 		}
-		if !instance.Execution.EvidenceExpired && time.Since(timestamp) < age && total <= limit {
+		if e := i.Execution; e != nil && retentionStart(e) != "" {
+			start, err := time.Parse(time.RFC3339Nano, retentionStart(e))
+			if err != nil {
+				return err
+			}
+			all = append(all, candidate{id: id, start: start})
+		}
+		size, err := s.evidenceSize(id)
+		if err != nil {
+			return err
+		}
+		total += size
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].start.Equal(all[j].start) {
+			return all[i].attempt == "" && all[j].attempt != ""
+		}
+		return all[i].start.Before(all[j].start)
+	})
+	for _, c := range all {
+		if !c.expired && time.Since(c.start) < age && total <= limit {
 			continue
 		}
-		removed, err := s.pruneInstanceEvidence(instance.ID, instance.Execution.Attempt)
+		lock := s.mutationLock(c.id)
+		if !lock.TryLock() {
+			continue
+		}
+		var size int64
+		var err error
+		if c.attempt == "" {
+			size, err = s.expireUnknownEvidence(c.id, age, total > limit)
+		} else {
+			selected, selectErr := s.store.attempt(v1.AttemptRequest{InstanceID: c.id, Attempt: c.attempt})
+			err = selectErr
+			if err == nil {
+				size, err = s.attemptEvidenceSize(c.id, c.attempt)
+				if err == nil {
+					err = s.deleteAttempt(selected.Attempt, false)
+				}
+			}
+		}
+		lock.Unlock()
 		if err != nil {
 			return err
 		}
-		total -= removed
+		total -= size
 	}
+
 	return nil
 }
-func (s *service) pruneInstanceEvidence(id, attempt string) (int64, error) {
-	lock := s.mutationLock(id)
-	if !lock.TryLock() {
-		return 0, nil
-	}
-	defer lock.Unlock()
-	instance, err := s.store.inspect(id)
-	if err != nil {
-		return 0, err
-	}
-	if active(instance.Status) || instance.Execution == nil || instance.Execution.Kept || instance.Execution.CleanupFailure != "" || instance.Execution.Attempt != attempt {
-		return 0, nil
-	}
-	size, err := s.evidenceSize(id)
-	if err != nil {
-		return 0, err
-	}
-	// Commit expiration before removal and retry already-expired residual files.
-	// The instance mutation lock fences a restart until both operations finish.
-	err = s.store.db.Update(func(tx *bolt.Tx) error {
-		r, err := load(tx, id)
-		if err != nil {
-			return err
-		}
-		r.Instance.Execution.EvidenceExpired = true
-		return put(tx, "instances", id, r)
-	})
-	if err != nil {
-		return 0, err
-	}
-	if err := s.removeEvidence(id); err != nil {
-		return 0, err
-	}
-	return size, nil
-}
-
 func (s *service) evidenceSize(id string) (int64, error) {
 	var size int64
 	for _, directory := range []string{filepath.Join(s.directory, "artifacts", id), filepath.Join(s.directory, "logs")} {
@@ -286,6 +309,9 @@ func (s *service) evidenceSize(id string) (int64, error) {
 	return size, nil
 }
 func (s *service) removeEvidence(id string) error {
+	if err := s.validateEvidencePaths("logs", filepath.Join("artifacts", id)); err != nil {
+		return err
+	}
 	if err := os.RemoveAll(filepath.Join(s.directory, "artifacts", id)); err != nil {
 		return err
 	}
@@ -324,6 +350,25 @@ func (s *service) observeLegacyEvidence() error {
 		}
 		for _, r := range updates {
 			if err := put(tx, "instances", r.Instance.ID, r); err != nil {
+				return err
+			}
+		}
+		var historical []v1.Attempt
+		if err := tx.Bucket([]byte("attempts")).ForEach(func(_, data []byte) error {
+			var a v1.Attempt
+			if err := json.Unmarshal(data, &a); err != nil {
+				return err
+			}
+			if !active(a.Status) && a.Result.CompletedAt == "" && a.Result.EvidenceObservedAt == "" {
+				a.Result.EvidenceObservedAt = observed
+				historical = append(historical, a)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		for _, a := range historical {
+			if err := put(tx, "attempts", attemptKey(a.InstanceID, a.Sequence), a); err != nil {
 				return err
 			}
 		}

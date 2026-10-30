@@ -355,7 +355,49 @@ func (s *service) stopExecution(id string) (v1.Instance, error) {
 			entry.releaseOutputs()
 		}
 	}
+	if err == nil && !active(instance.Status) && (instance.Execution == nil || !instance.Execution.Kept) {
+		err = s.stopInstanceNetworks(&instance)
+	}
 	return instance, err
+}
+
+// Explicit stop also retires networks from older, already-stopped records.
+func (s *service) stopInstanceNetworks(instance *v1.Instance) error {
+	g, err := s.store.resources(instance.ID)
+	if err != nil {
+		return err
+	}
+	pending := false
+	for _, r := range g.Resources {
+		pending = pending || r.Kind == "network" && !r.Removed
+	}
+	if !pending {
+		return nil
+	}
+	if instance.Execution == nil {
+		return problem("cleanup_failed", "network allocation has no execution ownership; preserved")
+	}
+	for _, observed := range instance.Execution.NativeCleanup {
+		if observed.FencesResources(instance.NativeOwnershipWarnings) {
+			return problem("cleanup_failed", "native cleanup incomplete; instance networks preserved")
+		}
+	}
+	status := instance.Status
+	if _, err = s.store.execution(instance.ID, v1.Stopping, instance.Execution); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err = s.store.removeNetworks(ctx, instance.ID, &g, nil); err != nil {
+		result := *instance.Execution
+		result.CleanupFailure = "instance network cleanup incomplete; restore provider/ownership or remove foreign consumers and retry stop"
+		result.CleanupDetails = cleanupDetails(err)
+		var saveErr error
+		*instance, saveErr = s.store.execution(instance.ID, status, &result)
+		return errors.Join(problem("cleanup_failed", result.CleanupFailure), saveErr)
+	}
+	*instance, err = s.store.execution(instance.ID, status, instance.Execution)
+	return err
 }
 
 // OwnerJoin budgets joining one execution owner after cancellation. It covers two
@@ -582,6 +624,9 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		if entry.resources != nil && cleanup == nil && !keep {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			cleanup = s.store.cleanupContainers(cleanupCtx, id, entry.resources, entry.docker)
+			if cleanup == nil {
+				cleanup = s.store.removeNetworks(cleanupCtx, id, entry.resources, entry.docker)
+			}
 			cancel()
 		}
 		if entry.docker != nil && !keep {

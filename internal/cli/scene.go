@@ -26,7 +26,7 @@ func sceneCommand() *urfave.Command {
 		if name == "status" {
 			flags = append(flags, statusFollowFlags()...)
 		}
-		children = append(children, &urfave.Command{Name: name, Description: "Example: backlot scene " + name + " dev\nNamed scenes resolve within the selected checkout; use status/inspect with an instance ID for exact recorded state.", ArgsUsage: "<scene>", Usage: map[string]string{"start": "Start a persistent scene and wait for readiness; --attached owns its attempt", "status": "Read a named persistent scene; --follow observes without lifecycle ownership", "stop": "Stop a recorded persistent scene, retaining data; current manifest is not required"}[name], Flags: flags, Action: sceneAction})
+		children = append(children, &urfave.Command{Name: name, Description: "Example: backlot scene " + name + " dev\nNamed scenes resolve within the selected checkout; use status/inspect with an instance ID for exact recorded state.", ArgsUsage: "<scene>", Usage: map[string]string{"start": "Start a persistent scene and wait for readiness; --attached owns its attempt", "status": "Read a named persistent scene; --follow observes without lifecycle ownership", "stop": "Stop a recorded persistent scene, releasing unused instance networks and retaining data; cleanup failures can be retried; current manifest is not required"}[name], Flags: flags, Action: sceneAction})
 	}
 	return &urfave.Command{Name: "scene", Usage: "Discover declarations and manage recorded persistent scenes", Commands: children}
 }

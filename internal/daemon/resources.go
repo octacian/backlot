@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/localipc"
@@ -106,7 +107,7 @@ func hasDocker(p v1.PlanResponse) bool {
 	return false
 }
 func retained(p v1.PlanResponse) bool {
-	// Every selected Docker workload also retains its implicit instance network.
+	// Docker workloads retain their network contract even while allocations retire.
 	if hasDocker(p) {
 		return true
 	}
@@ -271,9 +272,33 @@ func (s *service) allocateResources(ctx context.Context, id string, snap plan.Sn
 			return err
 		}
 		r, exists := g.Resources[name]
+		if exists && r.Kind == "network" {
+			if !r.Removed {
+				if r.ID == "" {
+					r.ID, err = recoverResourceEffect(ctx, entry.docker, r)
+				} else {
+					err = verifyResource(ctx, entry.docker, r)
+				}
+				if err != nil && !errdefs.IsNotFound(err) {
+					return err
+				}
+				if err == nil {
+					g.Resources[name] = r
+					if err = s.store.saveResources(id, g); err != nil {
+						return err
+					}
+					continue
+				}
+			}
+			// A new capability fences the retired effect; references keep its name.
+			r.Token, r.ID, r.Removed = newID(), "", false
+			exists = false
+		}
 		if !exists {
-			r = ownedResource{Kind: declarations[name].Kind, Token: newID()}
-			r.Name = "backlot-" + r.Token
+			if r.Name == "" {
+				r = ownedResource{Kind: declarations[name].Kind, Token: newID()}
+				r.Name = "backlot-" + r.Token
+			}
 			if r.Kind == "directory" {
 				r.Name = filepath.Join(s.directory, "data", r.Token)
 			}
@@ -371,6 +396,76 @@ func verifyResource(ctx context.Context, d *dockerEngine, r ownedResource) error
 		return verifyDockerResource(ctx, d, r)
 	}
 }
+
+// removeNetworks requires joined consumers and a durable cleanup obligation.
+// It retires only instance networks; data and shared allocations stay retained.
+func (s *store) removeNetworks(ctx context.Context, id string, g *resourceGeneration, d *dockerEngine) (failure error) {
+	defer func() {
+		if failure != nil {
+			failure = errors.Join(&v1.PlanError{Code: "cleanup_failed", Field: "resources.network", Message: "instance network cleanup incomplete; restore provider/ownership or remove foreign consumers and retry stop"}, failure)
+		}
+	}()
+	networks := resourceGeneration{Resources: map[string]ownedResource{}}
+	for name, r := range g.Resources {
+		if r.Kind == "network" && !r.Removed {
+			networks.Resources[name] = r
+		}
+	}
+	if len(networks.Resources) == 0 {
+		return nil
+	}
+	if err := s.guardAbandonedData(id); err != nil {
+		return err
+	}
+	for _, r := range g.Containers {
+		if !r.Removed {
+			return problem("cleanup_failed", "container cleanup incomplete; instance networks preserved")
+		}
+	}
+	if d == nil {
+		var err error
+		d, err = newDocker(g.Endpoint)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = d.Close() }()
+	}
+	for name, r := range networks.Resources {
+		if r.ID == "" {
+			var err error
+			r.ID, err = recoverResourceEffect(ctx, d, r)
+			if err != nil && !errdefs.IsNotFound(err) {
+				return err
+			}
+			r.Removed = errdefs.IsNotFound(err)
+			g.Resources[name], networks.Resources[name] = r, r
+			if err = s.saveResources(id, *g); err != nil {
+				return err
+			}
+		}
+	}
+	if err := d.noConsumers(ctx, networks); err != nil {
+		return err
+	}
+	for name, r := range networks.Resources {
+		if r.Removed {
+			continue
+		}
+		if err := removeDockerResource(ctx, d, r); err != nil {
+			return err
+		}
+		if err := s.sharedPoint("network-remove-effect:" + name); err != nil {
+			return err
+		}
+		r.Removed = true
+		g.Resources[name] = r
+		if err := s.saveResources(id, *g); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *store) removeResources(ctx context.Context, id string) error {
 	return s.removeResourcesWithForce(ctx, id, false)
 }

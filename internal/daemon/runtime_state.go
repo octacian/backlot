@@ -222,6 +222,19 @@ func (s *store) recoverExecution(id string) error {
 			cleanup = errors.Join(cleanup, problem("cleanup_failed", observed.Detail))
 		}
 	}
+	consumersStopped := cleanup == nil
+	if consumersStopped {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		cleanup = s.removeNetworks(ctx, id, &g, nil)
+		cancel()
+	} else {
+		// Native uncertainty prevented retrying a separately recorded network failure.
+		for _, detail := range result.CleanupDetails {
+			if detail.Field == "resources.network" {
+				cleanup = errors.Join(cleanup, &detail)
+			}
+		}
+	}
 
 	// Reassess transient non-native failures; retain native fences through their
 	// typed observations rather than making an old mixed error string sticky.
@@ -232,8 +245,12 @@ func (s *store) recoverExecution(id string) error {
 		result.CleanupDetails = cleanupDetails(cleanup)
 	}
 	// Retrying resource cleanup does not interrupt an already completed execution.
-	if cleanup == nil && result.CompletedAt != "" && !active(instance.Status) && !result.Kept {
-		_, err := s.execution(id, instance.Status, &result)
+	completedStatus := instance.Status
+	if completedStatus == v1.Stopping && result.CompletedAt != "" && result.Outcome != "" {
+		completedStatus = result.Outcome
+	}
+	if consumersStopped && result.CompletedAt != "" && !active(completedStatus) && !result.Kept {
+		_, err := s.execution(id, completedStatus, &result)
 		return err
 	}
 	for i := range result.Components {

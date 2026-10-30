@@ -88,6 +88,12 @@ func createDockerResource(ctx context.Context, d *dockerEngine, r ownedResource)
 		}
 		return out.Volume.Name, nil
 	case "network":
+		if _, err := d.NetworkInspect(ctx, r.Name, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+			if err == nil {
+				err = problem("conflict", "recorded network name already exists; preserved")
+			}
+			return "", err
+		}
 		out, err := d.NetworkCreate(ctx, r.Name, client.NetworkCreateOptions{Driver: "bridge", Labels: resourceLabels(r)})
 		if err != nil {
 			return "", err
@@ -112,6 +118,9 @@ func verifyDockerResource(ctx context.Context, d *dockerEngine, r ownedResource)
 		out, err := d.NetworkInspect(ctx, handle, client.NetworkInspectOptions{})
 		if err != nil {
 			return err
+		}
+		if r.ID != "" && out.Network.ID != r.ID {
+			return problem("cleanup_failed", "network immutable identity changed; preserved")
 		}
 		return owned(out.Network.Labels, r)
 	case "container":
@@ -186,9 +195,16 @@ func (d *dockerEngine) noConsumers(ctx context.Context, g resourceGeneration) er
 					return problem("cleanup_failed", "directory has a positively identified Docker bind consumer; preserved; remove the consumer before retrying reset/destroy")
 				}
 			}
-			if r.Kind == "network" && c.NetworkSettings != nil {
-				for _, n := range c.NetworkSettings.Networks {
-					if n.NetworkID == r.ID {
+			if r.Kind == "network" {
+				// Never-started declarations can retain only the name, with no endpoint ID.
+				if c.HostConfig != nil && (r.Name != "" && string(c.HostConfig.NetworkMode) == r.Name || r.ID != "" && string(c.HostConfig.NetworkMode) == r.ID) {
+					return problem("cleanup_failed", "network still has a Docker consumer; preserved")
+				}
+				if c.NetworkSettings == nil {
+					continue
+				}
+				for name, n := range c.NetworkSettings.Networks {
+					if r.Name != "" && name == r.Name || r.ID != "" && (name == r.ID || n != nil && n.NetworkID == r.ID) {
 						return problem("cleanup_failed", "network still has a Docker consumer; preserved")
 					}
 				}

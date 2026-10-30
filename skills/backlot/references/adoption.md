@@ -146,7 +146,9 @@ Only the terminal job gets that tail. Read each command's exit and result before
 continuing; discovery/configuration/plan/doctor do not establish execution success.
 Once ready, use the [daily loop](operations.md#daily-loop) for logs, evidence and
 scoped cleanup, and the [lifecycle table](daemon.md#identity-and-lifecycle) when edits
-need restart/reset. Test failures keep their original exit independently of
+need restart/reset. After fixing a persistent failure, explicitly repeat start to
+request one compatible new attempt; follow [conflict/unknown-result guidance](cli.md#commands-and-defaults).
+Test failures keep their original exit independently of
 orchestration, collection and cleanup.
 
 Use the existing [loopback Playwright recipe](https://github.com/octacian/backlot/blob/6177c64f60654657a914857edbffb69b8316a41b/examples/native-playwright/README.md)

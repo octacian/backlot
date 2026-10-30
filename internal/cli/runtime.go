@@ -21,7 +21,7 @@ func runtimeCommands() []*urfave.Command {
 	commands := []*urfave.Command{}
 	for _, name := range []string{"run", "restart", "reset"} {
 		flags := append(daemonFlags(false), &urfave.StringFlag{Name: "config", Usage: "Machine configuration path"}, &urfave.StringFlag{Name: "startup-timeout", Value: defaultStartupTimeout, Usage: "Startup budget; 0s is unlimited"}, &urfave.StringFlag{Name: "job-timeout", Value: defaultJobTimeout, Usage: "Job budget; 0s is unlimited"}, &urfave.StringFlag{Name: "stop-grace", Value: defaultStopGrace, Usage: "Grace before cleanup escalation"})
-		usage, args := "Start a scene and wait for readiness or disposable completion", "<scene> [terminal-job args...]"
+		usage, args := "Ensure a persistent scene is running, or wait for disposable completion", "<scene> [terminal-job args...]"
 		if name == "run" {
 			flags = append(flags, &urfave.BoolFlag{Name: "attached", Usage: "Own a persistent attempt until this client ends"}, &urfave.BoolFlag{Name: "keep-on-failure", Usage: "Keep disposable resources after failure"}, &urfave.StringFlag{Name: "project", Usage: "Project directory or manifest path"})
 		} else {
@@ -231,7 +231,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 				grace, _ = time.ParseDuration(request.Options.StopGrace)
 			}
 			cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
-			stopped, stopErr := cli.StopExecution(cleanup, id)
+			stopped, stopErr := cli.StopExecutionWithRequest(cleanup, v1.StopRequest{APIVersion: v1.Version, InstanceID: id, ExpectedAttempt: attempt})
 			cancel()
 			if stopErr != nil {
 				return observedFailure(c, response, stopErr)
@@ -301,7 +301,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 				grace, _ = time.ParseDuration(request.Options.StopGrace)
 			}
 			cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
-			stopped, stopErr := cli.StopExecution(cleanup, id)
+			stopped, stopErr := cli.StopExecutionWithRequest(cleanup, v1.StopRequest{APIVersion: v1.Version, InstanceID: id, ExpectedAttempt: attempt})
 			cancel()
 			if stopErr != nil {
 				return observedFailure(c, response, stopErr)

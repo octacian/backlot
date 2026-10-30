@@ -1,11 +1,11 @@
 ---
 title: 'Authorize declared sensitive startup details for persistent scenes'
 date: '2026-10-22'
-status: accepted
+status: superseded
 summary: 'Treat ordered fixture selection as authorization for sensitive persistent startup display while keeping recorded results and observation redacted.'
 tags: [security, configuration, lifecycle, cli, api]
 supersedes: [20261007T055849866Z-define-versioned-offline-scene-planning-contracts.md, 20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md]
-superseded_by: []
+superseded_by: [20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md]
 ---
 
 # Authorize declared sensitive startup details for persistent scenes
@@ -22,6 +22,9 @@ and the inherited run-redaction promise in the
 [native-session decision](20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md).
 All other requirements and inherited contracts remain unchanged, including native
 supervision, cleanup, recovery, state compatibility and private configuration.
+
+The [persistent-start decision](20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md) partially supersedes this record's ordinary-start eligibility and snapshot-selection rules; unaffected rules
+and existing successors remain in force.
 
 ## Context
 

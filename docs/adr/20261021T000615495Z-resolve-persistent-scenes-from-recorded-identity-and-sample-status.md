@@ -1,11 +1,11 @@
 ---
 title: 'Resolve persistent scenes from recorded identity and sample status'
 date: '2026-10-21'
-status: accepted
+status: superseded
 summary: 'Resolve persistent scene targets in the daemon from existing identity records and observe bounded sampled snapshots without acquiring lifecycle ownership.'
 tags: [lifecycle, identity, api, cli, observation]
 supersedes: []
-superseded_by: []
+superseded_by: [20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md]
 ---
 
 # Resolve persistent scenes from recorded identity and sample status
@@ -21,6 +21,9 @@ selected the nearest recorded project and named-scene observation across
 absence and recreation. Accepted after independent architecture review and
 coordinator approval on 2026-10-21; implementation and runtime verification remain
 separate delivery obligations.
+
+The [persistent-start decision](20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md) partially supersedes this record's ordinary-start eligibility and snapshot-selection rules; unaffected rules
+and existing successors remain in force.
 
 ## Context
 

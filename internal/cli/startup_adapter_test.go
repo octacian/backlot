@@ -216,6 +216,10 @@ func TestAcceptedCLIObservationFailuresKeepIdentity(t *testing.T) {
 						_ = json.NewEncoder(w).Encode(v1.ErrorResponse{APIVersion: v1.Version, Error: v1.PlanError{Code: "lease_failed", Message: "lease renewal unavailable"}})
 					case "/v1/runtime/stop":
 						stops.Add(1)
+						var stop v1.StopRequest
+						if json.NewDecoder(r.Body).Decode(&stop) != nil || stop.InstanceID != id || stop.ExpectedAttempt != attempt || stop.Force {
+							t.Error("startup cancellation lacked exact precondition")
+						}
 						w.WriteHeader(503)
 						_ = json.NewEncoder(w).Encode(v1.ErrorResponse{APIVersion: v1.Version, Error: v1.PlanError{Code: "cleanup_uncertain", Message: "cleanup result unavailable"}})
 					case "/v1/inspect", "/v1/scenes/status":

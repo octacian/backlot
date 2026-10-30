@@ -179,12 +179,12 @@ func decodeRecord(data []byte, id string, r *record) error {
 }
 
 func (s *store) begin(snapshot plan.Snapshot, checkout v1.CheckoutIdentity, lease time.Duration) (v1.InstanceResponse, bool, error) {
-	return s.beginSelected(snapshot, checkout, lease, false)
+	return s.beginSelected(snapshot, checkout, lease, false, nil)
 }
 
 // beginSelected keeps the existing logical key but fences named-scene location
 // collisions in the same transaction as deduplication, before any accepted intent.
-func (s *store) beginSelected(snapshot plan.Snapshot, checkout v1.CheckoutIdentity, lease time.Duration, sceneOnly bool) (v1.InstanceResponse, bool, error) {
+func (s *store) beginSelected(snapshot plan.Snapshot, checkout v1.CheckoutIdentity, lease time.Duration, sceneOnly bool, observed *startObservation) (v1.InstanceResponse, bool, error) {
 	response := v1.InstanceResponse{APIVersion: v1.Version}
 	created := false
 	if sceneOnly {
@@ -229,6 +229,12 @@ func (s *store) beginSelected(snapshot plan.Snapshot, checkout v1.CheckoutIdenti
 					}
 				}
 				response.Instance = r.Instance
+				if observed != nil {
+					*observed, err = observeStart(tx, r.Instance)
+					if err != nil {
+						return err
+					}
+				}
 				response.ManifestDrift = r.Instance.Plan.ManifestDigest != p.ManifestDigest
 				response.ConfigDrift = plan.ConfigurationDrift(r.Instance.Plan, p)
 				return nil

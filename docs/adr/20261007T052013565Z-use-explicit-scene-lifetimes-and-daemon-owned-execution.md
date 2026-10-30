@@ -1,16 +1,19 @@
 ---
 title: "Use explicit scene lifetimes and daemon-owned execution"
 date: 2026-10-07
-status: accepted
+status: superseded
 summary: "Use a local daemon and explicit persistent or disposable scenes to centralize isolation and lifecycle guarantees."
 tags: [architecture, lifecycle, isolation]
 supersedes: []
-superseded_by: []
+superseded_by: [20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md]
 ---
 
 # Use explicit scene lifetimes and daemon-owned execution
 
 Backlot runs as one local daemon with a CLI client. Projects compose reusable components into persistent or disposable scenes. The daemon owns resource allocation, readiness, cancellation, logs, and cleanup.
+
+The [persistent-start decision](20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md) partially supersedes this record's ordinary-start eligibility and snapshot-selection rules; unaffected rules
+and existing successors remain in force.
 
 ## Context
 

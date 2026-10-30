@@ -42,7 +42,11 @@ capability/help presence is not semantic or provider-readiness proof.
    permission to retry. Investigate recorded identity/scope; keep uncertainty visible.
 5. For edits, consult [identity/lifecycle](references/daemon.md#identity-and-lifecycle)
    and [drift](references/containers.md#generations-jobs-and-drift). Repeated start
-   reports old-snapshot drift; explicit `restart ID` applies compatible changes.
+   joins starting/ready work with unapplied drift, or requests one compatible new
+   attempt after eligible stopped/failed work and cleanup. New starts use current
+   explicit/default config; `restart ID` deliberately replaces healthy work.
+   On `startup_conflict`, inspect the bound attempt's retained history/logs/export;
+   never retry a missing mutation reply automatically.
    Protected drift needs a deliberate reset/destroy data-removal decision. Do not
    destroy retained data or stop a reused/peer execution to force your change.
 6. Bound diagnostics: `history ID --limit 100 --json`, `inspect ID --last-completed --json`,

@@ -76,11 +76,11 @@ func (s *service) prepareSelected(ctx context.Context, request v1.PrepareRequest
 	if err != nil {
 		return v1.InstanceResponse{}, err
 	}
-	return s.prepareCaptured(ctx, snapshot, original, request.Plan.Scene, persistentOnly)
+	return s.prepareCaptured(ctx, snapshot, original, request.Plan.Scene, persistentOnly, nil)
 }
 
 // prepareCaptured accepts the exact generation resolved by preparation or launch.
-func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, original capturedSource, scene string, persistentOnly bool) (v1.InstanceResponse, error) {
+func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, original capturedSource, scene string, persistentOnly bool, observed *startObservation) (v1.InstanceResponse, error) {
 	if persistentOnly && snapshot.Plan.Lifetime != v1.Persistent {
 		return v1.InstanceResponse{}, problem("invalid_lifetime", "scene start requires a persistent scene; use run for disposable work")
 	}
@@ -112,7 +112,7 @@ func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, o
 			return v1.InstanceResponse{}, err
 		}
 	}
-	response, created, err := s.store.beginSelected(snapshot, original.checkout, s.lease, persistentOnly)
+	response, created, err := s.store.beginSelected(snapshot, original.checkout, s.lease, persistentOnly, observed)
 	if err != nil || !created {
 		return response, err
 	}

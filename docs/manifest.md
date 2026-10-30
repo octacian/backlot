@@ -175,8 +175,9 @@ result with a transient `startup_details` object containing `attempt`, ordered
 readiness. If summary retrieval fails after readiness, startup still succeeds
 with its identity/URL and an unavailable warning; incomplete details are omitted.
 
-Repeated start and stop/run use actual retained selections/values despite current
-manifest/config drift. Restart/reset adopt current selections through existing
+Starting/ready joins use actual retained selections/values despite current
+manifest/config drift. Eligible new starts adopt compatible current inputs and
+startup-details selections. Restart/reset adopt current selections through existing
 compatibility and snapshot rules. A startup replaced before observed readiness
 conflicts instead of reporting a replacement attempt's summary. Ordinary plans,
 status/follow, inspect, diagnostics, fixture discovery, execution results and
@@ -391,9 +392,9 @@ private-file override, recursive include, or deep merge.
 `config_digest` retains the machine-file byte digest. The additive
 `effective_config_digest` records composed validated inputs/tools/providers;
 source-only formatting or overridden tool changes do not become effective drift.
-Running attempts retain private launch values and provenance. Repeated run reports
-drift; explicit restart/reset resolves current layers subject to existing retained
-resource safety checks. Stop, destroy and recovery use recorded snapshots.
+Starting/ready joins use recorded configuration and report manifest/configuration
+drift; eligible new starts and explicit restart/reset resolve current layers subject
+to retained-resource safety checks. Stop, destroy and recovery use recorded snapshots.
 Diagnostics distinguish launch/current private sources and effective configuration;
 export records the attempt's effective digest without private contents.
 

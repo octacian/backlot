@@ -310,7 +310,7 @@ Removal is idempotent even when a mutation response/completion record was lost.
 Changed/moved routes or unavailable APIs produce explicit cleanup failure and
 preserve uncertain configuration for diagnosis. Fix the provider or inspect the
 private journal, then retry stop/destroy; do not prune routes by hostname/name.
-Recovery interrupts execution and requires explicit restart; it does not adopt
+Recovery interrupts execution; a later explicit scene start can accept eligible work after cleanup. It does not adopt
 foreign routes or continue workloads automatically.
 
 Structured startup categories are available in `execution.failure_detail` and

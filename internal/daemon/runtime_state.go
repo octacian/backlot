@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/gateway"
 	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 	bolt "go.etcd.io/bbolt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -264,7 +266,7 @@ func (s *store) recoverExecution(id string) error {
 	if result.CollectionFailure == "" {
 		result.CollectionFailure = "daemon interruption; output/status collection may contain gaps"
 	}
-	result.Failure = "daemon recovery interrupted execution; explicit restart required"
+	result.Failure = "daemon recovery interrupted execution; inspect before another explicit start"
 	result.FailureDetail = &v1.PlanError{Code: "execution_interrupted", Message: result.Failure}
 	if _, err := s.execution(id, v1.Interrupted, &result); err != nil {
 		return err
@@ -347,17 +349,31 @@ func (s *store) cleanupFailures() error {
 // acceptExecution rechecks eligibility and lease in the same transaction as launch
 // acceptance. Cached preparation responses never authorize resurrection.
 func (s *store) acceptExecution(id string, journal runtimeRecord, result *v1.ExecutionResult, restart bool) (v1.Instance, error) {
-	return s.acceptExecutionSnapshot(id, journal, result, restart, nil)
+	return s.acceptExecutionSnapshot(id, journal, result, restart, nil, nil)
 }
 
 // acceptExecutionSnapshot adopts current configuration for a predecessor attempt
 // in the same transaction as execution acceptance. Rejection retains launch facts.
-func (s *store) acceptExecutionSnapshot(id string, journal runtimeRecord, result *v1.ExecutionResult, restart bool, snapshot *plan.Snapshot) (v1.Instance, error) {
+func (s *store) acceptExecutionSnapshot(id string, journal runtimeRecord, result *v1.ExecutionResult, restart bool, snapshot *plan.Snapshot, expected *startObservation) (v1.Instance, error) {
 	var instance v1.Instance
 	err := s.db.Update(func(tx *bolt.Tx) error {
 		r, err := load(tx, id)
 		if err != nil {
 			return err
+		}
+		if expected != nil {
+			current, err := observeStart(tx, r.Instance)
+			if err != nil {
+				return err
+			}
+			switch current.status {
+			case v1.Prepared, v1.Stopped, v1.Failed, v1.Cancelled, v1.Interrupted:
+			default:
+				return startConflict(id, expected.attempt)
+			}
+			if current.sequence != expected.sequence || current.attempt != expected.attempt {
+				return startConflict(id, expected.attempt)
+			}
 		}
 		if !restart && r.Instance.Status != v1.Prepared {
 			return problem("restart_required", "instance is no longer prepared; explicit restart required")
@@ -439,4 +455,76 @@ func allNativePreviousBoot(r runtimeRecord, attempt string) bool {
 		}
 	}
 	return true
+}
+
+// startObservation is request-local selection proof, never part of stored or wire state.
+type startObservation struct {
+	attempt  string
+	status   v1.InstanceStatus
+	sequence int64
+}
+
+func observeStart(tx *bolt.Tx, instance v1.Instance) (startObservation, error) {
+	observed := startObservation{status: instance.Status}
+	if instance.Execution != nil {
+		observed.attempt = instance.Execution.Attempt
+	}
+	if raw := tx.Bucket([]byte("attempt_sequences")).Get([]byte(instance.ID)); raw != nil {
+		n, err := strconv.ParseInt(string(raw), 10, 64)
+		if err != nil || n <= 0 {
+			return observed, problem("state_corrupt", "invalid attempt acceptance sequence")
+		}
+		observed.sequence = n
+	}
+	if (observed.attempt == "") != (observed.sequence == 0) && instance.Status != v1.Destroyed {
+		return observed, problem("state_corrupt", "current execution and acceptance sequence disagree")
+	}
+	return observed, nil
+}
+
+func startConflict(id, attempt string) error {
+	return problem("startup_conflict", fmt.Sprintf("Instance %s startup attempt %s is no longer current or available; inspect retained history/logs/export before another explicit start", id, attempt))
+}
+
+// boundStart requires the instance mutation lock. Current state plus highwater
+// proves a join even after current history pruning; history is diagnostic only.
+func (s *store) boundStart(id string, observed startObservation, attached bool) (instance v1.Instance, bound bool, err error) {
+	err = s.db.View(func(tx *bolt.Tx) error {
+		r, err := load(tx, id)
+		if err != nil {
+			return err
+		}
+		instance = r.Instance
+		if instance.Status == v1.Destroyed {
+			return startConflict(id, observed.attempt)
+		}
+		current, err := observeStart(tx, instance)
+		if err != nil {
+			return err
+		}
+		if current.sequence == observed.sequence && current.attempt == observed.attempt {
+			bound = observed.status == v1.Starting || observed.status == v1.RuntimeReady || current.status == v1.Starting || current.status == v1.RuntimeReady
+			return nil
+		}
+		if attached {
+			return problem("conflict", "attached start cannot adopt an intervening execution; inspect the recorded instance")
+		}
+		if observed.status != v1.Starting && observed.status != v1.RuntimeReady && current.sequence == observed.sequence+1 {
+			bound = true
+			return nil
+		}
+		attempt := observed.attempt
+		if observed.status != v1.Starting && observed.status != v1.RuntimeReady {
+			attempt = "unavailable"
+			if data := tx.Bucket([]byte("attempts")).Get([]byte(attemptKey(id, observed.sequence+1))); data != nil {
+				var successor v1.Attempt
+				if err := json.Unmarshal(data, &successor); err != nil {
+					return err
+				}
+				attempt = successor.Result.Attempt
+			}
+		}
+		return startConflict(id, attempt)
+	})
+	return
 }

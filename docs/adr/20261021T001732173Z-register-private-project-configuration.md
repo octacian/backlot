@@ -5,7 +5,7 @@ status: superseded
 summary: 'Register project-only private inputs and tool overrides outside checkouts, reuse them across linked worktrees, and isolate CI setup without redirecting application configuration.'
 tags: [configuration, security, identity, cli, persistence, ci, compatibility]
 supersedes: [20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md]
-superseded_by: [20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md]
+superseded_by: [20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md, 20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md]
 ---
 
 # Register private project configuration
@@ -23,6 +23,9 @@ recovery contract, with a one-way in-place transition only from the previous mer
 main state version 6. This record replaces only the compatibility/transition policy of the published native recovery decision;
 retain all its boot provenance, authenticated ownership, explicit force-stop waiver,
 collection-gap, original-exit, deletion-guard and saved gateway/CA guarantees.
+
+The [persistent-start decision](20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md) partially supersedes this record's ordinary-start eligibility and snapshot-selection rules; unaffected rules
+and existing successors remain in force.
 
 ## Context
 

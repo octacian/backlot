@@ -5,7 +5,7 @@ status: superseded
 summary: 'Hand attempt-specific local image tags to selected native jobs and retain inspected Engine image IDs so concurrent executions do not share mutable image configuration.'
 tags: [containers, manifest, planning, lifecycle, persistence, compatibility]
 supersedes: []
-superseded_by: [20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md]
+superseded_by: [20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md, 20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md]
 ---
 
 # Pin execution-scoped build images from native jobs
@@ -16,6 +16,9 @@ producer completion and native join, inspect that tag at the configured local
 Docker Engine and retain its immutable image ID before creating consumers.
 Project commands own building, caching and tagging; Backlot owns the handoff and
 retained identity without rewriting registered inputs or application configuration.
+
+The [persistent-start decision](20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md) partially supersedes this record's ordinary-start eligibility and snapshot-selection rules; unaffected rules
+and existing successors remain in force.
 
 ## Context
 

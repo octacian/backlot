@@ -25,7 +25,7 @@ See [private configuration](manifest.md#registered-private-project-configuration
 | Start prepared/stopped/failed/cancelled/interrupted scene | Repeat start/run after diagnosis/repair | One compatible current-input attempt after joined cleanup; retain identity/data/paired credentials |
 | Apply command, probe or non-sensitive environment edits to healthy work | `restart ID` | Capture current sources and apply compatible drift; retain identity/data/paired credentials |
 | Changed protected resource/initialization/sensitive contract | `reset ID`, or `destroy ID` then start | Explicit destructive replacement required; reset keeps logical ID but replaces generation; later start after destroy gets a new ID |
-| Stop development runtime | `scene stop SCENE` or `stop ID` | Stop owned consumers/routes, retain data, credentials, history and evidence |
+| Stop development runtime | `scene stop SCENE` or `stop ID` | Stop owned consumers/routes, release verified-unused instance networks, retain data, credentials, history and evidence |
 | Remove this instance's owned data | `destroy ID` | Stop/join and remove data, then erase attempt results/logs/artifacts; export first |
 | Change daemon PATH/environment or policy | Explicit daemon stop/start in same state directory | Future daemon context changes; retained data/CA remain; no automatic scene restart |
 | Inspect or follow | `status`, `logs`, `export` | Observation only; no attachment, lease renewal or lifecycle ownership |

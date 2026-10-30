@@ -43,7 +43,10 @@ func newSharedSQLFixture(t *testing.T, freshOnly bool, manager string, endpoints
 	if endpoint == "" {
 		t.Skip("requires explicit Docker endpoint and pre-pulled SQL/alpine:3.21 images; skip is not provider evidence")
 	}
-	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
+	if err := sharedSQLBinaries.load(); err != nil {
+		t.Fatal(err)
+	}
+	binary := sharedSQLBinaries.cli
 	h := newNativeHarness(t, binary, "30s")
 	d, err := newDocker(endpoint)
 	if err != nil {
@@ -142,15 +145,14 @@ func newSharedSQLFixture(t *testing.T, freshOnly bool, manager string, endpoints
 	}
 	baseIDs = []string{maria.ID, base.ID}
 	t.Log(manager, "local immutable image", maria.ID, "Alpine local immutable base", base.ID)
-	native := filepath.Join(t.TempDir(), "consumer")
-	if out, err := exec.Command("go", "build", "-o", native, "./testdata/shared-consumer").CombinedOutput(); err != nil {
-		t.Fatalf("build native consumer: %v %s", err, out)
-	}
+	native := sharedSQLBinaries.native
 	buildDir := t.TempDir()
-	build := exec.Command("go", "build", "-o", filepath.Join(buildDir, "consumer"), "./testdata/shared-consumer")
-	build.Env = append(os.Environ(), "GOOS=linux", "CGO_ENABLED=0")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build container consumer: %v %s", err, out)
+	consumer, err := os.ReadFile(sharedSQLBinaries.linuxConsumer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "consumer"), consumer, 0755); err != nil {
+		t.Fatal(err)
 	}
 	imageOwner = newID()
 	dockerfile := "FROM " + base.ID + "\nLABEL io.backlot.owner=" + imageOwner + "\nCOPY consumer /consumer\nENTRYPOINT [\"/consumer\"]\n"
@@ -158,7 +160,7 @@ func newSharedSQLFixture(t *testing.T, freshOnly bool, manager string, endpoints
 		t.Fatal(err)
 	}
 	iid := filepath.Join(buildDir, "iid")
-	build = exec.Command("docker", "--host", endpoint, "build", "--pull=false", "--network=none", "--force-rm=true", "--iidfile", iid, buildDir)
+	build := exec.Command("docker", "--host", endpoint, "build", "--pull=false", "--network=none", "--force-rm=true", "--iidfile", iid, buildDir)
 	build.Env = append(os.Environ(), "DOCKER_BUILDKIT=0")
 	buildStarted = true
 	buildOutput, buildErr := build.CombinedOutput()
@@ -317,6 +319,10 @@ func TestSharedMariaDBGate1(t *testing.T) {
 		t.Fatal("did not observe exactly one actual owned shared server", err)
 	}
 	serverID := actualServers.Items[0].ID
+	serverNetwork, err := d.ContainerInspect(ctx, serverID, client.ContainerInspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ca, cb := f.credential(t, a.Instance.ID, "native"), f.credential(t, b.Instance.ID, "container")
 	if ca.database == cb.database || ca.user == cb.user || ca.password == cb.password {
 		t.Fatal("allocation identity collision")
@@ -352,6 +358,11 @@ func TestSharedMariaDBGate1(t *testing.T) {
 	for _, action := range []string{"stop-start", "restart"} {
 		if action == "stop-start" {
 			cli("stop", "--state-dir", h.dir, "--json", a.Instance.ID)
+			for _, attachment := range serverNetwork.Container.NetworkSettings.Networks {
+				if _, err := d.NetworkInspect(ctx, attachment.NetworkID, client.NetworkInspectOptions{}); err != nil {
+					t.Fatal("instance stop removed exact shared network", err)
+				}
+			}
 			run("host", h.project)
 		} else {
 			cli("restart", a.Instance.ID, "--state-dir", h.dir, "--startup-timeout", "90s", "--json")

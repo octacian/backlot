@@ -26,7 +26,7 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `scene start SCENE [--project PATH] [--config PATH]` | Ensure a named persistent scene is running in the selected checkout |
 | `restart ID [--config PATH]` | Persistent only; read current recorded project/config sources and apply compatible drift, retaining data |
 | `reset ID [--config PATH]` | Persistent only; stop, remove old owned generation, then start fresh; destructive |
-| `stop ID` / `scene stop SCENE [--project PATH]` | Stop selected runtime/routes and retain data; named stop uses recorded selection |
+| `stop ID` / `scene stop SCENE [--project PATH]` | Stop selected runtime/routes, release verified-unused instance networks and retain data; named stop uses recorded selection |
 | `destroy ID` | Remove owned runtime/data, then erase attempt results/logs/artifacts; export first |
 | `history ID [--limit 100] [--after CURSOR]` | Newest-first retained attempt summaries |
 | `inspect ID --attempt ATTEMPT` / `inspect ID --last-completed` | Exact retained result/provenance; mutually exclusive selectors |
@@ -54,6 +54,10 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `contracts [--daemon]` | Focused installed/daemon read capabilities, not a complete flag catalog; state-dir requires daemon mode |
 | `schema manifest\|machine\|private` | Raw installed schema, without runtime effects |
 | `version` / `licenses` | Executable/API/state identity / embedded license and notices; no daemon |
+
+Stop retries network cleanup even for stopped records; named stop may report
+`already_stopped` after releasing networks. Consumer, provider or ownership failures
+require correction and retry; see [network cleanup](containers.md#ownership-and-recovery).
 
 `list` filters intersect: `--project PATH` (exact recorded project directory) or
 `--checkout PATH` (verified checkout), plus `--project-id`, `--scene`,

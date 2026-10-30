@@ -89,10 +89,16 @@ deletes incompatible state. See the [migration decision](adr/20261022T201438827Z
 Each accepted execution records an attempt. Each retained generation records its
 own resource capabilities and generated secrets in the private daemon database.
 Containers are recreated on start, with Docker restart policies disabled. Storage,
-network and secret generations survive persistent stop/run, restart and daemon
-shutdown. Generated credentials remain paired with their storage. Host port values
-are scoped to an attempt and bound on loopback by default; explicit machine
-`docker.publish_address` selects another numeric interface. Containers use service
+generated credentials and fresh-only completion records survive persistent
+stop/run, restart and daemon shutdown. After verified consumer teardown, Backlot
+releases implicit and declared instance networks and recreates them on later
+start within the same data generation. Recorded network names, including
+`network.name` references retained by initialization jobs, stay stable; Engine IDs
+and subnets may change. Shared-service networks remain retained separately.
+Credentials stay paired with storage; shutdown retains disposable data too.
+Host port values are scoped to an attempt and bound on loopback by default;
+explicit machine `docker.publish_address` selects another numeric interface.
+Containers use service
 references for private DNS names and internal ports. Container-to-native references
 require explicit `docker.host_address` and reachable native listener interfaces;
 see the [HTTPS/mixed guide](https.md). Managed HTTPS consumers on
@@ -156,6 +162,16 @@ including unrelated consumers; no broad prune or forced volume/network deletion
 is used. Image-declared anonymous volumes belong to the owned container and are
 removed with it.
 
+Network release uses those same ownership and consumer fences, including stopped
+foreign containers, and never disconnects foreign endpoints. Healthy services kept
+for investigation retain their networks until explicit stop. Provider failure,
+uncertain ownership or unfinished consumer cleanup retains the network and reports
+a cleanup failure. Restore access/authority or remove the foreign consumer, then
+retry `stop ID` or named `scene stop`; explicit stop also reclaims unused networks
+from older already-stopped records. There is no historical sweep or global prune.
+A foreign collision at a retained network name fails later startup without adoption
+or deletion.
+
 Authenticated directory ownership authorizes cleanup by default even when a
 foreign bind source is unresolved, dangling, noncanonical or otherwise uncertain.
 Inspection still blocks positively identified same/ancestor/descendant consumers,
@@ -182,11 +198,13 @@ Docker list/inspect errors still block cleanup, as do owned-consumer shutdown,
 directory ownership/privacy, replaced/symlinked path and volume/network safeguards.
 
 After a daemon crash, verifiably owned surviving containers are stopped, available
-logs are retained, and containers are removed. Data/credentials remain retained;
+logs are retained, and containers and verified-unused instance networks are removed.
+Data/credentials remain retained;
 instances become interrupted and require an explicit start after diagnosis. Unknown ownership stays
 untouched. An unfinished intent with a verifiably owned effect can be recorded on explicit
-start; a missing or unverifiable retained allocation requires reset/destroy
-rather than silently creating empty storage. Recovery records a
+start; an authoritatively absent network can be recreated, while missing or
+unverifiable retained storage requires reset/destroy rather than silently creating
+empty storage. Recovery records a
 collection gap, because output/status around the interruption may be incomplete.
 
 Docker log drivers may transform output before returning it; Backlot preserves

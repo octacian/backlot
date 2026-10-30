@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -76,6 +77,286 @@ func TestDirectoryOwnershipPreserved(t *testing.T) {
 	}
 	if _, err := os.Stat(r.Name); err != nil {
 		t.Fatal("uncertain directory modified", err)
+	}
+}
+
+func TestInstanceNetworkLifecycle(t *testing.T) {
+	for _, mode := range []string{"stopped", "missing", "pending", "remove-gap", "create-gap", "provider", "delete-denied", "native-waiver", "ownership", "consumer", "container", "collision"} {
+		t.Run(mode, func(t *testing.T) {
+			root, dir := shortTemp(t), shortTemp(t)
+			config := writeFixture(t, root)
+			state, err := openStore(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = state.db.Close() })
+			svc := &service{store: state, directory: dir, lease: time.Minute}
+			prepared, err := svc.prepare(context.Background(), request(root, config, "dev"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, attempt := prepared.Instance.ID, newID()
+			deleteDenied := mode == "delete-denied" || mode == "native-waiver"
+			n := ownedResource{Kind: "network", Name: "backlot-" + newID(), Token: newID(), ID: newID()}
+			var present, fail, foreign, mismatch, unavailable atomic.Bool
+			present.Store(mode != "missing")
+			fail.Store(mode == "provider" || deleteDenied)
+			foreign.Store(mode == "consumer")
+			mismatch.Store(mode == "ownership")
+			var creates, removes, deleteAttempts atomic.Int32
+			d := forceEngine(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodDelete {
+					deleteAttempts.Add(1)
+				}
+				switch {
+				case unavailable.Load() || fail.Load() && (!deleteDenied || r.Method == http.MethodDelete):
+					w.WriteHeader(http.StatusServiceUnavailable)
+				case r.URL.Path == "/containers/json":
+					if r.URL.Query().Get("all") != "1" {
+						t.Error("stopped consumers omitted")
+					}
+					if foreign.Load() {
+						_, _ = w.Write([]byte(`[{"Id":"foreign"}]`))
+					} else {
+						_, _ = w.Write([]byte(`[]`))
+					}
+				case r.URL.Path == "/containers/foreign/json":
+					_ = json.NewEncoder(w).Encode(map[string]any{"NetworkSettings": map[string]any{"Networks": map[string]any{n.Name: map[string]string{"NetworkID": n.ID}}}})
+				case r.URL.Path == "/networks/create":
+					var body struct {
+						Name   string
+						Labels map[string]string
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name != n.Name || body.Labels["io.backlot.owner"] == n.Token {
+						t.Error("replacement lost name or reused retired authority", err)
+					}
+					creates.Add(1)
+					_ = json.NewEncoder(w).Encode(map[string]string{"Id": newID()})
+				case strings.HasPrefix(r.URL.Path, "/networks/"):
+					if !present.Load() {
+						w.WriteHeader(http.StatusNotFound)
+						return
+					}
+					if r.Method == http.MethodDelete {
+						removes.Add(1)
+						present.Store(false)
+						w.WriteHeader(http.StatusNoContent)
+						return
+					}
+					labels := resourceLabels(n)
+					if mismatch.Load() {
+						labels["io.backlot.owner"] = newID()
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"Id": n.ID, "Name": n.Name, "Labels": labels})
+				default:
+					t.Error("unexpected provider mutation/target", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			})
+			secret := ownedResource{Kind: "secret", Name: "secret", Token: newID(), Value: newID()}
+			secret.ID = secret.Token
+			g := resourceGeneration{ID: newID(), Endpoint: d.DaemonHost(), Resources: map[string]ownedResource{"@network": n, "secret": secret}, Initialized: map[string]bool{"init": true}, BuildImages: map[string]v1.BuildImageResult{"image": {ID: "sha256:" + newID()}}}
+			witness := filepath.Join(shortTemp(t), "data")
+			if mode == "native-waiver" {
+				if err := os.WriteFile(witness, []byte("retained data"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				data := ownedResource{Kind: "directory", Name: filepath.Dir(witness), Token: newID()}
+				data.ID = data.Token
+				if err := os.WriteFile(filepath.Join(data.Name, ".backlot-owner"), []byte(data.Token), 0600); err != nil {
+					t.Fatal(err)
+				}
+				g.Resources["data"] = data
+			}
+			if mode == "pending" || mode == "create-gap" {
+				pending := n
+				pending.ID = ""
+				g.Resources["@network"] = pending
+			}
+			if mode == "container" {
+				g.Containers = []ownedResource{{Kind: "container", Name: "owned", Token: newID(), Attempt: attempt}}
+			}
+			if err := state.saveResources(id, g); err != nil {
+				t.Fatal(err)
+			}
+			result := &v1.ExecutionResult{Attempt: attempt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano), Outcome: v1.Stopped}
+			if _, err := state.execution(id, v1.Stopped, result); err != nil {
+				t.Fatal(err)
+			}
+			if err := state.saveRuntime(id, runtimeRecord{Attempt: attempt}); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "remove-gap" {
+				state.sharedCheckpoint = func(string) error { return errors.New("remove effect not acknowledged") }
+			}
+			// Model an old stopped instance without an in-memory execution owner.
+			var stopped v1.Instance
+			if mode == "stopped" {
+				response, stopErr := svc.scene(v1.SceneTarget{CWD: root, ProjectPath: root, Scene: "dev"}, true)
+				if stopErr != nil || response.Result == nil || response.Outcome != v1.SceneAlreadyStopped {
+					t.Fatal("named stop of historical instance", stopErr)
+				}
+				stopped = response.Result.Instance
+			} else {
+				stopped, err = svc.stopExecution(id)
+			}
+			wantFailure := mode == "provider" || deleteDenied || mode == "ownership" || mode == "consumer" || mode == "container" || mode == "remove-gap"
+			if (err != nil) != wantFailure || stopped.Status != v1.Stopped || stopped.Execution.CollectionFailure != "" {
+				t.Fatal("selected stop lost completion or failure facts", err)
+			}
+			if wantFailure {
+				retained, _ := state.resources(id)
+				ids, _ := state.runtimeRecoveryIDs()
+				if retained.Resources["@network"].Removed || len(ids) != 1 || stopped.Execution.CleanupFailure == "" {
+					t.Fatal("unsettled authority or retry selection lost")
+				}
+				if mode != "remove-gap" && removes.Load() != 0 {
+					t.Fatal("unsafe removal attempted")
+				}
+				if mode == "remove-gap" {
+					if _, err := state.execution(id, v1.Stopping, stopped.Execution); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if mode == "provider" || deleteDenied || mode == "ownership" || mode == "consumer" {
+					if mode == "native-waiver" {
+						stopped.Execution.NativeCleanup = []v1.NativeCleanupResult{{Component: "test", Attempt: attempt, Confidence: v1.CleanupAuthorityLost, Detail: "guardian authority lost"}}
+						if _, err := state.execution(id, v1.Stopped, stopped.Execution); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if deleteDenied {
+						if err := state.saveRuntime(id, runtimeRecord{Attempt: attempt, LaunchPending: true}); err != nil {
+							t.Fatal(err)
+						}
+						if err := state.recoverExecution(id); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if _, err := state.abandonNative(context.Background(), id, attempt); err == nil {
+						t.Fatal("native waiver erased independent network failure")
+					}
+					if mode == "native-waiver" {
+						before := storedBytes(t, state, "resources", id)
+						deletes := deleteAttempts.Load()
+						force := v1.StopRequest{InstanceID: id, Force: true, ExpectedAttempt: attempt}
+						for _, refusal := range []string{"delete-denied", "present", "provider", "ownership", "consumer"} {
+							present.Store(refusal != "provider")
+							fail.Store(refusal == "delete-denied")
+							unavailable.Store(refusal == "provider")
+							mismatch.Store(refusal == "ownership")
+							foreign.Store(refusal == "consumer")
+							blocked, err := svc.stopRuntimeRequest(context.Background(), force)
+							journal, _ := state.runtime(id)
+							if err == nil || !journal.LaunchPending || len(blocked.NativeOwnershipWarnings) != 0 || blocked.Execution.CleanupFailure == "" || blocked.Execution.CollectionFailure == "" || !bytes.Equal(before, storedBytes(t, state, "resources", id)) || deleteAttempts.Load() != deletes {
+								t.Fatal("native force bypassed current network fence", refusal, err)
+							}
+							if !reflect.DeepEqual(blocked.Execution.NativeCleanup, stopped.Execution.NativeCleanup) {
+								t.Fatal("refusal erased native uncertainty", refusal)
+							}
+							if data, err := os.ReadFile(witness); err != nil || string(data) != "retained data" {
+								t.Fatal("refusal changed retained data", refusal, err)
+							}
+						}
+						foreign.Store(false)
+						present.Store(false) // Independent operator removal; native fence remains intact.
+						forced, err := svc.stopRuntimeRequest(context.Background(), force)
+						if err != nil || forced.Status != v1.Stopped || len(forced.NativeOwnershipWarnings) != 1 || forced.Execution.CleanupFailure != "" || len(forced.Execution.CleanupDetails) != 0 || forced.Execution.CollectionFailure == "" || !reflect.DeepEqual(forced.Execution.NativeCleanup, stopped.Execution.NativeCleanup) {
+							t.Fatal("authoritative network absence did not permit native-only waiver", err)
+						}
+						journal, _ := state.runtime(id)
+						retired, err := state.resources(id)
+						want := g
+						want.Resources = map[string]ownedResource{}
+						for name, r := range g.Resources {
+							want.Resources[name] = r
+							if r.Kind == "network" {
+								r.Removed = true
+								want.Resources[name] = r
+							}
+						}
+						if err != nil || !reflect.DeepEqual(retired, want) || journal.LaunchPending || deleteAttempts.Load() != deletes {
+							t.Fatal("waiver changed retained generation or deleted uncertain resources", err)
+						}
+						var history record
+						if err := json.Unmarshal(storedBytes(t, state, "instances", id), &history); err != nil {
+							t.Fatal(err)
+						}
+						if len(history.NativeAbandonments) != 1 || !history.NativeAbandonments[0].Pending || history.NativeAbandonments[0].Attempt != attempt || history.NativeAbandonments[0].Result.CollectionFailure == "" || len(history.NativeAbandonments[0].Result.CleanupDetails) == 0 {
+							t.Fatal("waiver lost original uncertainty and independent failure history")
+						}
+						original := history.NativeAbandonments[0].Result
+						networkFailure := false
+						for _, detail := range original.CleanupDetails {
+							networkFailure = networkFailure || detail.Field == "resources.network"
+						}
+						if !networkFailure || !reflect.DeepEqual(original.NativeCleanup, forced.Execution.NativeCleanup) {
+							t.Fatal("waiver rewrote original native or network observation")
+						}
+						code(t, state.removeResources(context.Background(), id), "native_ownership_relinquished")
+						if data, err := os.ReadFile(witness); err != nil || string(data) != "retained data" {
+							t.Fatal("native waiver permitted data removal", err)
+						}
+						return
+					}
+					if err := state.saveRuntime(id, runtimeRecord{Attempt: attempt}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				fail.Store(false)
+				foreign.Store(false)
+				mismatch.Store(false)
+				g.Containers = nil
+				retained.Containers = nil
+				if err := state.saveResources(id, retained); err != nil {
+					t.Fatal(err)
+				}
+				state.sharedCheckpoint = nil
+				wantStatus := v1.Stopped
+				if mode == "delete-denied" {
+					wantStatus = v1.Interrupted
+				}
+				if retried, err := svc.stopExecution(id); err != nil || retried.Status != wantStatus || (retried.Execution.CollectionFailure != "") != (mode == "delete-denied") {
+					t.Fatal("explicit retry", err)
+				}
+			}
+			retired, err := state.resources(id)
+			if err != nil || !retired.Resources["@network"].Removed || present.Load() {
+				t.Fatal("network retirement not settled", err)
+			}
+			if mode == "collision" {
+				present.Store(true)
+				mismatch.Store(true)
+			}
+			snap := plan.Snapshot{Docker: &v1.DockerConfig{Endpoint: g.Endpoint}, Plan: v1.PlanResponse{Resources: map[string]v1.Resource{"secret": {Kind: "secret"}}, Components: []v1.PlannedComponent{{Runtime: v1.Container}}}}
+			if mode == "missing" {
+				retired.Resources["@network"] = n
+			}
+			if mode == "create-gap" {
+				pending := n
+				pending.ID = ""
+				retired.Resources["@network"] = pending
+				present.Store(true)
+			}
+			if err := state.saveResources(id, retired); err != nil {
+				t.Fatal(err)
+			}
+			entry := &execution{}
+			err = svc.allocateResources(context.Background(), id, snap, entry)
+			if entry.docker != nil {
+				_ = entry.docker.Close()
+			}
+			if (err != nil) != (mode == "collision") {
+				t.Fatal("network replacement/reconciliation", err)
+			}
+			recreated, _ := state.resources(id)
+			if recreated.ID != g.ID || recreated.Resources["secret"] != secret || !reflect.DeepEqual(recreated.Initialized, g.Initialized) || !reflect.DeepEqual(recreated.BuildImages, g.BuildImages) || recreated.Resources["@network"].Name != n.Name {
+				t.Fatal("replacement changed retained generation or references")
+			}
+			if mode == "collision" && creates.Load() != 0 || mode == "create-gap" && (creates.Load() != 0 || recreated.Resources["@network"].ID != n.ID) {
+				t.Fatal("foreign collision mutated or interrupted create duplicated")
+			}
+		})
 	}
 }
 
@@ -178,7 +459,8 @@ func TestForeignBindUncertaintyAndAliases(t *testing.T) {
 
 func TestDockerConsumerInventoryFailuresAndMixedIdentities(t *testing.T) {
 	owned := t.TempDir()
-	for _, mode := range []string{"list-error", "inspect-error", "unknown-then-known", "known-then-unknown", "unknown-only"} {
+	n := ownedResource{Kind: "network", Name: "owned-network", ID: "owned-network-id"}
+	for _, mode := range []string{"list-error", "inspect-error", "unknown-then-known", "known-then-unknown", "unknown-only", "network-mode-name", "network-mode-id", "network-key-name", "network-key-id", "network-endpoint-id", "network-unrelated"} {
 		t.Run(mode, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -195,6 +477,23 @@ func TestDockerConsumerInventoryFailuresAndMixedIdentities(t *testing.T) {
 				case strings.HasSuffix(r.URL.Path, "/containers/foreign/json"):
 					if mode == "inspect-error" {
 						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					}
+					if strings.HasPrefix(mode, "network-") {
+						modeValue, key, endpointID := "unrelated", "unrelated", "unrelated-id"
+						switch mode {
+						case "network-mode-name":
+							modeValue = n.Name
+						case "network-mode-id":
+							modeValue = n.ID
+						case "network-key-name":
+							key, endpointID = n.Name, ""
+						case "network-key-id":
+							key, endpointID = n.ID, ""
+						case "network-endpoint-id":
+							endpointID = n.ID
+						}
+						_ = json.NewEncoder(w).Encode(map[string]any{"Id": "foreign", "HostConfig": map[string]string{"NetworkMode": modeValue}, "NetworkSettings": map[string]any{"Networks": map[string]any{key: map[string]string{"NetworkID": endpointID}, "nil-endpoint": nil}}})
 						return
 					}
 					sources := []string{filepath.Join(owned, "absent")}
@@ -219,8 +518,8 @@ func TestDockerConsumerInventoryFailuresAndMixedIdentities(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = engine.Close() })
-			err = (&dockerEngine{engine}).noConsumers(context.Background(), resourceGeneration{Resources: map[string]ownedResource{"data": {Kind: "directory", Name: owned}}})
-			if (err == nil) != (mode == "unknown-only") {
+			err = (&dockerEngine{engine}).noConsumers(context.Background(), resourceGeneration{Resources: map[string]ownedResource{"data": {Kind: "directory", Name: owned}, "network": n}})
+			if (err == nil) != (mode == "unknown-only" || mode == "network-unrelated") {
 				t.Fatal("consumer classification", err)
 			}
 		})

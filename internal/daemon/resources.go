@@ -559,6 +559,8 @@ func (s *service) destroyWithForce(ctx context.Context, id string, force bool) (
 		return v1.Instance{}, admissionErr
 	}
 	defer finish()
+	s.evidence.mu.Lock()
+	defer s.evidence.mu.Unlock()
 	unlock := s.lockMutation(id)
 	defer unlock()
 	instance, err := s.stopExecution(id)
@@ -588,23 +590,8 @@ func (s *service) destroyWithForce(ctx context.Context, id string, force bool) (
 		err = s.store.recordCleanupFailure(id, err)
 		return instance, problem("cleanup_failed", fmt.Sprintf("destroy preserved remaining resources: %v", err))
 	}
-	if instance.Execution == nil {
-		instance.Execution = &v1.ExecutionResult{Attempt: newID(), Components: []v1.ComponentResult{}}
-	}
-	instance, err = s.store.execution(id, v1.Destroyed, instance.Execution)
-	if err != nil {
-		return instance, err
-	}
-	err = s.store.db.Update(func(tx *bolt.Tx) error {
-		key := instance.Plan.Project + "/" + instance.Checkout.ID + "/" + instance.Plan.Scene
-		bucket := tx.Bucket([]byte("persistent"))
-		if string(bucket.Get([]byte(key))) == id {
-			return bucket.Delete([]byte(key))
-		}
-		return nil
-	})
-	// Keep the owner of a sticky collection gap for truthful shutdown reporting.
-	if err == nil && instance.Execution.CollectionFailure == "" {
+	instance, err = s.eraseDestroyed(id)
+	if err == nil {
 		s.mu.Lock()
 		delete(s.executions, id)
 		s.mu.Unlock()

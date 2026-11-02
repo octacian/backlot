@@ -34,7 +34,7 @@ func newControlledExpiry(t *testing.T) *controlledExpiry {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &controlledExpiry{s: &service{store: store, lease: time.Minute, executions: map[string]*execution{}}, root: root, config: config}
+	f := &controlledExpiry{s: &service{store: store, directory: store.directory, lease: time.Minute, executions: map[string]*execution{}}, root: root, config: config}
 	t.Cleanup(func() {
 		for _, release := range f.gates {
 			release()

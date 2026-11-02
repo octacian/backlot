@@ -41,7 +41,7 @@ func TestDiscoveryStrictWireValidation(t *testing.T) {
 	c := New("unused")
 	defer c.Close()
 	id := strings.Repeat("a", 64)
-	response := `{"api_version":"v1","instance_id":"` + id + `","records":[],"gaps":[],"historical_collection":"unknown","more":false,"active":false,"unexpected":true}`
+	response := `{"api_version":"v1","instance_id":"` + id + `","records":[],"gaps":[],"historical_collection":"known","more":false,"active":false,"unexpected":true}`
 	c.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		var q v1.LogPageRequest
 		if r.URL.Path != "/v1/logs/page" || json.NewDecoder(r.Body).Decode(&q) != nil || q.InstanceID != id || q.Attempt != id || q.Stream != "stderr" {
@@ -57,7 +57,7 @@ func TestDiscoveryStrictWireValidation(t *testing.T) {
 	if _, err := c.LogPage(context.Background(), q); err != nil {
 		t.Fatal(err)
 	}
-	response = strings.Replace(response, `"historical_collection":"unknown"`, `"historical_collection":"complete"`, 1)
+	response = strings.Replace(response, `"historical_collection":"known"`, `"historical_collection":"complete"`, 1)
 	if _, err := c.LogPage(context.Background(), q); err == nil {
 		t.Fatal("invented completeness accepted")
 	}

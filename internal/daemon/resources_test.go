@@ -708,9 +708,7 @@ func TestDockerLogBytesThroughHistoricalAPI(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.destroy(context.Background(), id); err != nil {
-		t.Fatal(err)
-	}
+
 	body, err := json.Marshal(v1.LogsRequest{APIVersion: v1.Version, InstanceID: id})
 	if err != nil {
 		t.Fatal(err)
@@ -742,7 +740,14 @@ func TestDockerLogBytesThroughHistoricalAPI(t *testing.T) {
 		}
 	}
 	if response.Active || !binary || !bytes.Equal(got.Bytes(), want) {
-		t.Fatal("control, binary or ordinary bytes not retained after destroy")
+		t.Fatal("control, binary or ordinary bytes not retained after completion")
+	}
+	if _, err := svc.destroy(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	erased, err := svc.logs(v1.LogsRequest{InstanceID: id})
+	if err != nil || len(erased.Records) != 0 {
+		t.Fatal("destroy retained binary logs", err)
 	}
 }
 

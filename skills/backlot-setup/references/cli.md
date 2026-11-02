@@ -23,12 +23,15 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `plan SCENE [--project PATH] [--config PATH] [-- ARGS...]` | Offline selected input/seed/tool resolution; no daemon/provider effects |
 | `prepare SCENE [--project PATH] [--config PATH]` | Daemon records metadata only; returns disposable lease when applicable |
 | `run SCENE [--project PATH] [--config PATH] [-- ARGS...]` | Execute; persistent returns at readiness, disposable after collection/cleanup |
-| `scene start SCENE [--project PATH] [--config PATH]` | Execute/join a named persistent scene in the selected checkout |
+| `scene start SCENE [--project PATH] [--config PATH]` | Ensure a named persistent scene is running in the selected checkout |
 | `restart ID [--config PATH]` | Persistent only; read current recorded project/config sources and apply compatible drift, retaining data |
 | `reset ID [--config PATH]` | Persistent only; stop, remove old owned generation, then start fresh; destructive |
 | `stop ID` / `scene stop SCENE [--project PATH]` | Stop selected runtime/routes, release verified-unused instance networks and retain data; named stop uses recorded selection |
-| `destroy ID` | Remove selected owned runtime/data; retain history/evidence subject to retention |
-| `inspect ID` / `status ID` | Redacted recorded instance, including failed/destroyed history; no current manifest needed |
+| `destroy ID` | Remove owned runtime/data, then erase attempt results/logs/artifacts; export first |
+| `history ID [--limit 100] [--after CURSOR]` | Newest-first retained attempt summaries |
+| `inspect ID --attempt ATTEMPT` / `inspect ID --last-completed` | Exact retained result/provenance; mutually exclusive selectors |
+| `history prune ID [--older-than D] [--keep N] [--dry-run]` | Union selection; requires age and/or count; protects runtime/cleanup obligations |
+| `inspect ID` / `status ID` | Current redacted instance; destroyed identities omit execution; no manifest needed |
 | `scene status SCENE [--project PATH]` | Recorded persistent selection; successful `not_found` has no result |
 | `status ID --follow` / `scene status SCENE --follow` | Sample without owning runtime; `--interval 1s` (100ms–1m), `--duration 30m` (1s–24h) |
 | `list` | One page of recorded history, including destroyed records; `--limit 100` (1–100), `--after NEXT_AFTER_ID` |
@@ -36,7 +39,7 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `logs ID --page` | Finite page; `--component`, `--attempt`, `--stream stdout\|stderr`, `--after`, `--limit 100` (1–1000) |
 | `fixtures ID [--component NAME]` | Discover fixture names with sensitive values redacted |
 | `secret ID NAME --component NAME` | Explicitly reveal one sensitive fixture; protect output |
-| `export ID --output PATH [--wait[=SECONDS_OR_DURATION]] [--allow-partial]` | Publish latest settled attempt to a new caller-owned destination; observer only |
+| `export ID --output PATH [--attempt ATTEMPT] [--wait[=SECONDS_OR_DURATION]] [--allow-partial]` | Publish current or exact retained settled attempt to a new caller-owned destination; observer only |
 | `doctor` | Daemon access/paths only; selected scopes and opt-in probe described below |
 | `renew ID --lease-token TOKEN` | Explicitly renew disposable lease; capability from initial preparation, never inspection |
 | `cancel ID` | Cancel preparation/execution using recorded identity; no new work |
@@ -77,8 +80,27 @@ client cancellation/loss; no tails or keep-on-failure. `restart --allow-image-ch
 explicitly accepts changed build-image compatibility risk. See
 [lifecycle/drift](daemon.md#identity-and-lifecycle) before restart/reset.
 
+Persistent `run` and `scene start` wait for starting work or return an already-ready
+scene, reporting unapplied configuration changes. After preparation, stop, failure,
+cancellation or interruption, they can start one new attempt once prior work and
+cleanup finish. Identity, data and paired credentials survive. New attempts use
+current compatible configuration from `--config` or the normal per-user default;
+they do not reuse the recorded path. Restart/reset keep their existing path defaults.
+Use `restart ID` to apply edits to running work; protected changes require reset/destroy.
+
+Overlapping starts share one attempt while it remains current, even if it finishes
+before the response. Replacement returns `startup_conflict` with a nonzero exit:
+inspect the returned instance/attempt using `history`, `inspect`,
+`logs --page --attempt` or `export --attempt` before deciding to start again.
+Polling conflicts retain the last observed snapshot without the replacement's
+startup details. A missing mutation reply leaves acceptance unknown; never retry
+automatically. Startup cancellation stops only its accepted attempt; ID-only
+operator stop remains an override. Uncertain cleanup blocks a new attempt;
+collection failure alone does not. See [lifecycle](daemon.md#identity-and-lifecycle).
+
 Daemon startup accepts `--lease-duration 30s` (100ms–24h; zero selects the default),
-`--retention-age 168h`, `--retention-bytes 1073741824` (1 GiB); retention values
+`--retention-attempts 100` (positive completed count), `--retention-age 168h`,
+`--retention-bytes 1073741824` (1 GiB); age/byte retention values
 cannot be negative; zero selects the corresponding default. The default state directory is `backlot/daemon` beneath
 `os.UserConfigDir()`. Starting against an existing daemon leaves its policy intact.
 `--config` selects machine configuration, not daemon state/policy or private inputs;

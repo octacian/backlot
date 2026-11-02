@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -96,6 +97,50 @@ func TestSharedLifecycleTransportBudget(t *testing.T) {
 				if _, err := c.Shared(ctx, action, request); err == nil || ctx.Err() == nil {
 					t.Fatal("caller deadline ignored", err)
 				}
+			}
+		})
+	}
+}
+
+func TestOrdinaryStartTransportBudget(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Backlot-API-Version", v1.Version)
+		if r.URL.Path == "/v1/status" {
+			_ = json.NewEncoder(w).Encode(v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, Status: "running", PID: 1, LeaseDuration: "1m"})
+			return
+		}
+		select {
+		case <-time.After(60 * time.Millisecond):
+		case <-r.Context().Done():
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Backlot-API-Version", v1.Version)
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(v1.ErrorResponse{APIVersion: v1.Version, Error: v1.PlanError{Code: "startup_conflict", Message: "bound attempt was replaced; inspect history"}})
+	}))
+	defer server.Close()
+	c := New("unused")
+	defer c.Close()
+	c.http.Timeout = 5 * time.Millisecond
+	c.http.Transport = &http.Transport{Proxy: func(*http.Request) (*url.URL, error) { return url.Parse(server.URL) }}
+	defer c.http.CloseIdleConnections()
+
+	for _, path := range []string{"/v1/run", "/v1/scenes/start"} {
+		t.Run(path, func(t *testing.T) {
+			var response v1.InstanceResponse
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			err := c.call(ctx, http.MethodPost, path, v1.RunRequest{}, &response)
+			var detail *v1.PlanError
+			if !errors.As(err, &detail) || detail.Code != "startup_conflict" {
+				t.Fatal("start lost cleanup budget or typed conflict", err)
+			}
+			ctx, cancel = context.WithTimeout(context.Background(), 5*time.Millisecond)
+			defer cancel()
+			if err := c.call(ctx, http.MethodPost, path, v1.RunRequest{}, &response); err == nil || ctx.Err() == nil {
+				t.Fatal("caller deadline ignored", err)
 			}
 		})
 	}

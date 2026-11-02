@@ -21,12 +21,12 @@ See [private configuration](manifest.md#registered-private-project-configuration
 | Discover declarations / resolve current prerequisites | `scene list`, `scene describe` / `plan` | No runtime mutation; plan resolves caller-side tools, inputs and seeds |
 | Record metadata only | `prepare SCENE` | Snapshot/identity, no application readiness or provider allocation |
 | First persistent start | `scene start SCENE` or `run SCENE` | Accept snapshot/attempt, allocate selected resources, await readiness |
-| Join running scene; or resume stopped scene | Repeat start/run | Existing identity, retained snapshot/data/credentials; report drift without applying edits |
-| Changed ordinary command, probe or non-sensitive environment | `restart ID` | Capture current sources and apply compatible drift; retain identity/data/paired credentials |
+| Join starting/ready scene | Repeat start/run | Same attempt and recorded configuration; report unapplied changes |
+| Start prepared/stopped/failed/cancelled/interrupted scene | Repeat start/run after diagnosis/repair | One new attempt using compatible current configuration after cleanup; retain identity/data/paired credentials |
+| Apply command, probe or non-sensitive environment edits to healthy work | `restart ID` | Capture current sources and apply compatible drift; retain identity/data/paired credentials |
 | Changed protected resource/initialization/sensitive contract | `reset ID`, or `destroy ID` then start | Explicit destructive replacement required; reset keeps logical ID but replaces generation; later start after destroy gets a new ID |
-| Failed/interrupted persistent attempt | Inspect then `restart ID` | No implicit retry; compatibility/ownership fences apply before old work is stopped |
 | Stop development runtime | `scene stop SCENE` or `stop ID` | Stop owned consumers/routes, release verified-unused instance networks, retain data, credentials, history and evidence |
-| Remove this instance's owned data | `destroy ID` | Stop/join before removal; history/evidence remain subject to retention |
+| Remove this instance's owned data | `destroy ID` | Stop/join and remove data, then erase attempt results/logs/artifacts; export first |
 | Change daemon PATH/environment or policy | Explicit daemon stop/start in same state directory | Future daemon context changes; retained data/CA remain; no automatic scene restart |
 | Inspect or follow | `status`, `logs`, `export` | Observation only; no attachment, lease renewal or lifecycle ownership |
 | Own one new persistent attempt until client ends | `scene start --attached SCENE` or `run --attached SCENE` | Refuse existing runtime; signal/loss stops only the accepted attempt and retains data |
@@ -66,12 +66,12 @@ recorded-ID commands work outside a checkout. Finite `status ID` keeps its exist
 `InstanceResponse` output. ID observation includes persistent, disposable and
 historical instances; use `run` to execute disposable scenes.
 
-Start accepts `--startup-timeout`, `--job-timeout` and `--stop-grace`. Repeated or
-concurrent starts converge on the existing instance and report manifest/config
-drift without reconciling retained data. Unhealthy execution needs explicit
-restart. A logical project/checkout/scene key recorded at a different canonical
-project directory conflicts before start/join. Cancelling startup uses existing
-run cleanup; cancelling observation leaves execution alone.
+Start accepts `--startup-timeout`, `--job-timeout` and `--stop-grace` and follows
+[the start rules](cli.md#commands-and-defaults) for configuration, overlapping
+requests and missing replies.
+A logical project/checkout/scene key recorded at a different canonical project
+directory conflicts before start/join. Cancelling startup stops and waits for only
+its accepted attempt; cancelling observation leaves execution alone.
 
 ### Attached execution
 
@@ -110,7 +110,7 @@ not hide recorded instances while the directory and checkout identity remain usa
 
 Multiple non-destroyed persistent records at that location/scene produce
 `ambiguous_target`; use `backlot status ID` or `backlot stop ID`. Failed and
-metadata-only records participate; destroyed history is available by ID only.
+metadata-only records participate; destroyed identity tombstones are available by ID only.
 Malformed recorded selectors or disagreement with existing persistent slots produce
 `state_corrupt` before discovery filtering. Preserve state for diagnosis; existing
 ID inspection/cleanup remains independent of named selection.
@@ -329,7 +329,8 @@ backlot list --checkout /absolute/worktree --project-id my-project --json
 backlot daemon config --state-dir /private/backlot --json
 ```
 
-Unfiltered list remains global retained history, including destroyed instances.
+Unfiltered list remains global recorded identity discovery, including destroyed
+tombstones; successful destroy retains no execution result or attempt evidence.
 `--project` and `--checkout` are mutually exclusive explicit location selectors;
 project selects the exact recorded directory (a deleted recognized manifest path
 also works), while checkout selects all projects in that existing directory's

@@ -21,7 +21,7 @@ func runtimeCommands() []*urfave.Command {
 	commands := []*urfave.Command{}
 	for _, name := range []string{"run", "restart", "reset"} {
 		flags := append(daemonFlags(false), &urfave.StringFlag{Name: "config", Usage: "Machine configuration path"}, &urfave.StringFlag{Name: "startup-timeout", Value: defaultStartupTimeout, Usage: "Startup budget; 0s is unlimited"}, &urfave.StringFlag{Name: "job-timeout", Value: defaultJobTimeout, Usage: "Job budget; 0s is unlimited"}, &urfave.StringFlag{Name: "stop-grace", Value: defaultStopGrace, Usage: "Grace before cleanup escalation"})
-		usage, args := "Start a scene and wait for readiness or disposable completion", "<scene> [terminal-job args...]"
+		usage, args := "Ensure a persistent scene is running, or wait for disposable completion", "<scene> [terminal-job args...]"
 		if name == "run" {
 			flags = append(flags, &urfave.BoolFlag{Name: "attached", Usage: "Own a persistent attempt until this client ends"}, &urfave.BoolFlag{Name: "keep-on-failure", Usage: "Keep disposable resources after failure"}, &urfave.StringFlag{Name: "project", Usage: "Project directory or manifest path"})
 		} else {
@@ -56,7 +56,7 @@ func runtimeCommands() []*urfave.Command {
 		response, err := cli.StopExecutionWithRequest(ctx, request)
 		return output(c, response, err)
 	}})
-	commands = append(commands, &urfave.Command{Name: "destroy", ArgsUsage: "<instance-id>", Description: "Evidence remains subject to retention after runtime/data removal.\nExample: backlot destroy INSTANCE_ID", Usage: "Remove runtime/data; --force waives shared ownership proof only, retaining consumer/native/private-resource fences", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force", Usage: "Waive shared ownership proof only; consumer, native and private-resource fences still apply"}), Action: func(ctx context.Context, c *urfave.Command) error {
+	commands = append(commands, &urfave.Command{Name: "destroy", ArgsUsage: "<instance-id>", Description: "Successful destroy irreversibly erases attempt results, logs and artifacts; export first.\nExample: backlot destroy INSTANCE_ID", Usage: "Remove runtime/data; --force waives shared ownership proof only, retaining consumer/native/private-resource fences", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force", Usage: "Waive shared ownership proof only; consumer, native and private-resource fences still apply"}), Action: func(ctx context.Context, c *urfave.Command) error {
 		if c.Args().Len() != 1 {
 			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "destroy requires one recorded instance ID"})
 		}
@@ -65,7 +65,7 @@ func runtimeCommands() []*urfave.Command {
 			return output(c, nil, err)
 		}
 		defer cli.Close()
-		response, err := cli.DestroyWithRequest(ctx, v1.DestroyRequest{APIVersion: v1.Version, InstanceID: c.Args().First(), Force: c.Bool("force")})
+		response, err := cli.DestroyWithRequest(ctx, v1.DestroyRequest{Contract: v1.DestroyContract, APIVersion: v1.Version, InstanceID: c.Args().First(), Force: c.Bool("force")})
 		return output(c, response, err)
 	}})
 	commands = append(commands, &urfave.Command{Name: "logs", ArgsUsage: "<instance-id>", Description: "Reads retained logs after teardown too; follow interruption stops observation without stopping runtime. JSON emits log NDJSON.\nExample: backlot logs --follow --component app INSTANCE_ID", Usage: "Read retained component logs", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "page", Usage: "Emit one finite bounded log page"}, &urfave.StringFlag{Name: "attempt", Usage: "Page attempt ID"}, &urfave.StringFlag{Name: "stream", Usage: "Page stream stdout or stderr"}, &urfave.StringFlag{Name: "after", Usage: "Transient page continuation"}, &urfave.IntFlag{Name: "limit", Value: 100, Usage: "Page records, 1 through 1000"}, &urfave.BoolFlag{Name: "follow", Usage: "Stream new logs until runtime settles or observation is interrupted"}, &urfave.StringFlag{Name: "component", Usage: "Filter logs by component name (default: all components)"}), Action: func(ctx context.Context, c *urfave.Command) error {
@@ -231,7 +231,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 				grace, _ = time.ParseDuration(request.Options.StopGrace)
 			}
 			cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
-			stopped, stopErr := cli.StopExecution(cleanup, id)
+			stopped, stopErr := cli.StopExecutionWithRequest(cleanup, v1.StopRequest{APIVersion: v1.Version, InstanceID: id, ExpectedAttempt: attempt})
 			cancel()
 			if stopErr != nil {
 				return observedFailure(c, response, stopErr)
@@ -301,7 +301,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 				grace, _ = time.ParseDuration(request.Options.StopGrace)
 			}
 			cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
-			stopped, stopErr := cli.StopExecution(cleanup, id)
+			stopped, stopErr := cli.StopExecutionWithRequest(cleanup, v1.StopRequest{APIVersion: v1.Version, InstanceID: id, ExpectedAttempt: attempt})
 			cancel()
 			if stopErr != nil {
 				return observedFailure(c, response, stopErr)

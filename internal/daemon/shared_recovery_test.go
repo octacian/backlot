@@ -145,7 +145,7 @@ func TestSharedDestroyTracksReleaseOwner(t *testing.T) {
 	defer func() { _ = state.db.Close() }()
 	root := shortTemp(t)
 	config := writeFixture(t, root)
-	svc := &service{store: state, lease: time.Second}
+	svc := &service{store: state, directory: state.directory, lease: time.Second}
 	prepared, err := svc.prepare(context.Background(), request(root, config, "dev"))
 	if err != nil {
 		t.Fatal(err)

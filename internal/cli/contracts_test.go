@@ -62,7 +62,7 @@ func TestPublicCommandConfiguration(t *testing.T) {
 		}
 	}
 	visit(root)
-	if actions != 43 || jsonFlags != 1 || root.ExitErrHandler == nil {
+	if actions != 44 || jsonFlags != 1 || root.ExitErrHandler == nil {
 		t.Fatal(actions, jsonFlags)
 	}
 	for _, c := range root.Commands {

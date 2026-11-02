@@ -47,12 +47,17 @@ copies as their runtime changes. Capability/help presence does not prove semanti
    work or `run NAME --json -- ACTUAL_TEST_ARGS` for disposable tests. Preserve the
    process exit and parse the named result as described by [CLI](references/cli.md).
    Record returned instance/attempt IDs and whether persistent work was reused;
+   repeat start after a repaired eligible failure for one compatible new attempt,
+   retaining data/paired credentials. Ready joins report unapplied drift; healthy
+   replacement remains explicit restart. On startup conflict, inspect exact history;
    discovery, plan, doctor and metadata-only prepared state do not prove success.
    If a mutation reply is missing, acceptance is unknown: inspect recorded scope
    before considering retry, and never blindly repeat it.
 6. Inspect an actual application failure too when validating adoption. Read
    [evidence](references/evidence.md) and [lifecycle](references/daemon.md#identity-and-lifecycle).
-   Distinguish terminal exit, runtime, collection and cleanup outcomes; preserve
+   Use `history ID`/`inspect ID --last-completed` to distinguish retained attempts.
+   Export needed evidence before destroy, which erases results/logs/artifacts; exports
+   survive. Distinguish terminal exit, runtime, collection and cleanup outcomes; preserve
    uncertainty. Stop/destroy only work authorized for this task, by returned ID in
    the same daemon scope. Stop retains data; reset/destroy need explicit removal
    intent. Reused scenes, peer worktrees, shared servers, daemons and gateways are

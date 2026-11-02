@@ -70,6 +70,9 @@ func (c *Client) LogPage(ctx context.Context, request v1.LogPageRequest) (v1.Log
 	err := c.discoveryCall(ctx, "/v1/logs/page", request, &r)
 	if err == nil {
 		err = r.Validate(request)
+		if err == nil && request.Attempt != "" && r.HistoricalCollection != "known" {
+			err = &v1.PlanError{Code: "unsupported_feature", Message: "daemon does not support retained attempt collection facts; upgrade the daemon"}
+		}
 	}
 	return r, err
 }

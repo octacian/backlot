@@ -27,9 +27,9 @@ locking, without automatic retry/start or live process handover. Cleanup and
 transport failures remain errors. Supported upgrades require no wipe or fresh directory.
 
 Existing snapshots remain readable for recorded cleanup without becoming a current
-input source or acquiring invented provenance. Eligible prepared/stopped starts use
+input source or acquiring invented provenance. Eligible persistent starts use
 current captured configuration after retained-resource/sensitive-value checks;
-unsafe drift fails before effects. Failed/interrupted instances need explicit restart.
+unsafe drift fails before effects and preserves the old snapshot.
 
 Preserve unsupported state for diagnosis and its matching binary's lifecycle.
 A different directory does not clean its resources. Backlot never automatically
@@ -64,14 +64,16 @@ checks. See [container application trust](https.md#public-root-file-mounts-for-c
 
 
 A fresh-only job is skipped only after its successful exit and completion record.
-A failed initialization leaves its generation incomplete. Explicit restart can
-retry that same contract/generation; no background retry, repair or initialization
-rollback occurs. Each-start jobs run at every start. Image initialization is the
-image's responsibility and does not create a separate Backlot job record.
+A failed initialization leaves its generation incomplete. An explicit start can
+retry the same compatible contract/generation once cleanup finishes; no automatic
+retry, repair or initialization rollback occurs. Each-start jobs run at every start.
+Image initialization is the image's responsibility and does not create a separate
+Backlot job record.
 
-Repeated run returns the recorded instance and manifest/config digest drift.
-Restart applies ordinary commands, probes and non-sensitive environment changes.
-Before stopping any existing work, it rejects retained resource declarations,
+Start leaves an already-running scene unchanged and reports unapplied configuration
+changes. If the scene needs a new attempt, start uses the current compatible
+configuration. Use restart to apply changes to a running scene.
+Before stopping old work, both reject changes to retained resource declarations,
 attachments/mounts, storage-consuming container image/argument changes, fresh-only
 contracts, Docker endpoint changes (including port-only scenes with an implicit
 network), and resolved sensitive/inherited/seed-value changes. Implicit native
@@ -79,13 +81,14 @@ launch locations such as PATH/HOME/TMPDIR may change for ordinary work; explicit
 pass-throughs, seeds and secret assignments remain protected even for those keys.
 Fresh-only contracts protect their resolved launch values too. Mark credentials `secret: true` or use declared secret inputs/resources.
 The conservative contract may require reset for changes that an application could
-handle; there is no permissive compatibility engine. Failed/interrupted instances
-require explicit restart. Stop/run reuses the old snapshot, reporting drift.
+handle; there is no permissive compatibility engine. Stop/run uses current
+compatible inputs for a new attempt; it never resets data to force progress.
+See [start/concurrency behavior](cli.md#commands-and-defaults).
 
 Reset stops and joins owned consumers, removes the old generation, accepts the new
 validated snapshot and initializes/starts a new generation under the same logical
-instance ID. Destroy stops work and removes owned data, retaining snapshots,
-results and historical logs under a `destroyed` status. A later run gets a new
+instance ID. Destroy stops work and removes owned data, then erases snapshots, current results,
+retained attempts, logs and artifacts, keeping a minimal `destroyed` identity. A later run gets a new
 instance ID. Repeated destroy is idempotent. Cleanup failures return nonzero and
 retain remaining handles for explicit cleanup retry. Neither reset nor destroy
 promises atomic rollback after destructive cleanup has begun.
@@ -149,16 +152,17 @@ directory ownership/privacy, replaced/symlinked path and volume/network safeguar
 After a daemon crash, verifiably owned surviving containers are stopped, available
 logs are retained, and containers and verified-unused instance networks are removed.
 Data/credentials remain retained;
-instances become interrupted and require explicit restart. Unknown ownership stays
+instances become interrupted and require an explicit start after diagnosis. Unknown ownership stays
 untouched. An unfinished intent with a verifiably owned effect can be recorded on explicit
-restart; an authoritatively absent network can be recreated, while missing or
+start; an authoritatively absent network can be recreated, while missing or
 unverifiable retained storage requires reset/destroy rather than silently creating
 empty storage. Recovery records a
 collection gap, because output/status around the interruption may be incomplete.
 
 Docker log drivers may transform output before returning it; Backlot preserves
 the bytes supplied by the engine. Container stdout/stderr is collected outside Docker containers while running and
-joined before deletion. Historical `logs` remains available after destroy.
+joined before deletion. Logs remain after ordinary stop and disposable cleanup; successful explicit destroy
+erases them. Export before destroy to retain caller-owned diagnostics.
 Application output is captured as emitted and can contain application-printed
 credentials; ordinary Backlot plans/status never expose private secret values.
 See [disposable evidence](evidence.md) for artifacts, keep-on-failure, explicit

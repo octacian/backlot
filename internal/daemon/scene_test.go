@@ -37,7 +37,7 @@ func sceneFixture(t *testing.T) (*service, string, string) {
 			t.Error(err)
 		}
 	})
-	return &service{store: store, lease: time.Minute, generation: newID()}, root, config
+	return &service{store: store, directory: store.directory, lease: time.Minute, generation: newID()}, root, config
 }
 
 func scenePrepare(t *testing.T, s *service, root, config string) v1.InstanceResponse {

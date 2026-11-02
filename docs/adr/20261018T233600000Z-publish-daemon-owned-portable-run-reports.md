@@ -1,59 +1,78 @@
 ---
 title: 'Publish daemon-owned portable run reports'
 date: '2026-10-18'
-status: accepted
-implementation: implemented
+status: superseded
 summary: 'Export a fenced settled attempt through the typed daemon API into an audited no-replacement directory with an independently versioned report.'
 tags: [evidence, api, security]
 supersedes: []
-superseded_by: []
-related: []
-tracking: ["https://github.com/octacian/backlot/issues/41"]
-implemented_by: ["https://github.com/octacian/backlot/commit/7b25dc078017ed39acd9865484d72c376cfb45d0"]
+superseded_by: [20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md]
 ---
 
 # Publish daemon-owned portable run reports
 
-## Context and Problem Statement
+The daemon owns portable evidence export through the existing same-user local
+API. Publish one settled execution attempt as a directory containing an intentional
+`backlot.export/v1` JSON report, a script-free HTML entry page and copied evidence.
+Clients and Actions consume this public operation rather than daemon storage.
 
-Evidence must remain useful after private runtime removal and relocation.
-Action-side private-record copying duplicates selection/audit rules and can race
-active producers or pruning. Reports must not execute untrusted summaries or leak
-lifecycle capabilities.
+## Context
 
-## Considered Options
+[Issue 41](https://github.com/octacian/backlot/issues/41) requires useful reports
+after private runtime removal and relocation. Existing Actions duplicate private
+record selection, copying and audit; active producers and concurrent pruning can
+otherwise produce misleading evidence. Report presentation must not execute
+untrusted summary text or serialize private lifecycle capabilities.
 
-- One daemon-owned portable directory export through the typed API.
-- Action-side copying: couples every caller to private state.
-- Links to retained files: fail relocation and pruning.
-- Replacement publication or check-then-rename: risks data loss under races.
-- A report parser/UI framework: adds an unrelated product boundary.
+## Decision
 
-## Decision Outcome
+Fence instance mutations and evidence pruning while selecting and copying the
+latest settled attempt. Wait is explicit and observes without run cancellation;
+kept services are producers until stopped. Strict export rejects known incomplete
+evidence. Explicit partial mode records omissions and never relaxes safety.
 
-Export one settled execution attempt with a separately versioned JSON report,
-script-free HTML entry and copied evidence. Fence lifecycle mutations and pruning
-while selecting/copying. Waiting is explicit and grants no cancellation authority;
-kept services remain producers. Strict mode rejects known incomplete evidence;
-explicit partial mode records omissions without weakening safety.
+Use a new caller-owned destination outside private daemon state, sibling private
+staging, and platform atomic no-replacement rename. Existing destinations are
+always rejected. Root filesystem operations anchor copy/destination access.
+Audit generic filesystem, key and ZIP exclusions before publication; application
+format assertions remain in the existing application tests, without a product
+parser framework. Preserve application report bytes and assets as labelled content.
 
-Publish outside private state to a new caller-owned destination through private
-staging and atomic no-replacement rename. Audit filesystem/key/archive exclusions
-before publication. Preserve application report bytes as labelled content and
-inventory only copied relative paths, hashes, bounded provenance and original
-outcomes. HTML escapes logs and discloses display truncation while retaining originals.
+Version the portable report separately from API/state. Inventory only copied
+relative paths and hashes, bounded provenance, timestamps and original outcomes.
+The HTML embeds escaped logs in a collapsed script-free section, using the
+user-approved 256 KiB decoded text/context head-and-tail display budget. Exact
+omissions are visible and the full original NDJSON stays copied and inventoried.
+Primary report/log/media/archive links precede a collapsed complete file list.
 
-Never serialize private records, plans, machine configuration, secrets or
-capabilities. Unknown historical facts remain unknown. Publication failure may
-retain an independently settled application result but cannot claim a destination.
+Do not serialize plans, machine paths/configuration, secrets, fixtures or private
+records. Missing historical facts remain unknown. A publication failure may
+return a settled original result alongside its typed error; it never claims a
+published destination. No historical compatibility/migration layer is introduced.
 
-### Consequences
+## Consequences
 
-Local users, agents and CI share one supported export boundary. Caller storage
-owns retention; copying large evidence delays fenced operations. Script-free
-presentation reduces summary risk but cannot sanitize arbitrary application
-artifacts or replace application secret discipline.
+One operation works for local users, agents and CI. Caller storage determines
+retention after publication. Export holds lifecycle/pruning fences during copying;
+large evidence can delay those operations. The HTML summary requires no runtime
+or scripts, while application reports retain their own viewer requirements and
+application secret discipline remains necessary.
 
-## More Information
+## Alternatives considered
 
-[Portable export contract](/docs/evidence.md#portable-per-instance-export).
+Action-side export keeps private storage coupling and leaves local users without
+a supported workflow. Linking evidence fails relocation and pruning. Replacing
+an existing directory risks data loss; check-then-rename alone cannot enforce
+collision behavior under races. A framework report parser/UI adds an unrelated
+product boundary. Archives are unnecessary for the minimum portable directory.
+
+## Revisit when
+
+Revisit snapshot cost if measured evidence volume makes copying under fences
+unacceptable, or when a new supported platform needs an equivalent safe atomic
+publication primitive. Binary releases and action version tags remain issue 25.
+
+## References
+
+- [Shared API architecture](../architecture.md#shared-api)
+- [Portable export contract](../evidence.md#portable-per-instance-export)
+- [Typed Go API decision](20261007T052013961Z-use-go-with-a-shared-typed-local-api-and-urfave-cli.md)

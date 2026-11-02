@@ -242,18 +242,31 @@ func TestHTTPSRuntime(t *testing.T) {
 					if httpsBody(t, f, kept.Origin, "/ssr") != "ssr:api:/value" {
 						t.Fatal("healthy mixed dependencies/routes removed")
 					}
+					logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: runID, Component: "client"})
+					if err != nil || len(logs.Records) == 0 {
+						t.Fatal("kept output missing before destroy", logs, err)
+					}
+					for _, record := range logs.Records {
+						if record.Attempt != kept.Attempt || record.Time == "" || record.Stream == "" {
+							t.Fatal("kept output context missing", record)
+						}
+					}
+					report := filepath.Join(kept.Artifacts[0].Path, "report")
+					if data, err := os.ReadFile(report); err != nil || string(data) != "kept-artifact\n" {
+						t.Fatal("kept artifact missing before destroy", err)
+					}
 					if _, err := h.cli.Destroy(context.Background(), runID); err != nil {
 						t.Fatal(err)
 					}
 					if httpsBody(t, f, kept.Origin, "/api/value") != "unrelated sentinel" {
 						t.Fatal("explicit destroy retained owned route or disturbed unrelated route")
 					}
-					logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: runID, Component: "client"})
-					if err != nil || len(logs.Records) == 0 {
-						t.Fatal("post-destroy output missing", logs, err)
+					logs, err = h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: runID, Component: "client"})
+					if err != nil || len(logs.Records) != 0 {
+						t.Fatal("destroy retained output", logs, err)
 					}
-					if _, err := os.Stat(filepath.Join(kept.Artifacts[0].Path, "report")); err != nil {
-						t.Fatal("destroy removed retained artifact", err)
+					if _, err := os.Stat(report); !os.IsNotExist(err) {
+						t.Fatal("destroy retained artifact", err)
 					}
 					h.manifest.Components["client"] = original
 					h.write()

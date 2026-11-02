@@ -64,7 +64,7 @@ func TestLegacySnapshotAdoptionIsAtomicWithAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldSnapshot, oldSecrets := storedBytes(t, state, "snapshots", id), storedBytes(t, state, "secrets", id)
-	_, err = state.acceptExecutionSnapshot(id, runtimeRecord{Attempt: newID()}, &v1.ExecutionResult{Attempt: newID()}, false, &current)
+	_, err = state.acceptExecutionSnapshot(id, runtimeRecord{Attempt: newID()}, &v1.ExecutionResult{Attempt: newID()}, false, &current, nil)
 	code(t, err, "restart_required")
 	if !bytes.Equal(oldSnapshot, storedBytes(t, state, "snapshots", id)) || !bytes.Equal(oldSecrets, storedBytes(t, state, "secrets", id)) {
 		t.Fatal("rejected acceptance published current provenance")
@@ -74,7 +74,7 @@ func TestLegacySnapshotAdoptionIsAtomicWithAcceptance(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := state.acceptExecutionSnapshot(id, runtimeRecord{Attempt: newID()}, &v1.ExecutionResult{Attempt: newID()}, false, &current)
+	accepted, err := state.acceptExecutionSnapshot(id, runtimeRecord{Attempt: newID()}, &v1.ExecutionResult{Attempt: newID()}, false, &current, nil)
 	if err != nil || accepted.Plan.EffectiveConfigDigest != current.Plan.EffectiveConfigDigest {
 		t.Fatal("current plan not accepted", err)
 	}
@@ -177,14 +177,9 @@ func TestLegacyActivationSensitiveFenceBeforeEffects(t *testing.T) {
 					} else {
 						_, err = svc.run(context.Background(), run)
 					}
-					want := "shutting_down"
-					if legacy {
-						want = "unsafe_drift"
-						if status == v1.Failed {
-							want = "restart_required"
-						}
-					}
-					code(t, err, want)
+					// Every eligible persistent start now proposes current inputs, including
+					// legacy failed attempts; sensitive retained drift rejects before effects.
+					code(t, err, "unsafe_drift")
 					if !bytes.Equal(before, storedBytes(t, state, "snapshots", id)) {
 						t.Fatal("rejected activation changed historical snapshot")
 					}

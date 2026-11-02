@@ -105,7 +105,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 	httpClient := *c.http
 	// Cleanup/restart can use a configured grace exceeding the transport default.
 	// The daemon bounds cleanup; callers retain context cancellation authority.
-	if path == "/v1/shared/start" || path == "/v1/shared/stop" || path == "/v1/shared/restart" || path == "/v1/shared/destroy" || path == "/v1/attached/cancel" || path == "/v1/scenes/stop" || path == "/v1/export" || path == "/v1/doctor" || path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
+	if path == "/v1/run" || path == "/v1/scenes/start" || path == "/v1/shared/start" || path == "/v1/shared/stop" || path == "/v1/shared/restart" || path == "/v1/shared/destroy" || path == "/v1/attached/cancel" || path == "/v1/scenes/stop" || path == "/v1/export" || path == "/v1/doctor" || path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
 		httpClient.Timeout = 0
 	}
 	rejected := false

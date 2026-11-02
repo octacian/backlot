@@ -1,11 +1,11 @@
 ---
 title: 'Bind attached persistent execution to one daemon-owned attempt'
 date: '2026-10-22'
-status: accepted
+status: superseded
 summary: 'Keep optional attached persistent clients alive with an ephemeral daemon-owned attempt lease and existing retained log delivery.'
 tags: [lifecycle, ownership, api, cli, logs]
 supersedes: []
-superseded_by: []
+superseded_by: [20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md]
 ---
 
 # Bind attached persistent execution to one daemon-owned attempt
@@ -24,6 +24,9 @@ the lifetime and scene-targeting decisions without replacing their other rules.
 
 Accepted after independent architecture review and coordinator approval on
 2026-10-22; implementation and runtime verification remain separate obligations.
+
+The [persistent-start decision](20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md) partially supersedes this record's ordinary-start eligibility and snapshot-selection rules; unaffected rules
+and existing successors remain in force.
 
 ## Context
 

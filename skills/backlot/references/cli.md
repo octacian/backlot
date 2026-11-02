@@ -23,7 +23,7 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `plan SCENE [--project PATH] [--config PATH] [-- ARGS...]` | Offline selected input/seed/tool resolution; no daemon/provider effects |
 | `prepare SCENE [--project PATH] [--config PATH]` | Daemon records metadata only; returns disposable lease when applicable |
 | `run SCENE [--project PATH] [--config PATH] [-- ARGS...]` | Execute; persistent returns at readiness, disposable after collection/cleanup |
-| `scene start SCENE [--project PATH] [--config PATH]` | Execute/join a named persistent scene in the selected checkout |
+| `scene start SCENE [--project PATH] [--config PATH]` | Ensure a named persistent scene is running in the selected checkout |
 | `restart ID [--config PATH]` | Persistent only; read current recorded project/config sources and apply compatible drift, retaining data |
 | `reset ID [--config PATH]` | Persistent only; stop, remove old owned generation, then start fresh; destructive |
 | `stop ID` / `scene stop SCENE [--project PATH]` | Stop selected runtime/routes, release verified-unused instance networks and retain data; named stop uses recorded selection |
@@ -79,6 +79,24 @@ nonnegative. `run --keep-on-failure` is disposable only; success still cleans up
 client cancellation/loss; no tails or keep-on-failure. `restart --allow-image-change`
 explicitly accepts changed build-image compatibility risk. See
 [lifecycle/drift](daemon.md#identity-and-lifecycle) before restart/reset.
+
+Persistent `run` and `scene start` wait for starting work or return an already-ready
+scene, reporting unapplied configuration changes. After preparation, stop, failure,
+cancellation or interruption, they can start one new attempt once prior work and
+cleanup finish. Identity, data and paired credentials survive. New attempts use
+current compatible configuration from `--config` or the normal per-user default;
+they do not reuse the recorded path. Restart/reset keep their existing path defaults.
+Use `restart ID` to apply edits to running work; protected changes require reset/destroy.
+
+Overlapping starts share one attempt while it remains current, even if it finishes
+before the response. Replacement returns `startup_conflict` with a nonzero exit:
+inspect the returned instance/attempt using `history`, `inspect`,
+`logs --page --attempt` or `export --attempt` before deciding to start again.
+Polling conflicts retain the last observed snapshot without the replacement's
+startup details. A missing mutation reply leaves acceptance unknown; never retry
+automatically. Startup cancellation stops only its accepted attempt; ID-only
+operator stop remains an override. Uncertain cleanup blocks a new attempt;
+collection failure alone does not. See [lifecycle](daemon.md#identity-and-lifecycle).
 
 Daemon startup accepts `--lease-duration 30s` (100ms–24h; zero selects the default),
 `--retention-attempts 100` (positive completed count), `--retention-age 168h`,

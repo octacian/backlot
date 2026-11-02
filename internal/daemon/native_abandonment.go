@@ -76,8 +76,8 @@ func (s *service) stopRuntimeRequest(ctx context.Context, request v1.StopRequest
 	if err != nil {
 		return before, err
 	}
-	if request.Force && ((before.Execution != nil && request.ExpectedAttempt != before.Execution.Attempt) || (before.Execution == nil && request.ExpectedAttempt != "")) {
-		return before, problem("conflict", "selected execution attempt changed; inspect before issuing a new force stop")
+	if (request.Force || request.ExpectedAttempt != "") && ((before.Execution != nil && request.ExpectedAttempt != before.Execution.Attempt) || (before.Execution == nil && request.ExpectedAttempt != "")) {
+		return before, problem("conflict", "selected execution attempt changed; inspect before issuing a new stop")
 	}
 	instance, err := s.stopExecution(request.InstanceID)
 	var detail *v1.PlanError

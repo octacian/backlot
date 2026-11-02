@@ -131,13 +131,19 @@ erases this instance's attempt results, logs, artifacts and private original-res
 copies. Stop retains history and evidence. Export needed diagnostics before destroy;
 caller-owned exports survive. Failed or uncertain runtime/data cleanup retains
 diagnostics, and file-erasure failures return nonzero with retryable deletion intent. Daemon crash recovery stops only verifiably owned
-survivors, retains data/evidence, reports interruption/collection gaps and requires
-an explicit restart. Unknown ownership remains untouched with a cleanup failure unless a targeted
+survivors, retains data/evidence and reports interruption/collection gaps. Diagnose
+the cause before explicitly starting a persistent scene again. Unknown ownership remains untouched with a cleanup failure unless a targeted
 `stop --force` explicitly relinquishes the native claim. That acknowledgement
 retains private history, known exits, a collection gap and safe public warnings;
 unknown survivors may still run/write. Replacement attempts retain the warning but
 do not inherit an old attempt's collection gap. Selected-attempt export can therefore
 be complete for a fully collected replacement while reporting prior waivers.
+
+After fixing a persistent failure, explicitly start again for one new attempt;
+the previous failure, collection gap and original exits remain in history.
+If another caller replaces its attempt, start returns `startup_conflict`;
+inspect the original attempt before starting again.
+Uncertain cleanup blocks replacement. See [start rules](cli.md#commands-and-defaults).
 
 ## Logs and retention
 

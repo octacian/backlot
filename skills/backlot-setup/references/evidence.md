@@ -139,11 +139,11 @@ unknown survivors may still run/write. Replacement attempts retain the warning b
 do not inherit an old attempt's collection gap. Selected-attempt export can therefore
 be complete for a fully collected replacement while reporting prior waivers.
 
-An explicit persistent start after a repaired failure accepts one eligible attempt;
-the previous failure, collection gap and original exits stay in retained history.
-A later attempt can replace a concurrent start's binding and cause
-`startup_conflict`; use exact-attempt diagnostics rather than repeating blindly.
-Cleanup uncertainty still blocks replacement. See [ordinary starts](cli.md#commands-and-defaults).
+After fixing a persistent failure, explicitly start again for one new attempt;
+the previous failure, collection gap and original exits remain in history.
+If another caller replaces its attempt, start returns `startup_conflict`;
+inspect the original attempt before starting again.
+Uncertain cleanup blocks replacement. See [start rules](cli.md#commands-and-defaults).
 
 ## Logs and retention
 

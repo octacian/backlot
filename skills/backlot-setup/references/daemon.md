@@ -21,8 +21,8 @@ See [private configuration](manifest.md#registered-private-project-configuration
 | Discover declarations / resolve current prerequisites | `scene list`, `scene describe` / `plan` | No runtime mutation; plan resolves caller-side tools, inputs and seeds |
 | Record metadata only | `prepare SCENE` | Snapshot/identity, no application readiness or provider allocation |
 | First persistent start | `scene start SCENE` or `run SCENE` | Accept snapshot/attempt, allocate selected resources, await readiness |
-| Join starting/ready scene | Repeat start/run | Same current attempt and recorded runtime configuration; report unapplied drift |
-| Start prepared/stopped/failed/cancelled/interrupted scene | Repeat start/run after diagnosis/repair | One compatible current-input attempt after joined cleanup; retain identity/data/paired credentials |
+| Join starting/ready scene | Repeat start/run | Same attempt and recorded configuration; report unapplied changes |
+| Start prepared/stopped/failed/cancelled/interrupted scene | Repeat start/run after diagnosis/repair | One new attempt using compatible current configuration after cleanup; retain identity/data/paired credentials |
 | Apply command, probe or non-sensitive environment edits to healthy work | `restart ID` | Capture current sources and apply compatible drift; retain identity/data/paired credentials |
 | Changed protected resource/initialization/sensitive contract | `reset ID`, or `destroy ID` then start | Explicit destructive replacement required; reset keeps logical ID but replaces generation; later start after destroy gets a new ID |
 | Stop development runtime | `scene stop SCENE` or `stop ID` | Stop owned consumers/routes, release verified-unused instance networks, retain data, credentials, history and evidence |
@@ -67,11 +67,11 @@ recorded-ID commands work outside a checkout. Finite `status ID` keeps its exist
 historical instances; use `run` to execute disposable scenes.
 
 Start accepts `--startup-timeout`, `--job-timeout` and `--stop-grace` and follows
-[the ordinary-start contract](cli.md#commands-and-defaults), including one explicit
-attempt, current compatible inputs, replacement conflicts and unknown replies.
+[the start rules](cli.md#commands-and-defaults) for configuration, overlapping
+requests and missing replies.
 A logical project/checkout/scene key recorded at a different canonical project
-directory conflicts before start/join. Cancelling startup joins only its accepted
-attempt; cancelling observation leaves execution alone.
+directory conflicts before start/join. Cancelling startup stops and waits for only
+its accepted attempt; cancelling observation leaves execution alone.
 
 ### Attached execution
 

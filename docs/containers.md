@@ -114,14 +114,15 @@ checks. See [container application trust](https.md#public-root-file-mounts-for-c
 
 A fresh-only job is skipped only after its successful exit and completion record.
 A failed initialization leaves its generation incomplete. An explicit start can
-retry that same compatible contract/generation after joined cleanup; no background retry, repair or initialization
-rollback occurs. Each-start jobs run at every start. Image initialization is the
-image's responsibility and does not create a separate Backlot job record.
+retry the same compatible contract/generation once cleanup finishes; no automatic
+retry, repair or initialization rollback occurs. Each-start jobs run at every start.
+Image initialization is the image's responsibility and does not create a separate
+Backlot job record.
 
-Starting/ready run returns the recorded attempt and manifest/config digest drift.
-An eligible new start applies compatible current commands, probes and non-sensitive
-environment changes. Explicit restart applies them while replacing healthy work.
-Both reject, before stopping old work, retained resource declarations,
+Start leaves an already-running scene unchanged and reports unapplied configuration
+changes. If the scene needs a new attempt, start uses the current compatible
+configuration. Use restart to apply changes to a running scene.
+Before stopping old work, both reject changes to retained resource declarations,
 attachments/mounts, storage-consuming container image/argument changes, fresh-only
 contracts, Docker endpoint changes (including port-only scenes with an implicit
 network), and resolved sensitive/inherited/seed-value changes. Implicit native

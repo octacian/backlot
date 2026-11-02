@@ -10,10 +10,10 @@ superseded_by: []
 
 # Ensure persistent start accepts one eligible current attempt
 
-Explicit persistent start/run joins starting/ready work or accepts one eligible
-current-input attempt after reconciliation. Preserve identity, data and paired
-credentials. Ready work stays unchanged, with truthful unapplied drift. There is
-no automatic retry or crash continuation.
+Persistent start/run leaves starting or ready work unchanged and reports unapplied
+configuration changes. Otherwise, explicit start can launch one compatible new
+attempt after reconciliation, preserving identity, data and paired credentials.
+Nothing retries or resumes after a crash automatically.
 
 ## Context
 
@@ -23,60 +23,59 @@ restart would replace healthy work. Overlapping requests must not multiply attem
 
 ## Decision
 
-Use existing daemon coordination: join preparation/cleanup, reconcile and join old
-owners/collectors, then accept from prepared, stopped, failed, cancelled or
-interrupted state with compatible current inputs. Unresolved cleanup/ownership
-blocks replacement; collection failure alone is not an ownership fence. Recovery
-records interruption without launching. Named start after destroy creates a new
-ID; selecting an old ID never redirects.
+Finish preparation, cleanup and reconciliation through existing daemon coordination;
+wait for prior owners/collectors before accepting a new attempt from prepared,
+stopped, failed, cancelled or interrupted state. Uncertain cleanup or ownership
+blocks replacement; collection failure alone does not. Recovery records interruption
+without launching. Named start after destroy creates a new ID; selecting an old ID
+never redirects.
 
-Capture instance, observed attempt/status and acceptance highwater together during
-selection; keep this binding request-local across serialization. Recheck revision
-and eligibility atomically with acceptance. If two callers observe A and one accepts
-its first successor B, the queued ordinary caller returns coherent B while B remains
-current, even terminal or with pruned history. If C has replaced B, return typed
-`startup_conflict` with history guidance, accepting no D. Missing facts mean
-unavailability/conflict, never current fallback or a fabricated historical plan.
-An observed starting/ready attempt stays bound through termination. Only a genuinely
-later explicit call observing eligible terminal work may accept another attempt.
+Capture the instance, observed attempt/status and latest acceptance sequence together.
+Keep each request's selection while waiting for the mutation lock; atomically recheck
+revision and eligibility when accepting. If two callers observe A and one starts its
+immediate successor B, the queued ordinary caller returns B while current, even if
+finished or its history was pruned. If C replaces B, return typed `startup_conflict`
+with history guidance; do not start D. Missing facts return unavailability/conflict,
+never a different attempt or invented historical plan. Callers observing starting/ready
+work stay bound to it after termination. Only a later explicit call observing eligible
+terminal work may start again.
 
-CLI polling stays pinned to the returned attempt. Replacement returns conflict
-with its last validated snapshot labelled last observed. Startup cancellation
-sends `StopRequest.ExpectedAttempt` before effects, protecting replacements.
-Missing mutation replies remain unknown acceptance/completion, never retry permission.
+CLI polling follows only the returned attempt. Replacement returns conflict with
+its last validated snapshot labelled last observed. Startup cancellation supplies
+`StopRequest.ExpectedAttempt`, checked before stop effects to protect replacements.
+A missing mutation reply leaves acceptance/completion unknown; never retry automatically.
 
-New acceptance uses one captured current configuration resolution: explicit machine
-path or normal default, never ordinary inheritance of recorded ConfigPath. Preserve
-source-identity verification; rejected acceptance keeps prior launch provenance.
-Retain fresh-only initialization, resource/route identity, shared allocations,
-private provenance and image pins under existing compatibility checks. Protected
-drift requires explicit reset/destroy. Same-image reuse remains valid; changed-image
-and mounted-data consent remain explicit restart decisions. Start grants neither.
+A new attempt uses configuration resolved once from the explicit machine path or
+normal default, without inheriting recorded `ConfigPath`. Verify source identity;
+rejected starts preserve prior launch provenance. Existing compatibility checks
+protect fresh-only initialization, resource/route identity, shared allocations,
+private provenance and image pins. Protected changes require explicit reset/destroy.
+Reusing the same image remains valid; image-change and mounted-data consent require
+explicit restart. Start grants neither.
 
-Attachment belongs only to a newly accepted winner. Overtaken attached callers
-refuse adoption; ordinary joins acquire or renew no attachment authority. Keep
-existing cleanup-aware client request policy, caller cancellation and bounded
-cleanup; attachment renewal/expiry timing stays unchanged.
+Only the caller accepting a new attempt owns its attachment. Attached callers
+refuse another caller's attempt; ordinary joins gain or renew no attachment authority.
+Client request, cancellation, bounded cleanup and attachment renewal/expiry policies
+remain unchanged.
 
-This supersedes only unhealthy-start/recovery eligibility and stopped/start input
-selection in the metadata-linked records. Their remaining startup disclosure,
-privacy, supervision, ownership and lease contracts continue. Disposable execution,
-restart/reset and original terminal exits are unchanged. Detailed operational rules
+This supersedes only the rules for starting unhealthy/recovered scenes and selecting
+stop/start inputs in the records listed in `supersedes`. Their remaining startup
+disclosure, privacy, supervision, ownership and lease contracts continue. Disposable
+execution, restart/reset and original terminal exits are unchanged. Detailed operational rules
 remain in [ordinary start](../cli.md#commands-and-defaults),
 [attachment](../daemon.md#attached-execution) and
 [retained-resource compatibility](../containers.md#generations-jobs-and-drift).
 
 ## Consequences
 
-Start can apply compatible current inputs after terminal work while healthy joins
-keep recorded configuration. Existing acceptance/history transactions preserve
-predecessor diagnosis. No new persistent state, migration, dependency, background
-worker or retry engine is introduced. Replacement can visibly conflict; retained
-history supplies diagnosis rather than a successful historical start response.
+New attempts use compatible current configuration; running work keeps recorded
+configuration. Existing acceptance/history transactions preserve prior attempts for
+diagnosis. No new persistent state, migration, dependency, background worker or retry
+engine is introduced. Replacement returns conflict; retained history supports diagnosis.
 
 ## Alternatives considered
 
-- Always require restart: simpler, but retains the operator recovery trap.
+- Always require restart: simpler, but makes recovery require a separate command.
 - Return historical success after replacement: requires a distinct response or
   archived plans; visible conflict meets the chosen guarantee at lower cost.
 - Retry automatically or invoke restart unconditionally: duplicates attempts or

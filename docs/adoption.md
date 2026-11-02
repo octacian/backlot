@@ -144,8 +144,8 @@ Only the terminal job gets that tail. Read each command's exit and result before
 continuing; discovery/configuration/plan/doctor do not establish execution success.
 Once ready, use the [daily loop](operations.md#daily-loop) for logs, evidence and
 scoped cleanup, and the [lifecycle table](daemon.md#identity-and-lifecycle) when edits
-need restart/reset. After fixing a persistent failure, explicitly repeat start to
-request one compatible new attempt; follow [conflict/unknown-result guidance](cli.md#commands-and-defaults).
+need restart/reset. After fixing a persistent failure, explicitly start again for
+one new attempt; follow [conflict and missing-reply guidance](cli.md#commands-and-defaults).
 Test failures keep their original exit independently of
 orchestration, collection and cleanup.
 

@@ -2,59 +2,57 @@
 title: 'Ship self-contained setup and daily Backlot skills'
 date: '2026-10-28'
 status: accepted
+implementation: implemented
 summary: 'Distribute two procedural skills with generated local references and explicit executable compatibility checks so adopter agents can use Backlot without its source checkout.'
 tags: [skills, documentation, packaging, compatibility, agents]
 supersedes: []
 superseded_by: []
+related: []
+tracking: ["https://github.com/octacian/backlot/issues/59"]
+implemented_by: ["https://github.com/octacian/backlot/commit/6efda8051396286a95903dd2189a4ce20073e1de"]
 ---
 
 # Ship self-contained setup and daily Backlot skills
 
-Ship independent `backlot-setup` and `backlot` skills with local references
-for using the existing CLI without a source checkout.
-Allow development builds after capability/help checks, with user-managed refreshes.
+## Context and Problem Statement
 
-## Context
+Adopters need setup and daily-use procedures without a Backlot checkout, manual
+copy drift or requiring both skills. Remote repository links alone cannot supply
+essential offline guidance.
 
-[Issue 59](https://github.com/octacian/backlot/issues/59) needs adoption and daily-use
-procedures without network access, manual drift or requiring both skills.
+## Considered Options
 
-## Decision
+- Independent procedural skills with generated local references.
+- Hand-copied manuals: drift from maintained contracts.
+- Sibling links or every guide in each bundle: break independent installs or add
+  unused context.
+- Exact build allowlists: exclude usable development builds and need continual updates.
 
-- Setup adapts application commands/declarations; daily use operates configured
-  scenes; keep entry points short and load references by need.
-- Deterministically generate ordinary files from canonical guides, schemas and
-  examples inside each bundle. Preserve local links/anchors and offline essential
-  procedures; CI rejects drift. Update sources and regenerate in the same PR.
-- Distribute through repository Git sources and the optional skills installer,
-  supporting selective project/global installs and immutable refs, without new
-  runtime/API/distribution machinery or automatic installation/update behavior.
-- Check executable identity, required local/daemon read capabilities and targeted
-  command help as specified in [compatibility guidance](../agent-skills.md#compatibility).
-  Allow `dev`/`dev-dirty`; these checks cannot prove semantics or provider readiness.
-  Users of global development builds must refresh skills with runtime changes.
-- Inherit [ownership/data](../daemon.md#identity-and-lifecycle),
-  [disclosure](../daemon.md#declared-startup-details) and
-  [result](../evidence.md) guarantees; skills do not expand command authority.
+## Decision Outcome
 
-## Consequences
+Ship separate setup and daily-operation entry points. Deterministically generate
+ordinary local files from canonical guides, schemas and examples; preserve offline
+procedures and local links, and reject drift in CI. Keep entry points short and
+load references by need.
+
+Distribute through Git sources and the optional installer, supporting selective
+project/global installation and immutable refs. Users choose installation/refresh;
+no automatic updater or runtime distribution service is added.
+
+Check executable identity, required read capabilities and targeted help rather
+than trusting version labels alone. Development builds remain usable with those
+checks and user-managed refreshes; capability/help checks cannot prove semantics
+or provider readiness. Skills inherit ownership, disclosure and result guarantees
+and never expand command authority.
+
+### Consequences
 
 Generated duplication permits independent installs from one maintained source.
-Maintainers own selection, regeneration, checks and evaluation; users own pairing.
-Existing CLI commands retain runtime effects; skills add no background activity.
+Maintainers own selection, generation, drift checks and evaluation; users own
+runtime/skill pairing. There is no new background work. Revisit when evaluation
+finds missing guidance, overlapping triggers or incompatible installer behavior.
 
-## Alternatives considered
+## More Information
 
-- Repository links alone lack offline use; hand-copied manuals drift; sibling
-  symlinks fail independent installation. Bundling every guide adds unused context.
-- API/state versions or `dev` alone miss capabilities. Exact identity allowlists
-  exclude usable development builds and impose ongoing identity updates.
-
-## Revisit when
-
-Evaluations expose missing references, overlapping triggers or incompatible
-workflows; installer copy behavior changes; or a consumer cannot use a shell.
-
-## References
-
-[Installation/compatibility](../agent-skills.md), [generation/evaluation](../testing.md#agent-skills).
+[Compatibility/installation](/docs/agent-skills.md),
+[generation/evaluation](/docs/testing.md#agent-skills).

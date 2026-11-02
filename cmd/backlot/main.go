@@ -1,3 +1,5 @@
+// Command backlot exposes the CLI and daemon entry points; internal packages own
+// runtime lifecycle and platform operations.
 package main
 
 import (

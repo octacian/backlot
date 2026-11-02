@@ -39,13 +39,13 @@ Run these from the repository root:
 | `make tools` | Install pinned development tooling locally |
 | `make lint` | Validate lint configuration and run golangci-lint |
 | `make adr-create TITLE="Decision title"` | Create a proposed ADR without overwriting records |
-| `make adr-verify` | Verify all ADR records |
-| `make adr-test` | Run ADR tooling tests |
+| `make adr-verify` | Alias for `make check-docs` |
+| `make todo-check` | Reject TODO comments without issue URLs |
 | `make schema-generate` | Regenerate committed editor schemas from `api/v1` |
 | `make skills-generate`, `make skills-check` | Generate/verify independent installed skill references, schemas and examples |
 | `make schema-check` | Reject stale generated schemas without writing |
-| `make check-implementation` | Run schema/notice drift checks, formatting, vet, lint, Go race tests, and build |
-| `make check-docs` | Run ADR tooling tests and verify ADR records |
+| `make check-implementation` | Run TODO and generated-output checks, formatting, vet, lint, Go race tests, and build |
+| `make check-docs` | Run the pinned Corestack record and local file-link checker |
 | `make check` | Run both implementation and documentation checks |
 
 Before committing Go/tooling changes, run `make check`. Documentation changes
@@ -74,7 +74,7 @@ multi-commit pushes.
 
 | Changed files | Jobs that run |
 | --- | --- |
-| `docs/` files or Markdown anywhere, including ADR additions/deletions | Docs workflow: ADR tooling tests and record verification |
+| Every change, including code-only changes | Docs workflow: Corestack record and local file-link verification |
 | Go/runtime sources, schemas, non-CI examples, module/build/lint configuration | macOS/Ubuntu repository checks, Linux runtime, current-head scenes and project inputs |
 | `THIRD_PARTY_NOTICES.md` | Repository and Linux installation checks, plus Docs |
 | `actions/` implementation | Current-head scenes and project inputs |
@@ -85,11 +85,14 @@ multi-commit pushes.
 
 Markdown inside implementation/example directories stays documentation-only.
 The [Docs workflow](../.github/workflows/docs.yml) always owns documentation
-validation: it runs `make check-docs` whenever documentation or its tooling,
-module dependencies or Makefile change. Mixed implementation/documentation PRs
-run both workflows independently. The Check workflow runs
-`make check-implementation` and does not validate ADR records. Its Go test suite
-still tests ADR tooling code as part of the complete Go suite. The independent consumer is a manual
+validation: it runs the `make check-docs` checker on every PR and push to main,
+without path selection, since code-only changes can break record links. The checker is pinned
+to v0.2.0 in Makefile, AGENTS.md and workflows; it is a public Go tool rather than
+a runtime dependency. The equivalent Gitea workflow is
+[docs-check.yml](../.gitea/workflows/docs-check.yml). Mixed changes run applicable
+implementation gates independently. The Check workflow runs
+`make check-implementation`, including the linked-TODO check, and does not validate
+ADR records. The independent consumer is a manual
 [current-commit packaging smoke test](ci.md#independent-action-consumer), without
 browser shards or repeated lifecycle checks. It does not use path detection.
 Go package tests remain together: shared packages and separately built subprocesses
@@ -103,7 +106,8 @@ See [schema generation and editor setup](../schemas/README.md).
 
 Tests exercise strict manifest/config decoding, graph/reference validity, offline
 CLI JSON/errors, environment precedence, read-only seeds, secret redaction, tool
-availability and ADR validation. Daemon tests additionally exercise real temporary Git worktrees and aliases,
+availability. The external checker owns ADR format validation. Daemon tests
+additionally exercise real temporary Git worktrees and aliases,
 concurrent preparation, typed Unix-socket contracts, private snapshots, leases,
 shutdown, owned-child crashes and intent/effect recovery. See the
 [daemon guide](daemon.md). Native integration tests additionally build the real CLI, launch private fixture

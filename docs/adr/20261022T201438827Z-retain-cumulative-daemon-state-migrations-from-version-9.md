@@ -2,149 +2,69 @@
 title: 'Retain cumulative daemon state migrations from version 9'
 date: '2026-10-22'
 status: accepted
+implementation: implemented
 summary: 'Retain small transactional Go migration steps from version 9 so users can skip releases without resetting retained state.'
 tags: [daemon, state, migration, compatibility]
-supersedes: [20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md]
+supersedes: [/docs/adr/20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md]
 superseded_by: []
+related: []
+tracking: ["https://github.com/octacian/backlot/issues/66"]
+implemented_by: ["https://github.com/octacian/backlot/commit/d3416d9c74e7e581ce98acc73be3f61320dc0a37"]
 ---
 
 # Retain cumulative daemon state migrations from version 9
 
-Retain each real daemon state migration from version 9 onward and apply all
-required steps at startup in one existing bbolt write transaction. Users can skip
-releases and upgrade with the newest binary, without intermediate binaries or a
-state reset. Version 9 is the minimum supported format; pre-v9 state is rejected
-unchanged.
+## Context and Problem Statement
 
-This decision replaces only the state-transition policy in the
-[native session decision](20261021T002507834Z-allow-cooperative-native-process-groups-within-an-owned-session.md).
-All its supervision, authority, bounded cleanup, confidence, recovery and inherited
-configuration/privacy contracts continue in force by reference.
+Users need to skip releases without resetting retained state or finding each
+intermediate binary. The owner selected v9 as the forward baseline; maintaining
+preproduction v6/v8 compatibility has no adopter justification. Recreating old
+fixtures with current structs cannot establish historical compatibility.
 
-## Context
+## Considered Options
 
-[Issue #66](https://github.com/octacian/backlot/issues/66) asks for repeatable
-compatibility evidence and a maintainable upgrade policy. The approved outcome
-sets v9 as the forward baseline. The previous opener accepted v6/v8/v9, but the
-owner chose to drop pre-v9 support because Backlot has no adopters to migrate.
-Retaining preproduction validation and old-daemon exceptions adds maintenance
-without a current user need. Repeating predecessor-specific delivery exercises or
-requiring intermediate releases would defeat the approved forward outcome.
+- Retain minimal Go steps inside the existing bbolt transaction.
+- Keep only the latest predecessor: fails skip-release upgrades.
+- Commit steps independently: exposes partially upgraded state and weakens rollback.
+- Existing migration packages: inspected SQL/reader-based or separately committing
+  designs do not preserve caller-owned all-step rollback without replacing their
+  central behavior.
 
-Prefer a tested existing migration library when it fits. The inspected
-[golang-migrate interface](https://github.com/golang-migrate/migrate/blob/504568a3cbd23b8754760f55a3d89aec1b0c4963/database/driver.go)
-uses reader-based migrations and separate version calls; Goose requires SQL.
-[Migrago's Bolt adapter](https://github.com/librun/migrago/blob/a9e990da5b455c35466bcf154192f1ec4756c585/internal/storage/bolt.go)
-stores SQL migration history. The bbolt-native
-[nmilat manager](https://github.com/ohstr/nmilat/blob/670939430bdd3b3acc86f3bf578f1c2f0d513f7b/relay/migrations/manager.go)
-lets steps commit their own batches, then commits the version separately. None
-fits caller-owned, all-step rollback without replacing its central behavior.
-[Containerd](https://github.com/containerd/containerd/blob/57d315c6ec7c97b407bd62dbefb3b449e3a5d84c/core/metadata/db.go)
-demonstrates a small one-transaction step list, but its dispatcher is coupled to
-its metadata schema rather than an independently reusable migration library.
+## Decision Outcome
 
-## Decision
+Retain each real forward migration from v9 onward beside the state opener. Apply
+only explicit ordered source/destination steps in the caller-owned bbolt write
+transaction. Fresh state starts current; reject pre-v9, newer, malformed or
+unsupported paths unchanged. Do not add speculative version bumps, scripting,
+plugins, a second history store or downgrade support.
 
-Keep migration dispatch private to `internal/daemon`, beside the existing opener.
-Use an explicit ordered list of source/destination
-versions and Go functions accepting the already-open `*bbolt.Tx`. Permit only
-listed forward transitions; reject malformed versions, unsupported predecessors,
-missing steps, and newer state. Do not retain pre-v9 migration entries; real steps
-start from the v9 baseline. No registry, plugin interface, migration scripting,
-second history store, dirty marker, downgrade path or new dependency is needed.
-Keep `StateVersion` at 9 until an actual persisted-format change requires a bump;
-representative later versions belong only to tests.
+Validate each source before transforming it, then validate current authority and
+commit the final version fence in the same transaction. Preserve unknown/passive
+and unrelated bytes. Precommit error/cancellation rolls back the complete chain;
+a later startup failure never downgrades committed state. Migration performs no
+provider, process, registry or retained-file effects; recovery never auto-resumes
+workloads.
 
-The daemon acquires exclusive directory ownership and bbolt access before opening
-state. Fresh state initializes directly at the current format. Existing state
-uses source-appropriate layout and authority checks before transformation, then
-runs the complete path and validates the resulting current authority before
-writing the final version fence. Do not apply today's required bucket layout or
-future-only decoder requirements to an older format before its step can convert
-it. Reject all pre-v9 formats before authority validation or runtime recovery.
-Each future change supplies only the historical decoding needed by that step;
-current structs are not historical fixture evidence.
+Retain genuine closed predecessor-produced fixtures, with pinned producer/build
+provenance and regeneration instructions, before changing the producer. Keep
+supported steps/fixtures and test the oldest supported path through current reopen.
+Current structs and synthetic algorithm tests supplement rather than replace that
+evidence. Removing a supported path needs an explicit compatibility decision.
 
-All validation, data operations and the final fence share the existing write
-transaction. A step returns errors rather than committing or opening another
-transaction. Preserve unknown/passive data and all records outside each step's
-explicit transformation. Retain cancellation checks before work and immediately
-before commit. Any precommit error or interruption rolls back the whole chain;
-commit winning a cancellation race leaves the current format. A later startup
-failure never downgrades committed state. Rejected state retains actionable
-preservation and matching-binary guidance. Migration performs no provider calls,
-process actuation, registry writes or retained-file effects.
+Replace only the predecessor's migration policy; native ownership, confidence,
+recovery and inherited configuration/privacy guarantees remain in force. Operators
+stop the matching old daemon, wait for ownership release and explicitly start the
+new binary on retained state; reset is not an ordinary upgrade step.
 
-Recovery follows successful database open under its existing ownership rules;
-opening state never restarts workloads. Operators stop the old daemon normally,
-wait for shutdown/lock release, then explicitly start the new binary on the same
-directory. Client status and shutdown responses require matching API/state versions;
-use the matching binary for an incompatible daemon's lifecycle. Future wire shutdown
-compatibility must be decided with the relevant real change.
-There is no automatic handover, polling restart or promise that older binaries
-can read newer state. Preserve incompatible state for diagnosis; reset is not an
-ordinary upgrade step.
+### Consequences
 
-Capture a nonempty v9 database with the unmodified pinned baseline producer,
-record its source revision, binary/build provenance, fixture inputs, commands and
-artifact hashes, and commit it with a regeneration procedure. Use only fixture
-values and private owned resources. Copy closed database files; tests copy the
-fixture to temporary state before opening it and never recover its historical
-external paths. Do not retain pre-v9 fixture matrices or old-binary test hooks.
-For each future real format change, capture its predecessor
-before changing the producer, retain prior steps/fixtures, and verify opening the
-oldest retained fixture through the complete current path and reopening it.
-Removing a supported path requires an explicit compatibility decision.
+Users can skip releases with atomic rollback before commit. Maintainers own
+historical decoders and fixtures; large future rewrites may outgrow one transaction
+and need a new guarantee/cost decision rather than silent batching. No runtime
+migration engine or automatic live handover is introduced.
 
-Share transaction failure/interruption checks rather than repeating runtime
-lifecycle suites per version. Test an ordered chain with real bbolt bucket/value
-changes and synthetic test-only versions, including rollback of an earlier step
-when a later step fails. Retain current rejection, authority, cancellation and
-postcommit-startup coverage. Add genuine v9 fixture open/reopen and rejected-copy
-preservation coverage early; fixture evidence and synthetic algorithm tests serve
-different purposes. Document the next-change procedure in contributor guidance.
+## More Information
 
-## Consequences
-
-Users can skip releases while retaining state and ownership semantics. Production
-scope is one startup dispatcher using an existing database transaction; ordinary
-writers, public APIs and background owners keep their current boundaries. Tests
-and fixture provenance carry most of this issue's work. A native-only capture
-provides real records without requiring Docker, Caddy or trust changes; it does
-not establish historical provider coverage.
-
-Retaining steps and fixtures is an ongoing compatibility obligation. A large
-future rewrite can increase startup latency and bbolt transaction memory; it
-requires a fresh scope assessment rather than silent batching that weakens
-all-step rollback. No current transformation or schema bump is justified.
-
-## Alternatives considered
-
-- **Preserve preproduction v6/v8 compatibility.** Adds validation, old-daemon
-  exceptions and fixture maintenance without existing adopters; v9 is the baseline.
-- **Keep only the latest predecessor or require intermediate binaries.** Less
-  retained code, but fails the approved skip-release outcome.
-- **Adopt an inspected migration package.** Preferable if it removes maintained
-  code while preserving the transaction boundary; these candidates require a
-  custom driver, transaction redesign or unrelated storage integration.
-- **Minimal local Go steps.** Chosen: retains the existing proven transaction,
-  avoids a migration engine, and expresses only real Backlot transitions.
-- **Commit each step and resume after failure.** Bounds transaction size, but
-  exposes partially upgraded state and breaks the approved rollback guarantee.
-- **Recreate all old databases with current structs.** Cheap unit inputs, but
-  cannot establish compatibility with the actual historical producer.
-
-## Revisit when
-
-A suitable maintained bbolt library accepts a caller-owned transaction with less
-integration code; real migrations outgrow the simple dispatcher or transaction
-budget; removal of a retained compatibility path is proposed; or a real format
-change needs external-file effects or different shutdown wire compatibility.
-
-## References
-
-- [Issue #66](https://github.com/octacian/backlot/issues/66)
-- [Current state opener](../../internal/daemon/state.go), [authority preflight](../../internal/daemon/state_authority.go), and [legacy validation](../../internal/daemon/state_upgrade.go)
-- [Migration tests](../../internal/daemon/state_migration_test.go), [interruption tests](../../internal/daemon/state_integration_test.go), and [retained v9 fixture](../../internal/daemon/testdata/state/v9/README.md)
-- [State and recovery architecture](../architecture.md#state-and-recovery)
-- [State operation](../containers.md#state-compatibility) and [testing guidance](../testing.md)
+[State operation](/docs/containers.md#state-compatibility),
+[migration implementation](/internal/daemon/state_upgrade.go),
+[retained v9 provenance](/internal/daemon/testdata/state/v9/README.md).

@@ -14,7 +14,7 @@ type stateMigration struct {
 
 // Retain each real step from v9 onward. Source checks belong to the step,
 // before conversion; current layout/authority checks run only after the chain.
-var stateMigrations = []stateMigration{{9, 10, migrateStateNine}, {10, 11, migrateStateTen}}
+var stateMigrations = []stateMigration{{9, 10, migrateStateNine}, {10, 11, migrateStateTen}, {11, 12, migrateStateEleven}}
 
 func migrateStateNine(tx *bolt.Tx) error {
 	for _, name := range stateNineBuckets {
@@ -72,8 +72,10 @@ func requireStateBuckets(tx *bolt.Tx) error {
 
 // migrateStateTen adds the image-pin semantic fence without inventing historical pins.
 func migrateStateTen(tx *bolt.Tx) error {
-	if err := requireStateBuckets(tx); err != nil {
-		return err
+	for _, name := range stateElevenBuckets {
+		if tx.Bucket([]byte(name)) == nil {
+			return problem("state_corrupt", "source state bucket missing")
+		}
 	}
 	if err := validateStateNineAuthority(tx); err != nil {
 		return err

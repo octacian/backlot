@@ -63,7 +63,11 @@ func TestDisposableEvidenceNative(t *testing.T) {
 				t.Fatal(err)
 			}
 			id := r.Instance.ID
-			waitComponentLog(t, h, id, "job", "job-stdout")
+			if mode == "client-loss" {
+				waitComponentLog(t, h, id, "job", "job-stdout", r.LeaseToken)
+			} else {
+				waitComponentLog(t, h, id, "job", "job-stdout")
+			}
 			if mode == "cancellation" {
 				if _, err := h.cli.StopExecution(context.Background(), id); err != nil {
 					t.Fatal(err)
@@ -164,8 +168,15 @@ func TestDisposableEvidenceNative(t *testing.T) {
 			if strings.Contains(string(encoded), secret.Fixtures[0].Value) {
 				t.Fatal("ordinary result leaked fixture secret")
 			}
-			if mode == "collection-failure" {
-				h.expectShutdownFailureAfterCleanup("collection_failed", h.guardianCapabilities(id))
+
+			logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "job"})
+			if err != nil || len(logs.Records) == 0 {
+				t.Fatal("retained output lost before destroy", logs, err)
+			}
+			for _, record := range logs.Records {
+				if record.Attempt != result.Attempt || record.InstanceID != id || record.Component != "job" || record.Time == "" || record.Stream == "" {
+					t.Fatal("log context lost", record)
+				}
 			}
 			if _, err := h.cli.Destroy(context.Background(), id); err != nil {
 				t.Fatal(err)
@@ -175,14 +186,9 @@ func TestDisposableEvidenceNative(t *testing.T) {
 					t.Fatal("explicit destroy retained data", err)
 				}
 			}
-			logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "job"})
-			if err != nil || len(logs.Records) == 0 {
-				t.Fatal("historical output lost after destroy", logs, err)
-			}
-			for _, record := range logs.Records {
-				if record.Attempt != result.Attempt || record.InstanceID != id || record.Component != "job" || record.Time == "" || record.Stream == "" {
-					t.Fatal("log context lost", record)
-				}
+			logs, err = h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "job"})
+			if err != nil || len(logs.Records) != 0 {
+				t.Fatal("destroy retained output", logs, err)
 			}
 		})
 	}
@@ -238,7 +244,7 @@ func TestDisposableEvidenceNative(t *testing.T) {
 	}
 }
 
-func waitComponentLog(t *testing.T, h *nativeHarness, id, component, needle string) {
+func waitComponentLog(t *testing.T, h *nativeHarness, id, component, needle string, leaseToken ...string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -251,9 +257,17 @@ func waitComponentLog(t *testing.T, h *nativeHarness, id, component, needle stri
 				return
 			}
 		}
+		// Lease-loss fixtures retain their capability until the observed-effect
+		// barrier, then stop renewing to exercise loss rather than startup latency.
+		if len(leaseToken) > 0 {
+			if _, err := h.cli.Renew(context.Background(), id, leaseToken[0]); err != nil {
+				t.Fatal("startup lease renewal", err)
+			}
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("job output did not arrive")
+	observed, err := h.cli.Inspect(context.Background(), id)
+	t.Fatalf("job output did not arrive: status=%s result=%+v error=%v", observed.Instance.Status, observed.Instance.Execution, err)
 }
 
 func TestCancelledOutputWaiterArtifacts(t *testing.T) {

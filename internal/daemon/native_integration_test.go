@@ -1230,7 +1230,7 @@ func TestNativeRuntime(t *testing.T) {
 		r := h.run("dev")
 		h.state(r.Instance.ID, v1.RuntimeReady)
 		h.retainFixtureCleanup()
-		h.expectShutdownFailureAfterCleanup("collection_failed", []native.Identity{h.guardianCapability(r.Instance.ID)})
+
 		identity := h.guardianCapability(r.Instance.ID)
 		moved := identity.Control + ".retained"
 		t.Cleanup(func() {

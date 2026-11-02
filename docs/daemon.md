@@ -33,7 +33,7 @@ See [private configuration](manifest.md#registered-private-project-configuration
 | Changed protected resource/initialization/sensitive contract | `reset ID`, or `destroy ID` then start | Explicit destructive replacement required; reset keeps logical ID but replaces generation; later start after destroy gets a new ID |
 | Failed/interrupted persistent attempt | Inspect then `restart ID` | No implicit retry; compatibility/ownership fences apply before old work is stopped |
 | Stop development runtime | `scene stop SCENE` or `stop ID` | Stop owned consumers/routes, release verified-unused instance networks, retain data, credentials, history and evidence |
-| Remove this instance's owned data | `destroy ID` | Stop/join before removal; history/evidence remain subject to retention |
+| Remove this instance's owned data | `destroy ID` | Stop/join and remove data, then erase attempt results/logs/artifacts; export first |
 | Change daemon PATH/environment or policy | Explicit daemon stop/start in same state directory | Future daemon context changes; retained data/CA remain; no automatic scene restart |
 | Inspect or follow | `status`, `logs`, `export` | Observation only; no attachment, lease renewal or lifecycle ownership |
 | Own one new persistent attempt until client ends | `scene start --attached SCENE` or `run --attached SCENE` | Refuse existing runtime; signal/loss stops only the accepted attempt and retains data |
@@ -201,7 +201,7 @@ not hide recorded instances while the directory and checkout identity remain usa
 
 Multiple non-destroyed persistent records at that location/scene produce
 `ambiguous_target`; use `backlot status ID` or `backlot stop ID`. Failed and
-metadata-only records participate; destroyed history is available by ID only.
+metadata-only records participate; destroyed identity tombstones are available by ID only.
 Malformed recorded selectors or disagreement with existing persistent slots produce
 `state_corrupt` before discovery filtering. Preserve state for diagnosis; existing
 ID inspection/cleanup remains independent of named selection.
@@ -307,7 +307,11 @@ format and rejection/cleanup rules.
 | `POST /v1/renew` | `LeaseRequest` | `InstanceResponse` |
 | `POST /v1/run`, `/v1/restart`, `/v1/reset` | `RunRequest` | `InstanceResponse` |
 | `POST /v1/runtime/stop` | `StopRequest` (force requires selected `expected_attempt`) | `InstanceResponse` |
-| `POST /v1/destroy` | `DestroyRequest` | `InstanceResponse` |
+| `POST /v1/destroy` | `DestroyRequest` (required `contract: "erase-attempt-history/v1"`) | `InstanceResponse` (execution-free destroyed identity) |
+| `POST /v1/attempts/list` | `HistoryRequest` | `HistoryResponse` (at most 100 summaries) |
+| `POST /v1/attempts/inspect` | `AttemptRequest` | `AttemptResponse` |
+| `POST /v1/attempts/prune` | `HistoryPruneRequest` | `HistoryPruneResponse` |
+| `POST /v1/export` | `ExportRequest` (optional exact attempt) | `ExportResponse` |
 | `POST /v1/attached/renew`, `/v1/attached/cancel` | `AttachedRequest` | `SceneResponse` |
 | `POST /v1/logs` | `LogsRequest` | `LogsResponse` |
 
@@ -697,7 +701,8 @@ backlot list --checkout /absolute/worktree --project-id my-project --json
 backlot daemon config --state-dir /private/backlot --json
 ```
 
-Unfiltered list remains global retained history, including destroyed instances.
+Unfiltered list remains global recorded identity discovery, including destroyed
+tombstones; successful destroy retains no execution result or attempt evidence.
 `--project` and `--checkout` are mutually exclusive explicit location selectors;
 project selects the exact recorded directory (a deleted recognized manifest path
 also works), while checkout selects all projects in that existing directory's

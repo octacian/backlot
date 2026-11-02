@@ -20,6 +20,12 @@ func validateStateAuthority(tx *bolt.Tx) error {
 	if err := validateSharedAuthority(tx); err != nil {
 		return err
 	}
+	if err := validateHistoryDeletionState(tx); err != nil {
+		return err
+	}
+	if err := validateAttemptState(tx); err != nil {
+		return err
+	}
 	if err := validateBuildImageResults(tx); err != nil {
 		return err
 	}

@@ -23,6 +23,9 @@ func CheckAccess(directory string) error {
 // A failed startup terminates/reaps only the child it created.
 func Start(ctx context.Context, options Options) (v1.DaemonStatusResponse, error) {
 	var empty v1.DaemonStatusResponse
+	if options.RetentionAttempts == 0 {
+		options.RetentionAttempts = DefaultRetentionAttempts
+	}
 	if options.LeaseDuration == 0 {
 		options.LeaseDuration = DefaultLeaseDuration
 	}
@@ -65,7 +68,7 @@ func Start(ctx context.Context, options Options) (v1.DaemonStatusResponse, error
 	if err != nil {
 		return empty, problem("permissions", "cannot open private daemon startup log")
 	}
-	command := exec.Command(executable, "daemon", "serve", "--state-dir", options.Directory, "--lease-duration", options.LeaseDuration.String(), "--retention-age", options.RetentionAge.String(), "--retention-bytes", strconv.FormatInt(options.RetentionBytes, 10))
+	command := exec.Command(executable, "daemon", "serve", "--state-dir", options.Directory, "--lease-duration", options.LeaseDuration.String(), "--retention-age", options.RetentionAge.String(), "--retention-bytes", strconv.FormatInt(options.RetentionBytes, 10), "--retention-attempts", strconv.Itoa(options.RetentionAttempts))
 	command.Dir = options.Directory
 	command.Stdout = log
 	command.Stderr = log

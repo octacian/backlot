@@ -1,11 +1,11 @@
 ---
 title: 'Pin execution-scoped build images from native jobs'
 date: '2026-10-25'
-status: accepted
+status: superseded
 summary: 'Hand attempt-specific local image tags to selected native jobs and retain inspected Engine image IDs so concurrent executions do not share mutable image configuration.'
 tags: [containers, manifest, planning, lifecycle, persistence, compatibility]
 supersedes: []
-superseded_by: []
+superseded_by: [20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md]
 ---
 
 # Pin execution-scoped build images from native jobs

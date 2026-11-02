@@ -16,18 +16,19 @@ import (
 
 func exportCommand() *urfave.Command {
 	return &urfave.Command{Name: "export", ArgsUsage: "<instance-id>", Description: "Export observes the latest attempt without owning runtime; interruption stops waiting, not execution. Without --wait the attempt must already be settled.\nExample: backlot export --output ./report INSTANCE_ID", Usage: "Publish a portable report for the latest settled execution attempt", Flags: append(daemonFlags(false),
+		&urfave.StringFlag{Name: "attempt", Usage: "Export one exact retained attempt"},
 		&urfave.StringFlag{Name: "output", Required: true, Usage: "New caller-owned directory (existing destinations are rejected)"},
 		&urfave.BoolFlag{Name: "allow-partial", Usage: "Publish explicitly incomplete evidence; safety checks still apply"},
 		&urfave.GenericFlag{Name: "wait", Value: &exportWaitValue{}, Usage: "Wait indefinitely or use --wait=SECONDS_OR_DURATION", OnlyOnce: true}),
 		Action: func(ctx context.Context, c *urfave.Command) error {
-			if c.Args().Len() != 1 {
+			if c.Args().Len() != 1 || c.IsSet("attempt") && c.String("attempt") == "" {
 				return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "export requires one recorded instance ID"})
 			}
 			destination, err := filepath.Abs(c.String("output"))
 			if err != nil {
 				return output(c, nil, err)
 			}
-			request := v1.ExportRequest{APIVersion: v1.Version, InstanceID: c.Args().First(), Output: destination, AllowPartial: c.Bool("allow-partial"), Wait: c.IsSet("wait")}
+			request := v1.ExportRequest{APIVersion: v1.Version, InstanceID: c.Args().First(), Attempt: c.String("attempt"), Output: destination, AllowPartial: c.Bool("allow-partial"), Wait: c.IsSet("wait")}
 			if value := c.Generic("wait").String(); request.Wait && value != "" && value != "true" {
 				if seconds, err := strconv.ParseFloat(value, 64); err == nil {
 					value = fmt.Sprintf("%gs", seconds)

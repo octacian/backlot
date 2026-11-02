@@ -119,7 +119,7 @@ func TestEvidenceRetentionIndependentOfDataAndRetriesExpiration(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(s.directory, "logs"), 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(s.directory, "logs", instance.ID+"-output.ndjson"), []byte(strings.Repeat("x", 10)), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(s.directory, "logs", instance.ID+"-"+result.Attempt+"-output.ndjson"), []byte(strings.Repeat("x", 10)), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -154,7 +154,7 @@ func TestEvidenceRetentionIndependentOfDataAndRetriesExpiration(t *testing.T) {
 	}
 	// Simulate interruption after metadata commit by recreating expired bytes;
 	// the next sweep must remove them without touching runtime/data state.
-	path := filepath.Join(s.directory, "logs", old.ID+"-output.ndjson")
+	path := filepath.Join(s.directory, "logs", old.ID+"-"+func() string { i, _ := s.store.inspect(old.ID); return i.Execution.Attempt }()+"-output.ndjson")
 	if err := os.WriteFile(path, []byte("residual"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -210,36 +210,6 @@ func TestKeptRuntimeFencesOutputDrift(t *testing.T) {
 	}
 }
 
-func TestPruningOldCandidateCannotExpireNewAttempt(t *testing.T) {
-	root := shortTemp(t)
-	config := writeFixture(t, root)
-	state, err := openStore(shortTemp(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := state.db.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	s := &service{store: state, lease: time.Minute, directory: state.directory}
-	response, err := s.prepare(context.Background(), request(root, config, "test"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldAttempt, newAttempt := newID(), newID()
-	if _, err := state.execution(response.Instance.ID, v1.Succeeded, &v1.ExecutionResult{Attempt: newAttempt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
-		t.Fatal(err)
-	}
-	if removed, err := s.pruneInstanceEvidence(response.Instance.ID, oldAttempt); err != nil || removed != 0 {
-		t.Fatal("stale candidate removal", removed, err)
-	}
-	instance, err := state.inspect(response.Instance.ID)
-	if err != nil || instance.Execution.EvidenceExpired {
-		t.Fatal("new attempt expired", instance, err)
-	}
-}
-
 func TestLegacyEvidenceObservationSurvivesRestart(t *testing.T) {
 	root := shortTemp(t)
 	config := writeFixture(t, root)
@@ -279,7 +249,7 @@ func TestLegacyEvidenceObservationSurvivesRestart(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(directory, "logs"), 0700); err != nil {
 			t.Fatal(err)
 		}
-		path := filepath.Join(directory, "logs", response.Instance.ID+"-output.ndjson")
+		path := filepath.Join(directory, "logs", response.Instance.ID+"-"+result.Attempt+"-output.ndjson")
 		if err := os.WriteFile(path, []byte("legacy"), 0600); err != nil {
 			t.Fatal(err)
 		}

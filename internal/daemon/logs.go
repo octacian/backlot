@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 func (s *service) logs(request v1.LogsRequest) (v1.LogsResponse, error) {
@@ -25,6 +26,10 @@ func (s *service) logsLocked(request v1.LogsRequest) (v1.LogsResponse, error) {
 // logsSourceLocked additionally fences export reads to the private state root and
 // rejects unsafe sources before decoding can turn them into copied records.
 func (s *service) logsSourceLocked(request v1.LogsRequest, source *os.Root) (v1.LogsResponse, error) {
+	return s.logsForInstance(request, source, nil)
+}
+
+func (s *service) logsForInstance(request v1.LogsRequest, source *os.Root, selected *v1.Instance) (v1.LogsResponse, error) {
 	response := v1.LogsResponse{APIVersion: v1.Version, Records: []v1.LogRecord{}, NextOffset: request.Offset}
 	if !validID(request.InstanceID) || request.Offset < 0 {
 		return response, problem("invalid_request", "recorded instance_id and nonnegative log offset required")
@@ -33,13 +38,25 @@ func (s *service) logsSourceLocked(request v1.LogsRequest, source *os.Root) (v1.
 	if err != nil {
 		return response, err
 	}
+	if selected != nil {
+		instance = *selected
+	}
 	response.NativeOwnershipWarnings = instance.NativeOwnershipWarnings
 	response.Active = instance.Status == v1.Starting || instance.Status == v1.RuntimeReady || instance.Status == v1.Stopping
 	if instance.Execution != nil {
 		response.Gap = instance.Execution.CollectionFailure
 		if instance.Execution.EvidenceExpired {
 			response.Gap = "evidence expired by retention policy"
-			return response, nil
+			if selected != nil {
+				return response, nil
+			}
+			other, err := s.otherRetainedEvidence(instance.ID, instance.Execution.Attempt)
+			if err != nil {
+				return response, err
+			}
+			if !other {
+				return response, nil
+			}
 		}
 		response.Active = response.Active || instance.Execution.Kept || instance.Execution.CleanupFailure != ""
 	}
@@ -83,6 +100,26 @@ func (s *service) logsSourceLocked(request v1.LogsRequest, source *os.Root) (v1.
 	if err != nil {
 		return response, err
 	}
+	if selected != nil {
+		paths = selectedLogPaths(paths, instance.ID, instance.Execution.Attempt)
+	}
+	// Aggregate offsets must append across replacements even when random attempt
+	// IDs sort before their predecessors. Finite log pages keep lexical ordering.
+	attempts, err := s.store.attempts(instance.ID)
+	if err != nil {
+		return response, err
+	}
+	order := map[string]int64{}
+	for _, a := range attempts {
+		order[instance.ID+"-"+a.Result.Attempt+"-output.ndjson"] = a.Sequence
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		left, right := order[filepath.Base(paths[i])], order[filepath.Base(paths[j])]
+		if left != right {
+			return left < right
+		}
+		return paths[i] < paths[j]
+	})
 	index := 0
 	size := 0
 	for _, path := range paths {

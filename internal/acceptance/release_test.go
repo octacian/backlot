@@ -916,19 +916,19 @@ func TestReleaseWorkflows(t *testing.T) {
 		}
 	})
 	h.test("public-negative-workflows", func(t *testing.T) { h.negativeWorkflows() })
-	h.test("shutdown-with-retained-collection-gap", func(t *testing.T) {
+	h.test("shutdown-after-history-erasure", func(t *testing.T) {
 		if h.collectionWitness == "" {
 			t.Fatal("injected collection failure witness absent")
 		}
 		before := h.require("inspect", h.collectionWitness)
-		h.stopDaemon(true)
+		h.stopDaemon(false)
 		h.start()
 		after := h.require("inspect", h.collectionWitness)
-		if before.Status != v1.Destroyed || after.Status != v1.Destroyed || after.Execution.CollectionFailure != before.Execution.CollectionFailure || after.Execution.TerminalExitCode == nil || *after.Execution.TerminalExitCode != 17 {
-			t.Fatal("shutdown erased historical original/collection failure")
+		if before.Status != v1.Destroyed || after.Status != v1.Destroyed || before.Execution != nil || after.Execution != nil {
+			t.Fatal("destroyed diagnostic history resurrected after restart")
 		}
-		if string(artifactFile(t, after, "collection", "present", "report")) != "retained-evidence\n" {
-			t.Fatal("shutdown erased retained artifact")
+		if _, err := os.Stat(filepath.Join(h.state, "artifacts", h.collectionWitness)); !os.IsNotExist(err) {
+			t.Fatal("destroy retained artifacts", err)
 		}
 	})
 	sentinels.verify()

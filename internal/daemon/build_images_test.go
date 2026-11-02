@@ -25,7 +25,7 @@ func TestBuildImageHandoffRejectsStaleAttemptOrGeneration(t *testing.T) {
 			if kind == "collection failure" {
 				result.CollectionFailure = "fixture collection gap"
 			}
-			if _, err := s.store.execution(instance.ID, v1.Starting, result); err != nil {
+			if _, err := s.store.replaceTestExecution(instance.ID, v1.Starting, result); err != nil {
 				t.Fatal(err)
 			}
 			g := resourceGeneration{ID: newID(), Resources: map[string]ownedResource{}, Initialized: map[string]bool{}}
@@ -34,7 +34,7 @@ func TestBuildImageHandoffRejectsStaleAttemptOrGeneration(t *testing.T) {
 			}
 			entry := &execution{resources: &g, acceptImages: true}
 			if kind == "attempt" {
-				if _, err := s.store.execution(instance.ID, v1.Starting, &v1.ExecutionResult{Attempt: newID()}); err != nil {
+				if _, err := s.store.replaceTestExecution(instance.ID, v1.Starting, &v1.ExecutionResult{Attempt: newID()}); err != nil {
 					t.Fatal(err)
 				}
 			}

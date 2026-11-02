@@ -75,7 +75,7 @@ func configCommand() *urfave.Command {
 			return output(c, nil, err)
 		}
 		r.DaemonSocket = daemon.SocketPath(r.DaemonDirectory)
-		r.Defaults = v1.ExecutionDefaults{Execution: v1.ExecutionOptions{StartupTimeout: defaultStartupTimeout, JobTimeout: defaultJobTimeout, StopGrace: defaultStopGrace}, LeaseDuration: daemon.DefaultLeaseDuration.String(), RetentionAge: daemon.DefaultRetentionAge.String(), RetentionBytes: daemon.DefaultRetentionBytes}
+		r.Defaults = v1.ExecutionDefaults{Execution: v1.ExecutionOptions{StartupTimeout: defaultStartupTimeout, JobTimeout: defaultJobTimeout, StopGrace: defaultStopGrace}, LeaseDuration: daemon.DefaultLeaseDuration.String(), RetentionAge: daemon.DefaultRetentionAge.String(), RetentionBytes: daemon.DefaultRetentionBytes, RetentionAttempts: daemon.DefaultRetentionAttempts}
 		return discoveryOutput(c, r, nil)
 	}}}}
 }
@@ -130,7 +130,7 @@ func contractsCommand(version v1.VersionResponse) *urfave.Command {
 
 func logPageAction(ctx context.Context, c *urfave.Command) error {
 	q := v1.LogPageRequest{APIVersion: v1.Version, InstanceID: c.Args().First(), Component: c.String("component"), Attempt: c.String("attempt"), Stream: c.String("stream"), After: c.String("after"), Limit: c.Int("limit")}
-	if c.Bool("follow") || q.Limit < 1 {
+	if c.Bool("follow") || q.Limit < 1 || c.IsSet("attempt") && q.Attempt == "" {
 		return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "--page conflicts with --follow and requires limit 1 through 1000"})
 	}
 	if err := q.Validate(); err != nil {

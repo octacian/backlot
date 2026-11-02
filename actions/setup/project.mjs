@@ -65,8 +65,8 @@ export function captureProjectInputs(register = mask) {
 export async function requireProjectRuntime(owner, binary) {
   const raw = await command(binary, ['version', '--json'], { env: await backlotEnvironment(owner), sensitive: true });
   let supported = false;
-  try { const version = JSON.parse(raw); supported = version.api_version === 'v1' && [10, 11].includes(version.state_version); } catch {}
-  if (!supported) throw Error('Private job configuration requires a compatible state-version-10 or state-version-11 Backlot revision');
+  try { const version = JSON.parse(raw); supported = version.api_version === 'v1' && [10, 11, 12].includes(version.state_version); } catch {}
+  if (!supported) throw Error('Private job configuration requires Backlot API v1 with state-version 10, 11 or 12; pin a compatible backlot-ref');
 }
 
 export async function setupProject(owner, binary, config, options, register = mask) {

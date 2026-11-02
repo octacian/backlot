@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { mkdir, writeFile, lstat, symlink, readFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { command, createOwner, verifyOwner, prepare, cleanup, listInstances } from './runtime.mjs';
+import { command, createOwner, verifyOwner, prepare, cleanup, listInstances, backlotEnvironment } from './runtime.mjs';
 
 
 const script = name => fileURLToPath(new URL(name, import.meta.url));
@@ -30,8 +30,8 @@ test('real setup failure after daemon start is cleaned by native post hook', {
     await writeFile(join(owner.root, 'daemon-attempted'), '');
     await assert.rejects(prepare({ owner, root: owner.root, binary: process.env.BACKLOT_BINARY,
       caddy: join(owner.root, 'missing-caddy'), node: process.execPath }), /gateway.*failed/s);
-    const cli = (...args) => command(process.env.BACKLOT_BINARY,
-      [...args, '--state-dir', join(owner.root, 'd'), '--json']);
+    const cli = async (...args) => command(process.env.BACKLOT_BINARY,
+      [...args, '--state-dir', join(owner.root, 'd'), '--json'], { env: await backlotEnvironment(owner) });
     // Bind the protocol fixture to actual CLI output, including an empty daemon.
     const empty = JSON.parse(await cli('list'));
     assert.equal(empty.api_version, 'v1');
@@ -42,7 +42,8 @@ test('real setup failure after daemon start is cleaned by native post hook', {
     await collect(emptyOutput);
     assert.deepEqual(await readdir(emptyOutput), []);
     // Reuse the existing persistent metadata scene: no application is launched.
-    const { instance } = JSON.parse(await cli('prepare', 'dev', '--project', script('../../examples/adoption')));
+    await writeFile(join(owner.root, 'metadata-machine.json'), '{"version":"backlot/v1"}', { mode: 0o600 });
+    const { instance } = JSON.parse(await cli('prepare', 'dev', '--project', script('../../examples/adoption'), '--config', join(owner.root, 'metadata-machine.json')));
     await assert.rejects(collect(preparedOutput), /no recorded execution|no_execution/);
     await command(process.execPath, [script('post.mjs')], { env: { ...process.env, STATE_owner: JSON.stringify(owner) }, timeout: 100_000 });
     await assert.rejects(lstat(owner.root), { code: 'ENOENT' });

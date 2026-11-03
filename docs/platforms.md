@@ -33,9 +33,9 @@ no numeric-PID signal fallback. See [installation](operations.md) and
 For adapting application commands across supported platforms, start with
 [project adoption](adoption.md); use this guide for host/topology prerequisites.
 
-Install Go at the version in `go.mod` (1.27.1, or a compatible newer patch), Git,
+Install Go at the version in `go.mod` (1.27.3, or a compatible newer patch), Git,
 Make, `lsof`, and a C compiler/libc headers for the contributor race gate. Install
-stock Caddy 2.11.6 separately for managed HTTPS and explicitly configure its
+stock Caddy 2.11.7 separately for managed HTTPS and explicitly configure its
 absolute path. Distro packages can lag these versions: Debian 13's original
 Go 1.24 and Caddy 2.6.2 packages do not match this validation baseline. Toolchain
 installation and system services remain operator responsibilities. Do not start a

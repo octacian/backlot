@@ -236,7 +236,7 @@ Docker endpoint; Backlot inspects and pins its image ID and never pulls/builds i
 The image contract requires executable `/bin/sh`, `/bin/bash`, `getent hosts`,
 GNU-compatible `timeout` (exit 124 on timeout), and OpenSSL `s_client` supporting
 `-connect`, `-servername`, `-verify_hostname`, `-verify_return_error` and `-CAfile`.
-For example a preexisting Debian-based `golang:1.27.1` image provides these tools;
+For example a preexisting Debian-based `golang:1.27.3` image provides these tools;
 operators select their own compatible image. Missing tools are `unsupported`.
 Images declaring volumes are unsupported. Image/app entrypoint and command are
 replaced by the bounded probe script and image healthchecks are explicitly disabled;

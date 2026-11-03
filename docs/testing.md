@@ -2,7 +2,7 @@
 
 ## Setup
 
-Use the Go version declared in `go.mod` (currently 1.27.1), Git, and Make.
+Use the Go version declared in `go.mod` (currently 1.27.3), Git, and Make.
 Repository contributor tooling is Go-only; Node and a JavaScript package manager
 are not required by `make check`. The optional [application CI example](../examples/ci-scenes/README.md)
 pins its own Node/Playwright dependencies and runs in a separate Ubuntu workflow.
@@ -264,7 +264,7 @@ image outside Backlot runtime (there are no implicit image pulls):
 
 ```sh
 go test -race ./internal/gateway/testdata/fixture -count=1 -v
-docker pull caddy:2.11.6
+docker pull caddy:2.11.7
 docker pull alpine:3.21
 BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
 BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
@@ -277,8 +277,8 @@ BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
 Run suites serially with exclusive fixture mutation ownership. Gateway fixtures
 use private cert/config/storage, dynamic ports, exact owned route effects and
 retained child handles or labeled containers. The container gateway is pinned to
-the Caddy 2.11.6 multi-platform digest
-`sha256:3422ce6de165df66534f9b9ba50efaf457114ec961763cc52f5dbdaac2972d73`.
+the Caddy 2.11.7 multi-platform digest
+`sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e`.
 Each suite builds a unique image from the generic static Go fixture source and
 pre-pulled `alpine:3.21` (including standard public CA roots);
 cleanup verifies ownership and removes fixture images/containers/networks and
@@ -321,7 +321,7 @@ Select this suite for affected managed-HTTPS guarantees lacking CI coverage. It 
 race-enabled CLI/native fixtures, uses dynamic IPv4/IPv6 loopback ports and a
 unique private daemon/CA state, and runs real CLI lifecycle and path traffic with
 normal host DNS. Private trust is explicit only in fixture clients/daemon process
-(`SSL_CERT_FILE` with Go 1.27.1 and an empty private `SSL_CERT_DIR`, plus fixture
+(`SSL_CERT_FILE` with Go 1.27.3 and an empty private `SSL_CERT_DIR`, plus fixture
 client root pools); production does not inject CA trust. Missing/wrong private
 trust must fail. Tests register authenticated cleanup before faults and preserve
 uncertain residuals. No existing gateway, trust store or resolver is changed.
@@ -485,7 +485,7 @@ already-present diagnostic image satisfying the [probe contract](daemon.md#expli
 ```sh
 BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
 BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
-BACKLOT_DOCTOR_TEST_IMAGE=golang:1.27.1 \
+BACKLOT_DOCTOR_TEST_IMAGE=golang:1.27.3 \
   go test -race ./internal/daemon -run '^TestDoctor(Runtime|OwnedProbeCancellationAndRecovery)$' -count=1 -v
 ```
 
@@ -514,7 +514,7 @@ images; production/default gateway exposure stays unchanged.
 
 ## Native watcher example and browser HMR
 
-Prepare a private copy of `examples/native-watchers` with Go 1.27.1, Air 1.67.4,
+Prepare a private copy of `examples/native-watchers` with Go 1.27.3, Air 1.67.4,
 Node 26.8.1 and `npm ci --ignore-scripts` (Vite 8.3.4). Put those tools on the
 fixture daemon PATH. The test mutates the private copy's `main.js`; never point it
 at a working checkout. Select an existing private empty fixture root on a short

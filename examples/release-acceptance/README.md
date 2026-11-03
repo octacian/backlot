@@ -10,7 +10,7 @@ and changes when a new attempt rebuilds it. Use restart to update running work.
 Application credentials are generated per resource generation, with a separate
 database administrator secret.
 
-From the repository root on macOS ARM64, with Go 1.27.1, Docker, Git, Make and
+From the repository root on macOS ARM64, with Go 1.27.3, Docker, Git, Make and
 `lsof` installed:
 
 ```sh

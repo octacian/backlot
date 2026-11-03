@@ -2,7 +2,7 @@
 title: "Select bounded working directories for native commands"
 date: 2026-11-03
 status: accepted
-implementation: in-progress
+implementation: implemented
 summary: "Select project-contained native command directories without changing other path anchors or retained lifecycle guarantees."
 tags:
   - native

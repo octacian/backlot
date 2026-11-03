@@ -42,7 +42,7 @@ func TestDockerObservationFailureDoesNotInventExit(t *testing.T) {
 			defer func() { _ = engine.Close() }()
 			done := make(chan struct{})
 			close(done)
-			work := &dockerWork{engine: &dockerEngine{engine}, resource: ownedResource{Kind: "container", ID: "owned", Token: token}, logDone: done}
+			work := &dockerWork{engine: &dockerEngine{Client: engine, stopClient: engine}, resource: ownedResource{Kind: "container", ID: "owned", Token: token}, logDone: done}
 			if collection {
 				work.logErr = errors.New("injected collector transport loss")
 			}
@@ -110,7 +110,7 @@ func TestDockerJobPollUsesOneObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = engine.Close() }()
-	work := &dockerWork{engine: &dockerEngine{engine}, resource: ownedResource{Kind: "container", ID: "owned"}}
+	work := &dockerWork{engine: &dockerEngine{Client: engine, stopClient: engine}, resource: ownedResource{Kind: "container", ID: "owned"}}
 	exit, err := waitJob(ctx, work, nil)
 	if exit != nil || !errors.Is(err, context.Canceled) || count.Load() != 1 {
 		t.Fatalf("job poll duplicated observation or invented exit: requests=%d exit=%v err=%v", count.Load(), exit, err)

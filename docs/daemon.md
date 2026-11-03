@@ -122,7 +122,8 @@ checkout path is rejected with a typed error, preserving old records; use a
 separate checkout rather than implicitly adopting old state. Non-Git projects use
 the project directory's filesystem identity.
 
-Repeated persistent preparation reports manifest/config digest drift and returns
+Repeated persistent preparation reports manifest/config drift, including effective
+working-directory target changes, and returns
 the original record without overwriting its snapshot, including cancelled or
 interrupted records. Metadata preparation itself never restarts runtime; native restart is described
 below. Reset/destroy are documented in the [private-state guide](containers.md);
@@ -352,6 +353,10 @@ startup error in foreground output or the private `daemon.log` for background st
 
 
 ## Native execution
+
+Native commands and host readiness commands use the selected
+[working directory](manifest.md#native-working-directories). Retained snapshots
+preserve its canonical target and launch rechecks it before activation.
 
 Build with `make build`, then explicitly start a private daemon as above. Native
 commands and descendants, including readiness commands, may create groups within

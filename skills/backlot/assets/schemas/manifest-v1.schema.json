@@ -33,6 +33,25 @@
     },
     "Command": {
       "properties": {
+        "working_directory": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "",
+                "."
+              ]
+            },
+            {
+              "not": {
+                "pattern": "(^|/)\\.\\.?(/|$)"
+              },
+              "pattern": "^[^/\\\\:\\x00]+(/[^/\\\\:\\x00]+)*$"
+            }
+          ],
+          "type": "string",
+          "description": "Existing manifest-relative directory for native execution; dot selects the manifest directory. Native service readiness commands inherit service cwd when omitted; other commands default to the manifest directory."
+        },
         "tool": {
           "type": "string",
           "minLength": 1,

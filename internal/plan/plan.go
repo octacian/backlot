@@ -110,6 +110,10 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 		}
 		planned := v1.PlannedComponent{Artifacts: c.Artifacts, Name: name, Kind: c.Kind, Runtime: c.Runtime, Command: c.Command, Args: slices.Clone(c.Args), Policy: c.Policy, Initializes: c.Initializes, DependsOn: c.DependsOn, Resources: c.Resources, Outputs: c.Outputs, Ports: c.Ports, Mounts: c.Mounts, HostMappings: c.HostMappings}
 		if c.Command != nil {
+			planned.WorkingDirectory, err = WorkingDirectory(project, c.Command.WorkingDirectory)
+			if err != nil {
+				return v1.PlanResponse{}, directoryProblem(err, "components."+name+".command.working_directory")
+			}
 			executable, err := tool(layers, c.Command.Tool, project, name, "command", snapshot)
 			if err != nil {
 				return v1.PlanResponse{}, err
@@ -181,6 +185,14 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 			p := c.Readiness
 			planned.Readiness = &v1.PlannedProbe{Kind: p.Kind, Command: p.Command, Timeout: p.Timeout}
 			if p.Command != nil {
+				directory := p.Command.WorkingDirectory
+				if directory == "" && c.Command != nil {
+					directory = c.Command.WorkingDirectory
+				}
+				planned.Readiness.WorkingDirectory, err = WorkingDirectory(project, directory)
+				if err != nil {
+					return v1.PlanResponse{}, directoryProblem(err, "components."+name+".readiness.command.working_directory")
+				}
 				executable, err := tool(layers, p.Command.Tool, project, name, "readiness", snapshot)
 				if err != nil {
 					return v1.PlanResponse{}, err

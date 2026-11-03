@@ -323,3 +323,11 @@ func (SharedService) JSONSchemaExtend(s *jsonschema.Schema) {
 		schemaWhen("manager", "mariadb", schemaProperties(map[string]*jsonschema.Schema{"port": {Const: 3306}})),
 		schemaWhen("manager", "postgresql", schemaProperties(map[string]*jsonschema.Schema{"port": {Const: 5432}})))
 }
+
+// JSONSchemaExtend bounds command directories while retaining omitted defaults.
+func (Command) JSONSchemaExtend(s *jsonschema.Schema) {
+	schemaProperty(s, "working_directory").AnyOf = []*jsonschema.Schema{
+		schemaEnum("", "."),
+		{Pattern: `^[^/\\:\x00]+(/[^/\\:\x00]+)*$`, Not: &jsonschema.Schema{Pattern: `(^|/)\.\.?(/|$)`}},
+	}
+}

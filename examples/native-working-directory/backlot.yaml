@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=../../schemas/manifest-v1.schema.json
+version: backlot/v1
+project: native-working-directory
+tools: {go: go}
+resources:
+  http: {kind: port}
+outputs:
+  build: {path: build, concurrency_group: build}
+components:
+  server:
+    kind: service
+    runtime: native
+    command: {tool: go, args: [run, .], working_directory: app}
+    resources: [http]
+    environment:
+      assign:
+        PORT: {ref: {kind: resource, name: http, field: port}}
+    ports: {http: {resource: http}}
+    readiness:
+      kind: tcp
+      target: {ref: {kind: resource, name: http, field: port}}
+      timeout: 1m
+  build:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: go, args: [build, -o, ../build/app, .], working_directory: app}
+    outputs: [build]
+    artifacts: {binary: {path: build/app}}
+  tests:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: go, args: [test, -count=1, ./...], working_directory: app}
+scenes:
+  dev: {lifetime: persistent, components: [server], resources: [http]}
+  build: {lifetime: disposable, components: [build], terminal_job: build}
+  test: {lifetime: disposable, components: [tests], terminal_job: tests}

@@ -41,6 +41,9 @@ type PlannedValue struct {
 
 // PlannedComponent contains selected work in dependency order.
 type PlannedComponent struct {
+	// WorkingDirectory is the canonical native cwd; empty means the manifest directory.
+	WorkingDirectory string `json:"working_directory,omitempty"`
+
 	Artifacts    map[string]ArtifactSource `json:"artifacts,omitempty"`
 	Fixtures     map[string]PlannedFixture `json:"fixtures,omitempty"`
 	Name         string                    `json:"name"`
@@ -91,6 +94,9 @@ func (e *PlanError) Error() string {
 
 // PlannedProbe preserves readiness intent with a redacted or symbolic target.
 type PlannedProbe struct {
+	// WorkingDirectory is the canonical host command cwd; empty means the manifest directory.
+	WorkingDirectory string `json:"working_directory,omitempty"`
+
 	Executable string        `json:"executable,omitempty"`
 	Kind       string        `json:"kind"`
 	Target     *PlannedValue `json:"target,omitempty"`

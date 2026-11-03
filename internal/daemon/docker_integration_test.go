@@ -1746,8 +1746,14 @@ func TestDockerRuntime(t *testing.T) {
 		peer := h.manifest.Components["server"]
 		peer.Args = []string{"sh", "-c", "echo recovery-peer; exec sleep 300"}
 		peer.Ports = nil
-		h.manifest.Tools = map[string]string{"true": "true"}
-		peer.Readiness = &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "true"}, Timeout: "3s"}
+		if err := os.Mkdir(filepath.Join(h.project, "probe"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(h.project, "probe", "host-marker"), []byte("fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		h.manifest.Tools = map[string]string{"probe": "sh"}
+		peer.Readiness = &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "probe", WorkingDirectory: "probe", Args: []string{"-c", "test -f host-marker"}}, Timeout: "3s"}
 		peer.Resources = []string{"data", "directory", "secret"}
 		h.manifest.Components["peer"] = peer
 		scene := h.manifest.Scenes["dev"]

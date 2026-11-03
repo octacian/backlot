@@ -41,6 +41,12 @@ func abandonmentWarnings(history []nativeAbandonment) []v1.NativeOwnershipWarnin
 	return warnings
 }
 
+// previousBoot is independent absence proof; it never contacts retained process authority.
+func (a nativeAbandonment) previousBoot() bool {
+	previous, err := native.PreviousBoot(a.Boot)
+	return err == nil && previous
+}
+
 // guardAbandonedData requires independent resource proof, never waiver itself,
 // before deleting data an unknown survivor might still consume. History is kept.
 func (s *store) guardAbandonedData(id string) error {
@@ -49,7 +55,7 @@ func (s *store) guardAbandonedData(id string) error {
 		return err
 	}
 	for _, a := range history {
-		if previous, err := native.PreviousBoot(a.Boot); err == nil && previous {
+		if a.previousBoot() {
 			continue
 		}
 		if a.Pending || len(a.Groups) == 0 {

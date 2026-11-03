@@ -231,12 +231,21 @@ func (s *service) projectPreview(request v1.ReassociationRequest) (result v1.Rea
 			}
 			result.Instances = append(result.Instances, v1.ReassociationInstance{RecordedFilesystemState: "unrecorded", ID: i.ID, Scene: i.Plan.Scene, Status: i.Status, Recorded: i.Checkout, Association: *i.Association, Selected: chosen})
 			_, _ = freshness.Write(d)
-			if i.Status == v1.Preparing || i.Status == v1.Starting || i.Status == v1.RuntimeReady || i.Status == v1.Stopping || len(i.NativeOwnershipWarnings) > 0 || i.Execution != nil && (i.Execution.Kept || i.Execution.CleanupFailure != "") {
+			if i.Status == v1.Preparing || i.Status == v1.Starting || i.Status == v1.RuntimeReady || i.Status == v1.Stopping || i.Execution != nil && (i.Execution.Kept || i.Execution.CleanupFailure != "") {
 				block("affected consumer " + i.ID + " must be stopped/joined with verified cleanup")
+			}
+			var previousBootWarnings []v1.NativeOwnershipWarning
+			for _, abandoned := range r.NativeAbandonments {
+				if !abandoned.previousBoot() {
+					block("affected relinquished native consumer lacks independent earlier-boot absence proof: " + i.ID)
+				} else {
+					previousBootWarnings = append(previousBootWarnings, abandoned.warning())
+				}
 			}
 			if i.Execution != nil {
 				for _, cleanup := range i.Execution.NativeCleanup {
-					if cleanup.Confidence != v1.ObservedEmpty {
+					// Only independently proven earlier-boot warnings may discharge an exact-attempt fence.
+					if cleanup.Validate() != nil || cleanup.FencesResources(previousBootWarnings) {
 						block("affected native consumer cleanup remains uncertain: " + i.ID)
 					}
 				}

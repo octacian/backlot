@@ -9,7 +9,7 @@ supersedes: [/docs/adr/20261019T050443877Z-add-project-scoped-shared-service-all
 superseded_by: []
 related: [/docs/adr/20261021T001732173Z-register-private-project-configuration.md, /docs/adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md, /docs/adr/20261103T174849392Z-select-bounded-working-directories-for-native-commands.md]
 tracking: []
-implemented_by: [/internal/daemon/reassociation.go, /internal/daemon/project_bindings.go, /internal/daemon/reassociation_native_test.go]
+implemented_by: [https://github.com/octacian/backlot/pull/120]
 ---
 
 # Reassociate retained projects through explicit current bindings

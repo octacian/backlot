@@ -18,14 +18,28 @@ storage implementation. Add dependencies when used, not in anticipation of work.
 
 Plan meaningful work in reviewable steps and name affected packages. Exercise
 failure behavior as well as success. Report the resulting behavior, validation,
-remaining work, and material uncertainty. Track planned work in issues/epics and
-applicable proposed ADRs; current guides describe implemented behavior. Keep
-execution evidence in PRs and rationale in ADRs. Do not present mocked integration
-checks as a working runtime.
+remaining work, and material uncertainty. Track scope and planned work in
+issues/epics; current guides describe implemented behavior. ADRs hold choices,
+rationale, alternatives and consequences, not delivery plans. Keep execution evidence in PRs. Follow the [ADR policy](adr/README.md) for
+record review and reconciliation. Do not present mocked integration checks as a
+working runtime.
 
-Document a rule once in its relevant guide. Keep ADR rationale in the ADR and
-reference it elsewhere. Treat generated files as outputs: change the source and
-regenerate, review the diff, and document generation commands when introduced.
+Update only documentation the change makes wrong. Document a rule once in its
+relevant guide. Keep ADR rationale in the ADR and reference it elsewhere. Treat
+generated files as outputs: change the source and regenerate, review the diff,
+and document generation commands when introduced.
+
+## Write clear documentation
+
+Write for the reader's task and assumed knowledge. Lead with the answer or action,
+use familiar words and concrete examples, and explain necessary jargon or acronyms
+on first use. Prefer active voice, short sentences and focused paragraphs. Use
+headings, lists and tables when they make information easier to find or compare.
+
+Keep only what helps the reader understand, decide or act. Cut repetition, filler
+and speculative detail; link to the authoritative explanation instead of copying
+it. Preserve necessary rationale, limitations, failure behavior and safety guidance.
+Review for clarity and useful content rather than enforcing a word-count target.
 
 ## Maintain adopter documentation
 

@@ -22,7 +22,7 @@ Before planning or editing, read:
 | CLI or API contracts | [Architecture: shared API](architecture.md#shared-api), [Go practices](go-practices.md) |
 | Commits and pull requests | [Git workflow](git-workflow.md) |
 | Delivery scope or status | Relevant issues/epics for scope and status; PRs for execution evidence |
-| ADR creation or changes | [ADR guide](adr/README.md), [template](adr/template.md) |
+| ADR creation or changes | [ADR guide](adr/README.md) |
 
 ## Guides
 

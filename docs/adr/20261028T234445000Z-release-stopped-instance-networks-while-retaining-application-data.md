@@ -2,82 +2,59 @@
 title: 'Release stopped instance networks while retaining application data'
 date: '2026-10-28'
 status: accepted
+implementation: implemented
 summary: 'Release authenticated instance networks after verified consumer teardown and recreate them on later start to avoid idle address-pool consumption without deleting retained data.'
 tags: [containers, networking, lifecycle, cleanup, recovery, compatibility]
 supersedes: []
 superseded_by: []
+related: []
+tracking: ["https://github.com/octacian/backlot/issues/96"]
+implemented_by: ["https://github.com/octacian/backlot/commit/685b7af7f2f8d883f9ba25bd9819ff227012b81a"]
 ---
 
 # Release stopped instance networks while retaining application data
 
-Treat implicit and declared instance Docker networks as runtime resources: release
-them after verified consumer teardown and recreate them on later start. Retain
-application data and recorded network names; Engine IDs and subnets may change.
+## Context and Problem Statement
 
-## Context
+Stopped persistent instances retain empty networks and consume finite Docker
+address pools. Persistent data retention does not require stable network
+allocations; releasing capacity should not force application-data destruction.
 
-[Issue 96](https://github.com/octacian/backlot/issues/96) reports Docker address-pool
-exhaustion. Owned fixtures confirmed that stopped persistent instances retain empty
-networks, while disposable completion and destroy clean them up. This establishes
-avoidable idle retention, not the cause of every allocation failure; execution
-evidence is in [PR 104](https://github.com/octacian/backlot/pull/104).
+## Considered Options
 
-The [lifecycle decision](20261007T052013565Z-use-explicit-scene-lifetimes-and-daemon-owned-execution.md)
-requires persistent data retention, not stable network allocations.
+- Release instance networks on verified teardown and recreate on start.
+- Retain until destroy: couples capacity recovery to data deletion.
+- A separate cleanup API: leaves ordinary stop accumulating reservations.
+- Shared bridges or larger address pools: change isolation/machine settings without
+  addressing the lifecycle cause.
 
-## Decision
+## Decision Outcome
 
-Release only the selected instance's recorded networks during normal teardown,
-explicit stop, daemon shutdown and interrupted-execution recovery. Explicit stop
-also handles older stopped records; there is no historical sweep. Healthy kept
-services retain their networks until explicitly stopped. Project-scoped
-[shared-service networks](20261019T050443877Z-add-project-scoped-shared-service-allocations.md)
-remain separately retained.
+Treat instance networks as runtime resources. Release only selected recorded
+networks during teardown, explicit stop, shutdown and interrupted recovery; older
+stopped records are handled on explicit stop, without a historical sweep. Healthy
+kept services retain networks; shared-service networks remain separately retained.
 
-Join owned consumers before release. Reuse existing capability/Engine-ID
-authentication, consumer fences, lifecycle locks and the intent/effect journal.
-Preserve foreign consumers, including never-started declarations, without
-disconnecting them. Provider errors, uncertain ownership and incomplete teardown
-retain resources and return bounded cleanup failures with recorded retry authority.
-Settle obligations only after verified removal or authoritative absence; native
-force cannot waive an independent network failure. Recovery never restarts work.
+Join consumers and authenticate recorded capability/Engine IDs before removal.
+Preserve foreign consumers, uncertain ownership and incomplete teardown with retry
+obligations; settle only verified removal or authoritative absence. Native force
+cannot waive independent network failures. Never disconnect foreign declarations.
 
-Recreate released or authoritatively absent networks through the existing journal,
-preserving their names and recording effects before launching consumers. A foreign
-same-name collision fails startup; names alone grant no adoption or deletion
-authority. Retain the instance/data generation, storage, credentials, fresh-only
-completion records and build-image pins. Existing storage verification, endpoint
-drift protection and reset/destroy/disposable data semantics remain unchanged,
-including disposable data retention during shutdown.
+Recreate through existing intent/effect ownership before launching consumers,
+retaining stable names while recording new IDs. A foreign same-name collision
+fails rather than grants adoption authority. Preserve instance/data generations,
+storage, credentials, initialization records and image pins; recovery never resumes
+workloads. Existing reset/destroy/disposable data semantics remain unchanged.
 
-Use the existing state layout and API. No collector, cleanup command or machine
-address-pool configuration is needed; bulk activity/stop work remains in
-[issue 98](https://github.com/octacian/backlot/issues/98).
+### Consequences
 
-## Consequences
+Stopped instances return avoidable address capacity while retaining application
+state. Later starts need capacity and may get new IDs/subnets, although names stay
+stable for completed initialization. Active workloads, foreign consumers and
+uncertain resources can still exhaust pools or need operator intervention. No new
+collector, bulk cleanup command or address-pool policy is required.
 
-Stopped instances release avoidable address-pool reservations without deleting
-application state. Start needs creation capacity and may receive a new Engine
-ID/subnet. Stable names preserve configuration written through `network.name` by
-completed initializers. Active workloads and foreign or uncertain resources can
-still exhaust capacity or require operator intervention.
+## More Information
 
-## Alternatives considered
-
-- **Retain until destroy:** preserves allocations but couples capacity recovery to
-  application-data deletion.
-- **Separate network cleanup operation:** leaves ordinary stop accumulating idle
-  networks and adds a manual step/API.
-- **Shared bridges or larger address pools:** change isolation or machine settings
-  without addressing the instance lifecycle.
-
-## Revisit when
-
-Supported applications require stable Engine IDs/subnets, active workloads alone
-exhaust pools, or recorded cleanup cannot provide useful bounded recovery.
-
-## References
-
-- [Container lifecycle and ownership](../containers.md#generations-jobs-and-drift)
-- [Resource journal](../../internal/daemon/resources.go) and [consumer checks](../../internal/daemon/docker.go)
-- [Provider checks](../testing.md#dockerprivate-state-integration)
+[Container lifecycle](/docs/containers.md#generations-jobs-and-drift),
+[resource journal](/internal/daemon/resources.go).

@@ -12,7 +12,7 @@ supersedes: []
 superseded_by: []
 related: [/docs/adr/20261023T211408955Z-explain-native-tool-selection-without-probing-runtimes.md, /docs/adr/20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md, /docs/adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md]
 tracking: ["https://github.com/octacian/backlot/issues/110"]
-implemented_by: []
+implemented_by: ["https://github.com/octacian/backlot/pull/118"]
 ---
 
 # Select bounded working directories for native commands

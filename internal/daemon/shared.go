@@ -481,10 +481,30 @@ func (s *service) ensureSharedAllocations(ctx context.Context, id string, snap p
 	if len(snap.Plan.SharedServices) == 0 {
 		return nil
 	}
+	allocations, err := s.store.sharedAllocations(id)
+	if err != nil {
+		return err
+	}
+	// A partial multi-allocation cleanup must not provision any new effects.
+	for _, allocation := range allocations {
+		if allocation.Request.Operation == "release" || allocation.Released {
+			return problem("allocation_conflict", "allocation release is pending; explicit reset/destroy required")
+		}
+	}
 	project, err := identifyShared(entry.source.source, snap.Plan.Project)
 	if err != nil {
 		return err
 	}
+	var owner sharedProjectIdentity
+	if err := s.store.db.View(func(tx *bolt.Tx) error {
+		var e error
+		owner, e = checkSharedBinding(tx, entry.source.checkout, project)
+		return e
+	}); err != nil {
+		return err
+	}
+	currentProject := project
+	project = owner
 	var ids []string
 	for _, resource := range snap.Plan.Resources {
 		if resource.Kind == "allocation" {
@@ -496,18 +516,49 @@ func (s *service) ensureSharedAllocations(ctx context.Context, id string, snap p
 		return err
 	}
 	defer release()
-	if err = s.store.db.Update(func(tx *bolt.Tx) error { return registerSharedProject(tx, project) }); err != nil {
-		return err
-	}
-	allocations, err := s.store.sharedAllocations(id)
+	// Admit first service intents with the binding check so repair cannot miss their locks.
+	s.store.bindingGate.Lock()
+	err = s.store.db.Update(func(tx *bolt.Tx) error {
+		if _, e := checkSharedBinding(tx, entry.source.checkout, currentProject); e != nil {
+			return e
+		}
+		if e := s.store.sharedPoint("allocation-admission"); e != nil {
+			return e
+		}
+		var e error
+		allocations, e = decodeSharedAllocations(tx.Bucket([]byte("shared_allocations")).Get([]byte(id)))
+		if e != nil {
+			return e
+		}
+		for name, resource := range snap.Plan.Resources {
+			if resource.Kind != "allocation" {
+				continue
+			}
+			serviceID := hash(project.ID + "/" + resource.SharedService)
+			if a, exists := allocations[name]; exists && (a.ServiceID != serviceID || a.Released || a.Request.Operation == "release") {
+				return problem("allocation_conflict", "retained allocation differs or was partially released; runtime preserved")
+			}
+			if tx.Bucket([]byte("shared_services")).Get([]byte(serviceID)) != nil {
+				continue
+			}
+			if snap.Docker == nil {
+				return problem("missing_provider", "shared allocations require configured Docker")
+			}
+			newResource := func(kind string) ownedResource {
+				token := newID()
+				return ownedResource{Kind: kind, Token: token, Name: "backlot-" + token}
+			}
+			declaration := snap.Plan.SharedServices[resource.SharedService]
+			record := sharedServiceRecord{ID: serviceID, Project: project, Name: resource.SharedService, Declaration: declaration, Endpoint: snap.Docker.Endpoint, Configuration: sharedDigest(declaration, snap.Docker.Endpoint), AdminPassword: newID(), Volume: newResource("volume"), Network: newResource("network"), Server: newResource("container"), Status: "intent"}
+			if e := put(tx, "shared_services", serviceID, record); e != nil {
+				return e
+			}
+		}
+		return ctx.Err()
+	})
+	s.store.bindingGate.Unlock()
 	if err != nil {
 		return err
-	}
-	// A partial multi-allocation cleanup must not provision any new effects.
-	for _, allocation := range allocations {
-		if allocation.Request.Operation == "release" || allocation.Released {
-			return problem("allocation_conflict", "allocation release is pending; explicit reset/destroy required")
-		}
 	}
 	for name, resource := range snap.Plan.Resources {
 		if resource.Kind != "allocation" {
@@ -519,15 +570,6 @@ func (s *service) ensureSharedAllocations(ctx context.Context, id string, snap p
 		}
 		serviceID := hash(project.ID + "/" + resource.SharedService)
 		record, err := s.store.sharedService(serviceID)
-		var detail *v1.PlanError
-		if errors.As(err, &detail) && detail.Code == "not_found" {
-			newResource := func(kind string) ownedResource {
-				token := newID()
-				return ownedResource{Kind: kind, Token: token, Name: "backlot-" + token}
-			}
-			record = sharedServiceRecord{ID: serviceID, Project: project, Name: resource.SharedService, Declaration: declaration, Endpoint: snap.Docker.Endpoint, Configuration: sharedDigest(declaration, snap.Docker.Endpoint), AdminPassword: newID(), Volume: newResource("volume"), Network: newResource("network"), Server: newResource("container"), Status: "intent"}
-			err = s.store.saveShared(record)
-		}
 		if err != nil {
 			return err
 		}

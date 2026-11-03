@@ -14,7 +14,7 @@ type stateMigration struct {
 
 // Retain each real step from v9 onward. Source checks belong to the step,
 // before conversion; current layout/authority checks run only after the chain.
-var stateMigrations = []stateMigration{{9, 10, migrateStateNine}, {10, 11, migrateStateTen}, {11, 12, migrateStateEleven}}
+var stateMigrations = []stateMigration{{9, 10, migrateStateNine}, {10, 11, migrateStateTen}, {11, 12, migrateStateEleven}, {12, 13, migrateStateTwelve}}
 
 func migrateStateNine(tx *bolt.Tx) error {
 	for _, name := range stateNineBuckets {

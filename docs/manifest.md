@@ -372,7 +372,10 @@ not ongoing dependencies. Git common-directory path plus filesystem identity
 and repository-relative manifest path bind the association. Linked worktrees
 reuse it; monorepo manifest paths isolate it. Names/remotes and independent
 clones do not enroll. Moved/replaced repository identities require explicit
-`--reassociate` and new values; old credentials are not implicitly imported.
+`project setup --reassociate` and explicit new values; old credentials are not
+implicitly imported. This repairs private setup only. Retained daemon projects use
+[a separate preview/apply workflow](cli.md#reassociate-retained-project-data), which
+requires caller and daemon registry roots to agree and never persists a root override.
 Non-Git projects bind canonical directory identity and manifest filename.
 
 Ordinary plan/prepare/run/restart/reset and scene diagnostics automatically read

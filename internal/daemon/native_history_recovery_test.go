@@ -79,6 +79,9 @@ func TestNativeWaiverRestoredReceiptRetainsStickyHistory(t *testing.T) {
 					return err
 				}
 				r.Instance.Plan.Lifetime = v1.Persistent
+				if err := tx.Bucket([]byte("persistent")).Put([]byte(sceneSlot(r.Instance)), []byte(instance.ID)); err != nil {
+					return err
+				}
 				return put(tx, "instances", instance.ID, r)
 			}); err != nil {
 				t.Fatal(err)

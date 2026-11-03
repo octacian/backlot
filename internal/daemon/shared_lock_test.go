@@ -11,6 +11,7 @@ import (
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/plan"
+	bolt "go.etcd.io/bbolt"
 )
 
 func TestSharedWaitingCancellation(t *testing.T) {
@@ -28,6 +29,24 @@ func TestSharedWaitingCancellation(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				checkout, err := identify(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := state.db.Update(func(tx *bolt.Tx) error {
+					if err := registerSharedProject(tx, project); err != nil {
+						return err
+					}
+					if err := put(tx, "checkouts", checkout.ID, checkout); err != nil {
+						return err
+					}
+					if err := tx.Bucket([]byte("paths")).Put([]byte(checkout.Path), []byte(checkout.ID)); err != nil {
+						return err
+					}
+					return put(tx, "checkout_bindings", checkout.ID, checkoutBinding{Current: checkout})
+				}); err != nil {
+					t.Fatal(err)
+				}
 				serviceID := hash(project.ID + "/sql")
 				id := newID()
 				allocations := map[string]sharedAllocation{"db": {ServiceID: serviceID, Request: v1.ManagerRequest{Version: v1.ManagerProtocolVersion, Operation: "allocate", AllocationID: newID(), Ownership: newID(), Database: "bl" + newID()[:32], Username: "bl" + newID()[:32], Password: newID()}}}
@@ -35,6 +54,7 @@ func TestSharedWaitingCancellation(t *testing.T) {
 					t.Fatal(err)
 				}
 				record := sharedLockRecord(serviceID)
+				record.Project = project
 				if err = state.saveShared(record); err != nil {
 					t.Fatal(err)
 				}
@@ -61,7 +81,7 @@ func TestSharedWaitingCancellation(t *testing.T) {
 					switch operation {
 					case "allocate":
 						snap := plan.Snapshot{Plan: v1.PlanResponse{Project: "fixture", SharedServices: map[string]v1.SharedService{"sql": {}}, Resources: map[string]v1.Resource{"db": {Kind: "allocation", SharedService: "sql"}}}}
-						done <- svc.ensureSharedAllocations(ctx, id, snap, &execution{source: capturedSource{source: plan.Source{ProjectPath: root, CheckoutPath: root}}})
+						done <- svc.ensureSharedAllocations(ctx, id, snap, &execution{source: capturedSource{source: plan.Source{ProjectPath: root, CheckoutPath: root}, checkout: checkout}})
 					case "shutdown":
 						done <- state.stopSharedServices(ctx)
 					case "release":

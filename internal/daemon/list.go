@@ -3,7 +3,6 @@ package daemon
 import (
 	"bytes"
 	"os"
-	"path/filepath"
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/plan"
@@ -73,17 +72,20 @@ func (s *store) filteredList(request v1.FilteredListRequest) (v1.ListResponse, e
 				return err
 			}
 			i := r.Instance
+			if err := associateInstance(tx, &i); err != nil {
+				return err
+			}
 			if checkout != nil {
 				if err := validateSceneRecord(i); err != nil {
 					return err
 				}
-				if i.Checkout.Path != checkout.Path {
+				if associatedCheckout(i).Path != checkout.Path {
 					continue
 				}
-				if !sameCheckout(&i.Checkout, checkout) {
+				if !sameCheckoutValue(associatedCheckout(i), *checkout) {
 					return problem("checkout_changed", "recorded checkout identity changed; use explicit recorded ID")
 				}
-				if project != "" && filepath.Dir(i.Plan.ManifestPath) != project {
+				if project != "" && associatedProject(i) != project {
 					continue
 				}
 			}

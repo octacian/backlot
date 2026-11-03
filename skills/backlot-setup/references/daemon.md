@@ -115,7 +115,8 @@ Malformed recorded selectors or disagreement with existing persistent slots prod
 `state_corrupt` before discovery filtering. Preserve state for diagnosis; existing
 ID inspection/cleanup remains independent of named selection.
 
-Moved/replaced checkouts or unavailable project/Git identity fail selection; use
+Before explicit reassociation, moved/identity-changed checkouts or unavailable
+project/Git identity fail selection; use
 recorded IDs. No force or path-only adoption exists. Project subdirectories within
 an unchanged Git checkout have no separately persisted inode identity; selection
 uses their recorded canonical location. Non-Git projects use the recorded project
@@ -339,6 +340,10 @@ scene, lifetime and exact instance state intersect the location selection; state
 is `Instance.Status`, not historical execution outcome. Explicit IDs remain the
 inspection/cleanup fallback for unavailable, moved or replaced identity. Named
 scene lifecycle selection retains its nearest-project/ambiguity rules.
+
+After explicit reassociation, location filters use the current binding. Summary
+`checkout` remains launch provenance; inspect the instance for its current
+`association`.
 
 Filters apply before the 1–100 page limit. Resume using `--after NEXT_AFTER_ID`
 with identical filters; the cursor is the last returned match only when another

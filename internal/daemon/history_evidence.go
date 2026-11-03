@@ -481,7 +481,7 @@ func (s *service) eraseDestroyed(id string) (v1.Instance, error) {
 				return err
 			}
 		}
-		key := p.Project + "/" + r.Instance.Checkout.ID + "/" + p.Scene
+		key := p.Project + "/" + checkoutParent(r.Instance) + "/" + p.Scene
 		index := tx.Bucket([]byte("persistent"))
 		if string(index.Get([]byte(key))) == id {
 			if err := index.Delete([]byte(key)); err != nil {

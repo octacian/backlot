@@ -153,7 +153,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		if previous.Status == v1.Destroyed {
 			return empty, problem("destroyed", "instance was destroyed; run the scene to create a fresh identity")
 		}
-		if previous.Plan.Project != snapshot.Plan.Project || previous.Plan.Scene != snapshot.Plan.Scene || previous.Plan.Lifetime != v1.Persistent || previous.Checkout.ID != identity.checkout.ID {
+		if previous.Plan.Project != snapshot.Plan.Project || previous.Plan.Scene != snapshot.Plan.Scene || previous.Plan.Lifetime != v1.Persistent || associatedCheckout(previous).ID != identity.checkout.ID {
 			return empty, problem("conflict", "restart must address the same persistent project, checkout and scene")
 		}
 	}
@@ -170,6 +170,9 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	defer unlock()
 	response.Instance, err = s.store.inspect(id)
 	if err != nil {
+		return empty, err
+	}
+	if err := s.store.verifyStartAssociation(id, observed); err != nil {
 		return empty, err
 	}
 	if response.Instance.Status == v1.Destroyed {
@@ -308,6 +311,9 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		return empty, err
 	}
 	if request.InstanceID != "" {
+		if response.Instance.Association != nil && !sameCheckoutValue(response.Instance.Checkout, response.Instance.Association.Checkout) {
+			acceptanceSnapshot = &snapshot
+		}
 		if acceptanceSnapshot == nil {
 			if err := s.store.replaceSnapshot(id, snapshot); err != nil {
 				return empty, err

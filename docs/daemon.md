@@ -117,9 +117,9 @@ checkout and its Git directory (when present); two real Git worktrees differ.
 Snapshot reads bind to canonical project/checkout identities captured before reading
 manifest, configuration or seed inputs. Acceptance rechecks both identities and
 paths; an in-flight replacement is rejected before any durable intent is recorded.
-Branch/HEAD text is provenance, never ownership. A moved checkout or replaced
-checkout path is rejected with a typed error, preserving old records; use a
-separate checkout rather than implicitly adopting old state. Non-Git projects use
+Branch/HEAD text is provenance, never ownership. A moved checkout or changed checkout path refuses automatic adoption, preserving
+old records. Use [explicit retained-project reassociation](cli.md#reassociate-retained-project-data)
+to review and apply supported association changes. Non-Git projects use
 the project directory's filesystem identity.
 
 Repeated persistent preparation reports manifest/config digest drift and returns
@@ -206,7 +206,8 @@ Malformed recorded selectors or disagreement with existing persistent slots prod
 `state_corrupt` before discovery filtering. Preserve state for diagnosis; existing
 ID inspection/cleanup remains independent of named selection.
 
-Moved/replaced checkouts or unavailable project/Git identity fail selection; use
+Before explicit reassociation, moved/identity-changed checkouts or unavailable
+project/Git identity fail selection; use
 recorded IDs. No force or path-only adoption exists. Project subdirectories within
 an unchanged Git checkout have no separately persisted inode identity; selection
 uses their recorded canonical location. Non-Git projects use the recorded project
@@ -299,6 +300,7 @@ format and rejection/cleanup rules.
 | `POST /v1/shared/list`, `/v1/shared/inspect`, `/v1/shared/start`, `/v1/shared/stop`, `/v1/shared/restart` | `SharedRequest` | `SharedResponse` (durable status; no credentials/ownership authority) |
 | `POST /v1/shared/destroy` | `SharedDestroyRequest` | `SharedResponse` |
 | `POST /v1/doctor` | `DoctorRequest` | `DoctorResponse` |
+| `POST /v1/projects/reassociate` | `ReassociationRequest` | `ReassociationResponse` (preview or explicit apply) |
 | `POST /v1/instances` | `ListRequest` | `ListResponse` (at most 100 summaries) |
 | `POST /v1/stop` | `ControlRequest` | `DaemonStatusResponse` (`stopping`) |
 | `POST /v1/prepare` | `PrepareRequest` | `InstanceResponse` |
@@ -677,6 +679,13 @@ registry remains format 1.
 See [state upgrade and operation](containers.md#state-compatibility) and
 [private setup, provenance and retention](manifest.md#registered-private-project-configuration).
 
+Current associations are separate from launch provenance: `instance.association`
+selects the current checkout/project while `instance.checkout` and its plan describe
+the accepted launch. Stable checkout parents retain scene slots across repair.
+Exact-ID restart/reset uses the current association; recorded cleanup and historical
+export keep their original authority. Scene doctor reports shared-registration
+conflicts before private composition, without applying repair.
+
 ## Declared startup details
 
 Persistent startup can show declared fixture details, including selected secrets.
@@ -712,6 +721,10 @@ scene, lifetime and exact instance state intersect the location selection; state
 is `Instance.Status`, not historical execution outcome. Explicit IDs remain the
 inspection/cleanup fallback for unavailable, moved or replaced identity. Named
 scene lifecycle selection retains its nearest-project/ambiguity rules.
+
+After explicit reassociation, location filters use the current binding. Summary
+`checkout` remains launch provenance; inspect the instance for its current
+`association`.
 
 Filters apply before the 1–100 page limit. Resume using `--after NEXT_AFTER_ID`
 with identical filters; the cursor is the last returned match only when another

@@ -63,7 +63,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 	// state must retain its ownership records (see docs/containers.md).
 	checkCompatibility := false
 	switch path {
-	case "/v1/scenes/start", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/gateway/start", "/v1/gateway/restart":
+	case "/v1/projects/reassociate", "/v1/scenes/start", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/gateway/start", "/v1/gateway/restart":
 		checkCompatibility = true
 	case "/v1/doctor":
 		// An explicit diagnostic image authorizes container creation/start, unlike
@@ -152,6 +152,8 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 		return &v1.PlanError{Code: "invalid_response", Message: "invalid daemon response contract"}
 	}
 	switch value := response.(type) {
+	case *v1.ReassociationResponse:
+		return value.Validate()
 	case *v1.DoctorResponse:
 		return value.Validate()
 	case *v1.GatewayResponse:
@@ -290,7 +292,7 @@ func (c *Client) Doctor(ctx context.Context, request v1.DoctorRequest) (v1.Docto
 
 func mutationPath(path string) bool {
 	switch path {
-	case "/v1/attempts/prune", "/v1/export", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/runtime/stop", "/v1/destroy", "/v1/stop", "/v1/cancel", "/v1/renew", "/v1/scenes/start", "/v1/scenes/stop", "/v1/attached/renew", "/v1/attached/cancel", "/v1/gateway/start", "/v1/gateway/stop", "/v1/gateway/restart", "/v1/shared/start", "/v1/shared/stop", "/v1/shared/restart", "/v1/shared/destroy":
+	case "/v1/projects/reassociate", "/v1/attempts/prune", "/v1/export", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/runtime/stop", "/v1/destroy", "/v1/stop", "/v1/cancel", "/v1/renew", "/v1/scenes/start", "/v1/scenes/stop", "/v1/attached/renew", "/v1/attached/cancel", "/v1/gateway/start", "/v1/gateway/stop", "/v1/gateway/restart", "/v1/shared/start", "/v1/shared/stop", "/v1/shared/restart", "/v1/shared/destroy":
 		return true
 	}
 	return false
@@ -309,6 +311,11 @@ func mutationError(path string, request any, err error) error {
 	if detail != nil && (detail.Code == "daemon_unavailable" || detail.Code == "invalid_response" || detail.Code == "api_version") {
 		target := ""
 		switch value := request.(type) {
+		case v1.ReassociationRequest:
+			if !value.Apply {
+				return err
+			}
+			target = value.ProjectID
 		case v1.HistoryPruneRequest:
 			target = value.InstanceID
 		case v1.ExportRequest:
@@ -339,4 +346,14 @@ func mutationError(path string, request any, err error) error {
 		err = &v1.PlanError{Code: detail.Code, Message: "daemon exchange failed (" + path + "); " + resultContext + "; inspect status/recorded targets with the same --state-dir before explicit recovery; do not automatically retry"}
 	}
 	return err
+}
+
+// Reassociate previews or explicitly applies current associations to retained ownership.
+func (c *Client) Reassociate(ctx context.Context, request v1.ReassociationRequest) (v1.ReassociationResponse, error) {
+	var response v1.ReassociationResponse
+	if err := request.Validate(); err != nil {
+		return response, err
+	}
+	err := c.call(ctx, http.MethodPost, "/v1/projects/reassociate", request, &response)
+	return response, err
 }

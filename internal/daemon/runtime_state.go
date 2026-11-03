@@ -11,6 +11,7 @@ import (
 	"github.com/octacian/backlot/internal/plan"
 	bolt "go.etcd.io/bbolt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -107,6 +108,12 @@ func (s *store) replaceSnapshot(id string, snap plan.Snapshot) error {
 		if err != nil {
 			return err
 		}
+		r.Instance.CheckoutParent = checkoutParent(r.Instance)
+		b, err := readCheckoutBinding(tx, r.Instance.CheckoutParent)
+		if err != nil {
+			return err
+		}
+		r.Instance.Checkout = b.Current
 		r.Instance.Plan = snap.Plan
 		if err := put(tx, "snapshots", id, snap); err != nil {
 			return err
@@ -295,7 +302,7 @@ func (s *store) outputConflict(requestedPlan v1.PlanResponse) error {
 				return err
 			}
 			instance := r.Instance
-			if instance.Execution == nil || instance.Plan.Checkout != requestedPlan.Checkout {
+			if instance.Execution == nil || associatedCheckout(instance).Path != requestedPlan.Checkout {
 				return nil
 			}
 			uncertain := instance.Execution.CleanupFailure != ""
@@ -310,7 +317,7 @@ func (s *store) outputConflict(requestedPlan v1.PlanResponse) error {
 						}
 						continue
 					}
-					oldPath, err := plan.OutputPath(filepath.Dir(instance.Plan.ManifestPath), existing.Path)
+					oldPath, err := plan.OutputPath(associatedProject(instance), existing.Path)
 					if err != nil {
 						return err
 					}
@@ -371,7 +378,7 @@ func (s *store) acceptExecutionSnapshot(id string, journal runtimeRecord, result
 			default:
 				return startConflict(id, expected.attempt)
 			}
-			if current.sequence != expected.sequence || current.attempt != expected.attempt {
+			if current.bindingRevision != expected.bindingRevision || current.sharedRevision != expected.sharedRevision || current.sequence != expected.sequence || current.attempt != expected.attempt {
 				return startConflict(id, expected.attempt)
 			}
 		}
@@ -388,6 +395,12 @@ func (s *store) acceptExecutionSnapshot(id string, journal runtimeRecord, result
 			}
 		}
 		if snapshot != nil {
+			r.Instance.CheckoutParent = checkoutParent(r.Instance)
+			b, err := readCheckoutBinding(tx, r.Instance.CheckoutParent)
+			if err != nil {
+				return err
+			}
+			r.Instance.Checkout = b.Current
 			r.Instance.Plan = snapshot.Plan
 			if err := put(tx, "snapshots", id, snapshot); err != nil {
 				return err
@@ -459,13 +472,37 @@ func allNativePreviousBoot(r runtimeRecord, attempt string) bool {
 
 // startObservation is request-local selection proof, never part of stored or wire state.
 type startObservation struct {
-	attempt  string
-	status   v1.InstanceStatus
-	sequence int64
+	bindingRevision string
+	sharedRevision  string
+	attempt         string
+	status          v1.InstanceStatus
+	sequence        int64
 }
 
 func observeStart(tx *bolt.Tx, instance v1.Instance) (startObservation, error) {
 	observed := startObservation{status: instance.Status}
+	if tx.Bucket([]byte("checkout_bindings")) != nil {
+		b, err := readCheckoutBinding(tx, checkoutParent(instance))
+		if err != nil {
+			return observed, err
+		}
+		observed.bindingRevision = b.Revision
+		keys := make([]string, 0, len(b.Shared))
+		for id := range b.Shared {
+			keys = append(keys, id)
+		}
+		slices.Sort(keys)
+		for _, id := range keys {
+			pb, err := readProjectBinding(tx, id)
+			if err != nil {
+				return observed, err
+			}
+			if pb.Revision != "" {
+				observed.sharedRevision += id + "/" + pb.Revision
+			}
+		}
+
+	}
 	if instance.Execution != nil {
 		observed.attempt = instance.Execution.Attempt
 	}
@@ -502,6 +539,9 @@ func (s *store) boundStart(id string, observed startObservation, attached bool) 
 		if err != nil {
 			return err
 		}
+		if current.bindingRevision != observed.bindingRevision || current.sharedRevision != observed.sharedRevision {
+			return problem("conflict", "checkout association changed after capture; retry start")
+		}
 		if current.sequence == observed.sequence && current.attempt == observed.attempt {
 			bound = observed.status == v1.Starting || observed.status == v1.RuntimeReady || current.status == v1.Starting || current.status == v1.RuntimeReady
 			return nil
@@ -527,4 +567,21 @@ func (s *store) boundStart(id string, observed startObservation, attached bool) 
 		return startConflict(id, attempt)
 	})
 	return
+}
+
+func (s *store) verifyStartAssociation(id string, observed startObservation) error {
+	return s.db.View(func(tx *bolt.Tx) error {
+		r, err := load(tx, id)
+		if err != nil {
+			return err
+		}
+		current, err := observeStart(tx, r.Instance)
+		if err != nil {
+			return err
+		}
+		if current.bindingRevision != observed.bindingRevision || current.sharedRevision != observed.sharedRevision {
+			return problem("conflict", "association changed after source capture; retry start")
+		}
+		return nil
+	})
 }

@@ -53,24 +53,10 @@ func Identify(project, checkout, file string) (Identity, error) {
 		if err != nil {
 			return result, problem("Git directory unavailable; repair Git metadata")
 		}
-		common := filepath.Join(git, "commondir")
-		if _, e := os.Lstat(common); e == nil {
-			data, e := Read(common)
-			if e != nil {
-				return result, e
-			}
-			value := strings.TrimSpace(string(data))
-			if value == "" || strings.ContainsAny(value, "\x00\r\n") {
-				return result, problem("invalid Git common directory")
-			}
-			if !filepath.IsAbs(value) {
-				value = filepath.Join(git, value)
-			}
-			git = value
-		} else if !os.IsNotExist(e) {
-			return result, problem("cannot inspect Git common directory")
+		result.Directory, err = GitCommonDirectory(git)
+		if err != nil {
+			return result, err
 		}
-		result.Directory, err = filepath.EvalSymlinks(git)
 		result.Manifest, _ = filepath.Rel(checkout, canonical)
 	} else if os.IsNotExist(err) {
 		result.Directory, err = filepath.EvalSymlinks(project)
@@ -87,4 +73,37 @@ func Identify(project, checkout, file string) (Identity, error) {
 	}
 	result.Filesystem, err = localipc.Identity(info)
 	return result, err
+}
+
+// GitCommonDirectory resolves bounded sharing metadata, refusing linked admin anchors.
+// It does not execute Git or validate repository objects, history or permanence.
+func GitCommonDirectory(git string) (string, error) {
+	marker := filepath.Join(git, "commondir")
+	if _, err := os.Lstat(marker); err == nil {
+		data, err := Read(marker)
+		if err != nil {
+			return "", err
+		}
+		value := strings.TrimSpace(string(data))
+		if value == "" || strings.ContainsAny(value, "\x00\r\n") {
+			return "", problem("invalid Git common-directory marker; repair Git metadata")
+		}
+		if filepath.IsAbs(value) {
+			git = value
+		} else {
+			git = filepath.Join(git, value)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", problem("cannot inspect Git common-directory marker")
+	}
+	anchor, err := filepath.EvalSymlinks(git)
+	if err != nil {
+		return "", problem("Git common directory unavailable; repair Git metadata")
+	}
+	if _, err := os.Lstat(filepath.Join(anchor, "gitdir")); err == nil {
+		return "", problem("invalid or ambiguous linked Git metadata; repair commondir before project association")
+	} else if !os.IsNotExist(err) {
+		return "", problem("cannot inspect Git common-directory anchor")
+	}
+	return anchor, nil
 }

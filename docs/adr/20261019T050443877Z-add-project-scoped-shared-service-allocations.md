@@ -1,11 +1,11 @@
 ---
 title: 'Add project-scoped shared-service allocations'
 date: '2026-10-19'
-status: accepted
+status: superseded
 summary: 'Share exact project-owned MariaDB servers while retaining private instance allocations and bounded explicit cleanup authority.'
 tags: [shared-services, identity, sql, security, lifecycle, cleanup, migration]
 supersedes: []
-superseded_by: []
+superseded_by: [20261103T174043965Z-reassociate-retained-projects-through-explicit-current-bindings.md]
 ---
 
 # Add project-scoped shared-service allocations

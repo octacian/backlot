@@ -171,6 +171,12 @@ secret-access endpoints and age/size retention.
 ## Project-scoped shared services
 
 Shared MariaDB and PostgreSQL servers retain independent instance allocations.
+[Explicit reassociation](cli.md#reassociate-retained-project-data) can change current
+project/checkout associations while preserving original shared ownership, server
+IDs, paired credentials and allocations. Every affected consumer must be stopped/
+joined; the SQL server itself may remain running. Unresolved peers stay fenced,
+and strict protected-configuration checks can refuse otherwise source-identical
+moves. Destroying the last service retains its project identity reservation.
 
 Declare `shared_services` and select `kind: allocation` resources per the
 [manifest guide](manifest.md#shared-service-declarations); follow the runnable

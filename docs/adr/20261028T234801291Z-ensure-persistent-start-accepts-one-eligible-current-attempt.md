@@ -1,11 +1,11 @@
 ---
 title: 'Ensure persistent start accepts one eligible current attempt'
 date: '2026-10-28'
-status: accepted
+status: superseded
 summary: 'Make explicit persistent start join running work or accept one compatible new attempt after prior work is reconciled without resetting identity or data.'
 tags: [daemon, lifecycle, identity, cli, attachment]
 supersedes: [20261007T052013565Z-use-explicit-scene-lifetimes-and-daemon-owned-execution.md, 20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md, 20261022T194804759Z-bind-attached-persistent-execution-to-one-daemon-owned-attempt.md, 20261022T195459793Z-authorize-declared-sensitive-startup-details-for-persistent-scenes.md, 20261021T001732173Z-register-private-project-configuration.md, 20261025T202510851Z-pin-execution-scoped-build-images-from-native-jobs.md]
-superseded_by: []
+superseded_by: [20261103T174043965Z-reassociate-retained-projects-through-explicit-current-bindings.md]
 ---
 
 # Ensure persistent start accepts one eligible current attempt

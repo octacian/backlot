@@ -1,0 +1,12 @@
+version: backlot/v1
+project: retained-fixture
+tools: {shell: /bin/sh}
+components:
+  job:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: shell, args: [-c, "exit 0"]}
+scenes:
+  prepared: {lifetime: persistent, components: [job]}
+  completed: {lifetime: persistent, components: [job]}

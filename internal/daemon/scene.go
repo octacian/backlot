@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -248,7 +247,7 @@ func requireSceneLocation(instance v1.Instance, project string) error {
 	if err := validateSceneRecord(instance); err != nil {
 		return err
 	}
-	if filepath.Dir(instance.Plan.ManifestPath) != project {
+	if associatedProject(instance) != project {
 		return problem("conflict", "persistent scene belongs to a different recorded project directory; use its explicit recorded instance ID")
 	}
 	return nil
@@ -277,32 +276,19 @@ func storedSceneInstances(tx *bolt.Tx) (map[string]recordedScene, error) {
 			return err
 		}
 		i := r.Instance
+		if err := associateInstance(tx, &i); err != nil {
+			return err
+		}
 		instances[string(key)] = recordedScene{
-			id: i.ID, project: filepath.Dir(i.Plan.ManifestPath), scene: i.Plan.Scene,
+			id: i.ID, project: associatedProject(i), scene: i.Plan.Scene,
 			slot: sceneSlot(i), lifetime: i.Plan.Lifetime, status: i.Status,
-			Checkout: v1.CheckoutIdentity{ID: i.Checkout.ID, Path: i.Checkout.Path, GitDirectory: i.Checkout.GitDirectory},
+			Checkout: associatedCheckout(i),
 		}
 		return nil
 	}); err != nil {
 		return nil, err
 	}
-	checkouts := make(map[string]v1.CheckoutIdentity)
-	if err := tx.Bucket([]byte("checkouts")).ForEach(func(key, data []byte) error {
-		var checkout v1.CheckoutIdentity
-		if json.Unmarshal(data, &checkout) != nil || checkout.ID != string(key) {
-			return problem("state_corrupt", "cannot decode recorded checkout identity")
-		}
-		checkout.GitHead = "" // HEAD is provenance, not selection identity.
-		checkouts[string(key)] = checkout
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	paths := make(map[string]string)
-	if err := tx.Bucket([]byte("paths")).ForEach(func(key, data []byte) error {
-		paths[string(key)] = string(data)
-		return nil
-	}); err != nil {
+	if err := validateOriginCheckouts(tx); err != nil {
 		return nil, err
 	}
 	slots := make(map[string]string)
@@ -319,10 +305,6 @@ func storedSceneInstances(tx *bolt.Tx) (map[string]recordedScene, error) {
 		return nil, err
 	}
 	for _, i := range instances {
-		checkout, exists := checkouts[i.Checkout.ID]
-		if !exists || !sameCheckout(&checkout, &i.Checkout) || paths[i.Checkout.Path] != i.Checkout.ID {
-			return nil, problem("state_corrupt", "recorded scene and checkout location indexes disagree")
-		}
 		if i.lifetime == v1.Persistent && i.status != v1.Destroyed && slots[i.slot] != i.id {
 			return nil, problem("state_corrupt", "recorded persistent scene has no matching slot")
 		}
@@ -331,22 +313,12 @@ func storedSceneInstances(tx *bolt.Tx) (map[string]recordedScene, error) {
 }
 
 func sceneSlot(i v1.Instance) string {
-	return i.Plan.Project + "/" + i.Checkout.ID + "/" + i.Plan.Scene
+	return i.Plan.Project + "/" + checkoutParent(i) + "/" + i.Plan.Scene
 }
 
 // verifyRecordedCheckout compares current filesystem identity with recorded location indexes.
 func verifyRecordedCheckout(tx *bolt.Tx, checkout v1.CheckoutIdentity) error {
-	if data := tx.Bucket([]byte("paths")).Get([]byte(checkout.Path)); data != nil && string(data) != checkout.ID {
-		return problem("checkout_replaced", "recorded checkout path identifies different files; use explicit recorded ID")
-	}
-	if data := tx.Bucket([]byte("checkouts")).Get([]byte(checkout.ID)); data != nil {
-		var previous v1.CheckoutIdentity
-		if err := json.Unmarshal(data, &previous); err != nil {
-			return problem("state_corrupt", "cannot decode checkout identity")
-		}
-		if previous.Path != checkout.Path || previous.GitDirectory != checkout.GitDirectory {
-			return problem("checkout_moved", "checkout moved; use explicit recorded ID")
-		}
-	}
-	return nil
+	_, err := locateCheckout(tx, checkout)
+	return err
 }
+func sameCheckoutValue(a, b v1.CheckoutIdentity) bool { return sameCheckout(&a, &b) }

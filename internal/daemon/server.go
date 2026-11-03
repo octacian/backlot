@@ -359,6 +359,17 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				response.Error = detail
 			}
 			writeJSON(w, response)
+		case "/v1/projects/reassociate":
+			var request v1.ReassociationRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.reassociate(r.Context(), request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
 		case "/v1/doctor":
 			var request v1.DoctorRequest
 			if !decode(w, r, &request) {

@@ -391,3 +391,31 @@ func TestStartupDetailsSchemaParity(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkingDirectoryYAMLParity(t *testing.T) {
+	s := compile(t, "manifest-v1.schema.json")
+	for _, runtime := range []string{"native", "container"} {
+		for _, directory := range []string{"", ".", "packages/web", "space dir", "/tmp", "..", "a/../b", "./a", "a/", "a//b", `a\b`, "C:/dir"} {
+			t.Run(runtime+"/"+directory, func(t *testing.T) {
+				component := "command: {tool: sh, working_directory: " + fmt.Sprintf("%q", directory) + "}"
+				if runtime == "container" {
+					component = "image: {literal: fixture}"
+				}
+				doc := []byte(fmt.Sprintf(`version: backlot/v1
+project: cwd
+tools: {sh: sh}
+components:
+  server:
+    kind: service
+    runtime: %s
+    %s
+    readiness: {kind: command, timeout: 1s, command: {tool: sh, working_directory: %q}}
+scenes:
+  dev: {lifetime: persistent, components: [server]}
+`, runtime, component, directory))
+				valid := directory == "" || directory == "." || directory == "packages/web" || directory == "space dir"
+				checkManifestParity(t, doc, valid, s.Validate(yamlValue(t, doc)))
+			})
+		}
+	}
+}

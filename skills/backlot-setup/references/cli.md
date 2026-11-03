@@ -103,6 +103,8 @@ setup may succeed while daemon repair remains unapplied.
 
 Protected configuration checks remain strict. Even an unchanged relative fresh-only
 initializer such as `./bin/setup` blocks a move if its resolved executable changes.
+A nondefault fresh-only `working_directory` also blocks if its effective directory
+changes; omission and `.` keep the manifest-directory default.
 Preview reports safe categories without secret values. Unresolved peers keep their
 bindings/launch facts and cannot start until separately verified/repaired; the
 requesting branch is never substituted for their scene configuration.

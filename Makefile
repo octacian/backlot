@@ -1,5 +1,6 @@
 GOLANGCI_LINT_VERSION := v2.14.0
 GORELEASER_VERSION := v2.19.0
+DOCS := go run go.auvem.com/corestack/cmd/corestack-docs@v0.2.0
 RELEASE_GOOS ?= darwin
 RELEASE_GOARCH ?= arm64
 RELEASE_COMMIT := $(shell git rev-parse HEAD)
@@ -8,7 +9,7 @@ RELEASE_TIME := $(shell TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%S
 LINT := .tools/bin/golangci-lint-$(GOLANGCI_LINT_VERSION)
 GORELEASER := .tools/bin/goreleaser-$(GORELEASER_VERSION)
 
-.PHONY: build release-build release-snapshot release-package notices notices-check fmt fmt-check vet test race tools lint adr-create adr-verify adr-test schema-generate schema-check skills-generate skills-check check-implementation check-docs check
+.PHONY: build release-build release-snapshot release-package notices notices-check fmt fmt-check vet test race tools lint todo-check adr-create adr-verify schema-generate schema-check skills-generate skills-check check-implementation check-docs check
 
 build:
 	go build -o bin/backlot ./cmd/backlot
@@ -42,7 +43,7 @@ fmt:
 	go fmt ./...
 
 fmt-check:
-	@unformatted=$$(gofmt -l $$(git ls-files --cached --others --exclude-standard '*.go')); \
+	@unformatted=$$(git ls-files --cached --others --exclude-standard '*.go' | while IFS= read -r file; do [ ! -f "$$file" ] || gofmt -l "$$file"; done); \
 	if [ -n "$$unformatted" ]; then echo "$$unformatted"; exit 1; fi
 
 vet:
@@ -67,14 +68,13 @@ lint: tools
 	$(LINT) config verify
 	$(LINT) run
 
+todo-check:
+	bash .github/scripts/todo-check.sh
+
 adr-create:
-	go run ./cmd/adr create "$(TITLE)"
+	$(DOCS) new adr "$(TITLE)"
 
-adr-verify:
-	go run ./cmd/adr verify
-
-adr-test:
-	go test ./internal/adr ./cmd/adr
+adr-verify: check-docs
 
 schema-generate:
 	go run ./cmd/schema
@@ -88,8 +88,9 @@ skills-generate:
 skills-check:
 	go run ./cmd/skills -check
 
-check-implementation: skills-check schema-check notices-check fmt-check vet lint race build
+check-implementation: todo-check skills-check schema-check notices-check fmt-check vet lint race build
 
-check-docs: adr-test adr-verify
+check-docs:
+	$(DOCS) check
 
 check: check-implementation check-docs

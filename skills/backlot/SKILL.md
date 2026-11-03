@@ -45,6 +45,9 @@ capability/help presence is not semantic or provider-readiness proof.
    joins starting/ready work with unapplied drift, or requests one compatible new
    attempt after eligible stopped/failed work and cleanup. New starts use current
    explicit/default config; `restart ID` deliberately replaces healthy work.
+   Native cwd changes keep the other project path anchors; consult
+   [working directories](references/manifest.md#native-working-directories) before
+   adjusting relative arguments or interpreting symlink drift.
    On `startup_conflict`, inspect the bound attempt's retained history/logs/export;
    never retry a missing mutation reply automatically.
    Protected drift needs a deliberate reset/destroy data-removal decision. Do not

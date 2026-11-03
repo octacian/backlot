@@ -2,92 +2,56 @@
 title: 'Support explicit Linux managed HTTPS reachability'
 date: '2026-10-16'
 status: superseded
+implementation: implemented
 summary: 'Extend managed HTTPS to bounded rootful Linux bridges with an explicit IPv4 HTTPS bind setting while retaining loopback defaults and private administration.'
 tags: [linux, gateway, https, trust, networking, platforms]
-supersedes: [20261014T215536946Z-extend-managed-https-to-explicit-container-consumers.md]
-superseded_by: [20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md]
+supersedes: [/docs/adr/20261014T215536946Z-extend-managed-https-to-explicit-container-consumers.md]
+superseded_by: [/docs/adr/20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md]
+related: []
+tracking: ["https://github.com/octacian/backlot/issues/23"]
+implemented_by: ["https://github.com/octacian/backlot/commit/c8074b7f3cd3981825aa57157651bc390a428043"]
 ---
 
 # Support explicit Linux managed HTTPS reachability
 
-Target Ubuntu 24.04 amd64 and Debian 13.4 amd64 with a local rootful Docker Engine
-and IPv4 bridge consumers. Add an explicitly configured managed
-`caddy.https_bind_address` only for HTTPS reachability. Omission keeps the existing
-IPv4/IPv6 loopback listeners; administration always stays loopback. WSL2 receives
-configuration guidance only, without WSL QA or a support guarantee. Native Windows
-execution is not a target.
+## Context and Problem Statement
 
-## Context
+Rootful Linux bridges cannot assume Docker Desktop's forwarding to host loopback.
+An owned Debian experiment established correct-trust HTTPS through an explicitly
+wider IPv4 bind, while loopback-only refused the bridge connection.
 
-[Issue 23](https://github.com/octacian/backlot/issues/23) expands the platform
-policy after the [container decision](20261014T215536946Z-extend-managed-https-to-explicit-container-consumers.md).
-An owned Debian 13.4/Engine 29.3.1 bridge experiment with stock Caddy 2.11.6 showed
-connection refusal for a loopback HTTPS bind, then verified correct public-root
-trust success and missing/wrong trust failure with an explicit IPv4 wildcard bind.
-This experiment discriminates reachability; real CLI/daemon/native/browser and
-canonical-origin acceptance remain separate revision-bound gates. Docker Desktop's
-observed host-loopback forwarding is not a rootful Linux assumption.
+## Considered Options
 
-## Decision
+- Explicit operator-selected HTTPS reachability, retaining loopback defaults.
+- Automatic listener widening: changes exposure without operator choice.
+- Host networking: weakens instance isolation.
+- New hostnames, TLS bypass or exported CA directories: conceal compatibility
+  errors or widen trust-state exposure.
 
-Retain the superseded decision's explicit per-origin Engine `host-gateway` mapping,
-read-only existing public-root file mount, explicit application trust, scoped route
-ownership, authenticated guardian, conservative retained drift and recovery rules.
-Never expose private keys/CA directories or relax private state permissions.
-Host-only scenes remain independent of Docker. No runtime detection, implicit
-trust, custom production dialing, DNS mutation or TLS verification bypass is added.
+## Decision Outcome
 
-Managed mode accepts an optional canonical numeric IPv4 HTTPS bind address.
-A specific address adds HTTPS reachability while preserving IPv4/IPv6 loopback;
-`0.0.0.0` explicitly replaces the IPv4 loopback listener with all IPv4 interfaces.
-IPv6 remains loopback. Pin the actual wildcard listener to Caddy TCP4 rather
-than generic TCP, which can create a dual-stack IPv6 wildcard. Preflight uses the
-same network selector and readiness checks exact owned address families/exposure. Hostnames, zones, multicast addresses and external-mode
-bind settings are rejected. There is no default widening or automatic Docker
-address selection. The operator selects the actual reachable interface and
-firewall exposure. Admin remains `http://127.0.0.1` on a distinct unprivileged port.
-Bind preflight, guardian listener ownership and saved-config validation apply to
-all configured listeners; conflicts or changed/unavailable settings fail without
-fallback or takeover. Retained gateway configuration cannot be silently changed.
+Support bounded Ubuntu/Debian amd64 local rootful Docker bridge consumers. Accept an
+optional canonical IPv4 HTTPS bind setting; omission preserves IPv4/IPv6 loopback.
+A specific address adds reachability; explicit `0.0.0.0` widens IPv4 only. IPv6 and
+administration remain loopback. The operator owns interface/firewall selection;
+conflicts or retained-config drift fail without takeover or implicit fallback.
 
-Linux uses the existing explicit OS adapters and cooperative supervision contract;
-change adapters only when runtime evidence requires it. Ubuntu CI runs fresh
-installation, native/process/IPC/permission checks and real provider/HTTPS/browser
-gates. Debian requires actual-host runtime evidence. Cross-builds are insufficient;
-remove native Windows compile-only CI rather than suggesting planned execution.
-Keep macOS gates. The canonical suffix remains `backlot.localhost`; ordinary host
-resolver setup and consumer behavior are explicit prerequisites, with compatibility
-limits documented in [platform operations](../platforms.md).
+Retain explicit per-origin host-gateway mappings, read-only existing public-root
+mounts, application-selected trust, scoped routes and authenticated supervision.
+Never expose keys/private CA parents or relax private state permissions. Host-only
+scenes remain independent of Docker.
 
-## Consequences
+Real Linux native/provider/browser evidence is distinct from compilation and macOS
+fixtures. WSL2 receives guidance only; native Windows is outside this support
+boundary. The successor changes native recovery, preserving these HTTPS guarantees.
 
-Linux consumers can share the canonical HTTPS origin through an explicit bridge
-boundary. Explicit wider HTTPS can be reachable from other networks, so the chosen
-interface/firewall becomes part of operator configuration. Private admin and CA
-signing authority remain unchanged. Linux distribution/browser/Docker combinations
-outside the bounded targets remain experimental; WSL documentation does not prove
-Windows-host browser reachability or trust. Release readiness still requires exact
-candidate evidence and published-HEAD CI.
+### Consequences
 
-## Alternatives considered
+Linux bridges can use canonical origins, but explicitly wider HTTPS may expose
+services beyond the host. Rootless/remote Engines, IPv6 bridges and other
+platforms require their own decision and evidence; private administration never
+widens merely to solve reachability.
 
-Keeping only loopback fails the observed Linux bridge topology. Automatic widening
-would change exposure based on runtime detection. Host networking would remove
-instance network isolation and differs from the approved bridge contract. Public-CA
-export directories or permission relaxation expose more state than a file mount.
-Replacing the canonical hostname or disabling TLS would hide compatibility errors.
-Native Windows runtime implementation exceeds this platform slice.
+## More Information
 
-## Revisit when
-
-Revisit for rootless/remote engines, IPv6 bridge targets, changes to Engine
-host-gateway behavior, non-root certificate mount needs, or separately authorized
-WSL/browser QA. Any broader exposure or trust delivery contract needs new evidence.
-
-## References
-
-- [Platform policy and Linux/WSL operation](../platforms.md)
-- [HTTPS operation](../https.md)
-- [Architecture](../architecture.md)
-- [Native supervision](20261008T004039730Z-supervise-cooperative-native-process-groups-with-durable-guardian-identity.md)
-- [Epic 17](https://github.com/octacian/backlot/issues/17)
+[Platform policy](/docs/platforms.md), [HTTPS operation](/docs/https.md).

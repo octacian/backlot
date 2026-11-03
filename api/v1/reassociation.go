@@ -6,31 +6,48 @@ import (
 
 // ProjectAssociation exposes current selection independently of historical launch facts.
 type ProjectAssociation struct {
-	CheckoutParent string           `json:"checkout_parent"`
-	Checkout       CheckoutIdentity `json:"checkout"`
-	ProjectPath    string           `json:"project_path"`
-	Revision       string           `json:"revision"`
+	// CheckoutParent is the immutable checkout registration used for scene slots.
+	CheckoutParent string `json:"checkout_parent"`
+	// Checkout is the currently selected checkout, independent of launch history.
+	Checkout CheckoutIdentity `json:"checkout"`
+	// ProjectPath is the current project directory inside Checkout.
+	ProjectPath string `json:"project_path"`
+	// Revision is the opaque current checkout-binding revision.
+	Revision string `json:"revision"`
 }
 
 // ProjectIdentity describes an observed shared anchor, never provider authority.
 type ProjectIdentity struct {
-	ID         string `json:"id"`
-	Anchor     string `json:"anchor"`
+	// ID hashes the filesystem identity, relative location and declared project.
+	ID string `json:"id"`
+	// Anchor is the resolved Git common directory or non-Git project directory.
+	Anchor string `json:"anchor"`
+	// Filesystem records the filesystem object identity observed at Anchor.
 	Filesystem string `json:"filesystem"`
-	Relative   string `json:"relative"`
-	Project    string `json:"project"`
+	// Relative is the project directory location within its checkout.
+	Relative string `json:"relative"`
+	// Project is the declared project name.
+	Project string `json:"project"`
 }
 
 // ReassociationRequest selects exact retained owners and acknowledges a preview on apply.
 type ReassociationRequest struct {
-	APIVersion   string `json:"api_version"`
-	ProjectPath  string `json:"project_path"`
-	ConfigPath   string `json:"config_path,omitempty"`
+	// APIVersion selects the typed local API contract.
+	APIVersion string `json:"api_version"`
+	// ProjectPath selects the absolute destination project or manifest.
+	ProjectPath string `json:"project_path"`
+	// ConfigPath selects explicit destination machine configuration when supplied.
+	ConfigPath string `json:"config_path,omitempty"`
+	// RegistryRoot selects the requesting operation's absolute private registry.
 	RegistryRoot string `json:"registry_root"`
-	ProjectID    string `json:"project_id,omitempty"`
-	CheckoutID   string `json:"checkout_id,omitempty"`
-	Apply        bool   `json:"apply,omitempty"`
-	Preview      string `json:"preview,omitempty"`
+	// ProjectID selects the exact retained shared-project owner.
+	ProjectID string `json:"project_id,omitempty"`
+	// CheckoutID selects the original retained checkout registration.
+	CheckoutID string `json:"checkout_id,omitempty"`
+	// Apply requests explicit publication after preview revalidation.
+	Apply bool `json:"apply,omitempty"`
+	// Preview acknowledges the exact safe preview digest on apply.
+	Preview string `json:"preview,omitempty"`
 }
 
 // Validate rejects invalid selectors before filesystem reads or effects.
@@ -48,70 +65,114 @@ func (r ReassociationRequest) Validate() error {
 
 // ProjectRegistration separates original ownership from the active binding.
 type ProjectRegistration struct {
-	Origin          ProjectIdentity `json:"origin"`
-	Current         ProjectIdentity `json:"current"`
-	Revision        string          `json:"revision"`
-	Acknowledgement string          `json:"acknowledgement,omitempty"`
+	// Origin retains immutable shared ownership facts.
+	Origin ProjectIdentity `json:"origin"`
+	// Current records the active observed association.
+	Current ProjectIdentity `json:"current"`
+	// Revision is the opaque shared-binding revision.
+	Revision string `json:"revision"`
+	// Acknowledgement records the last accepted preview digest.
+	Acknowledgement string `json:"acknowledgement,omitempty"`
 }
 
 // ReassociationInstance lists affected retained consumers without secret state.
 type ReassociationInstance struct {
-	RecordedFilesystemState string             `json:"recorded_checkout_git_filesystem_state"`
-	ID                      string             `json:"id"`
-	Scene                   string             `json:"scene"`
-	Status                  InstanceStatus     `json:"status"`
-	Recorded                CheckoutIdentity   `json:"recorded"`
-	Association             ProjectAssociation `json:"association"`
-	Selected                bool               `json:"selected"`
+	// RecordedFilesystemState labels unavailable historical checkout/Git filesystem observations.
+	RecordedFilesystemState string `json:"recorded_checkout_git_filesystem_state"`
+	// ID is the stable retained instance identity.
+	ID string `json:"id"`
+	// Scene is the recorded scene name.
+	Scene string `json:"scene"`
+	// Status is the durable consumer lifecycle status.
+	Status InstanceStatus `json:"status"`
+	// Recorded retains accepted launch checkout provenance.
+	Recorded CheckoutIdentity `json:"recorded"`
+	// Association describes current selection separately from Recorded.
+	Association ProjectAssociation `json:"association"`
+	// Selected marks consumers whose destination scenes will be composed.
+	Selected bool `json:"selected"`
 }
 
 // ReassociationAllocation lists retained allocation links, including released journals.
 type ReassociationAllocation struct {
+	// AllocationID identifies the retained allocation without its ownership capability.
 	AllocationID string `json:"allocation_id"`
-	InstanceID   string `json:"instance_id"`
-	Resource     string `json:"resource"`
-	ServiceID    string `json:"service_id"`
-	Released     bool   `json:"released"`
+	// InstanceID identifies the retained allocation consumer.
+	InstanceID string `json:"instance_id"`
+	// Resource is the recorded resource name within that consumer.
+	Resource string `json:"resource"`
+	// ServiceID identifies the immutable shared service parent.
+	ServiceID string `json:"service_id"`
+	// Released marks a retained release journal rather than a live allocation.
+	Released bool `json:"released"`
 }
 
 // ReassociationPrivate describes safe private-selection facts, never input values.
 type ReassociationPrivate struct {
+	// RecordedGenerationPath is the immutable private source recorded at launch, when known.
 	RecordedGenerationPath string `json:"recorded_generation_path,omitempty"`
-	OperationRoot          string `json:"operation_root"`
-	RuntimeRoot            string `json:"runtime_root"`
-	RecordedAssociation    string `json:"recorded_association,omitempty"`
-	Association            string `json:"association,omitempty"`
-	GenerationPath         string `json:"generation_path,omitempty"`
-	State                  string `json:"state"`
-	Revision               string `json:"revision"`
+	// OperationRoot is the reviewed requesting registry selection.
+	OperationRoot string `json:"operation_root"`
+	// RuntimeRoot is the daemon's ordinary registry selection.
+	RuntimeRoot string `json:"runtime_root"`
+	// RecordedAssociation identifies the private association recorded at launch, when known.
+	RecordedAssociation string `json:"recorded_association,omitempty"`
+	// Association identifies the usable current private selection, when available.
+	Association string `json:"association,omitempty"`
+	// GenerationPath is the selected immutable private source path, when available.
+	GenerationPath string `json:"generation_path,omitempty"`
+	// State reports safe selection/provenance status without input values.
+	State string `json:"state"`
+	// Revision is keyed opaque source freshness, scoped to this daemon generation.
+	Revision string `json:"revision"`
 }
 
 // FilesystemObservation separates device/inode evidence from checkout hash identity.
 type FilesystemObservation struct {
-	Path   string `json:"path"`
+	// Path identifies the observed checkout, Git directory or sharing anchor.
+	Path string `json:"path"`
+	// Device records the device value when available.
 	Device string `json:"device,omitempty"`
-	Inode  string `json:"inode,omitempty"`
+	// Inode records the inode value when available.
+	Inode string `json:"inode,omitempty"`
 }
 
 // ReassociationResponse is the canonical safe actionable preview and applied result.
 type ReassociationResponse struct {
-	StateRevision    string                    `json:"state_revision"`
-	APIVersion       string                    `json:"api_version"`
-	DaemonGeneration string                    `json:"daemon_generation"`
-	Request          ReassociationRequest      `json:"request"`
-	Current          ProjectIdentity           `json:"current"`
-	Checkout         CheckoutIdentity          `json:"checkout"`
-	Filesystems      []FilesystemObservation   `json:"filesystems"`
-	Projects         []ProjectRegistration     `json:"projects"`
-	Instances        []ReassociationInstance   `json:"instances"`
-	Services         []SharedStatus            `json:"services"`
-	Allocations      []ReassociationAllocation `json:"allocations"`
-	Private          ReassociationPrivate      `json:"private"`
-	Changes          []string                  `json:"changes"`
-	Preserved        []string                  `json:"preserved"`
-	Blockers         []string                  `json:"blockers"`
-	Preview          string                    `json:"preview"`
-	Applied          bool                      `json:"applied"`
+	// StateRevision is opaque freshness for retained registrations and consumers.
+	StateRevision string `json:"state_revision"`
+	// APIVersion identifies the typed local API contract.
+	APIVersion string `json:"api_version"`
+	// DaemonGeneration invalidates acknowledgements across daemon restarts.
+	DaemonGeneration string `json:"daemon_generation"`
+	// Request contains normalized selectors for this preview.
+	Request ReassociationRequest `json:"request"`
+	// Current describes the destination sharing anchor observation.
+	Current ProjectIdentity `json:"current"`
+	// Checkout describes the requesting checkout observation.
+	Checkout CheckoutIdentity `json:"checkout"`
+	// Filesystems separates available device/inode evidence from derived IDs.
+	Filesystems []FilesystemObservation `json:"filesystems"`
+	// Projects lists retained origin/current shared registrations.
+	Projects []ProjectRegistration `json:"projects"`
+	// Instances lists selected and affected retained consumers.
+	Instances []ReassociationInstance `json:"instances"`
+	// Services lists relevant retained shared services without credentials.
+	Services []SharedStatus `json:"services"`
+	// Allocations lists exact retained allocation links without capabilities.
+	Allocations []ReassociationAllocation `json:"allocations"`
+	// Private reports safe private selection and root-agreement facts.
+	Private ReassociationPrivate `json:"private"`
+	// Changes describes the proposed association changes.
+	Changes []string `json:"changes"`
+	// Preserved describes authority and data kept by the repair.
+	Preserved []string `json:"preserved"`
+	// Blockers lists prerequisites that prevent application.
+	Blockers []string `json:"blockers"`
+	// Preview is the canonical safe acknowledgement digest.
+	Preview string `json:"preview"`
+	// Applied confirms completed association publication.
+	Applied bool `json:"applied"`
 }
 
 // Validate checks the coherent preview envelope returned by a daemon.

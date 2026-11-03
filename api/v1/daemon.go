@@ -66,7 +66,9 @@ type Operation struct {
 
 // Instance is the redacted durable public view of preparation and optional execution.
 type Instance struct {
-	CheckoutParent          string                   `json:"checkout_parent,omitempty"`
+	// CheckoutParent preserves the original registration across association changes.
+	CheckoutParent string `json:"checkout_parent,omitempty"`
+	// Association exposes current selection separately from recorded launch provenance.
 	Association             *ProjectAssociation      `json:"association,omitempty"`
 	NativeOwnershipWarnings []NativeOwnershipWarning `json:"native_ownership_warnings,omitempty"`
 	ID                      string                   `json:"id"`

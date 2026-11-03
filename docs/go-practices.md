@@ -44,15 +44,18 @@ honor a defined shutdown budget and report unfinished work.
 
 ## Documentation
 
-Document all exported functions, types, variables, and constants with GoDoc
-comments beginning with the identifier and using complete sentences. Document
-unexported helpers when their preconditions, side effects, or behavior are not
+Document all handwritten exported fields, functions, types, variables and constants
+with GoDoc comments beginning with the identifier and using complete sentences.
+Document unexported helpers when their preconditions, side effects, or behavior are not
 obvious. Explain intent, invariants, ownership, and surprising ordering in complex
 code; avoid narrating syntax.
 
-Package documentation should explain a meaningful boundary when that is not
-clear from its name. Keep public behavior, error cases, and cancellation
-semantics current when implementations change.
+Package documentation states purpose, ownership and boundaries.
+Use `invariant:`, `authz:` and `shortcut: <limit>, <when to upgrade>` when they
+clarify durable constraints or bounded debt. Every TODO needs an issue URL; review
+tagged comments when their code changes. Document generated contracts at their
+source and regenerate rather than editing output. Keep public behavior, error
+cases and cancellation semantics current when implementations change.
 
 ## Shared contracts
 

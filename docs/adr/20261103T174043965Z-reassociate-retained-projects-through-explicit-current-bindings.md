@@ -2,176 +2,128 @@
 title: "Reassociate retained projects through explicit current bindings"
 date: 2026-11-03
 status: accepted
-summary: 'Separate retained ownership from explicitly reviewed current location bindings so moved or identity-changed projects can reuse data without automatic adoption.'
+implementation: in-progress
+summary: "Separate retained ownership from explicitly reviewed current bindings so moved or identity-changed projects can reconnect data without automatic adoption."
 tags: [identity, shared-services, state, migration, configuration, cli, recovery]
-supersedes: [20261019T050443877Z-add-project-scoped-shared-service-allocations.md, 20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md]
+supersedes: [/docs/adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md, /docs/adr/20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md]
 superseded_by: []
+related: [/docs/adr/20261021T001732173Z-register-private-project-configuration.md, /docs/adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md, /docs/adr/20261103T174849392Z-select-bounded-working-directories-for-native-commands.md]
+tracking: []
+implemented_by: [/internal/daemon/reassociation.go, /internal/daemon/project_bindings.go, /internal/daemon/reassociation_native_test.go]
 ---
 
 # Reassociate retained projects through explicit current bindings
 
-Keep retained ownership immutable and add direct current-location bindings so moved
-projects reconnect data without rewriting authority. Allow explicit, preview-bound
-reassociation to one retained project, preserving service/instance IDs, allocations,
-credentials, data and cleanup capabilities. Commit daemon associations atomically;
-private setup remains a separate prerequisite.
+## Context and Problem Statement
 
-## Context
+Filesystem-derived project IDs also identify services and embed their authority.
+Independent checkout, scene and private-configuration fences make identity rewrites
+unsafe or incomplete. Users need to reconnect retained allocations after an explicit
+move or identity change without discarding data, credentials or cleanup authority.
 
-Shared project IDs hash filesystem identity, relative location and declared name;
-services derive IDs from and embed that identity. Independent checkout/scene/private
-fences mean path/ID rewrites can invalidate authority or leave another fence unresolved,
-even after service destruction.
+The requesting checkout, its per-worktree Git directory and the resolved Git common
+directory are distinct. Show the actual sharing anchor, including when it lies under
+another checkout. A path does not prove permanence; device/inode drift indicates
+identity change, not proof of replacement. Names, paths, remotes and history cannot
+authorize adoption or merge independent clones.
 
-The requesting checkout and its per-worktree Git directory differ from the resolved
-Git common-directory sharing anchor. Show the actual anchor location, even when it
-lies under another checkout; location does not prove permanence. Changed device/
-inode values indicate identity change, not proof of replacement. Matching paths,
-names, remotes or history do not authorize adoption; independent clones stay separate.
+## Considered Options
 
-## Decision
+- Direct current bindings to immutable owners, coordinated across checkout selection
+  and shared services: preserves authority with two bounded stores.
+- Rewrite/rekey identities and dependent records: changes provider parents or still
+  needs origin facts to preserve IDs and historical authority.
+- Diagnostics, fresh state or destruction: cannot reconnect retained allocations.
+- Shared-only repair: leaves independent checkout/private fences unresolved.
+- Atomic private-and-daemon repair: adds cross-store recovery and offline-writer
+  fencing; existing staged setup provides a smaller, truthful failure boundary.
+- Automatic matching: cannot establish intended ownership or safe credential reuse.
 
-### Retained ownership and current selection
+## Decision Outcome
 
-Preserve shared ownership records, their hashes, embedded service identities and
-original bidirectional path index separately from active indexes. Add one direct
-current shared-project binding to a retained project ID and one current checkout
-binding to its original registration ID, reused as the stable parent for instances
-and persistent slots. Bindings start at the recorded identity and are replaced
-explicitly; no merges, alias chains, universal identity type or binding history.
+Keep original shared-project records, hashes, embedded service identities and
+bidirectional path indexes immutable. Add one current shared-project binding to its
+retained owner and one current checkout binding to its original registration, which
+remains the stable parent of instances and persistent slots. Replace bindings only
+through explicit repair; no merges, alias chains, universal identity or history layer.
 
-Resolve current bindings before ordinary registration and service lookup. Retained
-origin IDs remain reserved: an active-binding miss cannot reactivate an origin
-whose current binding differs, even at its original path or after all services are
-destroyed. Conflicting path/observed-ID claims, occupied slots and ambiguous owners
-refuse repair. Project-name and relative project/manifest-location changes remain
-outside this repair; never implicitly relocate another registered project.
+Resolve current bindings before ordinary registration/service lookup. Origin IDs and
+paths remain reserved even after all services are destroyed: a binding miss cannot
+reactivate a relocated origin. Reject foreign claims, ambiguous owners and occupied
+slots. Preserve declared project and relative project/manifest locations; never
+implicitly relocate another registered project or pair independent retained owners.
 
-Keep current association metadata separate from recorded launch facts. Selection
-uses current bindings; launch validation and recorded cleanup retain historical
-authority. A newly accepted attempt atomically records its current plan and observed
-checkout without changing its stable parent/slot or old attempt/export provenance.
-Exact-ID restart/reset uses current associations; destroy uses stable parents while
-preserving identity reservations and existing history/evidence erasure semantics.
+Keep current selection separate from recorded launch facts. Acceptance atomically
+records the new plan and observed checkout while retaining stable parents/slots,
+service/allocation IDs, credentials, capabilities and historical export/cleanup facts.
+Exact-ID restart/reset uses current association; destroy retains reservations and
+existing history/evidence erasure semantics.
 
-### Preview and scope
+Diagnosis and preview are read-only, expose recorded/current identities, affected
+services/instances/allocations and exact changes/preservation, and label unknown facts.
+Scene doctor exposes identity/verification conflicts before private composition.
+Apply selects exact retained owners and acknowledges a canonical safe preview of
+selectors, observations, affected state, daemon generation and opaque revisions.
+Exclude raw inputs and unkeyed secret fingerprints; generation-private memory-keyed
+source freshness covers manual edits without a persisted preview/key or expiry worker.
+Recompute before commit; stale or conflicting state requires a fresh preview.
 
-Expose typed `project diagnose` and `project reassociate` contracts; reassociation
-without apply is read-only. Scene doctor exposes shared-registration conflicts even
-when configuration cannot compose. Show recorded/current checkout paths and IDs,
-per-worktree Git directory, resolved sharing anchor, relative project location,
-project IDs and available device/inode values; label historical unknowns honestly.
-Show what changed, affected services/instances/allocations (including empty retained
-registrations), exact association changes, preserved authority and all blockers.
-Text/JSON retain existing [privacy rules](20261019T050443877Z-add-project-scoped-shared-service-allocations.md).
-Apply selects exact retained owners/destinations and acknowledges the specific
-preview through `--apply --preview DIGEST`. Hash a canonical safe actionable
-projection of selectors, observations, affected IDs/status, daemon generation and
-opaque binding/private-selection revisions. Exclude raw inputs and unkeyed
-secret-derived fingerprints. A generation-private random memory key supplies opaque
-source-byte freshness revisions, including manual edits; no persisted preview/key
-or expiry worker. Recompute before commit; relevant change requires a fresh preview.
+Enumerate all affected peers, including consumers without allocations. Require stopped,
+joined, independently settled consumers and a fixed locked/fenced set; waiver alone
+is not absence proof, and historical gaps/warnings remain. Compose only selected
+destinations and check declarations/providers against retained authority. Preserve
+unresolved peer bindings/snapshots and refuse their starts until separately verified;
+never substitute the requesting branch. Recorded cleanup remains available, and a
+shared SQL server may remain running without changing provider effects or allocations.
 
-Enumerate every peer affected by a shared-anchor change and require all consumers
-stopped/joined, locked and fenced, even with unavailable sources. Only explicitly
-selected destinations compose; validate their shared declarations/providers against
-retained service authority. Never compose a peer from the requesting branch.
-Preserve unresolved peer bindings/snapshots and fence their starts until separately
-verified/repaired against the new shared binding revision. Recorded cleanup remains
-available. Refuse live, kept, pending or uncertain consumers under existing
-[lifecycle rules](20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md);
-status or a force-stop waiver is not absence proof. A shared SQL server may remain
-running under its service lock: repair changes no provider effects or allocations.
+Private setup remains separate, using explicit values without credential import.
+Unsafe/missing setup or unreviewable provenance blocks; ordinary input-free
+unregistered projects remain valid. Diagnosis honors the explicit registry root;
+apply requires agreement with ordinary daemon selection, including after restart.
+No persisted root override, global environment mutation or cross-store rollback
+promise: setup may succeed while daemon repair stays unapplied. Restart invalidates
+old previews and later root changes remain ordinary configuration drift.
 
-### Private setup and compatibility
+Relocate association metadata only. Compare protected resource/provider/initializer,
+input/image/mount fields against the latest accepted snapshot, including repeated
+repairs, without rewriting snapshots/digests or rebasing paths/secrets. Preserve
+ordinary default-cwd equivalence and strict nondefault fresh-only cwd checks. A moved
+relative fresh-only executable or nondefault effective initializer cwd can therefore
+block repair even with identical declarations. Report safe categories, not secret
+values or destruction as successful repair; add no relocation normalizer.
 
-Keep format-1 private setup and its publication protocol independent. A stale
-association blocks apply with the recorded/current association, selected generation,
-reason and `project setup --reassociate` prerequisite using explicit values; never
-import old credentials implicitly. Unsafe/missing required setup or unreviewable
-provenance blocks; ordinary input-free unregistered projects remain valid. Setup
-may commit while daemon repair remains unapplied: report that boundary and require
-a fresh preview, with no cross-store journal, rollback or compensation promise.
+Use existing mutation ownership and fixed fail-fast instance locks, cancellable
+ordered service/private-publication locks, then the admission gate last. Revalidate
+sources before the gate and the complete affected set/revisions under it; new
+registrations refuse/repreview rather than expand waits. Never acquire the gate
+holding service.mu or span source reads/lock waits with either. Captured starts check
+revisions at acceptance/allocation; first service intents share binding admission.
+One bbolt transaction revalidates relationships and publishes selected bindings,
+revision and acknowledgement, without provider/network effects. Precommit failure
+changes no association; missing replies require inspection, never automatic retry.
+Recovery sees old or new state and never starts work. External filesystem/Git/manual
+edits cannot be locked; subsequent starts reverify.
 
-Diagnosis honors the operation's explicit registry root without fallback. Preview/
-apply requires that root and ordinary daemon runtime selection to agree, including
-canonicalization and safety checks; mismatch is a prerequisite blocker. No persisted
-root override or global environment mutation. After daemon restart, use its actual
-selection/generation and reject old previews; later operator root changes remain
-configuration changes under [private-configuration rules](20261021T001732173Z-register-private-project-configuration.md).
+Follow cumulative source12-to-13 migration from retained state only, preserving older
+steps, authority, unrelated bytes, journals, history/passive files and destroyed-slot
+gaps. Startup validates original authority, unique active claims, stable parents and
+historical launch relationships. Failure/uncertainty preserves ownership with
+all-step rollback; old steps cannot depend on future bindings. No new provider,
+dependency, worker or machine pool. Only the superseded decisions' move/refusal and
+location-selection rules change; their other guarantees remain in force.
 
-Only association/selection metadata relocates: current checkout path/observed ID,
-per-worktree Git-directory path, shared anchor path/filesystem observation and
-project/manifest paths derived from unchanged relative locations. Protected resource,
-provider, initialization, input, image and mount checks remain unchanged in preview,
-apply and subsequent start/restart. Compare the latest accepted launch snapshot,
-including after A-to-B/start-at-B/B-to-C; never rewrite snapshots or digests.
+### Consequences
 
-Fresh-only initializer comparison includes the resolved executable. An unchanged
-`./bin/setup` resolving from A/bin/setup to B/bin/setup therefore blocks this version,
-as do changed protected absolute tools or secret paths. Report safe field categories,
-never secret values or destruction as successful repair. Moves with unchanged
-protected fields are supported; not every source-identical move is. No normalizer,
-secret/path rebasing or implicit relative-tool relocation exception is authorized.
+Bindings impose indirection and validation on ordinary selection, startup, acceptance
+and cleanup even without repair. Staged setup and strict compatibility can refuse a
+move while preserving data. Bindings record trusted-user intent, not permanence or
+isolation from hostile same-user edits. Revisit for cross-store one-step repair,
+renaming/relative relocation, provenance-backed tool relocation, cross-daemon sharing
+or binding history, rather than silently expanding these two concrete bindings.
 
-### Commit, recovery and migration
+## More Information
 
-Under existing mutation ownership, try a fixed sorted instance lock set once, then
-take cancellable ordered service locks and the private publication lock. Verify
-sources before acquiring the admission gate last; contention or new affected
-registrations/consumers refuses/repreviews, never expands waits. Recheck the complete
-set/revisions under the gate; never acquire it holding `service.mu` or hold either
-over source reads/lock waits. Old captures recheck revision at acceptance and allocation.
-
-One bbolt transaction revalidates database relationships, changes all selected
-daemon bindings/indexes and records their revision/accepted digest. No transaction
-spans configuration reads, lock waits or provider/network effects. Precommit failure
-changes no association; missing postcommit reply means unknown completion, never
-automatic retry. Inspection exposes the accepted digest/current binding; recovery
-sees old or new state and never starts consumers. External filesystem/Git/manual
-edits cannot be locked by Backlot; later starts reverify and refuse changed sources.
-
-Add only the two binding stores, stable instance parents, revisions/verified shared
-revision and accepted acknowledgement. Follow the [cumulative migration policy](20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md)
-from source12, retaining older steps/decoders. Derive bindings solely from retained
-state, never current files or private registry; preserve historical authority and
-unrelated bytes, credentials, capabilities, allocations, history and passive files.
-Startup validates origin authority plus unique active claims, binding parents and
-slots independently of historical launch locations. Preserve legitimate destroyed-
-slot gaps and all-step rollback; historical migration steps cannot require future
-binding storage. No provider/manager change, new dependency, worker or machine pool.
-
-## Consequences
-
-Bindings add indirection across selection, acceptance and cleanup, migration and
-historical-reader/index maintenance; reads/startup validation apply even without
-repair. Staged setup and strict compatibility can require another action or refuse
-a move without discarding data. Bindings express trusted-user intent, not object
-permanence or isolation from hostile same-user edits.
-
-## Alternatives considered
-
-- Diagnostics/setup/cleanup or a fresh checkout cannot reconnect retained scene
-  allocations; destruction/fresh daemon state defeats preservation.
-- Transactionally rewrite identities and dependent records: keeping IDs still needs
-  origin facts; rekeying changes service/allocation/provider parents. Direct bindings
-  preserve those authority-bearing records and hashes with fewer historical writers.
-- Atomic private-and-daemon repair needs cross-store recovery and offline-writer
-  fencing. Existing staged setup provides a smaller, truthful failure boundary.
-- Automatic path/name/Git matching cannot establish intended ownership or safe
-  credential reuse. Shared-only bindings leave independent checkout fences unresolved.
-
-## Revisit when
-
-One-step cross-store repair, project renaming/relative relocation, provenance-backed
-relative-tool relocation, cross-daemon sharing, binding history/reversal, hostile
-same-user isolation or automatic relocation is required; or the two concrete
-bindings and existing locks cannot preserve coherent current/historical selection.
-
-## References
-
-- [Shared identity](../../internal/daemon/shared_identity.go), [authority validation](../../internal/daemon/state_authority.go), [scene selection](../../internal/daemon/scene.go)
-- [Private publication](../../internal/projectconfig/store.go), [attempt acceptance](../../internal/daemon/runtime_state.go), [history/erasure rules](20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md)
-
-This supersedes only move/replacement refusal and location-selection rules in the
-linked shared-service/scene decisions; their other guarantees continue in force.
+[Repair workflow](/docs/cli.md#reassociate-retained-project-data),
+[authority checks](/internal/daemon/state_authority.go),
+[private publication](/internal/projectconfig/store.go),
+[history/erasure rules](/docs/adr/20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md).

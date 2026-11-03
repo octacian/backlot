@@ -344,7 +344,7 @@ func (s *service) projectPreview(request v1.ReassociationRequest) (result v1.Rea
 				result.Private.RecordedGenerationPath = old.PrivateProvenance.Path
 			}
 			if e = safeRestart(old, snapshot); e != nil {
-				block("protected resource/input/initializer compatibility changed for " + i.Scene + "; resolved fresh-only executable relocation is unsupported")
+				block("protected resource/input/initializer compatibility changed for " + i.Scene + "; resolved fresh-only executable or nondefault working-directory relocation is unsupported")
 			}
 			for _, service := range result.Services {
 				record, e := s.store.sharedService(service.ID)

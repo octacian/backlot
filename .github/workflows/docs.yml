@@ -13,15 +13,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  changes:
-    uses: ./.github/workflows/changes.yml
-    permissions:
-      contents: read
-
   docs:
     name: Documentation
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.docs == 'true') }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -29,5 +22,5 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Verify ADR tooling and records
-        run: make check-docs
+      - name: Verify documentation records and links
+        run: go run go.auvem.com/corestack/cmd/corestack-docs@v0.2.0 check

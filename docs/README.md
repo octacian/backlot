@@ -22,7 +22,7 @@ Before planning or editing, read:
 | CLI or API contracts | [Architecture: shared API](architecture.md#shared-api), [Go practices](go-practices.md) |
 | Commits and pull requests | [Git workflow](git-workflow.md) |
 | Delivery scope or status | Relevant issues/epics for scope and status; PRs for execution evidence |
-| ADR creation or changes | [ADR guide](adr/README.md), [template](adr/template.md) |
+| ADR creation or changes | [ADR guide](adr/README.md) |
 
 ## Guides
 
@@ -39,6 +39,7 @@ Before planning or editing, read:
 | Exits, logs, artifacts, fixtures and retention | [Results and evidence](evidence.md) |
 | macOS/Linux targets and WSL configuration | [Platforms](platforms.md) |
 | GitHub Actions and Chromium scenes | [CI quickstart](ci.md), [Ubuntu example](../examples/ci-scenes/README.md) |
+| Package-local native dev/build/test | [Working-directory example](../examples/native-working-directory/README.md) |
 | Small native test recipes | [Playwright over loopback HTTP](../examples/native-playwright/README.md), [Go tests with MariaDB](../examples/native-go-mariadb/README.md) |
 | Preparing a release | [Release procedure](preparing-a-release.md) |
 | Targeted runtime diagnostics | [Diagnostics and evidence](release-acceptance/README.md), [four-workflow fixture](../examples/release-acceptance/README.md) |

@@ -518,7 +518,7 @@ func TestDockerConsumerInventoryFailuresAndMixedIdentities(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = engine.Close() })
-			err = (&dockerEngine{engine}).noConsumers(context.Background(), resourceGeneration{Resources: map[string]ownedResource{"data": {Kind: "directory", Name: owned}, "network": n}})
+			err = (&dockerEngine{Client: engine, stopClient: engine}).noConsumers(context.Background(), resourceGeneration{Resources: map[string]ownedResource{"data": {Kind: "directory", Name: owned}, "network": n}})
 			if (err == nil) != (mode == "unknown-only" || mode == "network-unrelated") {
 				t.Fatal("consumer classification", err)
 			}
@@ -590,7 +590,7 @@ func TestDockerBindConsumerIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = engine.Close() })
-			err = (&dockerEngine{engine}).noConsumers(context.Background(), resourceGeneration{Resources: map[string]ownedResource{"data": {Kind: "directory", Name: owned}}})
+			err = (&dockerEngine{Client: engine, stopClient: engine}).noConsumers(context.Background(), resourceGeneration{Resources: map[string]ownedResource{"data": {Kind: "directory", Name: owned}}})
 			if (err != nil) != tc.blocked {
 				t.Fatalf("blocked=%v want=%v error=%v", err != nil, tc.blocked, err)
 			}

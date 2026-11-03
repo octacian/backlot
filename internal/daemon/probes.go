@@ -42,7 +42,11 @@ func (s *service) awaitProbe(ctx context.Context, id string, c v1.PlannedCompone
 		}
 		var ready bool
 		if c.Readiness.Kind == "command" {
-			probe, err := s.launch(probeCtx, id, c.Name, c.Readiness.Executable, c.Readiness.Command.Args, c.Environment, snapshot, result, entry, journal)
+			command := *c.Readiness.Command
+			if command.WorkingDirectory == "" && c.Command != nil {
+				command.WorkingDirectory = c.Command.WorkingDirectory
+			}
+			probe, err := s.launch(probeCtx, id, c.Name, c.Readiness.Executable, command, c.Readiness.WorkingDirectory, c.Environment, snapshot, result, entry, journal)
 			if err != nil {
 				return err
 			}

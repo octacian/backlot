@@ -250,7 +250,7 @@ func (s *store) beginSelected(snapshot plan.Snapshot, checkout v1.CheckoutIdenti
 						return err
 					}
 				}
-				response.ManifestDrift = r.Instance.Plan.ManifestDigest != p.ManifestDigest
+				response.ManifestDrift = plan.ManifestDrift(r.Instance.Plan, p)
 				response.ConfigDrift = plan.ConfigurationDrift(r.Instance.Plan, p)
 				return nil
 			}

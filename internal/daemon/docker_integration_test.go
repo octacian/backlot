@@ -391,6 +391,46 @@ func TestDockerRuntime(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, out)
 	}
+	t.Run("default-grace-retains-final-output", func(t *testing.T) {
+		h := newDockerHarness(t, binary, endpoint)
+		h.alpine()
+		server := h.manifest.Components["server"]
+		server.Args = []string{"sh", "-c", "trap 'sleep 7; echo final-stop-marker; exit 0' TERM; echo stop-ready; while true; do nc -l -p 8080 < /dev/null & wait $!; done"}
+		server.DependsOn = nil
+		h.manifest.Components = map[string]v1.Component{"server": server}
+		h.manifest.Scenes = map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"server"}, Resources: []string{"data", "directory", "secret", "port"}}}
+		h.write()
+		// Use the CLI default grace, rather than the harness's one-second override.
+		output, err := exec.Command(binary, "run", "--project", h.project, "--config", h.config, "--state-dir", h.dir, "--json", "dev").Output()
+		if err != nil {
+			t.Fatal("CLI start", err, string(output))
+		}
+		var started v1.InstanceResponse
+		if err := json.Unmarshal(output, &started); err != nil {
+			t.Fatal(err)
+		}
+		id := started.Instance.ID
+		waitComponentLog(t, h.nativeHarness, id, "server", "stop-ready")
+		proveAbsent := h.observeDisposableDockerObjects(id, "")
+		output, err = exec.Command(binary, "stop", "--state-dir", h.dir, "--json", id).Output()
+		if err != nil {
+			t.Fatal("CLI stop", err, string(output))
+		}
+		stopped := h.state(id, v1.Stopped).Instance.Execution
+		if stopped == nil || stopped.CollectionFailure != "" || stopped.CleanupFailure != "" || stopped.Failure != "" {
+			t.Fatalf("stop outcomes: %+v", stopped)
+		}
+		if len(stopped.Components) != 1 || stopped.Components[0].ExitCode == nil || *stopped.Components[0].ExitCode != 0 {
+			t.Fatalf("actual container exit lost: %+v", stopped.Components)
+		}
+		waitComponentLog(t, h.nativeHarness, id, "server", "final-stop-marker")
+		if _, err := h.cli.Destroy(context.Background(), id); err != nil {
+			t.Fatal(err)
+		}
+		if err := proveAbsent(); err != nil {
+			t.Fatal(err)
+		}
+	})
 	t.Run("stopped-networks-recreated-with-data", func(t *testing.T) {
 		h := newDockerHarness(t, binary, endpoint)
 		h.alpine()
@@ -1706,8 +1746,14 @@ func TestDockerRuntime(t *testing.T) {
 		peer := h.manifest.Components["server"]
 		peer.Args = []string{"sh", "-c", "echo recovery-peer; exec sleep 300"}
 		peer.Ports = nil
-		h.manifest.Tools = map[string]string{"true": "true"}
-		peer.Readiness = &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "true"}, Timeout: "3s"}
+		if err := os.Mkdir(filepath.Join(h.project, "probe"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(h.project, "probe", "host-marker"), []byte("fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		h.manifest.Tools = map[string]string{"probe": "sh"}
+		peer.Readiness = &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "probe", WorkingDirectory: "probe", Args: []string{"-c", "test -f host-marker"}}, Timeout: "3s"}
 		peer.Resources = []string{"data", "directory", "secret"}
 		h.manifest.Components["peer"] = peer
 		scene := h.manifest.Scenes["dev"]

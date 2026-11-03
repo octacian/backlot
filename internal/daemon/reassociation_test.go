@@ -1038,3 +1038,67 @@ func TestReassociationR2FirstAllocationAdmission(t *testing.T) {
 		t.Fatal("provider-free admission created an allocation", err)
 	}
 }
+
+func TestReassociationWorkingDirectoryIntegration(t *testing.T) {
+	for _, scenario := range []struct {
+		name, before, after string
+		policy              v1.JobPolicy
+		allowed             bool
+	}{
+		{"default", "", "", v1.FreshOnly, true},
+		{"equivalent-default", "", ".", v1.FreshOnly, true},
+		{"fresh-nondefault", "package", "package", v1.FreshOnly, false},
+		{"ordinary-nondefault", "package", "package", v1.EachStart, true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			f := newRepairFixture(t)
+			if err := os.Mkdir(filepath.Join(f.project, "package"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			c := f.manifest.Components["job"]
+			c.Policy = scenario.policy
+			c.Command.WorkingDirectory = scenario.before
+			if c.Policy == v1.FreshOnly {
+				c.Initializes = []string{"db"}
+			}
+			f.manifest.Components["job"] = c
+			f.write(t)
+			source, err := plan.Locate(f.project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := plan.Prepare(source, v1.PlanRequest{ProjectPath: f.project, ConfigPath: f.config, Scene: "dev"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.s.store.replaceSnapshot(f.instance.ID, snapshot); err != nil {
+				t.Fatal(err)
+			}
+			f.move(t, "moved")
+			c.Command.WorkingDirectory = scenario.after
+			f.manifest.Components["job"] = c
+			f.write(t)
+			before := stateContents(t, f.s.store)
+			p := f.preview(t)
+			if (len(p.Blockers) == 0) != scenario.allowed || !reflect.DeepEqual(before, stateContents(t, f.s.store)) {
+				t.Fatal("effective cwd compatibility or read-only preview changed", p.Blockers)
+			}
+			if scenario.allowed {
+				if err := f.apply(t, p); err != nil {
+					t.Fatal(err)
+				}
+				if stateContents(t, f.s.store)["snapshots"][f.instance.ID] != before["snapshots"][f.instance.ID] {
+					t.Fatal("repair rewrote recorded cwd instead of preserving launch history")
+				}
+			} else {
+				if !strings.Contains(strings.Join(p.Blockers, "\n"), "nondefault working-directory relocation") {
+					t.Fatal("cwd blocker category missing", p.Blockers)
+				}
+				code(t, f.apply(t, p), "reassociation_blocked")
+				if !reflect.DeepEqual(before, stateContents(t, f.s.store)) {
+					t.Fatal("cwd refusal mutated retained state")
+				}
+			}
+		})
+	}
+}

@@ -25,7 +25,8 @@ copies as their runtime changes. Capability/help presence does not prove semanti
    [manifest schema](assets/schemas/manifest-v1.schema.json) and
    [adaptation example](assets/examples/adoption/backlot.yaml). The example is a
    declaration outline, not a runnable app: replace its commands with the actual
-   application. Its [seed](assets/examples/adoption/defaults.env) is literal data.
+   application. Use `command.working_directory` for package-local native entry
+   points; keep tool/output/artifact/seed anchors at the manifest. Its [seed](assets/examples/adoption/defaults.env) is literal data.
    Declare selected dependencies/resources explicitly, terminal_job for disposable
    tests, and output concurrency groups for generated files. Offline schema success
    does not replace `backlot plan` or actual execution.

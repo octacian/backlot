@@ -115,6 +115,9 @@ type Output struct {
 
 // Command declares an executable tool and direct argument vector.
 type Command struct {
+	// WorkingDirectory selects a manifest-relative cwd; omitted readiness commands inherit native service cwd.
+	WorkingDirectory string `json:"working_directory,omitempty" yaml:"working_directory,omitempty" jsonschema_description:"Existing manifest-relative directory for native execution; dot selects the manifest directory. Native service readiness commands inherit service cwd when omitted; other commands default to the manifest directory."`
+
 	Tool string   `json:"tool" yaml:"tool" jsonschema:"minLength=1" jsonschema_description:"Name from the project tools map; no implicit shell interpretation."`
 	Args []string `json:"args,omitempty" yaml:"args,omitempty" jsonschema_description:"Direct argument vector; shell expansion requires an explicit shell command."`
 }

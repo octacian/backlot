@@ -67,7 +67,7 @@ func TestBuildImageHandoffRejectsStaleAttemptOrGeneration(t *testing.T) {
 					t.Error(err)
 				}
 			}()
-			entry.docker = &dockerEngine{engine}
+			entry.docker = &dockerEngine{Client: engine, stopClient: engine}
 			snap := plan.Snapshot{Plan: v1.PlanResponse{BuildImages: map[string]v1.BuildImage{"app": {Producer: "build"}}}}
 			before := stateContents(t, s.store)
 			if err := s.completeBuildImages(ctx, instance.ID, "build", snap, entry, result); err == nil {

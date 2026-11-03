@@ -154,12 +154,12 @@ func TestPlanUnsafeKeyAndConfigVersionErrors(t *testing.T) {
 }
 
 func TestExecutableOutputQuotesSelectionsAndPreservesWriteErrors(t *testing.T) {
-	planned := v1.PlanResponse{Components: []v1.PlannedComponent{{Name: "server", Executable: "/missing/command\npath", Readiness: &v1.PlannedProbe{Executable: "/missing/probe\x1bpath"}}}}
+	planned := v1.PlanResponse{Components: []v1.PlannedComponent{{Name: "server", Executable: "/missing/command\npath", WorkingDirectory: "/package\npath", Readiness: &v1.PlannedProbe{Executable: "/missing/probe\x1bpath"}}}}
 	var out bytes.Buffer
 	if err := executableOutput(&out, planned, "recorded selection"); err != nil {
 		t.Fatal(err)
 	}
-	if out.String() != "  server command (recorded selection): \"/missing/command\\npath\"\n  server readiness (recorded selection): \"/missing/probe\\x1bpath\"\n" {
+	if out.String() != "  server command (recorded selection): \"/missing/command\\npath\"\n    working directory: \"/package\\npath\"\n  server readiness (recorded selection): \"/missing/probe\\x1bpath\"\n" {
 		t.Fatal("unquoted or lost selections", out.String())
 	}
 	if err := executableOutput(failingWriter{}, planned, "caller/offline selection"); !errors.Is(err, io.ErrClosedPipe) {

@@ -97,6 +97,34 @@ outputs. The executor serializes these groups per canonical checkout
 across scenes and runs; a plan is not a lock. Backlot cannot infer undeclared
 command side effects.
 
+## Native working directories
+
+Native `command.working_directory` selects an existing directory relative to the
+manifest directory. Omission keeps the manifest directory; `.` explicitly selects
+it. Paths cannot be absolute, contain traversal, backslashes or drive names, or
+escape the manifest directory through symlinks. Planning checks filesystem
+metadata without executing tools; launch rechecks the retained canonical target
+and rejects a changed, missing or invalid directory.
+
+A native service's command readiness probe inherits the service cwd when its own
+`working_directory` is omitted. An explicit probe override is always relative to
+the manifest, including `.` to return to its directory. Command probes on container
+services also execute on the host and support overrides; their omitted default
+remains the manifest directory. Container image `WORKDIR` is unchanged.
+
+Relative argv paths are interpreted by the application from the selected cwd.
+Relative tool paths, discovery, output declarations, artifact paths and seed files
+keep their existing manifest/project anchors. For example, a build in `app` may
+use argv `../build/app`, with output `build` and artifact `build/app`.
+
+Plans and retained snapshots carry the effective canonical directory; omitted
+fields in older snapshots retain the manifest-directory default. Healthy work
+keeps its accepted cwd and reports unapplied drift, including symlink retargets
+with unchanged manifest bytes. Compatible start/restart may accept an ordinary
+command or probe cwd change; changing a retained fresh-only initializer's effective
+cwd requires reset/destroy. This is cooperative native execution, not a sandbox
+against concurrent host filesystem mutation or application file access.
+
 ## Components and scenes
 
 Components declare `kind: service|job` and `runtime: native|container`. Native
@@ -306,7 +334,8 @@ are illustrative adoption inputs, and providers are not provisioned. Their
 machine example contains illustrative endpoints; its private example supplies the image name.
 
 Human `plan` output shows command/readiness executable paths as caller/offline
-selections; JSON uses their existing `executable` fields. Missing-tool errors name
+selections, with a working directory when it differs from the manifest directory;
+JSON uses `executable` and optional effective `working_directory` fields. Missing-tool errors name
 the attempted candidate and winning declaration file. Bare missing names remain
 bare; relative paths resolve from the project. These are launcher selections,
 not runtime version checks or proof of execution.

@@ -35,7 +35,10 @@ import (
 
 // dockerEngine is the official Docker client boundary, with explicit local
 // endpoint selection and API negotiation. Image building/pulling is external.
-type dockerEngine struct{ *client.Client }
+type dockerEngine struct {
+	*client.Client
+	stopClient *client.Client
+}
 
 func newDocker(endpoint string) (*dockerEngine, error) {
 	parsed, parseErr := url.Parse(endpoint)
@@ -49,8 +52,31 @@ func newDocker(endpoint string) (*dockerEngine, error) {
 	if err != nil {
 		return nil, problem("missing_provider", "cannot configure local Docker client")
 	}
-	return &dockerEngine{c}, nil
+	stop, err := client.New(client.WithHTTPClient(&http.Client{Transport: &http.Transport{}}), client.WithHost(endpoint), client.WithScheme("http"))
+	if err != nil {
+		return nil, errors.Join(problem("missing_provider", "cannot configure local Docker stop client"), c.Close())
+	}
+	return &dockerEngine{Client: c, stopClient: stop}, nil
 }
+
+// Close releases both operation-specific transports.
+func (d *dockerEngine) Close() error {
+	return errors.Join(d.Client.Close(), d.stopClient.Close())
+}
+
+// ContainerStop lets the engine use its requested grace before the request ends.
+func (d *dockerEngine) ContainerStop(ctx context.Context, id string, options client.ContainerStopOptions) (client.ContainerStopResult, error) {
+	if options.Timeout != nil && *options.Timeout >= 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(*options.Timeout)*time.Second+10*time.Second)
+		defer cancel()
+	} else if _, bounded := ctx.Deadline(); !bounded {
+		return client.ContainerStopResult{}, errors.New("docker stop with default or indefinite grace requires a context deadline")
+	}
+	// The ordinary transport's header budget is shorter than valid stop grace.
+	return d.stopClient.ContainerStop(ctx, id, options)
+}
+
 func resourceLabels(r ownedResource) map[string]string {
 	return map[string]string{"io.backlot.owner": r.Token}
 }

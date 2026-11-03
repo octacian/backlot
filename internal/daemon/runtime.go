@@ -189,7 +189,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 			return empty, err
 		}
 		response.Instance = current
-		response.ManifestDrift = current.Plan.ManifestDigest != snapshot.Plan.ManifestDigest
+		response.ManifestDrift = plan.ManifestDrift(current.Plan, snapshot.Plan)
 		response.ConfigDrift = plan.ConfigurationDrift(current.Plan, snapshot.Plan)
 		if bound {
 			if request.Attached {
@@ -797,7 +797,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			if component.Runtime == v1.Container {
 				group, err = s.launchContainer(componentCtx, id, component, snapshot, result, entry)
 			} else {
-				group, err = s.launch(componentCtx, id, component.Name, component.Executable, component.Command.Args, component.Environment, snapshot, result, entry, &journal)
+				group, err = s.launch(componentCtx, id, component.Name, component.Executable, *component.Command, component.WorkingDirectory, component.Environment, snapshot, result, entry, &journal)
 			}
 			if err == nil {
 				entry.components[component.Name] = group
@@ -997,11 +997,24 @@ func waitJob(ctx context.Context, g workload, services map[string]workload) (*na
 		}
 	}
 }
-func (s *service) launch(ctx context.Context, id, name, executable string, args []string, environment map[string]v1.PlannedValue, snapshot plan.Snapshot, result *v1.ExecutionResult, entry *execution, journal *runtimeRecord) (*native.Group, error) {
+func (s *service) launch(ctx context.Context, id, name, executable string, command v1.Command, workingDirectory string, environment map[string]v1.PlannedValue, snapshot plan.Snapshot, result *v1.ExecutionResult, entry *execution, journal *runtimeRecord) (*native.Group, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if err := entry.source.verify(); err != nil {
+		return nil, err
+	}
+	checkDirectory := func() error {
+		current, err := plan.WorkingDirectory(filepath.Dir(snapshot.Plan.ManifestPath), command.WorkingDirectory)
+		if err != nil {
+			return err
+		}
+		if current != workingDirectory {
+			return problem("working_directory_changed", "working directory target changed after planning; retry with a stable project")
+		}
+		return nil
+	}
+	if err := checkDirectory(); err != nil {
 		return nil, err
 	}
 	directory := filepath.Join(s.directory, "logs")
@@ -1070,7 +1083,13 @@ func (s *service) launch(ctx context.Context, id, name, executable string, args 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	err = group.Activate(native.Spec{Executable: executable, Args: args, Environment: env, Directory: filepath.Dir(snapshot.Plan.ManifestPath), InstanceID: id, Component: name, Attempt: result.Attempt})
+	if err := checkDirectory(); err != nil {
+		return nil, err
+	}
+	if workingDirectory == "" {
+		workingDirectory = filepath.Dir(snapshot.Plan.ManifestPath)
+	}
+	err = group.Activate(native.Spec{Executable: executable, Args: command.Args, Environment: env, Directory: workingDirectory, InstanceID: id, Component: name, Attempt: result.Attempt})
 	return group, err
 }
 func runtimeValue(value v1.PlannedValue, id string, p v1.PlanResponse, ports map[string]int) (string, error) {

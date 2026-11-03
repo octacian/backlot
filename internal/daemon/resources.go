@@ -177,6 +177,18 @@ func safeRestart(old, next plan.Snapshot) error {
 			}
 			if c.Policy == v1.FreshOnly {
 				copy := c
+				// Compare effective cwd, not equivalent declarations such as dot and omission.
+				if c.Command != nil {
+					command := *c.Command
+					command.WorkingDirectory = ""
+					copy.Command = &command
+				}
+				if c.Readiness != nil && c.Readiness.Command != nil {
+					probe, command := *c.Readiness, *c.Readiness.Command
+					command.WorkingDirectory = ""
+					probe.Command = &command
+					copy.Readiness = &probe
+				}
 				x.Initialization = &copy
 			}
 			if len(c.Resources) > 0 || len(c.Mounts) > 0 || x.Initialization != nil {

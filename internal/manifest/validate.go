@@ -171,6 +171,9 @@ func command(m v1.Manifest, c *v1.Command, field string) error {
 	if _, ok := m.Tools[c.Tool]; !ok {
 		return invalid(field+".tool", "unknown tool; declare it in tools")
 	}
+	if c.WorkingDirectory != "" && c.WorkingDirectory != "." && !safePath(c.WorkingDirectory) {
+		return invalid(field+".working_directory", "use a safe manifest-relative directory without traversal, or dot for the manifest directory")
+	}
 	for _, arg := range c.Args {
 		if strings.ContainsRune(arg, 0) {
 			return invalid(field+".args", "NUL is not permitted")

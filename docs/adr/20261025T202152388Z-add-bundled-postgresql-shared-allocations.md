@@ -33,9 +33,10 @@ lifecycle coordination.
 ## Decision Outcome
 
 Add a focused PostgreSQL manager to the existing shared lifecycle. Keep pinned
-local images, exact topology, private administration and authenticated readiness,
-including wrong-password rejection. PostgreSQL 17 is the tested target, not an
-automatic version-upgrade policy. Projects own application objects and grants.
+local images, exact topology and private administration. Readiness requires
+verified PostgreSQL identity and enforced SCRAM authentication, including live
+wrong-password rejection. PostgreSQL 17 is the tested target, not an automatic
+version-upgrade policy. Projects own application objects and grants.
 
 Give each allocation one database, a restricted application role and a distinct
 NOLOGIN owner role. Applications receive only required in-database capabilities,
@@ -48,7 +49,8 @@ ownership fingerprints transactionally, then create the database with its verifi
 owner and connection limit zero in the same statement. Finalize grants/password/login
 and open connections transactionally. This binds ownership to nontransactional
 creation without exposing the PUBLIC-default connection interval. Verify ownership,
-ACLs and retained-password authentication before ready reuse; never repair/adopt drift.
+ACLs and SCRAM authentication with the retained password before ready reuse; never
+repair/adopt drift.
 
 Use lib/pq explicit configuration isolated from ambient PG settings. Privileged
 connections exclude application-writable schemas, including reconnects; reject

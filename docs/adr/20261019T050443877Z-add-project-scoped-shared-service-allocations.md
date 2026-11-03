@@ -57,7 +57,7 @@ but preserves peer/consumer, native and filesystem authority. Verify recorded
 objects absent before settling; acknowledgement gaps retain ordinary intent.
 Instance release can accept missing storage only when both exact server and backing
 volume are authoritatively absent. Service force still refuses allocations and
-cannot adopt unacknowledged effects or force-remove consumed volumes/networks.
+cannot adopt unacknowledged effects or force-remove Docker volumes/networks.
 
 The bounded language-neutral manager protocol separates ownership/effect results
 from process exit. It supports allocate, inspect/reconcile and release; force is

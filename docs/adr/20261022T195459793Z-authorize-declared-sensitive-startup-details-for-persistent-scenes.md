@@ -61,7 +61,7 @@ Startup stdout and saved JSON intentionally contain selected credentials and nee
 appropriate protection. Application changes can invalidate displayed credentials;
 readiness is an observation, not continuing health or authentication proof. Reusing
 fixtures adds no secret history/store or background service, and reset/destroy do
-not promise erasure from history or backups.
+not promise secure erasure from history or backups.
 
 ## More Information
 

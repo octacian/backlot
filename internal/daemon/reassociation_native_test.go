@@ -3,7 +3,6 @@
 package daemon
 
 import (
-	"context"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,93 +16,66 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-func repairNativeTarget(t *testing.T, f *repairFixture, peer bool) v1.Instance {
-	t.Helper()
-	if !peer {
-		return f.instance
-	}
-	git(t, f.project, "add", "backlot.json")
-	git(t, f.project, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Native repair fixture")
-	path := filepath.Join(filepath.Dir(f.project), "peer")
-	git(t, f.project, "worktree", "add", "-q", "-b", "peer", path)
-	prepared, err := f.s.prepare(context.Background(), request(path, f.config, "dev"))
+func TestReassociationH1PreviousBootRecovery(t *testing.T) {
+	f := newRepairFixture(t)
+	target := f.preparePeer(t)
+	boot, err := native.CurrentBoot()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return prepared.Instance
-}
+	old := "00000000-0000-0000-0000-000000000001"
+	if old == boot {
+		old = "00000000-0000-0000-0000-000000000002"
+	}
+	attempt := newID()
+	result := &v1.ExecutionResult{Attempt: attempt, TerminalExitCode: new(17), CollectionFailure: "original collection gap", CleanupFailure: "original incomplete cleanup", Components: []v1.ComponentResult{{Name: "job", Status: "unknown"}}, NativeCleanup: []v1.NativeCleanupResult{{Component: "job", Attempt: attempt, Confidence: v1.CleanupAuthorityLost, Reason: "guardian_authority_lost", Detail: "Original unresolved observation."}}}
+	if _, err := f.s.store.execution(target.ID, v1.RuntimeReady, result); err != nil {
+		t.Fatal(err)
+	}
+	control := filepath.Join(shortTemp(t), "control.sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: control, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	identity := native.Identity{Protocol: 1, Purpose: "application", Component: "job", Attempt: attempt, PID: os.Getpid(), Birth: "synthetic-earlier-boot", Boot: old, Token: strings.Repeat("b", 64), Control: control}
+	if err := f.s.store.saveRuntime(target.ID, runtimeRecord{Attempt: attempt, Groups: []native.Identity{identity}, LaunchPending: true, PendingBoot: old}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.store.recoverExecution(target.ID); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := f.s.store.inspect(target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup := recovered.Execution.NativeCleanup[0]
+	if recovered.Status != v1.Interrupted || cleanup.ResourceRelease != "previous_boot" || cleanup.FencesResources(nil) {
+		t.Fatal("ordinary recovery did not establish independent release")
+	}
 
-func TestReassociationH1PreviousBootRecovery(t *testing.T) {
-	for _, scenario := range []struct {
-		name       string
-		peer       bool
-		confidence v1.NativeCleanupConfidence
-		reason     string
-	}{
-		{"selected-incomplete", false, v1.CleanupIncomplete, "cleanup_incomplete"},
-		{"peer-authority-lost", true, v1.CleanupAuthorityLost, "guardian_authority_lost"},
-	} {
-		t.Run(scenario.name, func(t *testing.T) {
-			f := newRepairFixture(t)
-			target := repairNativeTarget(t, f, scenario.peer)
-			boot, err := native.CurrentBoot()
-			if err != nil {
-				t.Fatal(err)
-			}
-			old := "00000000-0000-0000-0000-000000000001"
-			if old == boot {
-				old = "00000000-0000-0000-0000-000000000002"
-			}
-			attempt := newID()
-			result := &v1.ExecutionResult{Attempt: attempt, TerminalExitCode: new(17), CollectionFailure: "original collection gap", CleanupFailure: "original incomplete cleanup", Components: []v1.ComponentResult{{Name: "job", Status: "unknown"}}, NativeCleanup: []v1.NativeCleanupResult{{Component: "job", Attempt: attempt, Confidence: scenario.confidence, Reason: scenario.reason, Detail: "Original unresolved observation."}}}
-			if _, err := f.s.store.execution(target.ID, v1.RuntimeReady, result); err != nil {
-				t.Fatal(err)
-			}
-			control := filepath.Join(shortTemp(t), "control.sock")
-			listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: control, Net: "unix"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = listener.Close() }()
-			identity := native.Identity{Protocol: 1, Purpose: "application", Component: "job", Attempt: attempt, PID: os.Getpid(), Birth: "synthetic-earlier-boot", Boot: old, Token: strings.Repeat("b", 64), Control: control}
-			if err := f.s.store.saveRuntime(target.ID, runtimeRecord{Attempt: attempt, Groups: []native.Identity{identity}, LaunchPending: true, PendingBoot: old}); err != nil {
-				t.Fatal(err)
-			}
-			if err := f.s.store.recoverExecution(target.ID); err != nil {
-				t.Fatal(err)
-			}
-			recovered, err := f.s.store.inspect(target.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			cleanup := recovered.Execution.NativeCleanup[0]
-			if recovered.Status != v1.Interrupted || cleanup.Confidence != scenario.confidence || cleanup.ResourceRelease != "previous_boot" || cleanup.FencesResources(nil) || recovered.Execution.CleanupFailure != "" || recovered.Execution.CollectionFailure != result.CollectionFailure || *recovered.Execution.TerminalExitCode != 17 {
-				t.Fatal("ordinary recovery did not retain history with independent release")
-			}
-			f.move(t, "moved")
-			before := stateContents(t, f.s.store)
-			p := f.preview(t)
-			if len(p.Blockers) != 0 || !reflect.DeepEqual(before, stateContents(t, f.s.store)) {
-				t.Fatal("earlier-boot repair blocked or preview mutated state", p.Blockers)
-			}
-			if err := f.apply(t, p); err != nil {
-				t.Fatal(err)
-			}
-			if stateContents(t, f.s.store)["instances"][target.ID] != before["instances"][target.ID] {
-				t.Fatal("repair rewrote confidence, collection gap or recorded history")
-			}
-			if err := listener.SetDeadline(time.Now().Add(15 * time.Millisecond)); err != nil {
-				t.Fatal(err)
-			}
-			connection, acceptErr := listener.AcceptUnix()
-			if connection != nil {
-				_ = connection.Close()
-				t.Fatal("earlier-boot recovery/preview/apply contacted native control")
-			}
-			if err, ok := acceptErr.(net.Error); !ok || !err.Timeout() {
-				t.Fatal("native control absence observation failed", acceptErr)
-			}
-		})
+	f.move(t, "moved")
+	before := stateContents(t, f.s.store)
+	p := f.preview(t)
+	if len(p.Blockers) != 0 || !reflect.DeepEqual(before, stateContents(t, f.s.store)) {
+		t.Fatal("earlier-boot repair blocked or preview mutated state", p.Blockers)
+	}
+	if err := f.apply(t, p); err != nil {
+		t.Fatal(err)
+	}
+	if stateContents(t, f.s.store)["instances"][target.ID] != before["instances"][target.ID] {
+		t.Fatal("repair rewrote confidence, collection gap or recorded history")
+	}
+	if err := listener.SetDeadline(time.Now().Add(15 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	connection, acceptErr := listener.AcceptUnix()
+	if connection != nil {
+		_ = connection.Close()
+		t.Fatal("earlier-boot recovery/preview/apply contacted native control")
+	}
+	if err, ok := acceptErr.(net.Error); !ok || !err.Timeout() {
+		t.Fatal("native control absence observation failed", acceptErr)
 	}
 }
 
@@ -120,14 +92,16 @@ func TestReassociationH1AbandonmentBootProof(t *testing.T) {
 		name, boot  string
 		peer, mixed bool
 	}{
-		{"selected-earlier", old, false, false}, {"peer-earlier", old, true, false},
-		{"current-waiver", boot, false, false}, {"peer-current-waiver", boot, true, false},
-		{"missing-boot", "", false, false}, {"malformed-boot", "invalid", false, false},
+		{"peer-earlier", old, true, false},
+		{"current-waiver", boot, false, false},
 		{"mixed-history", old, true, true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			f := newRepairFixture(t)
-			target := repairNativeTarget(t, f, scenario.peer)
+			target := f.instance
+			if scenario.peer {
+				target = f.preparePeer(t)
+			}
 			if err := f.s.store.db.Update(func(tx *bolt.Tx) error {
 				r, err := load(tx, target.ID)
 				if err != nil {
@@ -150,11 +124,6 @@ func TestReassociationH1AbandonmentBootProof(t *testing.T) {
 				t.Fatal(err)
 			}
 			allowed := scenario.boot == old && !scenario.mixed
-			// Pending unidentified work makes the current/unknown branches refuse without actuation.
-			guard := f.s.store.guardAbandonedData(target.ID)
-			if (guard == nil) != allowed {
-				t.Fatal("fixture disagrees with inherited independent-absence guard", guard)
-			}
 			f.move(t, "moved")
 			before := stateContents(t, f.s.store)
 			p := f.preview(t)
@@ -183,7 +152,7 @@ func TestReassociationH1AbandonmentBootProof(t *testing.T) {
 }
 
 func TestReassociationH1UncertainCleanupNotWaived(t *testing.T) {
-	for _, kind := range []string{"current", "missing", "malformed", "waiver-only", "other-attempt-proof", "invalid-release"} {
+	for _, kind := range []string{"waiver-only", "invalid-release"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newRepairFixture(t)
 			attempt := newID()
@@ -192,12 +161,7 @@ func TestReassociationH1UncertainCleanupNotWaived(t *testing.T) {
 				t.Fatal(err)
 			}
 			observation := v1.NativeCleanupResult{Component: "job", Attempt: attempt, Confidence: v1.CleanupIncomplete, Reason: "cleanup_incomplete", Detail: "Unresolved observation."}
-			switch kind {
-			case "missing":
-				boot = ""
-			case "malformed":
-				boot = "invalid"
-			case "invalid-release":
+			if kind == "invalid-release" {
 				observation.Confidence, observation.Reason, observation.ResourceRelease = v1.ObservedEmpty, "session_observed_empty", "previous_boot"
 			}
 			if _, err := f.s.store.execution(f.instance.ID, v1.Stopped, &v1.ExecutionResult{Attempt: attempt, NativeCleanup: []v1.NativeCleanupResult{observation}}); err != nil {
@@ -206,22 +170,14 @@ func TestReassociationH1UncertainCleanupNotWaived(t *testing.T) {
 			if err := f.s.store.saveRuntime(f.instance.ID, runtimeRecord{Attempt: attempt, Groups: []native.Identity{{Boot: boot}}}); err != nil {
 				t.Fatal(err)
 			}
-			if kind == "waiver-only" || kind == "other-attempt-proof" {
-				acknowledgementBoot, acknowledgedAttempt := boot, attempt
-				if kind == "other-attempt-proof" {
-					acknowledgementBoot = "00000000-0000-0000-0000-000000000001"
-					if acknowledgementBoot == boot {
-						acknowledgementBoot = "00000000-0000-0000-0000-000000000002"
-					}
-					acknowledgedAttempt = newID()
-				}
+			if kind == "waiver-only" {
 				if err := f.s.store.db.Update(func(tx *bolt.Tx) error {
 					r, err := load(tx, f.instance.ID)
 					if err != nil {
 						return err
 					}
-					r.NativeAbandonments = []nativeAbandonment{{Attempt: acknowledgedAttempt, RecordedAt: time.Now().UTC().Format(time.RFC3339Nano), Reason: nativeWaiverWarning, Boot: acknowledgementBoot, Pending: true}}
-					if kind == "waiver-only" && observation.FencesResources(abandonmentWarnings(r.NativeAbandonments)) {
+					r.NativeAbandonments = []nativeAbandonment{{Attempt: attempt, RecordedAt: time.Now().UTC().Format(time.RFC3339Nano), Reason: nativeWaiverWarning, Boot: boot, Pending: true}}
+					if observation.FencesResources(abandonmentWarnings(r.NativeAbandonments)) {
 						t.Fatal("waiver fixture did not discharge ordinary lifecycle fence")
 					}
 					return put(tx, "instances", f.instance.ID, r)

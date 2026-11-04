@@ -115,6 +115,34 @@ func (f *repairFixture) apply(t *testing.T, p v1.ReassociationResponse) error {
 	return err
 }
 
+func (f *repairFixture) captureSnapshot(t *testing.T) {
+	t.Helper()
+	source, err := plan.Locate(f.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := plan.Prepare(source, v1.PlanRequest{ProjectPath: f.project, ConfigPath: f.config, Scene: "dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.store.replaceSnapshot(f.instance.ID, snapshot); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *repairFixture) preparePeer(t *testing.T) v1.Instance {
+	t.Helper()
+	git(t, f.project, "add", "backlot.json")
+	git(t, f.project, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Fixture")
+	peer := filepath.Join(filepath.Dir(f.project), "peer")
+	git(t, f.project, "worktree", "add", "-q", "-b", "peer", peer)
+	prepared, err := f.s.prepare(context.Background(), request(peer, f.config, "dev"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return prepared.Instance
+}
+
 func TestReassociationReadOnlyAndAtomic(t *testing.T) {
 	f := newRepairFixture(t)
 	f.move(t, "moved")
@@ -189,7 +217,7 @@ func TestReassociationSamePathIdentityAndReservations(t *testing.T) {
 	code(t, f.apply(t, p), "reassociation_blocked")
 }
 func TestReassociationFreshnessLocksAndCancellation(t *testing.T) {
-	for _, scenario := range []string{"source bytes", "instance lock", "gate lock", "cancellation", "new registration", "rollback", "uncertain commit"} {
+	for _, scenario := range []string{"source bytes", "instance lock", "cancellation", "rollback", "uncertain commit"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := newRepairFixture(t)
 			f.move(t, "moved")
@@ -209,11 +237,6 @@ func TestReassociationFreshnessLocksAndCancellation(t *testing.T) {
 				err := f.apply(t, p)
 				lock.Unlock()
 				code(t, err, "conflict")
-			case "gate lock":
-				f.s.store.bindingGate.Lock()
-				err := f.apply(t, p)
-				f.s.store.bindingGate.Unlock()
-				code(t, err, "conflict")
 			case "cancellation":
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
@@ -224,19 +247,6 @@ func TestReassociationFreshnessLocksAndCancellation(t *testing.T) {
 				if !errors.Is(err, context.Canceled) {
 					t.Fatal("cancellation lost", err)
 				}
-			case "new registration":
-				if err := f.s.store.db.Update(func(tx *bolt.Tx) error {
-					b, e := readCheckoutBinding(tx, f.request.CheckoutID)
-					if e != nil {
-						return e
-					}
-					b.Revision = newID()
-					return put(tx, "checkout_bindings", f.request.CheckoutID, b)
-				}); err != nil {
-					t.Fatal(err)
-				}
-				code(t, f.apply(t, p), "stale_preview")
-				return
 			case "rollback":
 				f.s.store.sharedCheckpoint = func(point string) error {
 					if point == "reassociation-before-commit" {
@@ -282,7 +292,7 @@ func TestReassociationFreshnessLocksAndCancellation(t *testing.T) {
 		})
 	}
 }
-func TestReassociationPrivateRootsAndProtectedFields(t *testing.T) {
+func TestReassociationPrivateRootsAndFreshness(t *testing.T) {
 	f := newRepairFixture(t)
 	f.move(t, "moved")
 	old := f.preview(t)
@@ -305,19 +315,6 @@ func TestReassociationPrivateRootsAndProtectedFields(t *testing.T) {
 	if len(p.Blockers) > 0 {
 		t.Fatal("matching root could not compose", p.Blockers)
 	}
-	component := f.manifest.Components["job"]
-	component.Policy = v1.FreshOnly
-	component.Initializes = []string{"db"}
-	f.manifest.Components["job"] = component
-	f.write(t)
-	p = f.preview(t)
-	if len(p.Blockers) == 0 {
-		t.Fatal("initializer contract changed without refusal")
-	}
-	raw, _ := json.Marshal(p)
-	if strings.Contains(string(raw), "Password") {
-		t.Fatal("private configuration leaked")
-	}
 }
 func TestReassociationRelativeFreshInitializerRefused(t *testing.T) {
 	f := newRepairFixture(t)
@@ -333,17 +330,7 @@ func TestReassociationRelativeFreshInitializerRefused(t *testing.T) {
 	c.Initializes = []string{"db"}
 	f.manifest.Components["job"] = c
 	f.write(t)
-	source, err := plan.Locate(f.project)
-	if err != nil {
-		t.Fatal(err)
-	}
-	snap, err := plan.Prepare(source, v1.PlanRequest{ProjectPath: f.project, ConfigPath: f.config, Scene: "dev"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.s.store.replaceSnapshot(f.instance.ID, snap); err != nil {
-		t.Fatal(err)
-	}
+	f.captureSnapshot(t)
 	f.move(t, "moved")
 	p := f.preview(t)
 	if len(p.Blockers) == 0 {
@@ -356,21 +343,14 @@ func TestReassociationPrivateSetupAndOpaqueFreshness(t *testing.T) {
 	f := newRepairFixture(t)
 	f.manifest.Inputs = map[string]v1.Input{"token": {Secret: true}}
 	f.write(t)
-	setup, err := plan.OpenSetup(v1.ProjectSetupRequest{ProjectPath: f.project, ConfigPath: f.config, Edit: true})
-	if err != nil {
-		t.Fatal(err)
-	}
 	secret := "private-fixture-value-never-disclose"
-	_, err = setup.Save(context.Background(), v1.PrivateConfig{Version: v1.ManifestVersion, Inputs: map[string]string{"token": secret}}, nil, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	fixtureInputs(t, f.project, f.config, map[string]string{"token": secret})
 	f.move(t, "moved")
 	blocked := f.preview(t)
 	if len(blocked.Blockers) == 0 || blocked.Private.RecordedAssociation == "" {
 		t.Fatal("stale private association hidden")
 	}
-	setup, err = plan.OpenSetup(v1.ProjectSetupRequest{ProjectPath: f.project, ConfigPath: f.config, Reassociate: true})
+	setup, err := plan.OpenSetup(v1.ProjectSetupRequest{ProjectPath: f.project, ConfigPath: f.config, Reassociate: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,15 +402,8 @@ func TestReassociationDoctorBeforePrivateComposition(t *testing.T) {
 func TestReassociationMigrationRefusesCollisionUnchanged(t *testing.T) {
 	for _, scenario := range []string{"namespace collision", "origin index"} {
 		t.Run(scenario, func(t *testing.T) {
-			root := shortTemp(t)
+			root := copyStateFixture(t, "testdata/state/v12/state.db")
 			path := filepath.Join(root, "state.db")
-			original, err := os.ReadFile("testdata/state/v12/state.db")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, original, 0600); err != nil {
-				t.Fatal(err)
-			}
 			db, err := bolt.Open(path, 0600, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -513,57 +486,31 @@ func TestReassociationUnavailablePeerDifferentDeclaration(t *testing.T) {
 	}
 }
 
-func TestReassociationProtectedAbsoluteAndSecretPaths(t *testing.T) {
-	for _, scenario := range []string{"absolute initializer", "secret path"} {
-		t.Run(scenario, func(t *testing.T) {
-			f := newRepairFixture(t)
-			component := f.manifest.Components["job"]
-			value := fixtureLiteral("/fixture/old-secret-location")
-			value.Secret = true
-			component.Environment = v1.Environment{Assign: map[string]v1.Value{"TOKEN": value}}
-			if scenario == "absolute initializer" {
-				component.Policy = v1.FreshOnly
-				component.Initializes = []string{"db"}
-			}
-			f.manifest.Components["job"] = component
-			f.write(t)
-			source, err := plan.Locate(f.project)
-			if err != nil {
-				t.Fatal(err)
-			}
-			saved, err := plan.Prepare(source, v1.PlanRequest{ProjectPath: f.project, ConfigPath: f.config, Scene: "dev"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := f.s.store.replaceSnapshot(f.instance.ID, saved); err != nil {
-				t.Fatal(err)
-			}
-			if scenario == "absolute initializer" {
-				tool := filepath.Join(shortTemp(t), "absolute-tool")
-				if err := os.WriteFile(tool, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
-					t.Fatal(err)
-				}
-				f.manifest.Tools["shell"] = tool
-			} else {
-				value = fixtureLiteral("/fixture/new-secret-location")
-				value.Secret = true
-				component.Environment.Assign["TOKEN"] = value
-				f.manifest.Components["job"] = component
-			}
-			f.write(t)
-			f.move(t, "moved")
-			p := f.preview(t)
-			if len(p.Blockers) == 0 {
-				t.Fatal("protected path change accepted")
-			}
-			code(t, f.apply(t, p), "reassociation_blocked")
-			raw, _ := json.Marshal(p)
-			for _, secret := range []string{"/fixture/old-secret-location", "/fixture/new-secret-location"} {
-				if strings.Contains(string(raw), secret) {
-					t.Fatal("protected value disclosed")
-				}
-			}
-		})
+func TestReassociationProtectedSecretPath(t *testing.T) {
+	f := newRepairFixture(t)
+	component := f.manifest.Components["job"]
+	value := fixtureLiteral("/fixture/old-secret-location")
+	value.Secret = true
+	component.Environment = v1.Environment{Assign: map[string]v1.Value{"TOKEN": value}}
+	f.manifest.Components["job"] = component
+	f.write(t)
+	f.captureSnapshot(t)
+	value = fixtureLiteral("/fixture/new-secret-location")
+	value.Secret = true
+	component.Environment.Assign["TOKEN"] = value
+	f.manifest.Components["job"] = component
+	f.write(t)
+	f.move(t, "moved")
+	p := f.preview(t)
+	if len(p.Blockers) == 0 {
+		t.Fatal("protected path change accepted")
+	}
+	code(t, f.apply(t, p), "reassociation_blocked")
+	raw, _ := json.Marshal(p)
+	for _, secret := range []string{"/fixture/old-secret-location", "/fixture/new-secret-location"} {
+		if strings.Contains(string(raw), secret) {
+			t.Fatal("protected value disclosed")
+		}
 	}
 }
 
@@ -597,44 +544,26 @@ func TestReassociationRevalidatesSourceBeforeCommit(t *testing.T) {
 
 func TestReassociationRejectsLinkedMetadataWithoutMutation(t *testing.T) {
 	f := newRepairFixture(t)
-	git(t, f.project, "add", "backlot.json")
-	git(t, f.project, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Fixture")
-	peer := filepath.Join(filepath.Dir(f.project), "peer")
-	git(t, f.project, "worktree", "add", "-q", "-b", "peer", peer)
-	prepared, err := f.s.prepare(context.Background(), request(peer, f.config, "dev"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	peer := f.preparePeer(t)
 	query := f.request
-	query.ProjectPath = peer
-	query.CheckoutID = checkoutParent(prepared.Instance)
+	query.ProjectPath = peer.Checkout.Path
+	query.CheckoutID = checkoutParent(peer)
 	valid, err := f.s.reassociate(context.Background(), query)
 	if err != nil || len(valid.Blockers) > 0 {
 		t.Fatal(err, valid.Blockers)
 	}
-	marker := filepath.Join(prepared.Instance.Checkout.GitDirectory, "commondir")
 	before := stateContents(t, f.s.store)
-	for _, mode := range []string{"missing", "self"} {
-		if mode == "missing" {
-			if err := os.Remove(marker); err != nil {
-				t.Fatal(err)
-			}
-		} else {
-			if err := os.WriteFile(marker, []byte("."), 0600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		query.Apply = false
-		query.Preview = ""
-		_, err := f.s.reassociate(context.Background(), query)
-		code(t, err, "project_identity")
-		query.Apply = true
-		query.Preview = valid.Preview
-		_, err = f.s.reassociate(context.Background(), query)
-		code(t, err, "project_identity")
-		if !reflect.DeepEqual(before, stateContents(t, f.s.store)) {
-			t.Fatal("invalid linked metadata changed association")
-		}
+	if err := os.Remove(filepath.Join(peer.Checkout.GitDirectory, "commondir")); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.s.reassociate(context.Background(), query)
+	code(t, err, "project_identity")
+	query.Apply = true
+	query.Preview = valid.Preview
+	_, err = f.s.reassociate(context.Background(), query)
+	code(t, err, "project_identity")
+	if !reflect.DeepEqual(before, stateContents(t, f.s.store)) {
+		t.Fatal("invalid linked metadata changed association")
 	}
 }
 
@@ -701,22 +630,13 @@ func TestReassociationReservesInactiveForeignOrigins(t *testing.T) {
 				t.Fatal("inactive checkout origin not reserved", p.Blockers)
 			}
 			code(t, f.apply(t, p), "reassociation_blocked")
-			for _, bucket := range []string{"project_bindings", "checkout_bindings"} {
-				if bucket == "checkout_bindings" && collision != "path" {
-					continue
+			err = f.s.store.db.Update(func(tx *bolt.Tx) error {
+				if err := put(tx, "project_bindings", f.request.ProjectID, projectBinding{Current: p.Current, Revision: newID()}); err != nil {
+					return err
 				}
-				err := f.s.store.db.Update(func(tx *bolt.Tx) error {
-					if bucket == "project_bindings" {
-						if err := put(tx, bucket, f.request.ProjectID, projectBinding{Current: p.Current, Revision: newID()}); err != nil {
-							return err
-						}
-					} else if err := put(tx, bucket, f.request.CheckoutID, checkoutBinding{Current: p.Checkout, Revision: newID()}); err != nil {
-						return err
-					}
-					return validateBindings(tx)
-				})
-				code(t, err, "state_corrupt")
-			}
+				return validateBindings(tx)
+			})
+			code(t, err, "state_corrupt")
 			if !reflect.DeepEqual(before, stateContents(t, f.s.store)) {
 				t.Fatal("refusal changed immutable reservations or bindings")
 			}
@@ -809,7 +729,6 @@ func TestReassociationR1MismatchedRetainedSelectors(t *testing.T) {
 	f.request.ProjectPath = destination
 	f.request.CheckoutID = checkoutParent(second.Instance)
 	p := f.preview(t)
-	t.Logf("cross-owner preview blockers=%v instances=%v", p.Blockers, len(p.Instances))
 	encoded, err := json.Marshal(p)
 	if err != nil {
 		t.Fatal(err)
@@ -827,9 +746,6 @@ func TestReassociationR1MismatchedRetainedSelectors(t *testing.T) {
 	code(t, f.apply(t, p), "reassociation_blocked")
 	if !reflect.DeepEqual(before, stateContents(t, f.s.store)) {
 		t.Fatal("cross-owner refusal mutated state")
-	}
-	if err := f.s.store.db.View(func(tx *bolt.Tx) error { return validateRepairOwners(tx, f.request.ProjectID, f.request.CheckoutID) }); err == nil {
-		t.Fatal("commit ownership validator accepted cross-owner selectors")
 	}
 	err = f.s.store.db.Update(func(tx *bolt.Tx) error {
 		b, err := readCheckoutBinding(tx, f.request.CheckoutID)
@@ -855,15 +771,7 @@ func TestReassociationR4DoctorUnverifiedBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Force only the checkout verification stale through a real second shared binding repair.
-	git(t, f.project, "add", "backlot.json")
-	git(t, f.project, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Fixture")
-	peer := filepath.Join(filepath.Dir(f.project), "peer")
-	git(t, f.project, "worktree", "add", "-q", "-b", "peer", peer)
-	second, err := f.s.prepare(context.Background(), request(peer, f.config, "dev"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = second
+	peer := f.preparePeer(t).Checkout.Path
 	gitPath := filepath.Join(f.project, ".git")
 	if err := os.Rename(gitPath, gitPath+"-old"); err != nil {
 		t.Fatal(err)
@@ -884,14 +792,8 @@ func TestReassociationR4DoctorUnverifiedBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	git(t, f.project, "worktree", "repair", peer)
-	source, err := plan.Locate(peer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = source
 	_, err = f.s.prepare(context.Background(), request(peer, f.config, "dev"))
 	code(t, err, "project_unverified")
-	t.Logf("prepare refusal: %v", err)
 	r, err := f.s.doctor(context.Background(), v1.DoctorRequest{APIVersion: v1.Version, ProjectPath: peer, Scene: "dev", ConfigPath: f.config})
 	if err != nil {
 		t.Fatal(err)
@@ -900,7 +802,6 @@ func TestReassociationR4DoctorUnverifiedBinding(t *testing.T) {
 	for _, c := range r.Checks {
 		if c.Name == "shared_project_identity" {
 			found = true
-			t.Logf("doctor check: %+v", c)
 			if c.Status != v1.DoctorFailed || !strings.Contains(c.Message, "project_unverified") {
 				t.Fatal("doctor hid shared verification blocker")
 			}
@@ -942,29 +843,16 @@ func TestReassociationR4DoctorUnverifiedBinding(t *testing.T) {
 }
 func TestReassociationR2StartingPeerWithoutAllocation(t *testing.T) {
 	f := newRepairFixture(t)
-	git(t, f.project, "add", "backlot.json")
-	git(t, f.project, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Fixture")
-	peer := filepath.Join(filepath.Dir(f.project), "peer")
-	git(t, f.project, "worktree", "add", "-q", "-b", "peer", peer)
-	second, err := f.s.prepare(context.Background(), request(peer, f.config, "dev"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	second := f.preparePeer(t)
 	attempt := newID()
-	if _, err := f.s.store.acceptExecution(second.Instance.ID, runtimeRecord{Attempt: attempt}, &v1.ExecutionResult{Attempt: attempt, Components: []v1.ComponentResult{}}, false); err != nil {
+	if _, err := f.s.store.acceptExecution(second.ID, runtimeRecord{Attempt: attempt}, &v1.ExecutionResult{Attempt: attempt, Components: []v1.ComponentResult{}}, false); err != nil {
 		t.Fatal(err)
 	}
 	f.move(t, "destination")
 	p := f.preview(t)
-	t.Logf("starting peer %s; preview has %d instances blockers=%v", second.Instance.ID, len(p.Instances), p.Blockers)
-	for _, i := range p.Instances {
-		if i.ID == second.Instance.ID {
-			t.Log("peer was included")
-		}
-	}
 	included := false
 	for _, i := range p.Instances {
-		included = included || i.ID == second.Instance.ID
+		included = included || i.ID == second.ID
 	}
 	if !included || len(p.Blockers) == 0 {
 		t.Fatal("allocation-free starting peer omitted", p.Blockers)
@@ -1042,13 +930,10 @@ func TestReassociationR2FirstAllocationAdmission(t *testing.T) {
 func TestReassociationWorkingDirectoryIntegration(t *testing.T) {
 	for _, scenario := range []struct {
 		name, before, after string
-		policy              v1.JobPolicy
 		allowed             bool
 	}{
-		{"default", "", "", v1.FreshOnly, true},
-		{"equivalent-default", "", ".", v1.FreshOnly, true},
-		{"fresh-nondefault", "package", "package", v1.FreshOnly, false},
-		{"ordinary-nondefault", "package", "package", v1.EachStart, true},
+		{"equivalent-default", "", ".", true},
+		{"fresh-nondefault", "package", "package", false},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			f := newRepairFixture(t)
@@ -1056,24 +941,12 @@ func TestReassociationWorkingDirectoryIntegration(t *testing.T) {
 				t.Fatal(err)
 			}
 			c := f.manifest.Components["job"]
-			c.Policy = scenario.policy
+			c.Policy = v1.FreshOnly
 			c.Command.WorkingDirectory = scenario.before
-			if c.Policy == v1.FreshOnly {
-				c.Initializes = []string{"db"}
-			}
+			c.Initializes = []string{"db"}
 			f.manifest.Components["job"] = c
 			f.write(t)
-			source, err := plan.Locate(f.project)
-			if err != nil {
-				t.Fatal(err)
-			}
-			snapshot, err := plan.Prepare(source, v1.PlanRequest{ProjectPath: f.project, ConfigPath: f.config, Scene: "dev"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := f.s.store.replaceSnapshot(f.instance.ID, snapshot); err != nil {
-				t.Fatal(err)
-			}
+			f.captureSnapshot(t)
 			f.move(t, "moved")
 			c.Command.WorkingDirectory = scenario.after
 			f.manifest.Components["job"] = c

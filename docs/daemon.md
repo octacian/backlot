@@ -688,8 +688,7 @@ Current associations are separate from launch provenance: `instance.association`
 selects the current checkout/project while `instance.checkout` and its plan describe
 the accepted launch. Stable checkout parents retain scene slots across repair.
 Exact-ID restart/reset uses the current association; recorded cleanup and historical
-export keep their original authority. Scene doctor reports shared-registration
-conflicts before private composition, without applying repair.
+export keep their original authority. See the [repair workflow](cli.md#reassociate-retained-project-data).
 
 ## Declared startup details
 

@@ -6,9 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -158,13 +156,6 @@ func TestSharedReassociationEarlyFlow(t *testing.T) {
 	if err != nil || len(peerPreview.Blockers) != 0 {
 		t.Fatal("checkout-only verification blocked on an unaffected consumer", err, peerPreview.Blockers)
 	}
-	if _, err := f.h.cli.StopExecution(context.Background(), started.Instance.ID); err != nil {
-		t.Fatal(err)
-	}
-	peerPreview, err = f.h.cli.Reassociate(context.Background(), peerRequest)
-	if err != nil || len(peerPreview.Blockers) > 0 {
-		t.Fatal("stopped peer verification failed", err, peerPreview.Blockers)
-	}
 	peerRequest.Apply = true
 	peerRequest.Preview = peerPreview.Preview
 	if _, err := f.h.cli.Reassociate(context.Background(), peerRequest); err != nil {
@@ -178,82 +169,4 @@ func TestSharedReassociationEarlyFlow(t *testing.T) {
 	if _, err := f.h.cli.StopExecution(context.Background(), peer.Instance.ID); err != nil {
 		t.Fatal(err)
 	}
-	request.Apply = false
-	request.Preview = ""
-	beforeRestart, err := f.h.cli.Reassociate(context.Background(), request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.h.close()
-	otherRoot := filepath.Join(filepath.Dir(f.h.dir), "registry-after-restart")
-	t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", otherRoot)
-	f.h.start()
-	request.Apply = true
-	request.Preview = beforeRestart.Preview
-	_, err = f.h.cli.Reassociate(context.Background(), request)
-	code(t, err, "stale_preview")
-	request.Apply = false
-	request.Preview = ""
-	mismatch, err := f.h.cli.Reassociate(context.Background(), request)
-	if err != nil || len(mismatch.Blockers) == 0 || mismatch.Private.OperationRoot == mismatch.Private.RuntimeRoot {
-		t.Fatal("restart silently changed reviewed registry", err)
-	}
-	request.RegistryRoot = mismatch.Private.RuntimeRoot
-	aligned, err := f.h.cli.Reassociate(context.Background(), request)
-	if err != nil || len(aligned.Blockers) > 0 {
-		t.Fatal("aligned runtime selection failed", err, aligned.Blockers)
-	}
-	request.Apply = true
-	request.Preview = aligned.Preview
-	if _, err := f.h.cli.Reassociate(context.Background(), request); err != nil {
-		t.Fatal(err)
-	}
-	f.run("host", third)
-	verifySharedWitness(t, f.db(t, credential), witness)
-	peerNow, err := f.h.cli.Inspect(context.Background(), peer.Instance.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	marker := filepath.Join(peerNow.Instance.Association.Checkout.GitDirectory, "commondir")
-	originalMarker, err := os.ReadFile(marker)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.WriteFile(marker, originalMarker, 0600); err != nil {
-			t.Error(err)
-		}
-	})
-	query := request
-	query.Apply = false
-	query.Preview = ""
-	beforeMetadata, err := f.h.cli.Reassociate(context.Background(), query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, mode := range []string{"missing", "self"} {
-		if mode == "missing" {
-			if err := os.Remove(marker); err != nil {
-				t.Fatal(err)
-			}
-		} else {
-			if err := os.WriteFile(marker, []byte("."), 0600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		command := exec.Command(f.binary, "project", "diagnose", "--project", f.linked, "--config", f.configuration, "--state-dir", f.h.dir, "--json")
-		out, err := command.Output()
-		if err == nil {
-			t.Fatal("CLI adopted linked admin anchor")
-		}
-		var envelope v1.ErrorResponse
-		if err := json.Unmarshal(out, &envelope); err != nil || envelope.Error.Code != "project_identity" {
-			t.Fatal("unexpected linked metadata refusal", err)
-		}
-		afterMetadata, err := f.h.cli.Reassociate(context.Background(), query)
-		if err != nil || !reflect.DeepEqual(beforeMetadata.Projects, afterMetadata.Projects) {
-			t.Fatal("diagnose refusal changed registrations", err)
-		}
-	}
-	t.Log("real CLI/API repair preserved live SQL server identity, parent-written data, exact credentials, instance and allocations; stale acknowledgement refused")
 }

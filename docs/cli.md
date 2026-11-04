@@ -79,45 +79,38 @@ backlot project reassociate --project /destination --project-id PROJECT_ID --che
 backlot project reassociate --project /destination --project-id PROJECT_ID --checkout-id CHECKOUT_ID --config /private/machine.yaml --apply --preview DIGEST --json
 ```
 
-Diagnosis/preview never enrolls or changes associations. Select the exact retained
-IDs from diagnosis, stop/join all affected scene consumers, resolve every blocker,
-and acknowledge a fresh preview. A shared SQL server may stay running. Apply changes
-only daemon associations, preserving IDs, data, credentials, allocations and cleanup
-authority. No automatic move adoption, project rename, merge or cleanup is performed.
-The relative project location and manifest filename must remain unchanged.
-The requesting checkout, its individual Git directory and resolved common-directory
-sharing anchor are shown separately; an anchor path is not proof of permanence.
-Device/inode drift is evidence of identity change, not proof of replacement.
-Invalid linked Git metadata (including missing/self-pointing `commondir`) refuses
-association instead of using per-worktree admin metadata as the sharing anchor;
-repair Git metadata explicitly before retrying.
+Diagnosis/preview is read-only. Select exact retained IDs from diagnosis, stop/join
+all affected consumers, resolve blockers and acknowledge a fresh preview. The SQL
+server may stay live. Apply preserves IDs, data, credentials, allocations and cleanup
+authority; it never automatically adopts, merges, renames or cleans up projects.
+Relative project location and manifest filename must remain unchanged.
 
-A stale private association requires existing `project setup --reassociate --from FILE`
-with explicit values, then a new preview; old credentials are never imported
-implicitly. The caller's selected registry (`BACKLOT_PROJECT_CONFIG_DIR` or normal
-user default) must agree with the daemon runtime selection. Align it and restart
-the daemon explicitly if needed; no operation-specific override persists. Private
-setup may succeed while daemon repair remains unapplied.
+The requesting checkout, per-worktree Git directory and resolved common-directory
+sharing anchor are distinct; paths do not prove permanence, and device/inode drift
+indicates identity change, not replacement. Repair missing/self-pointing `commondir`
+explicitly before retrying; per-worktree admin metadata cannot be a sharing anchor.
 
-Protected configuration checks remain strict. Even an unchanged relative fresh-only
-initializer such as `./bin/setup` blocks a move if its resolved executable changes.
-A nondefault fresh-only `working_directory` also blocks if its effective directory
-changes; omission and `.` keep the manifest-directory default.
-Preview reports safe categories without secret values. Unresolved peers keep their
-bindings/launch facts and cannot start until separately verified/repaired; the
-requesting branch is never substituted for their scene configuration.
+For stale private setup, run `project setup --reassociate --from FILE` with explicit
+values, then repreview; credentials are never imported implicitly. The selected
+registry (`BACKLOT_PROJECT_CONFIG_DIR` or user default) must agree with the daemon's.
+Align it and restart the daemon if needed; no operation-specific override persists.
+Private setup may succeed while daemon repair remains unapplied.
 
-JSON returns `projects` (origin/current bindings), current checkout and filesystem
-observations, affected instances/services/allocations (including allocation IDs), private association/generation,
-exact changes/preservation, blockers and `preview`; `applied` confirms completed apply.
-Inspection keeps historical `checkout`/`plan` separate from current `association`.
-Preview with blockers is a successful diagnostic result. Apply failures are nonzero:
-`reassociation_blocked`, `stale_preview`, or `conflict` preserve associations before
-commit. Cancellation before commit preserves them too. A lost reply or
-`reassociation_committed_uncertain` means completion may have committed: inspect
-current bindings/accepted acknowledgement, then take a fresh preview, never retry
-apply automatically. Daemon restart invalidates old previews. Recorded-ID cleanup
-remains available independently of current sources.
+Protected checks remain strict: moving even an unchanged relative fresh-only
+initializer such as `./bin/setup` blocks if its resolved executable changes. A
+nondefault fresh-only `working_directory` blocks if its effective directory changes;
+omission and `.` remain equivalent. Unresolved peers keep their own bindings/launch
+facts and cannot start until separately verified; the requesting branch never
+substitutes for their scene configuration.
+
+JSON distinguishes recorded/current identity, reports safe blockers and a `preview`
+acknowledgement, and confirms apply with `applied`. Inspection separates historical
+`checkout`/`plan` from current `association`. Blocked preview is a successful diagnostic;
+apply errors `reassociation_blocked`, `stale_preview` and `conflict`, or precommit
+cancellation, preserve associations. A lost reply or `reassociation_committed_uncertain`
+may mean apply committed: inspect current bindings/accepted acknowledgement, then
+repreview; never retry apply automatically. Restart invalidates previews. Recorded-ID
+cleanup remains available independently of current sources.
 
 `run`, `restart`, `reset` and `scene start` accept `--startup-timeout 5m`,
 `--job-timeout 30m`, `--stop-grace 10s`. Execution budgets accept `0s` for unlimited;

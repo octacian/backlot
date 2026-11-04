@@ -15,9 +15,9 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-func copyStateNine(t *testing.T) string {
+func copyStateFixture(t *testing.T, path string) string {
 	t.Helper()
-	data, err := os.ReadFile("testdata/state/v9/state.db")
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,42 +28,20 @@ func copyStateNine(t *testing.T) string {
 	return dir
 }
 
+func copyStateNine(t *testing.T) string {
+	t.Helper()
+	return copyStateFixture(t, "testdata/state/v9/state.db")
+}
+
 func TestRetainedStateNine(t *testing.T) { testRetainedState(t, copyStateNine(t), 9) }
-
 func TestRetainedStateTen(t *testing.T) {
-	data, err := os.ReadFile("testdata/state/v10/state.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	if err = os.WriteFile(filepath.Join(dir, "state.db"), data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	testRetainedState(t, dir, 10)
+	testRetainedState(t, copyStateFixture(t, "testdata/state/v10/state.db"), 10)
 }
-
 func TestRetainedStateEleven(t *testing.T) {
-	data, err := os.ReadFile("testdata/state/v11/state.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "state.db"), data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	testRetainedState(t, dir, 11)
+	testRetainedState(t, copyStateFixture(t, "testdata/state/v11/state.db"), 11)
 }
-
 func TestRetainedStateTwelve(t *testing.T) {
-	data, err := os.ReadFile("testdata/state/v12/state.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "state.db"), data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	testRetainedState(t, dir, 12)
+	testRetainedState(t, copyStateFixture(t, "testdata/state/v12/state.db"), 12)
 }
 
 func testRetainedState(t *testing.T, dir string, version int) {
@@ -278,14 +256,7 @@ func TestRetainedStateTenRejectsInventedPinsUnchanged(t *testing.T) {
 }
 
 func TestRetainedStateTwelveSharedRegistration(t *testing.T) {
-	data, err := os.ReadFile("testdata/state/v12/state-shared.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "state.db"), data, 0600); err != nil {
-		t.Fatal(err)
-	}
+	dir := copyStateFixture(t, "testdata/state/v12/state-shared.db")
 	db, err := bolt.Open(filepath.Join(dir, "state.db"), 0600, nil)
 	if err != nil {
 		t.Fatal(err)

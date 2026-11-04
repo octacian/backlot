@@ -55,16 +55,19 @@ func DescribeScene(project, name string) (v1.SceneDescriptionResponse, error) {
 	}
 	r.Scene = sceneSummary(name, scene)
 	tools, inputs, seeds, required, pass := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
-	value := func(v v1.Value) {
-		if v.Ref == nil {
-			return
-		}
-		if v.Ref.Kind == "input" {
-			inputs[v.Ref.Name] = true
-		}
-		if v.Ref.Kind == "build_image" {
-			r.BuildImages[v.Ref.Name] = m.BuildImages[v.Ref.Name]
-		}
+	value := func(root v1.Value) {
+		_ = root.Walk(func(v v1.Value) error {
+			if v.Ref == nil {
+				return nil
+			}
+			if v.Ref.Kind == "input" {
+				inputs[v.Ref.Name] = true
+			}
+			if v.Ref.Kind == "build_image" {
+				r.BuildImages[v.Ref.Name] = m.BuildImages[v.Ref.Name]
+			}
+			return nil
+		})
 	}
 	environment := func(e v1.Environment) {
 		for _, n := range e.Seeds {
@@ -86,6 +89,9 @@ func DescribeScene(project, name string) (v1.SceneDescriptionResponse, error) {
 		}
 		if p.Command != nil {
 			tools[p.Command.Tool] = true
+			for _, arg := range p.Command.Args {
+				value(arg.Value)
+			}
 		}
 		if p.Target != nil {
 			value(*p.Target)
@@ -119,6 +125,9 @@ func DescribeScene(project, name string) (v1.SceneDescriptionResponse, error) {
 		}
 		if c.Command != nil {
 			tools[c.Command.Tool] = true
+			for _, arg := range c.Command.Args {
+				value(arg.Value)
+			}
 		}
 		if c.Image != nil {
 			value(*c.Image)
@@ -131,6 +140,9 @@ func DescribeScene(project, name string) (v1.SceneDescriptionResponse, error) {
 		}
 		for _, n := range c.EnvironmentSets {
 			environment(m.Environments[n])
+		}
+		for _, arg := range c.Args {
+			value(arg.Value)
 		}
 		environment(c.Environment)
 		probe(c.Readiness)

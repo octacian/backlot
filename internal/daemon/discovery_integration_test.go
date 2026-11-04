@@ -65,7 +65,7 @@ func TestDiscoveryNativeCLI(t *testing.T) {
 	h.state(peer.Instance.ID, v1.RuntimeReady)
 	for _, code := range []int{0, 23} {
 		job := h.manifest.Components["job"]
-		job.Command = &v1.Command{Tool: "sh", Args: []string{"-c", fmt.Sprintf("printf discovery-witness; exit %d", code)}}
+		job.Command = &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", fmt.Sprintf("printf discovery-witness; exit %d", code))}
 		h.manifest.Components["job"] = job
 		h.write()
 		var r v1.InstanceResponse

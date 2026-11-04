@@ -64,7 +64,7 @@ func TestPlanSuccessSymbolicRedactedAndReadOnly(t *testing.T) {
 		t.Fatalf("invalid plan: %+v", result)
 	}
 	c := result.Components[0]
-	if !reflect.DeepEqual(c.Command.Args, []string{"test", "./...", "-run", "TestOrders", "--json", "a b"}) {
+	if !reflect.DeepEqual(c.Command.Args, v1.StringArguments("test", "./...", "-run", "TestOrders", "--json", "a b")) {
 		t.Fatalf("args=%v", c.Command.Args)
 	}
 	if c.Environment["WORK_DIR"].Symbolic == nil || c.Environment["MODE"].Literal == nil || *c.Environment["MODE"].Literal != "development" {
@@ -356,7 +356,7 @@ func TestContainerTerminalAndOutputEscape(t *testing.T) {
 	c.Runtime = v1.Container
 	c.Command = nil
 	c.Image = &v1.Value{Literal: &image}
-	c.Args = []string{"test"}
+	c.Args = v1.StringArguments("test")
 	m.Components["test"] = c
 	encoded, err := json.Marshal(m)
 	if err != nil {
@@ -369,7 +369,7 @@ func TestContainerTerminalAndOutputEscape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(p.Components[0].Args, []string{"test", "--grep", "orders"}) {
+	if !reflect.DeepEqual(p.Components[0].Args, v1.StringArguments("test", "--grep", "orders")) {
 		t.Fatalf("container args=%v", p.Components[0].Args)
 	}
 	if err := os.Symlink(t.TempDir(), filepath.Join(root, "dist")); err != nil {

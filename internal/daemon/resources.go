@@ -152,7 +152,7 @@ func safeRestart(old, next plan.Snapshot) error {
 		BuildProducer  string
 		Runtime        v1.Runtime
 		Image          *v1.PlannedValue
-		Args           []string
+		Args           []v1.Argument
 		Resources      []string
 		HostMappings   []v1.HostMapping
 		Mounts         []v1.Mount
@@ -164,7 +164,7 @@ func safeRestart(old, next plan.Snapshot) error {
 			x := contract{Name: c.Name, Resources: c.Resources, Mounts: c.Mounts, HostMappings: c.HostMappings, Runtime: c.Runtime}
 			if c.Runtime == v1.Container && len(c.Mounts) > 0 {
 				x.Image = c.Image
-				x.Args = c.Args
+				x.Args = canonicalArguments(c.Args)
 			}
 			if c.Image != nil && (len(c.Mounts) > 0 || c.Policy == v1.FreshOnly) {
 				value := *c.Image
@@ -177,15 +177,18 @@ func safeRestart(old, next plan.Snapshot) error {
 			}
 			if c.Policy == v1.FreshOnly {
 				copy := c
+				copy.Args = canonicalArguments(c.Args)
 				// Compare effective cwd, not equivalent declarations such as dot and omission.
 				if c.Command != nil {
 					command := *c.Command
 					command.WorkingDirectory = ""
+					command.Args = canonicalArguments(command.Args)
 					copy.Command = &command
 				}
 				if c.Readiness != nil && c.Readiness.Command != nil {
 					probe, command := *c.Readiness, *c.Readiness.Command
 					command.WorkingDirectory = ""
+					command.Args = canonicalArguments(command.Args)
 					probe.Command = &command
 					copy.Readiness = &probe
 				}

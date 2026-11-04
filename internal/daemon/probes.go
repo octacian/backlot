@@ -60,28 +60,45 @@ func (s *service) awaitProbe(ctx context.Context, id string, c v1.PlannedCompone
 			}
 		} else {
 			value := *c.Readiness.Target
+			sensitive := value.Redacted
 			if value.Redacted {
 				value = snapshot.Secrets[c.Name+"/readiness"]
 			}
-			target, err := runtimeValue(value, id, snapshot.Plan, result.Ports)
+			target, err := resolvedValue(value, c.Name+"/readiness", id, snapshot, result, entry, v1.Native)
 			if err != nil {
 				return err
 			}
+			if err := validateProbeDestination(c.Readiness.Kind, target); err != nil {
+				return err
+			}
 			if c.Runtime == v1.Container {
-				if err := containerProbeOwned(probeCtx, entry.docker, group.(*dockerWork), c, value, result.Ports, publishAddress(snapshot.Docker)); err != nil {
+				if err := containerProbeOwned(probeCtx, entry.docker, group.(*dockerWork), c, result.Ports, publishAddress(snapshot.Docker), probeAddress(c.Readiness.Kind, target, mappedAddress(snapshot.Docker))); err != nil {
 					return err
 				}
 				address := mappedAddress(snapshot.Docker)
-				pinned := net.JoinHostPort(address.String(), target)
+				pinned := probeAddress(c.Readiness.Kind, target, address)
 				ready, err = probeDestination(probeCtx, c.Readiness.Kind, target, pinned)
 			} else {
 				ready, err = networkProbeWith(probeCtx, c.Readiness.Kind, target, group.(*native.Group).ListenerEndpoint)
 			}
 			var typed *v1.PlanError
-			if errors.As(err, &typed) && typed.Code == "port_conflict" && value.Symbolic == nil {
+			if errors.As(err, &typed) && typed.Code == "port_conflict" && !probeUsesAllocation(value, c, result.Ports, c.Readiness.Kind, target) {
 				return problem("readiness_unowned", "literal probe target has an unrelated listener; owned runtime stopped without retry")
 			}
 			if err != nil {
+				if sensitive {
+					if errors.Is(err, context.Canceled) {
+						return context.Canceled
+					}
+					if errors.Is(err, context.DeadlineExceeded) {
+						return context.DeadlineExceeded
+					}
+					var detail *v1.PlanError
+					if errors.As(err, &detail) {
+						return problem(detail.Code, "sensitive readiness check failed")
+					}
+					return problem("readiness_failed", "sensitive readiness check failed")
+				}
 				return err
 			}
 		}
@@ -208,4 +225,54 @@ func localProbeAddresses(ctx context.Context, host string, lookup func(context.C
 		}
 	}
 	return addresses, nil
+}
+
+func probeAddress(kind, target string, address netip.Addr) string {
+	if kind == "http" {
+		u, err := url.Parse(target)
+		if err != nil {
+			return ""
+		}
+		port := u.Port()
+		if port == "" {
+			port = "80"
+			if u.Scheme == "https" {
+				port = "443"
+			}
+		}
+		return net.JoinHostPort(u.Hostname(), port)
+	}
+	if strings.Contains(target, ":") {
+		return target
+	}
+	return net.JoinHostPort(address.String(), target)
+}
+
+// Allocation provenance affects retry eligibility, never listener ownership.
+func probeUsesAllocation(value v1.PlannedValue, c v1.PlannedComponent, ports map[string]int, kind, target string) bool {
+	_, portText, err := net.SplitHostPort(probeAddress(kind, target, netip.MustParseAddr("127.0.0.1")))
+	if err != nil {
+		return false
+	}
+	found := false
+	_ = walkPlanned(value, func(v v1.Value) error {
+		r := v.Ref
+		if r == nil || r.Field != "port" {
+			return nil
+		}
+		resource := ""
+		if r.Kind == "resource" {
+			resource = r.Name
+		}
+		if r.Kind == "service" && r.Name == c.Name {
+			resource = c.Ports[r.Port].Resource
+		}
+		for _, port := range c.Ports {
+			if port.Resource == resource && portText == strconv.Itoa(ports[resource]) {
+				found = true
+			}
+		}
+		return nil
+	})
+	return found
 }

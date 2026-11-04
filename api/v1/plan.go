@@ -31,12 +31,14 @@ type PlanResponse struct {
 	Publish               *Publication             `json:"publish,omitempty"`
 }
 
-// PlannedValue contains a known value, a symbolic allocation reference, or redaction.
-// Redacted values never carry their literal or reference payload.
+// PlannedValue contains a known value, symbolic reference, unresolved composition or redaction.
+// Redacted values never carry a payload.
 type PlannedValue struct {
 	Literal  *string    `json:"literal,omitempty"`
 	Symbolic *Reference `json:"symbolic,omitempty"`
-	Redacted bool       `json:"redacted,omitempty"`
+	// Composition retains typed partially resolved operands and their provenance.
+	Composition *Value `json:"composition,omitempty"`
+	Redacted    bool   `json:"redacted,omitempty"`
 }
 
 // PlannedComponent contains selected work in dependency order.
@@ -50,7 +52,7 @@ type PlannedComponent struct {
 	Kind         ComponentKind             `json:"kind"`
 	Runtime      Runtime                   `json:"runtime"`
 	Command      *Command                  `json:"command,omitempty"`
-	Args         []string                  `json:"args,omitempty"`
+	Args         []Argument                `json:"args,omitempty"`
 	Policy       JobPolicy                 `json:"policy,omitempty"`
 	Initializes  []string                  `json:"initializes,omitempty"`
 	DependsOn    []Dependency              `json:"depends_on,omitempty"`

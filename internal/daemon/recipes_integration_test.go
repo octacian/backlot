@@ -94,7 +94,7 @@ func recipeCLI(t *testing.T, h *nativeHarness, config, scene string, args []stri
 	for _, component := range instance.Plan.Components {
 		if component.Name == instance.Plan.TerminalJob {
 			base := h.manifest.Components[component.Name].Command.Args
-			if !reflect.DeepEqual(component.Command.Args, append(append([]string{}, base...), args...)) {
+			if !reflect.DeepEqual(component.Command.Args, append(append([]v1.Argument{}, base...), v1.StringArguments(args...)...)) {
 				t.Fatal("terminal argument vector changed")
 			}
 		}

@@ -30,7 +30,7 @@ func TestCLIAcceptedNativeFailure(t *testing.T) {
 			h.manifest.Tools["sh"] = "/bin/sh"
 			component := h.manifest.Components["server"]
 			marker := filepath.Join(h.project, "probe-started")
-			component.Readiness = &v1.Probe{Kind: "command", Timeout: "0s", Command: &v1.Command{Tool: "sh", Args: []string{"-c", `: > "$1"; exec sleep 60`, "probe", marker}}}
+			component.Readiness = &v1.Probe{Kind: "command", Timeout: "0s", Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", `: > "$1"; exec sleep 60`, "probe", marker)}}
 			h.manifest.Components["server"] = component
 			h.write()
 			proxyRoot, err := os.MkdirTemp("/tmp", "bl-cli-proxy-")

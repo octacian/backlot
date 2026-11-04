@@ -11,7 +11,7 @@ import (
 )
 
 func planCommand() *urfave.Command {
-	return &urfave.Command{Name: "plan", Usage: "Validate an offline scene plan without executing work", ArgsUsage: "<scene> [terminal-job args...]", Description: "Example: backlot plan test --project . -- -run TestExample", Flags: []urfave.Flag{&urfave.StringFlag{Name: "project", Usage: "Project directory or manifest path"}, &urfave.StringFlag{Name: "config", Usage: "Machine configuration path"}}, Action: func(_ context.Context, c *urfave.Command) error {
+	return &urfave.Command{Name: "plan", Usage: "Validate an offline scene plan without executing work", ArgsUsage: "<scene> [terminal-job args...]", Description: "Validate typed values and argv without allocation. Compositions retain unresolved references; sensitive values are redacted. Forwarded arguments remain literal. Example: backlot plan test --project . -- -run TestExample", Flags: []urfave.Flag{&urfave.StringFlag{Name: "project", Usage: "Project directory or manifest path"}, &urfave.StringFlag{Name: "config", Usage: "Machine configuration path"}}, Action: func(_ context.Context, c *urfave.Command) error {
 		if c.Args().Len() == 0 {
 			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "plan requires a scene name"})
 		}

@@ -51,8 +51,8 @@ func TestEnsureStartNativeCLI(t *testing.T) {
 			h.manifest.Resources["data"] = v1.Resource{Kind: "directory"}
 			h.manifest.Resources["password"] = v1.Resource{Kind: "secret"}
 			env := v1.Environment{Assign: map[string]v1.Value{"DATA": {Ref: &v1.Reference{Kind: "resource", Name: "data", Field: "path"}}, "SECRET": {Ref: &v1.Reference{Kind: "resource", Name: "password", Field: "value"}}}}
-			h.manifest.Components["prep"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.FreshOnly, Initializes: []string{"data"}, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: []string{"-c", `printf '%s\n' "$SECRET" >> "$DATA/init"`}}}
-			each := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: []string{"-c", `echo failed-A; echo start >> "$DATA/starts"; exit 23`}}, DependsOn: []v1.Dependency{{Component: "prep", Condition: v1.Completed}}}
+			h.manifest.Components["prep"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.FreshOnly, Initializes: []string{"data"}, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", `printf '%s\n' "$SECRET" >> "$DATA/init"`)}}
+			each := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", `echo failed-A; echo start >> "$DATA/starts"; exit 23`)}, DependsOn: []v1.Dependency{{Component: "prep", Condition: v1.Completed}}}
 			h.manifest.Components["each"] = each
 			server := h.manifest.Components["server"]
 			server.DependsOn = []v1.Dependency{{Component: "each", Condition: v1.Completed}}
@@ -123,7 +123,7 @@ func TestEnsureStartNativeCLI(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			each.Command.Args[1] = `echo ready-B; echo start >> "$DATA/starts"; test "$(cat "$DATA/init")" = "$SECRET"`
+			each.Command.Args[1] = v1.StringArguments(`echo ready-B; echo start >> "$DATA/starts"; test "$(cat "$DATA/init")" = "$SECRET"`)[0]
 			h.manifest.Components["each"] = each
 			server.Readiness.Timeout = "3s"
 			h.manifest.Components["server"] = server
@@ -143,7 +143,7 @@ func TestEnsureStartNativeCLI(t *testing.T) {
 				t.Fatal("paired credential/fresh-only witness changed", err)
 			}
 			// Changing an each-start command while ready must only disclose drift.
-			each.Command.Args[1] = `echo failed-next; echo start >> "$DATA/starts"; exit 23`
+			each.Command.Args[1] = v1.StringArguments(`echo failed-next; echo start >> "$DATA/starts"; exit 23`)[0]
 			h.manifest.Components["each"] = each
 			h.write()
 			ready := invoke(false, 0)

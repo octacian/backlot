@@ -89,7 +89,7 @@ func (h *harness) negativeWorkflows() {
 	m.Outputs["negative"] = v1.Output{Path: "negative", ConcurrencyGroup: "negative"}
 	env := v1.Environment{Assign: map[string]v1.Value{"PORT": reference("witness-port", "port")}}
 	target := reference("witness-port", "port")
-	server := v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "fixture", Args: []string{"witness-server"}}, Resources: []string{"witness-port"}, Environment: env, Ports: map[string]v1.ServicePort{"http": {Resource: "witness-port"}}, Readiness: &v1.Probe{Kind: "tcp", Target: &target, Timeout: "3s"}}
+	server := v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "fixture", Args: v1.StringArguments("witness-server")}, Resources: []string{"witness-port"}, Environment: env, Ports: map[string]v1.ServicePort{"http": {Resource: "witness-port"}}, Readiness: &v1.Probe{Kind: "tcp", Target: &target, Timeout: "3s"}}
 	m.Components["witness"] = server
 	m.Scenes["witness"] = v1.Scene{Lifetime: v1.Persistent, Components: []string{"witness"}, Resources: []string{"witness-port"}}
 	containerServer := server
@@ -97,7 +97,7 @@ func (h *harness) negativeWorkflows() {
 	containerServer.Command = nil
 	image := v1.Value{Ref: &v1.Reference{Kind: "input", Name: "image"}}
 	containerServer.Image = &image
-	containerServer.Args = []string{"witness-server"}
+	containerServer.Args = v1.StringArguments("witness-server")
 	containerServer.Environment = v1.Environment{Assign: map[string]v1.Value{"PORT": literal("8080")}}
 	containerServer.Ports = map[string]v1.ServicePort{"http": {Resource: "witness-port", ContainerPort: 8080}}
 	m.Components["container-witness"] = containerServer
@@ -108,7 +108,7 @@ func (h *harness) negativeWorkflows() {
 	m.Components["missing-image"] = missing
 	m.Scenes["missing-image"] = v1.Scene{Lifetime: v1.Persistent, Components: []string{"missing-image"}, Resources: []string{"witness-port"}}
 	shell := func(script string) v1.Component {
-		return v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "sh", Args: []string{"-c", script}}}
+		return v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", script)}}
 	}
 	fresh := shell(`if [ ! -f "$DATA/attempted" ]; then echo attempt >"$DATA/attempted"; echo fresh-first-failure; exit 19; fi; echo success >>"$DATA/completions"; echo fresh-success`)
 	fresh.Policy = v1.FreshOnly

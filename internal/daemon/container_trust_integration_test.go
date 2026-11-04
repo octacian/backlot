@@ -200,14 +200,14 @@ func testContainerManagedHTTPSRuntime(t *testing.T, smoke bool) {
 	cert := fixtureRef("resource", "origin", "ca_cert_path")
 	api := v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "fixture"}, Resources: []string{"api"}, Ports: map[string]v1.ServicePort{"http": {Resource: "api"}}, Environment: v1.Environment{Assign: map[string]v1.Value{"PORT": portRef("api"), "BIND": fixtureLiteral("127.0.0.1"), "ROLE": fixtureLiteral("api")}}, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(portRef("api")), Timeout: "10s"}}
 	front := v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "fixture"}, Resources: []string{"front", "origin"}, Ports: map[string]v1.ServicePort{"http": {Resource: "front"}}, DependsOn: []v1.Dependency{{Component: "api", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"PORT": portRef("front"), "BIND": fixtureLiteral("127.0.0.1"), "ROLE": fixtureLiteral("front"), "APP_CA_CERT": cert, "ORIGIN": origin}}, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(portRef("front")), Timeout: "10s"}}
-	input := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral("alpine:3.21")), Resources: []string{"origin"}, Mounts: []v1.Mount{{OriginCACert: "origin", Target: "/app/trust/root.pem", ReadOnly: true}}, DependsOn: []v1.Dependency{{Component: "front", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"SSL_CERT_FILE": cert, "SSL_CERT_DIR": fixtureLiteral("/empty-roots"), "ORIGIN": origin}}, Args: []string{"sh", "-ec", `test "$SSL_CERT_FILE" = /app/trust/root.pem
+	input := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral("alpine:3.21")), Resources: []string{"origin"}, Mounts: []v1.Mount{{OriginCACert: "origin", Target: "/app/trust/root.pem", ReadOnly: true}}, DependsOn: []v1.Dependency{{Component: "front", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"SSL_CERT_FILE": cert, "SSL_CERT_DIR": fixtureLiteral("/empty-roots"), "ORIGIN": origin}}, Args: v1.StringArguments("sh", "-ec", `test "$SSL_CERT_FILE" = /app/trust/root.pem
 test -f "$SSL_CERT_FILE"
 grep -q '^-----BEGIN CERTIFICATE-----$' "$SSL_CERT_FILE"
 test ! -e /app/trust/root.key
 test ! -e /app/trust/intermediate.key
 test ! -d /app/trust/pki
 awk '$2 == "/app/trust/root.pem" && $4 ~ /(^|,)ro(,|$)/ {found=1} END {exit !found}' /proc/mounts
-printf '%s\n' 'public root input and readonly file mount verified'`}}
+printf '%s\n' 'public root input and readonly file mount verified'`)}
 	publication := &v1.Publication{Resource: "origin", Routes: []v1.Route{{Path: "/", Service: "front", Port: "http", Prefix: "preserve"}, {Path: "/api", Service: "api", Port: "http", Prefix: "strip"}}, Probe: v1.Probe{Kind: "http", Target: &origin, Timeout: "10s"}}
 	resources := []string{"api", "front", "origin"}
 	h.manifest = v1.Manifest{Version: v1.ManifestVersion, Project: "container-trust-fixture", Tools: map[string]string{"fixture": app}, Resources: map[string]v1.Resource{"api": {Kind: "port"}, "front": {Kind: "port"}, "origin": {Kind: "origin"}}, Components: map[string]v1.Component{"api": api, "front": front, "ca-input": input}, Scenes: map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"api", "front"}, Resources: resources, Publish: publication}, "mount": {Lifetime: v1.Disposable, Components: []string{"api", "front", "ca-input"}, Resources: resources, TerminalJob: "ca-input", Publish: publication}}}
@@ -264,7 +264,7 @@ printf '%s\n' 'public root input and readonly file mount verified'`}}
 	// mapping; CERT/custom dialing are deliberately absent.
 	consumer := input
 	consumer.Image = ptrValue(fixtureLiteral(image))
-	consumer.Args = []string{"client"}
+	consumer.Args = v1.StringArguments("client")
 	consumer.HostMappings = []v1.HostMapping{{Origin: "origin", Host: "host-gateway"}}
 	for _, trustCase := range []string{"correct", "missing", "wrong"} {
 		consumer.Environment.Assign = map[string]v1.Value{"SSL_CERT_FILE": cert, "SSL_CERT_DIR": fixtureLiteral("/empty-roots"), "ORIGIN": origin}

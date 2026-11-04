@@ -36,12 +36,12 @@ func TestAttachedNativeCLI(t *testing.T) {
 			h.manifest.Resources["data"] = v1.Resource{Kind: "directory"}
 			h.manifest.Resources["password"] = v1.Resource{Kind: "secret"}
 			env := v1.Environment{Assign: map[string]v1.Value{"DATA": {Ref: &v1.Reference{Kind: "resource", Name: "data", Field: "path"}}, "SECRET": {Ref: &v1.Reference{Kind: "resource", Name: "password", Field: "value"}}}}
-			h.manifest.Components["prep"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.FreshOnly, Initializes: []string{"data"}, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: []string{"-c", "printf '%s' \"$SECRET\" > \"$DATA/init\""}}}
-			h.manifest.Components["verify"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: []string{"-c", `test "$(cat "$DATA/init")" = "$SECRET"`}}, DependsOn: []v1.Dependency{{Component: "server", Condition: v1.Ready}}}
+			h.manifest.Components["prep"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.FreshOnly, Initializes: []string{"data"}, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "printf '%s' \"$SECRET\" > \"$DATA/init\"")}}
+			h.manifest.Components["verify"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", `test "$(cat "$DATA/init")" = "$SECRET"`)}, DependsOn: []v1.Dependency{{Component: "server", Condition: v1.Ready}}}
 			server := h.manifest.Components["server"]
 			server.DependsOn = []v1.Dependency{{Component: "prep", Condition: v1.Completed}}
 			h.manifest.Components["server"] = server
-			h.manifest.Components["peer"] = v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "sh", Args: []string{"-c", "exec sleep 120"}}, Readiness: &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "sh", Args: []string{"-c", "true"}}, Timeout: "2s"}}
+			h.manifest.Components["peer"] = v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "exec sleep 120")}, Readiness: &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "true")}, Timeout: "2s"}}
 			h.manifest.Scenes["peer"] = v1.Scene{Lifetime: v1.Persistent, Components: []string{"peer"}}
 			scene := h.manifest.Scenes["dev"]
 			scene.Components = append(scene.Components, "prep", "job", "verify")

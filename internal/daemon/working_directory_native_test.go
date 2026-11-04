@@ -32,7 +32,7 @@ func TestWorkingDirectoryCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.manifest.Tools["sh"] = "sh"
-	h.manifest.Components["build"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "sh", Args: []string{"build.sh"}, WorkingDirectory: "package"}}
+	h.manifest.Components["build"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("build.sh"), WorkingDirectory: "package"}}
 	h.manifest.Scenes["build"] = v1.Scene{Lifetime: v1.Disposable, Components: []string{"build"}, TerminalJob: "build"}
 	h.write()
 	invoke := func() ([]byte, error) {
@@ -83,13 +83,13 @@ func TestWorkingDirectoryServiceProbesAndWorktrees(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.manifest.Tools["sh"] = "sh"
-	server := v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "sh", WorkingDirectory: "selected", Args: []string{"-c", "test -f service-marker || exit 23; pwd > started; exec sleep 60"}}}
+	server := v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "sh", WorkingDirectory: "selected", Args: v1.StringArguments("-c", "test -f service-marker || exit 23; pwd > started; exec sleep 60")}}
 	h.manifest.Components = map[string]v1.Component{"server": server}
 	h.manifest.Scenes = map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"server"}}}
 	git(t, h.project, "init", "-q")
 	var id string
 	for _, tc := range []struct{ cwd, marker string }{{"", "service-marker"}, {".", "root-marker"}, {"probe", "probe-marker"}} {
-		server.Readiness = &v1.Probe{Kind: "command", Timeout: "3s", Command: &v1.Command{Tool: "sh", WorkingDirectory: tc.cwd, Args: []string{"-c", "test -f " + tc.marker + " && test -f " + map[string]string{"": "started", ".": "package/started", "probe": "../package/started"}[tc.cwd]}}}
+		server.Readiness = &v1.Probe{Kind: "command", Timeout: "3s", Command: &v1.Command{Tool: "sh", WorkingDirectory: tc.cwd, Args: v1.StringArguments("-c", "test -f "+tc.marker+" && test -f "+map[string]string{"": "started", ".": "package/started", "probe": "../package/started"}[tc.cwd])}}
 		h.manifest.Components["server"] = server
 		h.write()
 		req := h.request("dev")

@@ -34,7 +34,7 @@ func Prepare(source Source, request v1.PlanRequest) (Snapshot, error) {
 }
 
 func (v resolvedValue) private() v1.PlannedValue {
-	return v1.PlannedValue{Literal: v.literal, Symbolic: v.symbolic}
+	return v1.PlannedValue{Literal: v.literal, Symbolic: v.symbolic, Composition: v.composition}
 }
 
 // ConfigProvenance distinguishes historical absence from unrecorded older snapshots.

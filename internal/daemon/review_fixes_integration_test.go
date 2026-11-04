@@ -42,7 +42,7 @@ func TestDestroyActiveKeptNative(t *testing.T) {
 			job := h.manifest.Components["job"]
 			job.Resources = append(job.Resources, "data")
 			job.Fixtures = map[string]v1.Fixture{"data": {Value: fixtureRef("resource", "data", "path")}}
-			job.Command = &v1.Command{Tool: "sh", Args: []string{"-c", "echo waiting; while [ ! -f release ]; do sleep 0.01; done; exit 23"}}
+			job.Command = &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "echo waiting; while [ ! -f release ]; do sleep 0.01; done; exit 23")}
 			h.manifest.Components["job"] = job
 			h.write()
 			request := h.request("test")
@@ -118,7 +118,7 @@ func TestLeaseCollectionFailureIsInstanceLocal(t *testing.T) {
 	h.manifest.Scenes["dev"] = dev
 	h.manifest.Tools["sh"] = "/bin/sh"
 	job := h.manifest.Components["job"]
-	job.Command = &v1.Command{Tool: "sh", Args: []string{"-c", "echo waiting; exec sleep 60"}}
+	job.Command = &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "echo waiting; exec sleep 60")}
 	job.Artifacts = map[string]v1.ArtifactSource{"missing": {Path: "not-produced"}}
 	h.manifest.Components["job"] = job
 	h.write()
@@ -187,7 +187,7 @@ func TestDestroyActiveKeptDocker(t *testing.T) {
 			h := newDockerHarness(t, binary, endpoint)
 			h.alpine()
 			job := h.manifest.Components["each"]
-			job.Args = []string{"sh", "-c", "echo waiting; while [ ! -f /private/release ]; do sleep 0.01; done; exit 23"}
+			job.Args = v1.StringArguments("sh", "-c", "echo waiting; while [ ! -f /private/release ]; do sleep 0.01; done; exit 23")
 			job.Fixtures = map[string]v1.Fixture{"data": {Value: fixtureRef("resource", "directory", "path")}}
 			h.manifest.Components["each"] = job
 			h.write()
@@ -374,7 +374,7 @@ func TestKeptGuardianLossReportsEvidenceGap(t *testing.T) {
 	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
 	h := newNativeFaultHarness(t, binary)
 	job := h.manifest.Components["job"]
-	job.Command.Args[len(job.Command.Args)-1] = "job-fail"
+	job.Command.Args[len(job.Command.Args)-1] = v1.StringArguments("job-fail")[0]
 	h.manifest.Components["job"] = job
 	h.write()
 	request := h.request("test")

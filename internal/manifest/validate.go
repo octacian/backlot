@@ -13,6 +13,7 @@ import (
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/compose"
 )
 
 var identifier = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
@@ -133,6 +134,9 @@ func Validate(m v1.Manifest) error {
 			if caCertPath(fixture.Value) {
 				return invalid("components."+name+".fixtures."+key, "ca_cert_path is only supported in explicit environment assignments")
 			}
+			if fixture.Value.Literal == nil && fixture.Value.Ref == nil {
+				return invalid("components."+name+".fixtures."+key, "fixtures require a literal or supported reference")
+			}
 			if err := value(m, fixture.Value, "components."+name+".fixtures."+key); err != nil {
 				return err
 			}
@@ -175,8 +179,8 @@ func command(m v1.Manifest, c *v1.Command, field string) error {
 		return invalid(field+".working_directory", "use a safe manifest-relative directory without traversal, or dot for the manifest directory")
 	}
 	for _, arg := range c.Args {
-		if strings.ContainsRune(arg, 0) {
-			return invalid(field+".args", "NUL is not permitted")
+		if err := argument(m, arg, field+".args"); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -210,8 +214,28 @@ func environment(m v1.Manifest, e v1.Environment, field string) error {
 }
 
 func value(m v1.Manifest, v v1.Value, field string) error {
-	if (v.Literal == nil) == (v.Ref == nil) {
-		return invalid(field, "provide exactly one literal or ref")
+	count := 0
+	for _, present := range []bool{v.Literal != nil, v.Ref != nil, v.Format != nil, v.HostPort != nil, v.URLPath != nil} {
+		if present {
+			count++
+		}
+	}
+	if count != 1 {
+		return invalid(field, "provide exactly one literal, ref, format, host_port or url_path")
+	}
+	if v.Ref == nil && v.Literal == nil {
+		if v.Format != nil && v.Format.Values == nil {
+			return invalid(field, "format requires template and values array")
+		}
+		for _, operand := range v.Operands() {
+			if err := value(m, operand, field); err != nil {
+				return err
+			}
+		}
+		if _, err := compose.Resolve(v, func(v v1.Value) (v1.Value, error) { return v, nil }); err != nil {
+			return invalid(field, err.Error())
+		}
+		return nil
 	}
 	if v.Literal != nil {
 		if strings.ContainsRune(*v.Literal, 0) {
@@ -237,7 +261,7 @@ func value(m v1.Manifest, v v1.Value, field string) error {
 		resource, ok := m.Resources[r.Name]
 		fields := map[string]string{"port": "port", "directory": "path", "volume": "name", "network": "name", "secret": "value", "origin": "url"}
 		defaultField, simple := fields[resource.Kind]
-		validField := resource.Kind == "allocation" && slices.Contains([]string{"host", "port", "database", "username", "password"}, r.Field) || simple && r.Field == defaultField || (resource.Kind == "origin" && r.Field == "ca_cert_path")
+		validField := resource.Kind == "allocation" && slices.Contains([]string{"host", "port", "database", "username", "password"}, r.Field) || simple && r.Field == defaultField || (resource.Kind == "origin" && (r.Field == "ca_cert_path" || r.Field == "hostname"))
 		if !ok || !validField || r.Port != "" {
 			return invalid(field, "reference must use the declared resource kind's field")
 		}
@@ -279,6 +303,17 @@ func probe(m v1.Manifest, p *v1.Probe, field string) error {
 		if p.Command != nil || p.Target == nil {
 			return invalid(field, "network probe requires target only")
 		}
+		if err := p.Target.Walk(func(v v1.Value) error {
+			if caCertPath(v) {
+				return invalid(field, "ca_cert_path is only supported in explicit environment assignments")
+			}
+			if buildImageRef(v) != nil {
+				return invalid(field, "build_image is not a readiness value")
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
 		if err := value(m, *p.Target, field+".target"); err != nil {
 			return err
 		}
@@ -289,6 +324,18 @@ func probe(m v1.Manifest, p *v1.Probe, field string) error {
 			if p.Kind == "http" && (r.Kind != "resource" || r.Field != "url") {
 				return invalid(field, "HTTP probe requires an origin reference or literal HTTP(S) URL")
 			}
+		} else if p.Target.Literal == nil {
+			if resolved, err := compose.Resolve(*p.Target, func(v v1.Value) (v1.Value, error) { return v, nil }); err != nil {
+				return invalid(field, err.Error())
+			} else if resolved.Literal != nil {
+				copy := *p
+				copy.Target = &resolved
+				return probe(m, &copy, field)
+			}
+			if caCertPath(*p.Target) {
+				return invalid(field, "ca_cert_path is only supported in explicit environment assignments")
+			}
+			return nil
 		} else if p.Kind == "tcp" {
 			_, port, err := net.SplitHostPort(*p.Target.Literal)
 			if err != nil || !validNetworkPort(port) {
@@ -326,6 +373,9 @@ func component(m v1.Manifest, name string, c v1.Component) error {
 		if c.Image.Literal != nil && *c.Image.Literal == "" {
 			return invalid(f+".image", "provide a nonempty image reference")
 		}
+		if c.Image.Ref == nil && c.Image.Literal == nil {
+			return invalid(f+".image", "image requires a literal or supported reference")
+		}
 		if c.Image.Ref != nil && c.Image.Ref.Kind != "input" && (c.Image.Ref.Kind != "build_image" || c.Image.Ref.Field != "id") {
 			return invalid(f+".image", "image references require an input or build_image id")
 		}
@@ -336,8 +386,8 @@ func component(m v1.Manifest, name string, c v1.Component) error {
 		return invalid(f+".runtime", "use native or container")
 	}
 	for _, arg := range c.Args {
-		if strings.ContainsRune(arg, 0) {
-			return invalid(f+".args", "NUL is not permitted")
+		if err := argument(m, arg, f+".args"); err != nil {
+			return err
 		}
 	}
 	if c.Kind == v1.Job {
@@ -360,10 +410,23 @@ func component(m v1.Manifest, name string, c v1.Component) error {
 		if err := probe(m, c.Readiness, f+".readiness"); err != nil {
 			return err
 		}
-		if c.Readiness.Target != nil && c.Readiness.Target.Ref != nil {
-			r := c.Readiness.Target.Ref
-			if r.Kind == "resource" && m.Resources[r.Name].Kind == "origin" {
-				return invalid(f+".readiness", "published origin readiness belongs in the aggregate publish probe to avoid a startup cycle")
+		readinessValues := []v1.Value{}
+		if c.Readiness.Target != nil {
+			readinessValues = append(readinessValues, *c.Readiness.Target)
+		}
+		if c.Readiness.Command != nil {
+			for _, arg := range c.Readiness.Command.Args {
+				readinessValues = append(readinessValues, arg.Value)
+			}
+		}
+		for _, readinessValue := range readinessValues {
+			if err := readinessValue.Walk(func(v v1.Value) error {
+				if v.Ref != nil && v.Ref.Kind == "resource" && m.Resources[v.Ref.Name].Kind == "origin" {
+					return invalid(f+".readiness", "published origin readiness belongs in the aggregate publish probe to avoid a startup cycle")
+				}
+				return nil
+			}); err != nil {
+				return err
 			}
 		}
 	}
@@ -583,7 +646,14 @@ func scene(m v1.Manifest, name string, s v1.Scene) error {
 		if err := probe(m, &p.Probe, f+".publish.probe"); err != nil {
 			return err
 		}
-		if p.Probe.Target.Ref == nil || p.Probe.Target.Ref.Kind != "resource" || p.Probe.Target.Ref.Name != p.Resource {
+		outputs := []string{}
+		for _, name := range s.Components {
+			outputs = append(outputs, m.Components[name].Outputs...)
+		}
+		if err := selectedReference(m, s, v1.Component{Runtime: v1.Native, Resources: s.Resources, Outputs: outputs}, *p.Probe.Target, f+".publish.probe"); err != nil {
+			return err
+		}
+		if !publicationValue(*p.Probe.Target, p.Resource) {
 			return invalid(f+".publish.probe", "aggregate probe must reference the published origin")
 		}
 	}
@@ -610,10 +680,29 @@ func componentValues(m v1.Manifest, c v1.Component) []v1.Value {
 	if c.Readiness != nil && c.Readiness.Target != nil {
 		values = append(values, *c.Readiness.Target)
 	}
+	for _, arg := range c.Args {
+		values = append(values, arg.Value)
+	}
+	if c.Command != nil {
+		for _, arg := range c.Command.Args {
+			values = append(values, arg.Value)
+		}
+	}
+	if c.Readiness != nil && c.Readiness.Command != nil {
+		for _, arg := range c.Readiness.Command.Args {
+			values = append(values, arg.Value)
+		}
+	}
 	return values
 }
 
 func selectedReference(m v1.Manifest, s v1.Scene, c v1.Component, v v1.Value, field string) error {
+	for _, child := range v.Operands() {
+		if err := selectedReference(m, s, c, child, field); err != nil {
+			return err
+		}
+	}
+
 	if v.Ref == nil {
 		return nil
 	}
@@ -802,7 +891,12 @@ func validURLPort(u *url.URL) bool {
 }
 
 func caCertPath(v v1.Value) bool {
-	return v.Ref != nil && v.Ref.Kind == "resource" && v.Ref.Field == "ca_cert_path"
+	found := false
+	_ = v.Walk(func(v v1.Value) error {
+		found = found || v.Ref != nil && v.Ref.Kind == "resource" && v.Ref.Field == "ca_cert_path"
+		return nil
+	})
+	return found
 }
 
 // ValidatePrivate validates structure and optionally membership for staged retirement repair.
@@ -866,4 +960,44 @@ func validateTools(tools map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func argument(m v1.Manifest, arg v1.Argument, field string) error {
+	if err := value(m, arg.Value, field); err != nil {
+		return err
+	}
+	return arg.Walk(func(v v1.Value) error {
+		if v.Secret || v.Ref != nil && (v.Ref.Kind == "input" && m.Inputs[v.Ref.Name].Secret || v.Ref.Kind == "resource" && (m.Resources[v.Ref.Name].Kind == "secret" || m.Resources[v.Ref.Name].Kind == "allocation" && v.Ref.Field == "password")) {
+			return invalid(field, "sensitive values are not permitted in argv")
+		}
+		if caCertPath(v) {
+			return invalid(field, "ca_cert_path is only supported in explicit environment assignments")
+		}
+		if buildImageRef(v) != nil {
+			return invalid(field, "build_image references are only for producer environment and container image")
+		}
+		return nil
+	})
+}
+
+// Only an origin in the destination-bearing branch establishes publication identity.
+func publicationValue(v v1.Value, origin string) bool {
+	if v.Ref != nil {
+		return v.Ref.Kind == "resource" && v.Ref.Name == origin && v.Ref.Field == "url"
+	}
+	if v.URLPath != nil {
+		return publicationValue(v.URLPath.Base, origin)
+	}
+	if v.Format != nil {
+		// A format can append a known path to the canonical origin, but cannot replace its authority.
+		if len(v.Format.Values) >= 1 && (v.Format.Template == "%s" || strings.HasPrefix(v.Format.Template, "%s/")) {
+			return publicationValue(v.Format.Values[0], origin)
+		}
+	}
+	return false
+}
+
+// ValidateProbeTarget applies the literal network destination contract after planning resolves inputs.
+func ValidateProbeTarget(kind, target string) error {
+	return probe(v1.Manifest{}, &v1.Probe{Kind: kind, Target: &v1.Value{Literal: &target}, Timeout: "0s"}, "readiness.target")
 }

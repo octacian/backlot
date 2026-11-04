@@ -533,7 +533,11 @@ func (s *service) launchContainer(ctx context.Context, id string, c v1.PlannedCo
 	}
 	r := ownedResource{Kind: "container", Token: newID(), Component: c.Name, Attempt: result.Attempt}
 	r.Name = "backlot-" + r.Token
-	config := &container.Config{Image: image, Cmd: c.Args, Env: env, Labels: resourceLabels(r), ExposedPorts: network.PortSet{}}
+	args, err := resolvedArguments(c.Args, id, snap, result, entry, c.Runtime)
+	if err != nil {
+		return nil, err
+	}
+	config := &container.Config{Image: image, Cmd: args, Env: env, Labels: resourceLabels(r), ExposedPorts: network.PortSet{}}
 	host := &container.HostConfig{RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled}, PortBindings: network.PortMap{}}
 	host.ExtraHosts, err = containerOriginHosts(c, snap, result.Origin)
 	if err != nil {
@@ -742,6 +746,11 @@ func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, re
 	if value.Redacted {
 		value = snap.Secrets[key]
 	}
+	if value.Composition != nil {
+		return resolveComposition(*value.Composition, func(v v1.Value) (string, error) {
+			return resolvedValue(plannedValue(v), key, id, snap, result, entry, runtime)
+		})
+	}
 	r := value.Symbolic
 	if r != nil && r.Kind == "build_image" {
 		return resolvedBuildImage(r, key, id, snap, result, entry)
@@ -792,9 +801,16 @@ func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, re
 		}
 		return entry.caCertPath, nil
 	}
-	if r != nil && r.Kind == "resource" && r.Field == "url" {
+	if r != nil && r.Kind == "resource" && (r.Field == "url" || r.Field == "hostname") {
 		if snap.Plan.Publish == nil || r.Name != snap.Plan.Publish.Resource || result.Origin == "" {
 			return "", problem("invalid_publication", "origin reference requires the scene publication")
+		}
+		if r.Field == "hostname" {
+			u, err := url.Parse(result.Origin)
+			if err != nil {
+				return "", problem("invalid_publication", "invalid canonical origin")
+			}
+			return u.Hostname(), nil
 		}
 		return result.Origin, nil
 	}
@@ -837,15 +853,27 @@ func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, re
 	return runtimeValue(value, id, snap.Plan, result.Ports)
 }
 
-func containerProbeOwned(ctx context.Context, d *dockerEngine, w *dockerWork, c v1.PlannedComponent, value v1.PlannedValue, ports map[string]int, address netip.Addr) error {
-	r := value.Symbolic
+// authz: only the final numeric destination and authenticated binding establish ownership.
+func containerProbeOwned(ctx context.Context, d *dockerEngine, w *dockerWork, c v1.PlannedComponent, ports map[string]int, address netip.Addr, destination string) error {
+	host, portText, err := net.SplitHostPort(destination)
+	if err != nil {
+		return problem("readiness_unowned", "invalid container probe destination")
+	}
+	expected := address
+	if expected.IsUnspecified() {
+		expected = mappedAddress(&v1.DockerConfig{PublishAddress: address.String()})
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil || ip != expected {
+		return problem("readiness_unowned", "container probe destination must match owned host binding")
+	}
 	resource := ""
-	if r != nil && r.Kind == "service" && r.Name == c.Name && r.Field == "port" {
-		resource = c.Ports[r.Port].Resource
+	for _, p := range c.Ports {
+		if portText == strconv.Itoa(ports[p.Resource]) {
+			resource = p.Resource
+		}
 	}
-	if r != nil && r.Kind == "resource" && r.Field == "port" {
-		resource = r.Name
-	}
+
 	var port v1.ServicePort
 	for _, p := range c.Ports {
 		if p.Resource == resource {
@@ -853,7 +881,7 @@ func containerProbeOwned(ctx context.Context, d *dockerEngine, w *dockerWork, c 
 		}
 	}
 	if resource == "" || port.ContainerPort == 0 {
-		return problem("readiness_unowned", "container network probes require a symbolic port owned by that component; use a native command probe for other checks")
+		return problem("readiness_unowned", "container network probes require a destination bound by that component; use a native command probe for other checks")
 	}
 	if err := verifyDockerResource(ctx, d, w.resource); err != nil {
 		return err

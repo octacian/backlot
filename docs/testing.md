@@ -256,6 +256,18 @@ The provider-independent `TestDisposableEvidenceNative` runs in `make check` and
 covers native artifacts, fixture metadata/secrets, kept cancellation and client
 loss, shutdown/crash retained data, and executable SIGINT/SIGTERM exit codes.
 
+The composition checkpoint uses the same owned fixture grant and cached
+`alpine:3.21`/`postgres:17` images:
+
+```sh
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^(TestComposeEarlyFlow|TestCompositionSharedSQL)$' -count=1 -v -timeout=8m
+```
+
+It checks real CLI/native/container environment, argv, readiness and SQL connection
+strings, original application failures, redaction and authenticated cleanup. The
+Linux runtime job includes it in the existing provider gate; HTTPS remains separate.
+
 ## HTTPS/mixed integration
 
 Use an explicit native Caddy binary and local Docker endpoint; both suites skip

@@ -853,7 +853,7 @@ func TestReleaseWorkflows(t *testing.T) {
 			t.Fatal("manifest decode")
 		}
 		prep := manifest.Components["prepare"]
-		prep.Command = &v1.Command{Tool: "fixture", Args: []string{"fail"}}
+		prep.Command = &v1.Command{Tool: "fixture", Args: v1.StringArguments("fail")}
 		manifest.Components["fail-prepare"] = prep
 		job := manifest.Components["backend-test"]
 		job.Artifacts = nil // This case isolates preparation failure; its terminal job never runs.
@@ -864,7 +864,7 @@ func TestReleaseWorkflows(t *testing.T) {
 		scene.TerminalJob = "prep-test"
 		manifest.Scenes["failed-prep"] = scene
 		bad := manifest.Components["api"]
-		bad.Readiness = &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "fixture", Args: []string{"fail"}}, Timeout: "200ms"}
+		bad.Readiness = &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "fixture", Args: v1.StringArguments("fail")}, Timeout: "200ms"}
 		manifest.Components["bad-api"] = bad
 		probe := manifest.Scenes["dev"]
 		probe.Components = []string{"database", "prepare", "bad-api"}

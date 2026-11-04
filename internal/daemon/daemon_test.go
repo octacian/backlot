@@ -698,7 +698,7 @@ func TestInFlightReplacementRejectsSnapshotBeforeDurableAcceptance(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if prepared.Instance.Checkout.ID != current.ID || prepared.Instance.Plan.Components[0].Command.Args[0] != "env" {
+			if prepared.Instance.Checkout.ID != current.ID || *prepared.Instance.Plan.Components[0].Command.Args[0].Literal != "env" {
 				t.Fatal("replacement adopted the original snapshot")
 			}
 		})

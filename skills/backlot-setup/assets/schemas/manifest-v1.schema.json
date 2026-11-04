@@ -3,6 +3,16 @@
   "$id": "https://raw.githubusercontent.com/octacian/backlot/main/schemas/manifest-v1.schema.json",
   "$ref": "#/$defs/Manifest",
   "$defs": {
+    "Argument": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/Value"
+        }
+      ]
+    },
     "ArtifactSource": {
       "properties": {
         "path": {
@@ -59,10 +69,10 @@
         },
         "args": {
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/Argument"
           },
           "type": "array",
-          "description": "Direct argument vector; shell expansion requires an explicit shell command."
+          "description": "Scalar strings or explicit values; each resolves to one argument without shell expansion or splitting. Sensitive arguments are rejected."
         }
       },
       "additionalProperties": false,
@@ -374,14 +384,41 @@
         },
         "image": {
           "$ref": "#/$defs/Value",
+          "allOf": [
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "format"
+                    ]
+                  }
+                },
+                {
+                  "not": {
+                    "required": [
+                      "host_port"
+                    ]
+                  }
+                },
+                {
+                  "not": {
+                    "required": [
+                      "url_path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
           "description": "Container image literal, declared input or build_image id reference."
         },
         "args": {
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/Argument"
           },
           "type": "array",
-          "description": "Direct argument vector; shell expansion requires an explicit shell command."
+          "description": "Scalar strings or explicit values; each resolves to one argument without shell expansion or splitting. Sensitive arguments are rejected."
         },
         "policy": {
           "type": "string",
@@ -581,7 +618,34 @@
           "type": "string"
         },
         "value": {
-          "$ref": "#/$defs/Value"
+          "$ref": "#/$defs/Value",
+          "allOf": [
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "format"
+                    ]
+                  }
+                },
+                {
+                  "not": {
+                    "required": [
+                      "host_port"
+                    ]
+                  }
+                },
+                {
+                  "not": {
+                    "required": [
+                      "url_path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -590,6 +654,28 @@
         "value"
       ],
       "description": "Fixture declares a discoverable identity or credential for a component."
+    },
+    "FormatValue": {
+      "properties": {
+        "template": {
+          "type": "string",
+          "description": "Template contains only sequential %s and %% escapes."
+        },
+        "values": {
+          "items": {
+            "$ref": "#/$defs/Value"
+          },
+          "type": "array",
+          "description": "Values supplies exactly one operand per %s."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "template",
+        "values"
+      ],
+      "description": "FormatValue substitutes sequential %s operands and supports %% literal percent."
     },
     "HostMapping": {
       "properties": {
@@ -614,6 +700,25 @@
         "host"
       ],
       "description": "HostMapping explicitly maps a published origin hostname to Docker's host gateway."
+    },
+    "HostPortValue": {
+      "properties": {
+        "host": {
+          "$ref": "#/$defs/Value",
+          "description": "Host is a hostname or numeric IP without IPv6 brackets."
+        },
+        "port": {
+          "$ref": "#/$defs/Value",
+          "description": "Port is a decimal string in 1..65535."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "host",
+        "port"
+      ],
+      "description": "HostPortValue joins a validated host and decimal port without numeric coercion."
     },
     "Input": {
       "allOf": [
@@ -1108,8 +1213,22 @@
                   "const": "http"
                 },
                 "target": {
-                  "required": [
-                    "ref"
+                  "anyOf": [
+                    {
+                      "required": [
+                        "ref"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "format"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "url_path"
+                      ]
+                    }
                   ]
                 }
               }
@@ -1261,6 +1380,7 @@
                     "name",
                     "value",
                     "url",
+                    "hostname",
                     "ca_cert_path",
                     "host",
                     "database",
@@ -1751,29 +1871,303 @@
       ],
       "description": "StartupDetailSelection authorizes displaying one selected component fixture."
     },
+    "URLPathValue": {
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/Value",
+          "description": "Base is an absolute credential-free HTTP(S) URL without query or fragment."
+        },
+        "path": {
+          "$ref": "#/$defs/Value",
+          "description": "Path appends beneath Base without traversal or authority replacement."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "base",
+        "path"
+      ],
+      "description": "URLPathValue appends a path beneath an absolute HTTP(S) base."
+    },
     "Value": {
       "oneOf": [
         {
+          "allOf": [
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "ref"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "format"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "host_port"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "url_path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
           "required": [
             "literal"
-          ],
-          "title": "literal"
+          ]
         },
         {
+          "allOf": [
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "literal"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "format"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "host_port"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "url_path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
           "required": [
             "ref"
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "literal"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "ref"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "host_port"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "url_path"
+                    ]
+                  }
+                }
+              ]
+            }
           ],
-          "title": "reference"
+          "required": [
+            "format"
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "literal"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "ref"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "format"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "url_path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "required": [
+            "host_port"
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "literal"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "ref"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "format"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "host_port"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "required": [
+            "url_path"
+          ]
         }
       ],
       "properties": {
         "literal": {
           "type": "string",
-          "description": "Literal string, including an empty string; mutually exclusive with ref."
+          "description": "Literal string, including an empty string; one of literal, ref, format, host_port or url_path."
         },
         "ref": {
           "$ref": "#/$defs/Reference",
-          "description": "Bounded symbolic reference; mutually exclusive with literal."
+          "description": "Bounded symbolic reference; one of literal, ref, format, host_port or url_path."
+        },
+        "format": {
+          "$ref": "#/$defs/FormatValue",
+          "description": "Sequential %s substitution and %% literal percent; at most 1 MiB rendered bytes."
+        },
+        "host_port": {
+          "$ref": "#/$defs/HostPortValue",
+          "description": "IPv6-safe hostname/IP and decimal port in 1..65535; at most 1 MiB rendered bytes."
+        },
+        "url_path": {
+          "$ref": "#/$defs/URLPathValue",
+          "description": "Append beneath a credential-free absolute HTTP(S) base without query, fragment or traversal; at most 1 MiB rendered bytes."
         },
         "secret": {
           "type": "boolean",
@@ -1782,7 +2176,7 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "description": "Value is exactly one literal or bounded discriminated reference."
+      "description": "Value is exactly one literal, reference or bounded composition."
     }
   },
   "$comment": "Generated from api/v1; run make schema-generate. Editor assistance only; backlot plan remains authoritative."

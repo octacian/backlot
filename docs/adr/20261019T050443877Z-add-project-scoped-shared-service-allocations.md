@@ -1,12 +1,12 @@
 ---
 title: 'Add project-scoped shared-service allocations'
 date: '2026-10-19'
-status: accepted
+status: superseded
 implementation: implemented
 summary: 'Share exact project-owned MariaDB servers while retaining private instance allocations and bounded explicit cleanup authority.'
 tags: [shared-services, identity, sql, security, lifecycle, cleanup, migration]
 supersedes: []
-superseded_by: []
+superseded_by: [/docs/adr/20261103T174043965Z-reassociate-retained-projects-through-explicit-current-bindings.md]
 related: []
 tracking: ["https://github.com/octacian/backlot/issues/43"]
 implemented_by: ["https://github.com/octacian/backlot/commit/3f52ab439d075533c3c0e5c3ba3389de5237821b"]

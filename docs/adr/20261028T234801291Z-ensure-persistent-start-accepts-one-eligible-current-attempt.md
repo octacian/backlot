@@ -1,12 +1,12 @@
 ---
 title: 'Ensure persistent start accepts one eligible current attempt'
 date: '2026-10-28'
-status: accepted
+status: superseded
 implementation: implemented
 summary: 'Make explicit persistent start join running work or accept one compatible new attempt after prior work is reconciled without resetting identity or data.'
 tags: [daemon, lifecycle, identity, cli, attachment]
 supersedes: [/docs/adr/20261007T052013565Z-use-explicit-scene-lifetimes-and-daemon-owned-execution.md, /docs/adr/20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md, /docs/adr/20261022T194804759Z-bind-attached-persistent-execution-to-one-daemon-owned-attempt.md, /docs/adr/20261022T195459793Z-authorize-declared-sensitive-startup-details-for-persistent-scenes.md, /docs/adr/20261021T001732173Z-register-private-project-configuration.md, /docs/adr/20261025T202510851Z-pin-execution-scoped-build-images-from-native-jobs.md]
-superseded_by: []
+superseded_by: [/docs/adr/20261103T174043965Z-reassociate-retained-projects-through-explicit-current-bindings.md]
 related: [/docs/adr/20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md]
 tracking: ["https://github.com/octacian/backlot/issues/99"]
 implemented_by: ["https://github.com/octacian/backlot/commit/11fb43f01ff720b83bcba82c50226689eb17775c"]

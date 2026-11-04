@@ -23,6 +23,21 @@ func validID(id string) bool {
 }
 func validateInstance(response v1.InstanceResponse) error {
 	instance := response.Instance
+	if instance.CheckoutParent != "" && !validID(instance.CheckoutParent) {
+		return responseError()
+	}
+	if instance.Association != nil {
+		if err := instance.Association.Validate(); err != nil {
+			return err
+		}
+		parent := instance.CheckoutParent
+		if parent == "" {
+			parent = instance.Checkout.ID
+		}
+		if instance.Association.CheckoutParent != parent {
+			return responseError()
+		}
+	}
 	if response.StartupDetails != nil || response.Error != nil {
 		return responseError()
 	}

@@ -19,6 +19,7 @@ import (
 )
 
 type service struct {
+	repairKey             []byte
 	generation            string
 	diagnosticRecoveryErr error
 	diagnosticOwners      map[string]*diagnosticOwner
@@ -92,6 +93,19 @@ func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, o
 		return v1.InstanceResponse{}, problem("plan_too_large", "resolved public plan exceeds bounded API response size")
 	}
 
+	if err := original.verify(); err != nil {
+		return v1.InstanceResponse{}, err
+	}
+	var sharedIdentity sharedProjectIdentity
+	if len(snapshot.Plan.SharedServices) > 0 {
+		var err error
+		sharedIdentity, err = identifyShared(original.source, snapshot.Plan.Project)
+		if err != nil {
+			return v1.InstanceResponse{}, err
+		}
+	}
+	s.store.bindingGate.Lock()
+	defer s.store.bindingGate.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closing {
@@ -100,15 +114,47 @@ func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, o
 	if err := ctx.Err(); err != nil {
 		return v1.InstanceResponse{}, problem("cancelled", "request cancelled before acceptance")
 	}
-	if err := original.verify(); err != nil {
-		return v1.InstanceResponse{}, err
-	}
 	if len(snapshot.Plan.SharedServices) > 0 {
-		identity, err := identifyShared(original.source, snapshot.Plan.Project)
-		if err != nil {
+		identity := sharedIdentity
+		if err := s.store.db.Update(func(tx *bolt.Tx) error { return registerSharedProject(tx, identity) }); err != nil {
 			return v1.InstanceResponse{}, err
 		}
-		if err := s.store.db.Update(func(tx *bolt.Tx) error { return registerSharedProject(tx, identity) }); err != nil {
+	}
+	if len(snapshot.Plan.SharedServices) > 0 {
+		if err := s.store.db.Update(func(tx *bolt.Tx) error {
+			current := sharedIdentity
+			owner, e := boundShared(tx, current)
+			if e != nil {
+				return e
+			}
+			_, e = readProjectBinding(tx, owner.ID)
+			if e != nil {
+				return e
+			}
+			parent, e := locateCheckout(tx, original.checkout)
+			if e != nil {
+				return e
+			}
+			if tx.Bucket([]byte("checkout_bindings")).Get([]byte(parent)) == nil {
+				return nil
+			}
+			_, e = checkSharedBinding(tx, original.checkout, current)
+			if e != nil {
+				return e
+			}
+			cb, e := readCheckoutBinding(tx, parent)
+			if e != nil {
+				return e
+			}
+			if _, exists := cb.Shared[owner.ID]; !exists {
+				if cb.Shared == nil {
+					cb.Shared = map[string]string{}
+				}
+				cb.Shared[owner.ID] = ""
+				return put(tx, "checkout_bindings", parent, cb)
+			}
+			return nil
+		}); err != nil {
 			return v1.InstanceResponse{}, err
 		}
 	}
@@ -116,6 +162,30 @@ func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, o
 	if err != nil || !created {
 		return response, err
 	}
+	if len(snapshot.Plan.SharedServices) > 0 {
+		if err := s.store.db.Update(func(tx *bolt.Tx) error {
+			owner, e := boundShared(tx, sharedIdentity)
+			if e != nil {
+				return e
+			}
+			pb, e := readProjectBinding(tx, owner.ID)
+			if e != nil {
+				return e
+			}
+			cb, e := readCheckoutBinding(tx, checkoutParent(response.Instance))
+			if e != nil {
+				return e
+			}
+			if cb.Shared == nil {
+				cb.Shared = map[string]string{}
+			}
+			cb.Shared[owner.ID] = pb.Revision
+			return put(tx, "checkout_bindings", checkoutParent(response.Instance), cb)
+		}); err != nil {
+			return response, err
+		}
+	}
+
 	// Once accepted, persistent preparation is daemon-owned, independent of HTTP disconnect.
 	if s.checkpoint != nil {
 		if err := s.checkpoint("intent"); err != nil {
@@ -131,6 +201,9 @@ func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, o
 		}
 	}
 	response.Instance, err = s.store.complete(response.Instance.ID)
+	if err == nil && observed != nil {
+		err = s.store.db.View(func(tx *bolt.Tx) error { var e error; *observed, e = observeStart(tx, response.Instance); return e })
+	}
 	return response, err
 }
 

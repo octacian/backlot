@@ -230,6 +230,8 @@ defines contributor provider checks; a local check is not full platform acceptan
 ## Project-scoped shared services
 
 Shared MariaDB and PostgreSQL servers retain independent instance allocations.
+[Explicit reassociation](cli.md#reassociate-retained-project-data) preserves retained
+ownership and data. Destroying the last service retains its project identity reservation.
 
 Declare `shared_services` and select `kind: allocation` resources per the
 [manifest guide](manifest.md#shared-service-declarations); follow the runnable

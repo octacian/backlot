@@ -23,6 +23,8 @@ import (
 	"github.com/octacian/backlot/internal/gateway"
 	"github.com/octacian/backlot/internal/manifest"
 	"github.com/octacian/backlot/internal/plan"
+	"github.com/octacian/backlot/internal/projectconfig"
+	bolt "go.etcd.io/bbolt"
 )
 
 func diagnosticAdd(r *v1.DoctorResponse, name, execution string, status v1.DoctorStatus, message string) {
@@ -110,6 +112,35 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 		if err != nil {
 			diagnosticAdd(&r, "runtime_inputs", "daemon/host", v1.DoctorFailed, "cannot discover selected manifest; verify --project and retain exactly one supported manifest")
 			return r, nil
+		}
+		// Identity diagnostics precede private composition so its fence cannot hide shared conflict.
+		var document v1.Manifest
+		if raw, e := projectconfig.Read(source.ManifestPath); e == nil && manifest.Decode(raw, filepath.Ext(source.ManifestPath), &document) == nil {
+			identity, e := identifyShared(source, document.Project)
+			if e == nil {
+				e = s.store.db.View(func(tx *bolt.Tx) error {
+					owner, err := boundShared(tx, identity)
+					if err != nil || tx.Bucket([]byte("shared_projects")).Get([]byte(owner.ID)) == nil {
+						return err
+					}
+					checkout, err := identify(source.CheckoutPath)
+					if err != nil {
+						return err
+					}
+					parent, err := locateCheckout(tx, checkout)
+					if err != nil || tx.Bucket([]byte("checkout_bindings")).Get([]byte(parent)) == nil {
+						return err
+					}
+					_, err = checkSharedBinding(tx, checkout, identity)
+					return err
+				})
+			}
+			failure := "shared registration conflicts; use project diagnose and explicit reassociation; records preserved"
+			var detail *v1.PlanError
+			if errors.As(e, &detail) && detail.Code == "project_unverified" {
+				failure = "project_unverified: checkout has not verified the current shared binding; use project diagnose and explicit reassociation; records preserved"
+			}
+			diagnosticResult(&r, "shared_project_identity", "daemon/filesystem", e, "current sharing anchor and checkout verification agree with registration or are unregistered", failure)
 		}
 		r.Paths = append(r.Paths, v1.DoctorPath{Name: "selected_manifest", Path: source.ManifestPath, State: "present"})
 		snap, err = plan.Prepare(source, v1.PlanRequest{Scene: request.Scene, ProjectPath: request.ProjectPath, ConfigPath: request.ConfigPath})

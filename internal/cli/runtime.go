@@ -160,7 +160,11 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 			return output(c, nil, err)
 		}
 		request.InstanceID = args[0]
-		request.Plan = v1.PlanRequest{Scene: previous.Instance.Plan.Scene, ProjectPath: previous.Instance.Plan.ManifestPath}
+		projectPath := previous.Instance.Plan.ManifestPath
+		if previous.Instance.Association != nil {
+			projectPath = previous.Instance.Association.ProjectPath
+		}
+		request.Plan = v1.PlanRequest{Scene: previous.Instance.Plan.Scene, ProjectPath: projectPath}
 	} else {
 		cwd, err := os.Getwd()
 		if err != nil {

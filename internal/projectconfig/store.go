@@ -99,6 +99,10 @@ func rootPath(checkout string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return rootPathAt(checkout, root)
+}
+func rootPathAt(checkout, root string) (string, error) {
+	var err error
 	// Canonicalize existing ancestors, preserving a missing suffix without creating it.
 	ancestor := root
 	suffix := ""
@@ -174,7 +178,16 @@ func readRegistry(root string) (result registry, revision string, readErr error)
 
 // Select captures one registry generation without reading private values.
 // Partial selection provenance remains useful on a selection error.
-func Select(project, checkout, file string, reassociate bool) (s Selection, loadErr error) {
+func Select(project, checkout, file string, reassociate bool) (Selection, error) {
+	root, err := selectedRoot()
+	if err != nil {
+		return Selection{}, err
+	}
+	return SelectAt(project, checkout, file, root, reassociate)
+}
+
+// SelectAt inspects an explicitly selected root without changing process environment.
+func SelectAt(project, checkout, file, root string, reassociate bool) (s Selection, loadErr error) {
 	s.State = "unavailable"
 	layer, path := "registry", ""
 	if root, err := selectedRoot(); err == nil {
@@ -185,7 +198,7 @@ func Select(project, checkout, file string, reassociate bool) (s Selection, load
 	if err != nil {
 		return s, err
 	}
-	root, err := rootPath(checkout)
+	root, err = rootPathAt(checkout, root)
 	if err != nil {
 		return s, err
 	}
@@ -426,4 +439,82 @@ func syncDir(path string) error {
 // Same reports whether the captured private selection is unchanged.
 func (s Selection) Same(other Selection) bool {
 	return s.registryDigest == other.registryDigest && reflect.DeepEqual(s.Provenance, other.Provenance)
+}
+
+// Root returns the canonical runtime registry root without creating it.
+func Root(checkout string) (string, error) {
+	root, err := rootPath(checkout)
+	if err != nil {
+		return "", err
+	}
+	return RootAt(checkout, root)
+}
+func canonicalRoot(root string) (string, error) {
+	ancestor := root
+	suffix := ""
+	for {
+		if _, err := os.Lstat(ancestor); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		suffix = filepath.Join(filepath.Base(ancestor), suffix)
+		ancestor = filepath.Dir(ancestor)
+	}
+	path, err := filepath.EvalSymlinks(ancestor)
+	return filepath.Join(path, suffix), err
+}
+
+// RootAt validates and canonicalizes an explicit root, without fallback or mutation.
+func RootAt(checkout, root string) (string, error) {
+	if !filepath.IsAbs(root) || strings.ContainsRune(root, 0) {
+		return "", problem("registry root must be absolute")
+	}
+	path, err := rootPathAt(checkout, root)
+	if err != nil {
+		return "", err
+	}
+	if info, e := os.Lstat(path); e == nil && info.Mode()&os.ModeSymlink != 0 {
+		return "", problem("private registry root cannot be a symlink")
+	} else if e != nil && !os.IsNotExist(e) {
+		return "", e
+	}
+	return canonicalRoot(path)
+}
+
+// Lock serializes repair revalidation with cooperating offline setup publications.
+func Lock(ctx context.Context, root string) (func(), error) {
+	if err := localipc.Directory(root, true); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(root, "projects.lock")
+	if err := localipc.File(path, false); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	lock := flock.New(path, flock.SetPermissions(0600))
+	ok, err := lock.TryLockContext(ctx, 25*time.Millisecond)
+	if err != nil || !ok {
+		return nil, problem("cannot lock private registry")
+	}
+	if err := localipc.File(path, false); err != nil {
+		_ = lock.Close()
+		return nil, err
+	}
+	return func() { _ = lock.Close() }, nil
+}
+
+// Freshness returns captured source bytes only to an in-process keyed comparator.
+func (s Selection) Freshness() ([]byte, error) {
+	data, err := json.Marshal(s.registry)
+	if err != nil {
+		return nil, err
+	}
+	if s.Provenance.Present {
+		private, err := Read(s.Provenance.Path)
+		if err != nil {
+			return nil, err
+		}
+		data = append(data, private...)
+	}
+	return data, nil
 }

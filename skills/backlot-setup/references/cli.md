@@ -20,6 +20,8 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `scene describe SCENE [--project PATH]` | Offline graph and named prerequisites, without values or readiness claims |
 | `config show [--project PATH] [--config PATH] [--state-dir PATH]` | Validated safe caller layers/candidates and prospective defaults; no executable/provider probes |
 | `project setup [--project PATH] [--config PATH]` | First terminal setup enrolls private inputs/tools; existing setup inspects. See edit options below |
+| `project diagnose [--project PATH] [--config PATH]` | Read-only recorded/current identity, retained owners and blockers |
+| `project reassociate --project PATH --project-id PROJECT_ID --checkout-id CHECKOUT_ID [--config PATH]` | Read-only exact-owner repair preview; explicit `--apply --preview DIGEST` commits daemon associations |
 | `plan SCENE [--project PATH] [--config PATH] [-- ARGS...]` | Offline selected input/seed/tool resolution; no daemon/provider effects |
 | `prepare SCENE [--project PATH] [--config PATH]` | Daemon records metadata only; returns disposable lease when applicable |
 | `run SCENE [--project PATH] [--config PATH] [-- ARGS...]` | Execute; persistent returns at readiness, disposable after collection/cleanup |
@@ -70,6 +72,47 @@ repeatable `--generate NAME`, `--remove-input NAME`, `--remove-tool NAME`, and
 inspection-only `--dangerously-reveal-secrets`. Supplied/generated/removal names
 must not conflict; edits preserve unspecified entries and publish only a complete
 valid candidate. Values never enter argv. See [private setup](manifest.md#registered-private-project-configuration).
+
+### Reassociate retained project data
+
+```sh
+backlot project diagnose --project /destination --config /private/machine.yaml --json
+backlot project reassociate --project /destination --project-id PROJECT_ID --checkout-id CHECKOUT_ID --config /private/machine.yaml --json
+backlot project reassociate --project /destination --project-id PROJECT_ID --checkout-id CHECKOUT_ID --config /private/machine.yaml --apply --preview DIGEST --json
+```
+
+Diagnosis/preview is read-only. Select exact retained IDs from diagnosis, stop/join
+all affected consumers, resolve blockers and acknowledge a fresh preview. The SQL
+server may stay live. Apply preserves IDs, data, credentials, allocations and cleanup
+authority; it never automatically adopts, merges, renames or cleans up projects.
+Relative project location and manifest filename must remain unchanged.
+
+The requesting checkout, per-worktree Git directory and resolved common-directory
+sharing anchor are distinct; paths do not prove permanence, and device/inode drift
+indicates identity change, not replacement. Repair missing/self-pointing `commondir`
+explicitly before retrying; per-worktree admin metadata cannot be a sharing anchor.
+
+For stale private setup, run `project setup --reassociate --from FILE` with explicit
+values, then repreview; credentials are never imported implicitly. The selected
+registry (`BACKLOT_PROJECT_CONFIG_DIR` or user default) must agree with the daemon's.
+Align it and restart the daemon if needed; no operation-specific override persists.
+Private setup may succeed while daemon repair remains unapplied.
+
+Protected checks remain strict: moving even an unchanged relative fresh-only
+initializer such as `./bin/setup` blocks if its resolved executable changes. A
+nondefault fresh-only `working_directory` blocks if its effective directory changes;
+omission and `.` remain equivalent. Unresolved peers keep their own bindings/launch
+facts and cannot start until separately verified; the requesting branch never
+substitutes for their scene configuration.
+
+JSON distinguishes recorded/current identity, reports safe blockers and a `preview`
+acknowledgement, and confirms apply with `applied`. Inspection separates historical
+`checkout`/`plan` from current `association`. Blocked preview is a successful diagnostic;
+apply errors `reassociation_blocked`, `stale_preview` and `conflict`, or precommit
+cancellation, preserve associations. A lost reply or `reassociation_committed_uncertain`
+may mean apply committed: inspect current bindings/accepted acknowledgement, then
+repreview; never retry apply automatically. Restart invalidates previews. Recorded-ID
+cleanup remains available independently of current sources.
 
 `run`, `restart`, `reset` and `scene start` accept `--startup-timeout 5m`,
 `--job-timeout 30m`, `--stop-grace 10s`. Execution budgets accept `0s` for unlimited;

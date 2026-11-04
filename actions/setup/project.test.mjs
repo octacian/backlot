@@ -32,7 +32,7 @@ async function setupCancellationFixture(mode) {
  const commandStub = async (binary,args) => {
   calls.push([binary,...args].join(' '));
   if(binary==='/fixture/node')return '';
-  if(binary==='go')return 'go version go1.27.1 linux/amd64\n';
+  if(binary==='go')return 'go version go1.27.3 linux/amd64\n';
   if(binary==='lsof') {
    if(mode==='missing') { if(lsofCalls++===0)throw Error('missing fixture dependency'); return ''; }
    const timer=setTimeout(()=>process.kill(process.pid,mode),100);

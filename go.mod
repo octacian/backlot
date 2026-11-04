@@ -1,6 +1,6 @@
 module github.com/octacian/backlot
 
-go 1.27.1
+go 1.27.3
 
 require (
 	github.com/chromedp/cdproto v0.0.0-20250403032234-65de8f5d025b
@@ -25,7 +25,7 @@ require (
 )
 
 require (
-	filippo.io/edwards25519 v1.1.0 // indirect
+	filippo.io/edwards25519 v1.1.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect

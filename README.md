@@ -7,7 +7,7 @@ scenes also get a canonical origin.
 
 ## Install Backlot
 
-Install with **Go 1.27.1 or newer**. Backlot targets **macOS ARM64**, **Ubuntu 24.04 amd64** and **Debian 13.4 amd64**; see the [platform policy](docs/platforms.md) for runtime gates and Linux prerequisites:
+Install with **Go 1.27.3 or newer**. Backlot targets **macOS ARM64**, **Ubuntu 24.04 amd64** and **Debian 13.4 amd64**; see the [platform policy](docs/platforms.md) for runtime gates and Linux prerequisites:
 
 ```sh
 go install github.com/octacian/backlot/cmd/backlot@latest

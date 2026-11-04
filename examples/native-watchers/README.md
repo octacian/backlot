@@ -1,6 +1,6 @@
 # Normal Air and Vite development
 
-This small example uses Go 1.27.1, Air 1.67.4, Node 26.8.1/npm and Vite 8.3.4.
+This small example uses Go 1.27.3, Air 1.67.4, Node 26.8.1/npm and Vite 8.3.4.
 Air rebuilds the Go HTTP API and starts its child in another process group; Vite
 runs through ordinary `npm run dev`. Both remain in their live guardian's session.
 Backlot supplies allocated loopback ports and the canonical gateway origin.
@@ -14,7 +14,7 @@ cd examples/native-watchers
 npm ci --ignore-scripts
 ```
 
-Configure stock Caddy 2.11.6 and a managed gateway using the [HTTPS guide](../../docs/https.md).
+Configure stock Caddy 2.11.7 and a managed gateway using the [HTTPS guide](../../docs/https.md).
 System/browser trust and normal canonical hostname resolution are separate operator
 prerequisites; do not bypass certificate warnings. Start a fresh v6 private state
 directory with the prepared PATH, then the gateway and scene:

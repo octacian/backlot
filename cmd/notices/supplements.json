@@ -9,7 +9,7 @@
   },
   {
     "module": "filippo.io/edwards25519",
-    "version": "v1.1.0",
+    "version": "v1.1.1",
     "source": "scalar.go",
     "sha256": "2c298f3528a81f7908978a3b9043a82113dd3e5b40755620f7a8f9c75dbe777d",
     "start": "//     Copyright (c) 2015-2020 The fiat-crypto Authors. All rights reserved.",

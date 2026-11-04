@@ -7,7 +7,7 @@ remain with their upstream distributions; they are not bundled with Backlot.
 Inventories are labeled separately below. Reviewed embedded notices are version/source-bound in `cmd/notices/supplements.json`.
 Do not edit this generated file by hand.
 
-## Go standard library go1.27.1
+## Go standard library go1.27.3
 
 Linked into: all inventories above.
 
@@ -43,7 +43,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-## filippo.io/edwards25519 v1.1.0
+## filippo.io/edwards25519 v1.1.1
 
 Linked into: Backlot CLI (darwin/arm64); Backlot CLI (linux/amd64); optional acceptance application (darwin/arm64); optional acceptance application (linux/arm64 container).
 

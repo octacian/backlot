@@ -132,7 +132,7 @@ func start(t *testing.T, domain string, inContainer bool) Fixture {
 		if endpoint == "" {
 			t.Skip("container Caddy requires explicit BACKLOT_DOCKER_TEST_ENDPOINT")
 		}
-		image := "caddy@sha256:3422ce6de165df66534f9b9ba50efaf457114ec961763cc52f5dbdaac2972d73"
+		image := "caddy@sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e"
 		DockerCommand(t, endpoint, "image", "inspect", image)
 		name := marker
 		t.Cleanup(func() {

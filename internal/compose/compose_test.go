@@ -67,12 +67,12 @@ func TestURLPath(t *testing.T) {
 			t.Fatalf("%+v: %q %v", tc, got, err)
 		}
 	}
-	for _, path := range []string{"..", "a/../b", "./a", "%2e%2e/a", ".%2e/a", "a%2fb", "a%5cb", "%252e%252e/a", "%252fb", "//evil/a", "a?query", "a#fragment", "a\\b"} {
+	for _, path := range []string{"..", "a/../b", "./a", "%2e%2e/a", ".%2e/a", "a%2fb", "a%5cb", "%252e%252e/a", "%252fb", "//evil/a", "a?query", "a#fragment", "a\\b", "%2e%2e/%25", "%2e/%25", "safe/%2e%2e/%25", "%252e%252e/%2525"} {
 		if _, err := Render(v1.Value{URLPath: &v1.URLPathValue{}}, []string{"https://example.test/base", path}); err == nil {
 			t.Fatalf("accepted path %q", path)
 		}
 	}
-	for _, base := range []string{"/relative", "ftp://example.test", "http://user:private-canary@example.test", "http://example.test?", "http://example.test#", "http://example.test:0", "http://example.test:", "http://example.test/a/../b", "http://example.test/a%2fb"} {
+	for _, base := range []string{"/relative", "ftp://example.test", "http://user:private-canary@example.test", "http://example.test?", "http://example.test#", "http://example.test:0", "http://example.test:", "http://example.test/a/../b", "http://example.test/a%2fb", "https://example.test/%2e%2e/%25", "https://example.test/%2e/%25", "https://example.test/safe/%2e%2e/%25"} {
 		_, err := Render(v1.Value{URLPath: &v1.URLPathValue{}}, []string{base, "a"})
 		if err == nil || strings.Contains(err.Error(), "private-canary") {
 			t.Fatalf("base %q: %v", base, err)
@@ -132,5 +132,58 @@ func TestHostPortExactByteBounds(t *testing.T) {
 				t.Fatal(len(got))
 			}
 		}
+	}
+}
+
+func TestPartialConstructorByteBounds(t *testing.T) {
+	unknown := v1.Value{Ref: &v1.Reference{Kind: "instance", Field: "id"}}
+	identity := func(v v1.Value) (v1.Value, error) { return v, nil }
+	for _, extra := range []int{0, 1, 2} {
+		port := strings.Repeat("0", MaxBytes-4+extra) + "80"
+		value := v1.Value{HostPort: &v1.HostPortValue{Host: unknown, Port: formatValue("%s", literal(port))}}
+		partial, err := Resolve(value, identity)
+		if (err == nil) != (extra == 0) {
+			t.Fatalf("partial host_port extra=%d: %v", extra, err)
+		}
+		if err == nil {
+			got, err := Resolve(partial, func(v v1.Value) (v1.Value, error) { return literal("a"), nil })
+			if err != nil || got.Literal == nil || len(*got.Literal) != MaxBytes {
+				t.Fatalf("host_port cap witness: %v", err)
+			}
+		}
+	}
+	for _, leading := range []string{"", "/"} {
+		for _, escaped := range []string{"x", "%25", "雪"} {
+			decoded, err := Render(v1.Value{URLPath: &v1.URLPathValue{}}, []string{"http://a", escaped})
+			if err != nil {
+				t.Fatal(err)
+			}
+			expansion := len(decoded) - len("http://a/")
+			for _, extra := range []int{0, 1} {
+				path := leading + strings.Repeat("x", MaxBytes-9-expansion+extra) + escaped
+				value := v1.Value{URLPath: &v1.URLPathValue{Base: unknown, Path: formatValue("%s", literal(path))}}
+				partial, err := Resolve(value, identity)
+				if (err == nil) != (extra == 0) {
+					t.Fatalf("partial url_path leading=%q escaped=%q extra=%d: %v", leading, escaped, extra, err)
+				}
+				if err == nil {
+					got, err := Resolve(partial, func(v v1.Value) (v1.Value, error) { return literal("http://a"), nil })
+					if err != nil || got.Literal == nil || len(*got.Literal) != MaxBytes {
+						t.Fatalf("url_path cap witness: %v", err)
+					}
+				}
+			}
+		}
+	}
+	// An unknown suffix may be empty, preserving a base already at the cap.
+	base := "http://a/" + strings.Repeat("x", MaxBytes-len("http://a/"))
+	value := v1.Value{URLPath: &v1.URLPathValue{Base: literal(base), Path: unknown}}
+	partial, err := Resolve(value, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Resolve(partial, func(v v1.Value) (v1.Value, error) { return literal(""), nil })
+	if err != nil || got.Literal == nil || *got.Literal != base {
+		t.Fatalf("empty suffix cap witness: %v", err)
 	}
 }

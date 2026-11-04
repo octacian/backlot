@@ -94,6 +94,19 @@ func Resolve(v v1.Value, reference func(v1.Value) (v1.Value, error)) (v1.Value, 
 		if resolved[1].Literal != nil && !validPort(texts[1]) {
 			return v1.Value{}, ErrInvalid
 		}
+		hostSize, portSize, separator := 1, 1, 1
+		if resolved[0].Literal != nil {
+			hostSize = len(texts[0])
+			if strings.Contains(texts[0], ":") {
+				separator = 3
+			}
+		}
+		if resolved[1].Literal != nil {
+			portSize = len(texts[1])
+		}
+		if hostSize > MaxBytes-portSize-separator {
+			return v1.Value{}, ErrInvalid
+		}
 	}
 	if v.URLPath != nil {
 		if resolved[0].Literal != nil {
@@ -106,7 +119,8 @@ func Resolve(v v1.Value, reference func(v1.Value) (v1.Value, error)) (v1.Value, 
 				return v1.Value{}, ErrInvalid
 			}
 			decoded, _ := url.PathUnescape(texts[1])
-			if escapedSize(decoded) > MaxBytes {
+			// A nonempty suffix needs at least "http://a/", even with an unknown base.
+			if texts[1] != "" && escapedSize(strings.TrimPrefix(decoded, "/")) > MaxBytes-len("http://a/") {
 				return v1.Value{}, ErrInvalid
 			}
 		}
@@ -234,25 +248,14 @@ func safePath(path string) bool {
 		}
 		decoded, err := url.PathUnescape(current)
 		if err != nil {
-			return false
+			// A literal percent is supported only after decoding a valid layer.
+			return depth > 0
 		}
 		if decoded == current {
 			return true
 		}
 		if strings.ContainsAny(decoded, "\\\x00\r\n") || strings.Count(decoded, "/") != strings.Count(current, "/") {
 			return false
-		}
-		// A decoded literal percent is safe unless it begins another encoded layer.
-		if !strings.Contains(decoded, "%") {
-			current = decoded
-			continue
-		}
-		next, err := url.PathUnescape(decoded)
-		if err != nil {
-			return true
-		}
-		if next == decoded {
-			return true
 		}
 		current = decoded
 	}

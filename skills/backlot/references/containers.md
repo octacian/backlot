@@ -2,14 +2,18 @@
 
 ## State compatibility
 
-The durable state format is version 11; version 9 is the minimum supported baseline. Pre-v9
+The durable state format is version 13; version 9 is the minimum supported baseline. Pre-v9
 formats, including 6 and 8, are rejected unchanged; no migration from those
 preproduction formats is provided. From v9 onward, retain every real Go migration
 so the newest binary can apply the complete path when users skip releases,
 without intermediate binaries or reset. The 9-to-10 step adds four empty shared
 project/path/service/allocation buckets without rewriting retained records. The
 10-to-11 semantic fence adds optional build-image pins/provenance; historical
-generations keep no pins and no invented image identity.
+generations keep no pins and no invented image identity. The 11-to-12 step seeds
+[attempt history](evidence.md#retained-attempt-history) from known current
+outcomes only; overwritten earlier attempts cannot be reconstructed. The 12-to-13
+step seeds current project and checkout bindings from retained origins, preserving
+ownership, credentials and history for later [explicit reassociation](cli.md#reassociate-retained-project-data).
 
 Source validation, transformations, current authority validation and the final
 version fence share one write transaction. Any precommit error, cancellation or

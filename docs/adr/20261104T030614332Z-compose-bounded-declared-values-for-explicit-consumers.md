@@ -2,7 +2,7 @@
 title: "Compose bounded declared values for explicit consumers"
 date: 2026-11-04
 status: accepted
-implementation: in-progress
+implementation: implemented
 summary: "Compose explicit values without shell evaluation, losing allocation provenance or widening secret disclosure."
 tags:
   - manifest
@@ -13,7 +13,7 @@ supersedes: []
 superseded_by: []
 related: [/docs/adr/20261007T055849866Z-define-versioned-offline-scene-planning-contracts.md, /docs/adr/20261103T174849392Z-select-bounded-working-directories-for-native-commands.md, /docs/adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md]
 tracking: ["https://github.com/octacian/backlot/issues/109"]
-implemented_by: []
+implemented_by: ["https://github.com/octacian/backlot/pull/122"]
 ---
 
 # Compose bounded declared values for explicit consumers

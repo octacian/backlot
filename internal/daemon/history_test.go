@@ -683,6 +683,12 @@ func TestUnrepresentedLegacyEvidenceRetention(t *testing.T) {
 	t.Run("byte-protection-cursor-reopen", func(t *testing.T) {
 		s, i, unknown := mixedPredecessor(t)
 		e := *i.Execution
+		stamp, err := time.Parse(time.RFC3339Nano, retentionStart(&e))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Keep this byte-only scenario independent of the predecessor's capture date.
+		s.evidence.age = time.Since(stamp) + time.Hour
 		represented, err := s.attemptEvidenceSize(i.ID, e.Attempt)
 		if err != nil {
 			t.Fatal(err)

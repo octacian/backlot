@@ -28,6 +28,9 @@ type runtimeRecord struct {
 	Attempt       string              `json:"attempt"`
 	Groups        []native.Identity   `json:"groups"`
 	Options       v1.ExecutionOptions `json:"options"`
+
+	// GatewayOnlyCleanup records joined consumer cleanup for this attempt, never route removal.
+	GatewayOnlyCleanup bool `json:"gateway_only_cleanup,omitempty"`
 }
 
 func (s *store) snapshot(id string) (plan.Snapshot, error) {
@@ -207,7 +210,7 @@ func (s *store) recoverExecution(id string) error {
 	result.NativeCleanup = append([]v1.NativeCleanupResult(nil), result.NativeCleanup...)
 	var cleanup error
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
-	cleanup = s.removeGateway(cleanupCtx, id, &r)
+	gatewayCleanup := s.removeGateway(cleanupCtx, id, &r)
 	cleanupCancel()
 	g, err := s.resources(id)
 	if err != nil {
@@ -267,6 +270,12 @@ func (s *store) recoverExecution(id string) error {
 			cleanup = errors.Join(cleanup, problem("cleanup_failed", observed.Detail))
 		}
 	}
+	// Route unavailability must not hide successful authenticated consumer cleanup.
+	// Keep its intent and failure, allowing explicit gateway recovery to retry it.
+	// An empty legacy journal alone cannot establish consumer absence.
+	consumerProof := r.GatewayOnlyCleanup || pendingAbsent || len(r.Groups) > 0 || len(g.Containers) > 0
+	r.GatewayOnlyCleanup = gatewayCleanup != nil && cleanup == nil && consumerProof
+	cleanup = errors.Join(gatewayCleanup, cleanup)
 	consumersStopped := cleanup == nil
 	if consumersStopped {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -276,11 +285,15 @@ func (s *store) recoverExecution(id string) error {
 		// Native uncertainty prevented retrying a separately recorded network failure.
 		for _, detail := range result.CleanupDetails {
 			if detail.Field == "resources.network" {
+				r.GatewayOnlyCleanup = false
 				cleanup = errors.Join(cleanup, &detail)
 			}
 		}
 	}
 
+	if err := s.saveRuntime(id, r); err != nil {
+		return err
+	}
 	// Reassess transient non-native failures; retain native fences through their
 	// typed observations rather than making an old mixed error string sticky.
 	result.CleanupFailure = ""

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/gateway"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -124,6 +125,28 @@ func TestTaskUncertainCleanupProtectsParentAndRetention(t *testing.T) {
 	if err := f.s.store.stopManaged(&managed, nil); err == nil || managed.Status != "running" {
 		t.Fatal("gateway released an uncertain dependent's parent publication", err)
 	}
+	// Even prior route-only parent proof cannot release a live or uncertain dependent.
+	journal, err := f.s.store.runtime(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.s.store.inspect(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal.Attempt, journal.GatewayOnlyCleanup = p.Execution.Attempt, true
+	journal.Gateway = &gateway.Intent{}
+	if err := f.s.store.saveRuntime(parent, journal); err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []v1.InstanceStatus{v1.Starting, v1.Failed} {
+		if _, err := f.s.store.execution(child, status, c.Execution); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.s.store.stopManaged(&managed, nil); err == nil || managed.Status != "running" {
+			t.Fatal("route-only parent proof bypassed dependent fence", status, err)
+		}
+	}
 
 	entries, err := f.s.store.retentionScope(parent)
 	if err != nil {
@@ -149,7 +172,7 @@ func TestTaskUncertainCleanupProtectsParentAndRetention(t *testing.T) {
 	if err := f.s.store.guardDependentTasks(parent); err != nil {
 		t.Fatal("collection failure became live fence", err)
 	}
-	p, err := f.s.store.inspect(parent)
+	p, err = f.s.store.inspect(parent)
 	if err != nil {
 		t.Fatal(err)
 	}

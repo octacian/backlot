@@ -150,3 +150,79 @@ func TestPartialFilePathKnownPrivateInputBound(t *testing.T) {
 		t.Fatal("private parent shortening", err)
 	}
 }
+
+func TestSharedConsumerKnownBoundsBeforePreparation(t *testing.T) {
+	for _, valid := range []bool{false, true} {
+		t.Run(map[bool]string{false: "overflow", true: "exact-cap"}[valid], func(t *testing.T) {
+			project, machine := setupFixture(t)
+			size, template := composition.MaxBytes/2, "%s%s%s"
+			if valid {
+				size--
+				template += "x"
+			}
+			half := "deferred-private-canary" + strings.Repeat("x", size-len("deferred-private-canary"))
+			lit := func(s string) v1.Value { return v1.Value{Literal: &s} }
+			input := v1.Value{Ref: &v1.Reference{Kind: "input", Name: "half"}}
+			tail := v1.Value{FilePath: &v1.FilePathValue{Base: lit("/base"), Parts: []v1.Value{lit("..")}}}
+			value := compositionFormat("%s", compositionFormat(template, input, input, compositionFormat("%s", tail)))
+			port := v1.Value{Ref: &v1.Reference{Kind: "resource", Name: "port", Field: "port"}}
+			unknown := v1.Value{FilePath: &v1.FilePathValue{Base: lit("/"), Parts: []v1.Value{input, port}}}
+			identityURL := v1.Value{URLPath: &v1.URLPathValue{Base: lit("http://a/" + strings.Repeat("雪", 120000)), Parts: []v1.Value{{FilePath: &v1.FilePathValue{Base: lit(""), Parts: []v1.Value{}}}}}}
+			image := lit("alpine:3.21")
+			c := v1.Component{Kind: v1.Service, Runtime: v1.Container, Image: &image, Resources: []string{"port"}, Readiness: &v1.Probe{Kind: "command", Timeout: "1s", Command: &v1.Command{Tool: "shell", Args: v1.StringArguments("-c", "true")}}, Environment: v1.Environment{Assign: map[string]v1.Value{"PRIVATE": value, "UNKNOWN": unknown, "URL": identityURL}}}
+			m := v1.Manifest{Version: v1.ManifestVersion, Project: "setup-test", Tools: map[string]string{"shell": "sh"}, Inputs: map[string]v1.Input{"half": {Secret: true}}, Resources: map[string]v1.Resource{"port": {Kind: "port"}}, Components: map[string]v1.Component{"web": c}, Scenes: map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Resources: []string{"port"}, Components: []string{"web"}}}}
+			data, err := json.Marshal(m)
+			if err != nil || len(data) > 1<<20 {
+				t.Fatal("fixture manifest bounds", err)
+			}
+			writeSetup(t, filepath.Join(project, "backlot.yaml"), string(data))
+			config, err := json.Marshal(v1.MachineConfig{Version: v1.ManifestVersion, Docker: &v1.DockerConfig{Endpoint: "unix://" + filepath.Join(t.TempDir(), "absent.sock")}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeSetup(t, machine, string(config))
+			setup := openSetup(t, v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine, Edit: true})
+			saveSetup(t, setup, map[string]string{"half": half}, nil)
+			request := v1.PlanRequest{Scene: "dev", ProjectPath: project, ConfigPath: machine}
+			result, planErr := Resolve(request)
+			source, err := Locate(project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, prepareErr := Prepare(source, request)
+			if !valid {
+				for _, err := range []error{planErr, prepareErr} {
+					var detail *v1.PlanError
+					if !errors.As(err, &detail) || detail.Code != "invalid_composition" || strings.Contains(err.Error(), "deferred-private-canary") {
+						t.Fatal("known overflow not rejected privately", err)
+					}
+				}
+				return
+			}
+			if planErr != nil || prepareErr != nil {
+				t.Fatal("valid contextual plan rejected", planErr, prepareErr)
+			}
+			public, err := json.Marshal(result)
+			if err != nil || strings.Contains(string(public), "deferred-private-canary") || !result.Components[0].Environment["PRIVATE"].Redacted {
+				t.Fatal("private plan exposed", err)
+			}
+			captured := snapshot.Secrets["web/environment/PRIVATE"].Composition
+			if captured == nil || captured.Format.Values[0].Format.Values[2].Format.Values[0].FilePath == nil {
+				t.Fatal("shared context folded during preparation")
+			}
+			pending := snapshot.Secrets["web/environment/UNKNOWN"].Composition
+			if pending == nil || pending.FilePath.Parts[1].Ref == nil || pending.FilePath.Parts[1].Ref.Name != "port" {
+				t.Fatal("allocation provenance lost")
+			}
+			if snapshot.PrivateProvenance == nil || !snapshot.PrivateProvenance.Present {
+				t.Fatal("private provenance lost")
+			}
+			for _, runtime := range []v1.Runtime{v1.Native, v1.Container} {
+				actual, err := composition.Resolve(*captured, runtime, func(v v1.Value) (v1.Value, error) { return v, nil })
+				if err != nil || actual.Literal == nil || len(*actual.Literal) != composition.MaxBytes || !actual.Secret {
+					t.Fatalf("actual consumer %s: %v", runtime, err)
+				}
+			}
+		})
+	}
+}

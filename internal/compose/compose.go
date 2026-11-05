@@ -50,6 +50,21 @@ func FormatCount(literal string) (int, error) {
 // Unresolved operands remain typed; sensitivity includes every operand.
 // An unknown runtime (empty string) preserves filesystem constructions for shared consumers.
 func Resolve(v v1.Value, runtime v1.Runtime, reference func(v1.Value) (v1.Value, error)) (v1.Value, error) {
+	resolved, err := resolveValue(v, runtime, reference)
+	if err != nil || runtime != "" || resolved.Literal != nil || resolved.Ref != nil {
+		return resolved, err
+	}
+	// Validate both eventual consumers without replacing the captured tree or
+	// re-reading references; deferred children can hide known parent failures.
+	for _, consumer := range []v1.Runtime{v1.Native, v1.Container} {
+		if _, err := resolveValue(resolved, consumer, func(v v1.Value) (v1.Value, error) { return v, nil }); err != nil {
+			return v1.Value{}, err
+		}
+	}
+	return resolved, nil
+}
+
+func resolveValue(v v1.Value, runtime v1.Runtime, reference func(v1.Value) (v1.Value, error)) (v1.Value, error) {
 	if v.Ref != nil {
 		return reference(v)
 	}
@@ -62,7 +77,7 @@ func Resolve(v v1.Value, runtime v1.Runtime, reference func(v1.Value) (v1.Value,
 	known := true
 	for i, child := range operands {
 		var err error
-		resolved[i], err = Resolve(child, runtime, reference)
+		resolved[i], err = resolveValue(child, runtime, reference)
 		if err != nil {
 			return v1.Value{}, err
 		}

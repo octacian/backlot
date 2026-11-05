@@ -219,3 +219,52 @@ func TestDeferredURLIdentityBounds(t *testing.T) {
 		t.Fatal("mandatory final separator lost", err)
 	}
 }
+
+func TestDeferredConsumerValidationPreservesCapturedTree(t *testing.T) {
+	input := v1.Value{Ref: &v1.Reference{Kind: "input", Name: "half"}}
+	tail := formatValue("%s", fileValue(literal("/base"), literal("..")))
+	for _, valid := range []bool{false, true} {
+		size, template := MaxBytes/2, "%s%s%s"
+		if valid {
+			size--
+			template += "x"
+		}
+		half := "private-canary" + strings.Repeat("x", size-len("private-canary"))
+		calls := 0
+		got, err := Resolve(formatValue(template, input, input, tail), "", func(v v1.Value) (v1.Value, error) {
+			calls++
+			value := literal(half)
+			value.Secret = true
+			return value, nil
+		})
+		if calls != 2 {
+			t.Fatalf("references captured %d times", calls)
+		}
+		if !valid {
+			if err != ErrInvalid || strings.Contains(err.Error(), "private-canary") {
+				t.Fatal("known overflow not rejected privately", err)
+			}
+			continue
+		}
+		if err != nil || got.Literal != nil || !got.Secret || got.Format == nil || got.Format.Values[2].Format.Values[0].FilePath == nil {
+			t.Fatal("captured consumer context changed", err)
+		}
+		for _, runtime := range []v1.Runtime{v1.Native, v1.Container} {
+			actual, err := Resolve(got, runtime, func(v v1.Value) (v1.Value, error) { return v, nil })
+			if err != nil || actual.Literal == nil || len(*actual.Literal) != MaxBytes || !actual.Secret {
+				t.Fatalf("exact cap %s: %v", runtime, err)
+			}
+		}
+	}
+	// Validation must leave genuinely unknown values available for later cleaning.
+	unknown := v1.Value{Ref: &v1.Reference{Kind: "instance", Field: "id"}}
+	value := formatValue("%s", fileValue(literal("/"), literal(strings.Repeat("x", MaxBytes)), unknown))
+	partial, err := Resolve(value, "", func(v v1.Value) (v1.Value, error) { return v, nil })
+	if err != nil || partial.Format == nil || partial.Format.Values[0].FilePath.Parts[1].Ref == nil {
+		t.Fatal("unknown shortening lost", err)
+	}
+	actual, err := Resolve(partial, v1.Native, func(v v1.Value) (v1.Value, error) { return literal("../leaf"), nil })
+	if err != nil || actual.Literal == nil || *actual.Literal != "/leaf" {
+		t.Fatal("later shortening rejected", err)
+	}
+}

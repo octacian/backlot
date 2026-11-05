@@ -226,9 +226,10 @@ bytes without effects; it is advisory and apply rechecks protection under the sa
 fences. Protected active/kept/cleanup-uncertain work is never deleted. Prune removes
 selected history and evidence, leaving application data, credentials and private
 snapshots intact for scene executions. Completed task pruning also retires its
-independent result to an execution-free tombstone. The current scene instance result remains current-state truth even if
-its history row is pruned, with expired evidence; exact history stays unavailable
-on later current-result updates. New attempts retain increasing acceptance order.
+independent result to an execution-free tombstone. The current scene instance result
+remains current-state truth even if its history row is pruned, with expired evidence;
+exact history stays unavailable on later current-result updates. New attempts retain
+increasing acceptance order.
 File deletion intent survives a crash or incomplete removal and is retried by the
 existing retention sweep, without resurrecting metadata. Legacy mixed logs preserve
 unselected records; rewriting visibly invalidates affected log cursors.
@@ -245,19 +246,16 @@ Lost/unusable mutation replies still mean unknown acceptance/completion.
 
 ### Task evidence and retirement
 
-Tasks have independent IDs, attempt results, native logs and artifact collections;
-use that task ID for inspection/history/export. Exact application exit and
-collection/cleanup failures remain independent. Task application streams retain
-the same sensitivity as all application evidence; ordinary results do not reveal
-accepted environment credentials.
+Use the task's independent ID for inspection, history and export. Its results,
+logs and artifacts follow the existing outcome and sensitivity contracts; ordinary
+results never reveal accepted environment credentials.
 
 Completed task outcomes share their parent's completed-attempt retention count,
 including parent-scoped manual pruning. Active and cleanup-uncertain tasks remain
-protected. Settled tasks retire private launch snapshots and inputs; they are not
-a historical secret archive. Restart/reset preserves bounded diagnosis. Successful
-parent destroy erases dependent results, logs, artifacts and private material too;
+protected. Settled tasks retire private launch snapshots and inputs. Restart/reset
+preserves bounded diagnosis. Successful parent destroy erases dependent results,
+logs, artifacts and private material too;
 failed filesystem erasure retains durable deletion intent and must be retried.
-Task completion/cancellation never destroys parent data.
 
 ## Portable per-instance export
 

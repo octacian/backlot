@@ -44,11 +44,10 @@ command side effects.
 
 ## Declared native tasks
 
-Enable reusable native `job` components with `policy: each-start` in a persistent
-scene's `tasks` list. They run only on explicit invocation; `components` remains
-the automatic startup graph. A component selected in both lists still runs at
-startup under its existing policy. Tasks cannot initialize resources or produce
-build images. Every attached resource and dependency must already be selected by
+Enable native `job` components with `policy: each-start` in a persistent scene's
+`tasks` list for explicit invocation. `components` selects automatic startup work;
+a component in both lists also runs at startup. Tasks cannot initialize resources
+or produce build images. Every attached resource and dependency must already be selected by
 the parent; dependencies test accepted ready services or successful/skipped parent
 jobs without launching work.
 
@@ -77,13 +76,13 @@ accepted paired credentials, including composed values; `instance.id` means the
 parent ID. Sensitive values stay in environment mappings, never argv. Task output
 and artifact declarations use the existing project-relative anchors.
 
-Enabling a task validates and privately captures its tools, cwd, seeds and inputs
-when the parent accepts a new attempt, even if the task is never invoked. Outputs
-are validated without acquiring startup locks. Invocation compares only that
-task's effective captured configuration and referenced parent contracts with current
-sources; a relevant change or unavailable input requires explicit parent restart.
-Unrelated task edits do not invalidate it. Legacy snapshots have no task captures;
-ordinary joins never add them. See [invocation](cli.md#declared-task-invocation) and
+Each new parent attempt validates and privately captures every enabled task's tools,
+cwd, seeds and inputs, even for unused tasks. Task outputs are validated without
+acquiring startup locks. Invocation rejects relevant changes to current configuration
+or referenced parent contracts and unavailable inputs; explicit parent restart is
+required. Unrelated task edits do not invalidate the capture. Legacy snapshots
+have no task captures, and ordinary joins never add them. See
+[invocation](cli.md#declared-task-invocation) and
 [parent ownership](daemon.md#tasks-borrowing-a-ready-parent).
 
 ## Native working directories

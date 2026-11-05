@@ -13,9 +13,7 @@ generations keep no pins and no invented image identity. The 11-to-12 step seeds
 [attempt history](evidence.md#retained-attempt-history) from known current
 outcomes only; overwritten earlier attempts cannot be reconstructed. The 12-to-13
 step seeds current project and checkout bindings from retained origins, preserving
-ownership, credentials and history for later [explicit reassociation](cli.md#reassociate-retained-project-data). The 13-to-14
-step adds the dependent-task semantic fence without creating legacy task captures.
-Older binaries cannot ignore live consumers; upgrade/recovery never resumes tasks.
+ownership, credentials and history for later [explicit reassociation](cli.md#reassociate-retained-project-data).
 
 Source validation, transformations, current authority validation and the final
 version fence share one write transaction. Any precommit error, cancellation or

@@ -178,22 +178,21 @@ backlot task run maintenance --instance PARENT_ID --state-dir /private/backlot -
 
 Choose exactly one `--scene` or `--instance`. Named targeting uses the existing
 recorded checkout/project selection; `--project` applies only to `--scene`.
-The first positional is the enabled task; remaining arguments are literal and
-`--` protects application flags. There is no `--config`, implicit parent start,
-restart, keep-on-failure or interactive shell mode. The parent must already be
-ready with a matching accepted capture. Missing/relevant drift returns
-`restart_required`; resolve it by deliberately restarting the parent, never by
-retrying the task automatically. Held output groups/overlapping paths return
-`output_conflict` immediately.
+Arguments after the task name are literal; use `--` for application flags.
+The parent must already be ready with a matching accepted capture. Missing capture
+or relevant drift returns `restart_required`; explicitly restart the parent to
+accept current declarations. There is no `--config`, implicit start/restart,
+keep-on-failure or interactive shell mode. Held output groups or overlapping paths
+return `output_conflict` immediately.
 
 `--job-timeout` defaults to 30m and `--stop-grace` to 10s; `0s` job timeout is still
 subject to the finite client lease. The client waits, renews its task lease and
 on SIGINT/SIGTERM cancels/joins only that task. Successful JSON is one
 `InstanceResponse`; `instance.task` gives parent instance, attempt, generation and
 task name. Its own `instance.id` addresses `inspect`, `status`, `logs`, `history`,
-`renew`, `cancel` and `stop`. Clean application failure preserves the exact exit
-code, including nonzero; orchestration, collection and cleanup failures remain
-separate and return nonzero. Task cleanup cannot be waived with `stop --force`.
+`renew`, `cancel` and `stop`. The task preserves the exact application exit code;
+orchestration, collection and cleanup failures remain separate and return nonzero.
+Task cleanup cannot be waived with `stop --force`.
 A lost mutation reply means unknown acceptance; inspect recorded scope before
 explicit recovery and never automatically retry.
 

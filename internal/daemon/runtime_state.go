@@ -326,7 +326,14 @@ func (s *store) outputConflict(requestedPlan v1.PlanResponse) error {
 						return err
 					}
 					separator := string(filepath.Separator)
-					if oldPath == newPath || strings.HasPrefix(oldPath, newPath+separator) || strings.HasPrefix(newPath, oldPath+separator) {
+					overlap := oldPath == newPath || strings.HasPrefix(oldPath, newPath+separator) || strings.HasPrefix(newPath, oldPath+separator)
+					if existing.EmptyBeforeExecution || requested.EmptyBeforeExecution {
+						_, overlap, err = plan.OutputOverlap(oldPath, newPath)
+						if err != nil {
+							return err
+						}
+					}
+					if overlap {
 						return problem("unsafe_drift", "overlapping checkout output declarations changed groups while another consumer is active or uncertain; stop it before launching")
 					}
 				}

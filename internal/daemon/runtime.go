@@ -736,6 +736,12 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 	entry.mu.Lock()
 	entry.outputRelease = release
 	entry.mu.Unlock()
+	if failure = s.store.outputConflict(snapshot.Plan); failure != nil {
+		return
+	}
+	if failure = s.prepareOutputDirectories(startup, snapshot, identity); failure != nil {
+		return
+	}
 	if failure = s.allocateResources(startup, id, snapshot, entry); failure != nil {
 		return
 	}

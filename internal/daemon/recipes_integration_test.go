@@ -153,7 +153,7 @@ func TestNativePlaywrightRecipe(t *testing.T) {
 	}
 	binary := recipeBinary(t, "BACKLOT_INSTALLED_TEST_BINARY", "../../cmd/backlot")
 	h := newNativeHarness(t, binary, "30s")
-	copyRecipe(t, h, "native-playwright", "app.mjs", "prepare.mjs", "playwright.config.mjs", "package.json", "tests/application.spec.mjs")
+	copyRecipe(t, h, "native-playwright", "app.mjs", "playwright.config.mjs", "package.json", "tests/application.spec.mjs")
 	config := filepath.Join(filepath.Dir(h.dir), "machine.json")
 	if err := os.WriteFile(config, []byte(`{"version":"backlot/v1"}`), 0600); err != nil {
 		t.Fatal(err)

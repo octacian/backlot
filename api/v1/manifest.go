@@ -117,8 +117,10 @@ type Resource struct {
 
 // Output declares a checkout-relative mutable path and serialization group.
 type Output struct {
-	Path             string `json:"path" yaml:"path" jsonschema:"minLength=1" jsonschema_description:"Safe checkout-relative mutable output path."`
-	ConcurrencyGroup string `json:"concurrency_group" yaml:"concurrency_group" jsonschema:"minLength=1" jsonschema_description:"Named serialization group for overlapping checkout outputs."`
+	// EmptyBeforeExecution authorizes emptying this scratch directory before each new execution.
+	EmptyBeforeExecution bool   `json:"empty_before_execution,omitempty" yaml:"empty_before_execution,omitempty" jsonschema_description:"Irreversibly empty and recreate this scratch directory under output locks before each new execution; omitted or false preserves existing contents."`
+	Path                 string `json:"path" yaml:"path" jsonschema:"minLength=1" jsonschema_description:"Safe checkout-relative mutable output path."`
+	ConcurrencyGroup     string `json:"concurrency_group" yaml:"concurrency_group" jsonschema:"minLength=1" jsonschema_description:"Named serialization group for overlapping checkout outputs."`
 }
 
 // Command declares an executable tool and direct argument vector.

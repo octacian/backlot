@@ -81,7 +81,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 			selectedOutputs[output] = true
 		}
 	}
-	if err := validateOutputs(project, m.Outputs, selectedOutputs); err != nil {
+	if err := ValidateOutputs(project, m.Outputs, selectedOutputs); err != nil {
 		return v1.PlanResponse{}, err
 	}
 	for _, name := range order {

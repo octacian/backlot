@@ -1,8 +1,8 @@
 ---
 title: "Prepare explicitly disposable checkout output directories before execution"
 date: 2026-11-05
-status: proposed
-implementation: not-started
+status: accepted
+implementation: in-progress
 summary: "Allow an explicit output-directory opt-in to authorize bounded preparation under execution output locks, without inferring artifact freshness."
 tags: [outputs, lifecycle, evidence, ownership]
 supersedes: []
@@ -58,8 +58,8 @@ locks before deletion. Require a strict manifest-directory descendant with safe
 relative syntax and a directory or absent target. Reject symlink components on
 the path, including internal aliases, and use root-relative filesystem operations;
 never follow links found inside the disposable tree. Reject overlap with this
-daemon's private state and retained resource data, and with Git metadata, including
-filesystem aliases.
+daemon's private state and retained resource data, and with the checkout Git marker, resolved Git directory and common directory,
+including filesystem aliases.
 Inspection or validation uncertainty fails closed. Preflight all selected targets
 before the first removal; no component launches unless every preparation succeeds.
 

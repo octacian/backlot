@@ -42,6 +42,31 @@ outputs. The executor serializes these groups per canonical checkout
 across scenes and runs; a plan is not a lock. Backlot cannot infer undeclared
 command side effects.
 
+Set `empty_before_execution: true` only for a disposable scratch directory, such
+as reports. Backlot removes and recreates each selected opted-in directory once
+per new execution, after all output locks are acquired and before any component
+launches. Omitted or false preserves contents. Joining accepted work, offline
+planning and metadata preparation never empty outputs. New starts and explicit
+restarts prepare again; healthy starts retain accepted settings and report drift.
+
+Opted-in paths must be strict descendants of the manifest directory, with no
+symlink path components and a directory or absent target. Tree symlinks are
+unlinked, never followed. Private daemon/resource state and the checkout Git
+marker, resolved Git directory and common directory are protected, including
+filesystem aliases. Overlaps involving an opted-in output require the same
+directory, concurrency group and opt-in; nested or mixed-policy overlaps are
+rejected across scene declarations. Ordinary output overlap rules are unchanged.
+
+All targets are checked under the locks before removal. Cancelled lock waiters
+do not delete; a filesystem failure or cancellation during preparation can leave
+some directories empty, but launches no components. There is no rollback,
+automatic retry or preparation replay on daemon recovery. Locks and kept/uncertain
+consumer fences remain through collection and joined cleanup. These checks bound
+cooperative checkout execution, not hostile filesystem or mount manipulation.
+Fresh-only initialization stamps are unchanged: a skipped producer does not
+repopulate an emptied directory. Use each-start jobs for repeatable reports; see
+[evidence](evidence.md#declared-artifacts-and-fixtures) for collection limits.
+
 ## Native working directories
 
 Native `command.working_directory` selects an existing directory relative to the

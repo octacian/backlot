@@ -2,7 +2,7 @@
 title: "Run declared native tasks against accepted ready scenes"
 date: 2026-11-05
 status: accepted
-implementation: in-progress
+implementation: implemented
 summary: "Bind explicit finite native tasks to one accepted parent attempt and resource generation, with independent execution outcomes and dependent cleanup fences."
 tags:
   - lifecycle
@@ -13,7 +13,7 @@ supersedes: []
 superseded_by: []
 related: [/docs/adr/20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md, /docs/adr/20261103T174043965Z-reassociate-retained-projects-through-explicit-current-bindings.md, /docs/adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md, /docs/adr/20261103T174849392Z-select-bounded-working-directories-for-native-commands.md, /docs/adr/20261104T030614332Z-compose-bounded-declared-values-for-explicit-consumers.md]
 tracking: ["https://github.com/octacian/backlot/issues/111"]
-implemented_by: []
+implemented_by: ["https://github.com/octacian/backlot/pull/124"]
 ---
 
 # Run declared native tasks against accepted ready scenes

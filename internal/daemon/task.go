@@ -36,8 +36,28 @@ func (s *service) runTask(ctx context.Context, q v1.TaskRunRequest) (v1.Instance
 		return out, problem("parent_unavailable", "recorded parent must already be ready")
 	}
 	parent := selected.Result.Instance
+	if parent.Status != v1.RuntimeReady || parent.Execution == nil {
+		return out, problem("parent_unavailable", "recorded parent must already be ready")
+	}
+	s.mu.Lock()
+	owner := s.executions[parent.ID]
+	generation := parent.Execution.Attempt
+	if owner != nil && owner.attempt == parent.Execution.Attempt && owner.resources != nil && owner.resources.ID != "" {
+		generation = owner.resources.ID
+	}
+	s.mu.Unlock()
+	binding := &v1.TaskBinding{InstanceID: parent.ID, Attempt: parent.Execution.Attempt, Generation: generation, Name: q.Task}
+	if s.beforeTaskMutation != nil {
+		s.beforeTaskMutation(parent.ID)
+	}
 	unlock := s.lockMutation(parent.ID)
 	defer unlock()
+	// invariant: waiting for lifecycle serialization never adopts a replacement attempt.
+	if err := s.store.db.View(func(tx *bolt.Tx) error {
+		return taskWriterParent(tx, v1.Instance{Task: binding})
+	}); err != nil {
+		return out, err
+	}
 	accepted, err := s.store.snapshot(parent.ID)
 	if err != nil {
 		return out, err
@@ -45,6 +65,13 @@ func (s *service) runTask(ctx context.Context, q v1.TaskRunRequest) (v1.Instance
 	capture, ok := accepted.Tasks[q.Task]
 	if !ok {
 		return out, problem("restart_required", "task has no accepted capture; explicitly restart the parent to accept enabled tasks")
+	}
+	if owner == nil || owner.attempt != binding.Attempt {
+		return out, problem("parent_unavailable", "parent must already be ready in this daemon; explicitly restart an interrupted parent")
+	}
+	// authz: exact-ID selection cannot grant a replacement filesystem the parent's resources.
+	if err := owner.source.verify(); err != nil {
+		return out, err
 	}
 	journal, err := s.store.runtime(parent.ID)
 	if err != nil {
@@ -57,6 +84,9 @@ func (s *service) runTask(ctx context.Context, q v1.TaskRunRequest) (v1.Instance
 	identity, err := captureSource(source)
 	if err != nil {
 		return out, err
+	}
+	if source != owner.source.source || identity.projectIdentity != owner.source.projectIdentity || !sameCheckoutValue(identity.checkout, associatedCheckout(parent)) {
+		return out, problem("checkout_changed", "task source disagrees with the accepted parent and current checkout binding; explicitly reassociate and restart")
 	}
 	current, err := plan.PrepareTask(source, v1.PlanRequest{Scene: parent.Plan.Scene, ConfigPath: journal.ConfigPath}, q.Task)
 	if err != nil {
@@ -85,9 +115,18 @@ func (s *service) runTask(ctx context.Context, q v1.TaskRunRequest) (v1.Instance
 	if err != nil {
 		return out, err
 	}
-	owner := s.executions[parent.ID]
-	if parent.Plan.Lifetime != v1.Persistent || parent.Status != v1.RuntimeReady || parent.Execution == nil || owner == nil || owner.taskAdmissionClosed || owner.attempt != parent.Execution.Attempt {
+	if s.executions[parent.ID] != owner || parent.Execution == nil || parent.Execution.Attempt != binding.Attempt {
+		return out, problem("conflict", "parent changed during task admission; no task was started")
+	}
+	if parent.Plan.Lifetime != v1.Persistent || parent.Status != v1.RuntimeReady || owner.taskAdmissionClosed || owner.attempt != parent.Execution.Attempt {
 		return out, problem("parent_unavailable", "parent must already be ready in this daemon; explicitly restart an interrupted parent")
+	}
+	ownerGeneration := owner.attempt
+	if owner.resources != nil && owner.resources.ID != "" {
+		ownerGeneration = owner.resources.ID
+	}
+	if ownerGeneration != binding.Generation {
+		return out, problem("conflict", "parent resource generation changed during task admission; no task was started")
 	}
 	select {
 	case <-owner.done:
@@ -108,11 +147,6 @@ func (s *service) runTask(ctx context.Context, q v1.TaskRunRequest) (v1.Instance
 			return out, problem("dependency_unavailable", "task dependency is not satisfied by the accepted parent")
 		}
 	}
-	generation := parent.Execution.Attempt
-	if owner.resources != nil && owner.resources.ID != "" {
-		generation = owner.resources.ID
-	}
-	binding := &v1.TaskBinding{InstanceID: parent.ID, Attempt: parent.Execution.Attempt, Generation: generation, Name: q.Task}
 	id, attempt := newID(), newID()
 	component := capture.Component
 	command := *component.Command
@@ -139,6 +173,9 @@ func (s *service) runTask(ctx context.Context, q v1.TaskRunRequest) (v1.Instance
 		}
 		if current.Instance.Status != v1.RuntimeReady || current.Instance.Execution == nil || current.Instance.Execution.Attempt != binding.Attempt {
 			return problem("conflict", "parent changed during task admission; no task was started")
+		}
+		if err := taskWriterParent(tx, instance); err != nil {
+			return err
 		}
 		if err := outputConflictTx(tx, snapshot.Plan, capture.Paths, "", true); err != nil {
 			return err

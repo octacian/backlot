@@ -106,6 +106,44 @@ func TestTaskNativeLifecycle(t *testing.T) {
 			}
 		}
 	})
+	t.Run("exact ID refuses replacement checkout", func(t *testing.T) {
+		h := newNativeHarness(t, binary)
+		enableNativeTasks(h, "job")
+		parent := h.state(h.run("dev").Instance.ID, v1.RuntimeReady).Instance
+		success := runHarnessTask(h, parent.ID, "job")
+		h.state(success.Instance.ID, v1.Succeeded)
+		original := h.project + "-original"
+		if err := os.Rename(h.project, original); err != nil {
+			t.Fatal(err)
+		}
+		// Restore the accepted directory before the harness joins its owned parent.
+		t.Cleanup(func() {
+			if err := os.RemoveAll(h.project); err != nil {
+				t.Error(err)
+			}
+			if err := os.Rename(original, h.project); err != nil {
+				t.Error(err)
+			}
+		})
+		if err := os.Mkdir(h.project, 0700); err != nil {
+			t.Fatal(err)
+		}
+		h.write()
+		before, err := h.cli.List(context.Background(), v1.ListRequest{APIVersion: v1.Version})
+		if err != nil {
+			t.Fatal(err)
+		}
+		command := exec.Command(binary, "task", "run", "job", "--instance", parent.ID, "--state-dir", h.dir, "--json")
+		data, err := command.Output()
+		if err == nil || !strings.Contains(string(data), `"code":"checkout_changed"`) {
+			t.Fatalf("replacement checkout accepted: %v %s", err, data)
+		}
+		after, err := h.cli.List(context.Background(), v1.ListRequest{APIVersion: v1.Version})
+		if err != nil || len(before.Instances) != len(after.Instances) {
+			t.Fatal("task admitted on replacement", err)
+		}
+		h.state(parent.ID, v1.RuntimeReady)
+	})
 	t.Run("lease expiry leaves parent ready", func(t *testing.T) {
 		h := newNativeHarness(t, binary, "500ms")
 		enableNativeTasks(h, "never")

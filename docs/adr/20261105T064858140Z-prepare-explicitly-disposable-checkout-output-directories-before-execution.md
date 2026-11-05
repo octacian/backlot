@@ -9,7 +9,7 @@ supersedes: []
 superseded_by: []
 related: [/docs/adr/20261103T174043965Z-reassociate-retained-projects-through-explicit-current-bindings.md, /docs/adr/20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md]
 tracking: ["https://github.com/octacian/backlot/issues/113"]
-implemented_by: []
+implemented_by: ["https://github.com/octacian/backlot/pull/123"]
 ---
 
 # Prepare explicitly disposable checkout output directories before execution

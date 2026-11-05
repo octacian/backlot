@@ -91,7 +91,7 @@ func TestFilePathBoundsAndDiscardedOperands(t *testing.T) {
 	// Measure allocations with preexisting operands, not the test's large input.
 	result := testing.Benchmark(func(b *testing.B) {
 		for b.Loop() {
-			if _, err := filePath([]string{huge, "..", "result"}, v1.Container); err != nil {
+			if _, err := filePath([]string{huge, "..", "result"}, v1.Container, nil); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -135,5 +135,87 @@ func TestURLPathPartsAndNormalizationBounds(t *testing.T) {
 		if _, err := Resolve(v, v1.Native, func(v v1.Value) (v1.Value, error) { return v, nil }); err != ErrInvalid {
 			t.Fatal("known part not validated", err)
 		}
+	}
+}
+
+func TestPartialFilePathIrreducibleBounds(t *testing.T) {
+	unknown := v1.Value{Ref: &v1.Reference{Kind: "instance", Field: "id"}}
+	identity := func(v v1.Value) (v1.Value, error) { return v, nil }
+	for _, tc := range []struct {
+		base      string
+		size      int
+		hydration string
+		valid     bool
+	}{
+		{"/", MaxBytes, "", false},
+		{"/", MaxBytes - 1, "", true},
+		{".", MaxBytes, "", true},
+		{"../a", MaxBytes - 2, "..", false},
+		{"../a", MaxBytes - 3, "..", true},
+	} {
+		value := fileValue(literal(tc.base), unknown, literal(strings.Repeat("x", tc.size)))
+		partial, err := Resolve(value, v1.Native, identity)
+		if (err == nil) != tc.valid {
+			t.Fatalf("base=%q terminal bytes=%d: %v", tc.base, tc.size, err)
+		}
+		if !tc.valid {
+			continue
+		}
+		got, err := Resolve(partial, v1.Native, func(v v1.Value) (v1.Value, error) { return literal(tc.hydration), nil })
+		if err != nil || got.Literal == nil || len(*got.Literal) != MaxBytes {
+			t.Fatalf("exact-cap hydration: %v", err)
+		}
+	}
+	// A later unknown parent may remove a huge earlier segment, even below a root.
+	huge := literal(strings.Repeat("x", 2*MaxBytes))
+	huge.Secret = true
+	partial, err := Resolve(fileValue(literal("/"), huge, unknown), v1.Native, identity)
+	if err != nil || partial.FilePath == nil || !partial.Secret {
+		t.Fatal("removable known prefix", err)
+	}
+	got, err := Resolve(partial, v1.Native, func(v v1.Value) (v1.Value, error) { return literal("../leaf"), nil })
+	if err != nil || got.Literal == nil || *got.Literal != "/leaf" || !got.Secret {
+		t.Fatal("parent shortening", err)
+	}
+	// An unknown first operand can select a relative result despite a rooted suffix.
+	value := fileValue(unknown, literal("/"+strings.Repeat("x", MaxBytes)))
+	if _, err := Resolve(value, v1.Native, identity); err != nil {
+		t.Fatal("uncertain root rejected", err)
+	}
+}
+
+func TestDeferredURLIdentityBounds(t *testing.T) {
+	base := "http://private-canary.test/" + strings.Repeat("雪", 120000)
+	empty := fileValue(literal(""))
+	empty.Secret = true
+	value := v1.Value{URLPath: &v1.URLPathValue{Base: literal(base), Parts: []v1.Value{empty}}}
+	identity := func(v v1.Value) (v1.Value, error) { return v, nil }
+	for _, runtime := range []v1.Runtime{"", v1.Native, v1.Container} {
+		got, err := Resolve(value, runtime, identity)
+		if err != nil || !got.Secret {
+			t.Fatalf("identity context=%q: %v", runtime, err)
+		}
+		if runtime == "" {
+			if got.URLPath == nil || got.URLPath.Parts[0].FilePath == nil {
+				t.Fatal("consumer context was folded")
+			}
+			got, err = Resolve(got, v1.Native, identity)
+		}
+		if err != nil || got.Literal == nil || *got.Literal != base {
+			t.Fatal("raw identity changed", err)
+		}
+	}
+	value.URLPath.Parts = append(value.URLPath.Parts, literal("/"))
+	for _, runtime := range []v1.Runtime{"", v1.Native} {
+		if _, err := Resolve(value, runtime, identity); err != ErrInvalid || strings.Contains(err.Error(), "private-canary") {
+			t.Fatal("unavoidable escaping not checked privately", err)
+		}
+	}
+	// A definitely nonempty slash requires a separator even if a later operand
+	// remains deferred and can be empty; it cannot preserve an at-cap raw base.
+	base = "http://a/" + strings.Repeat("x", MaxBytes-len("http://a/"))
+	value.URLPath = &v1.URLPathValue{Base: literal(base), Parts: []v1.Value{literal("/"), empty}}
+	if _, err := Resolve(value, "", identity); err != ErrInvalid {
+		t.Fatal("mandatory final separator lost", err)
 	}
 }

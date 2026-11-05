@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -158,6 +159,30 @@ func TestPathPartsStrictDecode(t *testing.T) {
 			if (err == nil) != tc.valid || err != nil && strings.Contains(err.Error(), "private-canary") {
 				t.Fatalf("%s: %v", source, err)
 			}
+		}
+	}
+}
+
+func TestDeferredURLIdentityManifestBoundary(t *testing.T) {
+	lit := func(s string) v1.Value { return v1.Value{Literal: &s} }
+	base := "http://private-canary.test/" + strings.Repeat("雪", 120000)
+	for _, appendRequired := range []bool{false, true} {
+		value := v1.Value{URLPath: &v1.URLPathValue{Base: lit(base), Parts: []v1.Value{{Secret: true, FilePath: &v1.FilePathValue{Base: lit(""), Parts: []v1.Value{}}}}}}
+		if appendRequired {
+			value.URLPath.Parts = append(value.URLPath.Parts, lit("/"))
+		}
+		m := v1.Manifest{Version: v1.ManifestVersion, Project: "demo", Tools: map[string]string{"sh": "sh"}, Components: map[string]v1.Component{"test": {Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "sh"}, Environment: v1.Environment{Assign: map[string]v1.Value{"URL": value}}}}, Scenes: map[string]v1.Scene{"test": {Lifetime: v1.Disposable, Components: []string{"test"}, TerminalJob: "test"}}}
+		data, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded v1.Manifest
+		if err := Decode(data, ".json", &decoded); err != nil {
+			t.Fatal("bounded source decode", err)
+		}
+		err = Validate(decoded)
+		if (err != nil) != appendRequired || err != nil && strings.Contains(err.Error(), "private-canary") {
+			t.Fatalf("append required=%v: %v", appendRequired, err)
 		}
 	}
 }

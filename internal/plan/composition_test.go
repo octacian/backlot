@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	composition "github.com/octacian/backlot/internal/compose"
 )
 
 func compositionFormat(template string, values ...v1.Value) v1.Value {
@@ -122,5 +123,30 @@ func TestFilePathActualConsumerPlanning(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestPartialFilePathKnownPrivateInputBound(t *testing.T) {
+	m := v1.Manifest{Inputs: map[string]v1.Input{"half": {Secret: true}}}
+	half := "private-canary" + strings.Repeat("x", composition.MaxBytes/2-len("private-canary"))
+	config := resolvedConfig{Inputs: map[string]string{"half": half}}
+	input := v1.Value{Ref: &v1.Reference{Kind: "input", Name: "half"}}
+	segment := compositionFormat("%s%s", input, input)
+	unknown := v1.Value{Ref: &v1.Reference{Kind: "instance", Field: "id"}}
+	root := "/"
+	value := v1.Value{FilePath: &v1.FilePathValue{Base: v1.Value{Literal: &root}, Parts: []v1.Value{unknown, segment}}}
+	_, err := resolveValue(m, config, value, "", v1.PlanResponse{}, v1.Native)
+	if err == nil || strings.Contains(err.Error(), "private-canary") {
+		t.Fatal("impossible known output not rejected privately", err)
+	}
+	value.FilePath.Parts = []v1.Value{segment, unknown}
+	partial, err := resolveValue(m, config, value, "", v1.PlanResponse{}, v1.Native)
+	if err != nil || !partial.wire().Redacted || partial.private().Composition == nil {
+		t.Fatal("removable private prefix rejected or exposed", err)
+	}
+	parent := "../leaf"
+	got, err := composition.Resolve(*partial.private().Composition, v1.Native, func(v v1.Value) (v1.Value, error) { return v1.Value{Literal: &parent}, nil })
+	if err != nil || got.Literal == nil || *got.Literal != "/leaf" || !got.Secret {
+		t.Fatal("private parent shortening", err)
 	}
 }

@@ -121,17 +121,18 @@ func Resolve(v v1.Value, runtime v1.Runtime, reference func(v1.Value) (v1.Value,
 			return v1.Value{}, ErrInvalid
 		}
 	}
-	if v.URLPath != nil {
+	if v.URLPath != nil || v.FilePath != nil {
 		knownParts := make([]bool, len(resolved))
 		for i := range resolved {
 			knownParts[i] = resolved[i].Literal != nil
 		}
-		if _, err := urlParts(texts, knownParts); err != nil {
-			return v1.Value{}, err
+		var err error
+		if v.URLPath != nil {
+			_, err = urlParts(texts, knownParts)
+		} else {
+			_, err = filePath(texts, v1.Native, knownParts)
 		}
-	}
-	if v.FilePath != nil && known {
-		if _, err := filePath(texts, v1.Native); err != nil {
+		if err != nil {
 			return v1.Value{}, err
 		}
 	}
@@ -175,7 +176,7 @@ func Render(v v1.Value, runtime v1.Runtime, operands []string) (string, error) {
 		if len(operands) == 0 || runtime == "" {
 			return "", ErrInvalid
 		}
-		return filePath(operands, runtime)
+		return filePath(operands, runtime, nil)
 	}
 	return "", ErrInvalid
 }
@@ -378,7 +379,15 @@ func urlParts(operands []string, known []bool) (string, error) {
 		}
 		return base, nil
 	}
+	// Deferred parts may all be empty, preserving the raw base without escaping.
+	if !complete && !appended && known[0] && len(base) <= MaxBytes {
+		return "", nil
+	}
 	size := len(u.Scheme) + 3 + len(u.Host)
+	// Any append still requires one slash when deferred boundaries erased the tail.
+	if !complete && len(paths) == 1 && (appended || known[0] && len(base) > MaxBytes) {
+		size++
+	}
 	for i, part := range paths {
 		n := escapedSize(part)
 		if i > 0 {
@@ -401,20 +410,48 @@ func urlParts(operands []string, known []bool) (string, error) {
 // cleaned away by later parents never allocate an oversized intermediate string.
 // Supported native hosts and containers use slash separators; the selected Go
 // library owns the resulting path. This does not add Windows host support.
-func filePath(operands []string, runtime v1.Runtime) (string, error) {
-	rooted, nonempty := false, false
-	for _, part := range operands {
+func filePath(operands []string, runtime v1.Runtime, known []bool) (string, error) {
+	rooted, nonempty, prefixKnown := false, false, true
+	depth, leadingParents := 0, 0
+	for i, part := range operands {
 		if strings.ContainsRune(part, 0) {
 			return "", ErrInvalid
+		}
+		if known != nil && !known[i] {
+			prefixKnown = false
+		}
+		if !prefixKnown {
+			continue
 		}
 		if !nonempty && part != "" {
 			rooted = strings.HasPrefix(part, "/")
 			nonempty = true
 		}
+		if known != nil {
+			for segment := range strings.SplitSeq(part, "/") {
+				switch segment {
+				case "", ".":
+				case "..":
+					if depth > 0 {
+						depth--
+					} else if !rooted {
+						leadingParents++
+					}
+				default:
+					depth++
+				}
+			}
+		}
 	}
 	parents, size := 0, 0
 	var segments []string
 	for i := len(operands) - 1; i >= 0; i-- {
+		if known != nil && !known[i] {
+			// Unknown parents may erase earlier normal segments, but cannot erase
+			// the known root, leading parents, or surviving later segments.
+			parents = leadingParents
+			break
+		}
 		rest := operands[i]
 		for rest != "" {
 			index := strings.LastIndexByte(rest, '/')
@@ -466,6 +503,9 @@ func filePath(operands []string, runtime v1.Runtime) (string, error) {
 		segments = append(segments, "/")
 	} else if len(segments) == 0 && nonempty {
 		segments = append(segments, ".")
+	}
+	if known != nil {
+		return "", nil
 	}
 	slices.Reverse(segments)
 	if runtime == v1.Container {

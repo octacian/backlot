@@ -22,12 +22,21 @@ type HostPortValue struct {
 	Port Value `json:"port" yaml:"port"`
 }
 
-// URLPathValue appends a path beneath an absolute HTTP(S) base.
+// URLPathValue appends ordered paths beneath an absolute HTTP(S) base.
 type URLPathValue struct {
 	// Base is an absolute credential-free HTTP(S) URL without query or fragment.
 	Base Value `json:"base" yaml:"base"`
-	// Path appends beneath Base without traversal or authority replacement.
-	Path Value `json:"path" yaml:"path"`
+	// Parts append beneath Base without traversal or authority replacement.
+	Parts []Value `json:"parts" yaml:"parts"`
+}
+
+// FilePathValue joins and cleans paths using the actual consumer's filesystem syntax.
+// Traversal is allowed; construction grants no filesystem access or containment.
+type FilePathValue struct {
+	// Base is the first filesystem path operand.
+	Base Value `json:"base" yaml:"base"`
+	// Parts are appended in order; an empty array still normalizes Base.
+	Parts []Value `json:"parts" yaml:"parts"`
 }
 
 // Operands returns a composition's immediate operands in declaration order.
@@ -38,7 +47,9 @@ func (v Value) Operands() []Value {
 	case v.HostPort != nil:
 		return []Value{v.HostPort.Host, v.HostPort.Port}
 	case v.URLPath != nil:
-		return []Value{v.URLPath.Base, v.URLPath.Path}
+		return append([]Value{v.URLPath.Base}, v.URLPath.Parts...)
+	case v.FilePath != nil:
+		return append([]Value{v.FilePath.Base}, v.FilePath.Parts...)
 	default:
 		return nil
 	}
@@ -74,5 +85,45 @@ func (f *FormatValue) UnmarshalJSON(data []byte) error {
 		return errors.New("invalid format shape")
 	}
 	*f = FormatValue(value)
+	return nil
+}
+
+// UnmarshalJSON requires base and an explicit non-null parts array.
+func (v *URLPathValue) UnmarshalJSON(data []byte) error {
+	type wire URLPathValue
+	var value wire
+	if err := decodePath(data, &value); err != nil {
+		return err
+	}
+	*v = URLPathValue(value)
+	return nil
+}
+
+// UnmarshalJSON requires base and an explicit non-null parts array.
+func (v *FilePathValue) UnmarshalJSON(data []byte) error {
+	type wire FilePathValue
+	var value wire
+	if err := decodePath(data, &value); err != nil {
+		return err
+	}
+	*v = FilePathValue(value)
+	return nil
+}
+
+func decodePath(data []byte, value any) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return errors.New("invalid path shape")
+	}
+	for _, key := range []string{"base", "parts"} {
+		if fields[key] == nil || bytes.Equal(bytes.TrimSpace(fields[key]), []byte("null")) {
+			return errors.New("path requires base and parts array")
+		}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(value); err != nil {
+		return errors.New("invalid path shape")
+	}
 	return nil
 }

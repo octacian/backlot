@@ -35,7 +35,7 @@ environments:
       API_URL:
         url_path:
           base: {ref: {kind: resource, name: public, field: url}}
-          path: {literal: /api/}
+          parts: [{literal: api}, {literal: /}]
 components:
   database:
     kind: service

@@ -747,7 +747,7 @@ func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, re
 		value = snap.Secrets[key]
 	}
 	if value.Composition != nil {
-		return resolveComposition(*value.Composition, func(v v1.Value) (string, error) {
+		return resolveComposition(*value.Composition, runtime, func(v v1.Value) (string, error) {
 			return resolvedValue(plannedValue(v), key, id, snap, result, entry, runtime)
 		})
 	}

@@ -70,5 +70,5 @@ func (a Argument) MarshalYAML() (any, error) {
 
 // Preserve scalar encoding only while the argument remains a plain literal.
 func (a Argument) scalarLiteral() bool {
-	return a.scalar && a.Literal != nil && !a.Secret && a.Ref == nil && a.Format == nil && a.HostPort == nil && a.URLPath == nil
+	return a.scalar && a.Literal != nil && !a.Secret && a.Ref == nil && a.Format == nil && a.HostPort == nil && a.URLPath == nil && a.FilePath == nil
 }

@@ -226,7 +226,7 @@ presence/validity, with no network call or certificate/DNS check.
 
 ## Values and environment
 
-A value contains exactly one `literal`, `ref`, `format`, `host_port` or `url_path` payload, optionally
+A value contains exactly one `literal`, `ref`, `format`, `host_port`, `url_path` or `file_path` payload, optionally
 `secret: true`. A reference has explicit `kind`, `name`, `field` and, only for a
 service port, `port`. Supported shapes are:
 
@@ -259,16 +259,26 @@ entries and TCP/HTTP readiness targets. Operands are recursive values, with the
 same reference and context checks at every level. Images and fixtures keep their
 existing literal/reference forms. Each composition has a 1 MiB **rendered byte**
 limit, checked before rendering known offline output and final hydrated output,
-including URL escaping. Existing literals, references and scalar argv keep their
+including URL escaping and filesystem cleaning; raw operand length is not the
+rendered size when later cleaning can shorten it. Existing literals, references and scalar argv keep their
 previous compatibility and limits.
 
 | Payload | Behavior |
 | --- | --- |
 | `format: {template: '%s:%s', values: [Value, Value]}` | Substitute the next string for each `%s`; `%%` emits one percent. Require exact operand count; reject every other verb, flag, width, precision or index. |
 | `host_port: {host: Value, port: Value}` | Validate a hostname/numeric IP and decimal port in 1..65535; join IPv6 with brackets. Supply the host without brackets. |
-| `url_path: {base: Value, path: Value}` | Append beneath a credential-free absolute HTTP(S) base without query/fragment. One boundary slash; one leading suffix slash does not replace the base. Empty suffix preserves the base; preserve interior path characters and suffix trailing slash. |
+| `url_path: {base: Value, parts: [Value, ...]}` | Append parts in order beneath a credential-free absolute HTTP(S) base without query/fragment. One separator at each boundary; a single leading slash does not replace the base. Empty parts are no-ops; `[]` preserves the validated base exactly. Preserve interior characters and the last nonempty part's trailing slash. |
+| `file_path: {base: Value, parts: [Value, ...]}` | Join and clean base plus parts using Go `filepath.Join` for native consumers and POSIX `path.Join` for containers on every daemon OS. `[]` still normalizes the base. `..` may escape the base; empty paths and separators follow the selected library. Reject NUL in every operand, including parts later removed by cleaning. |
 
-URL paths reject traversal (including encoded dot segments/separators),
+Both path constructors require `base` and a non-null `parts` array; the former
+unshipped URL `path` field is not accepted. Filesystem joining only constructs a
+string: no filesystem access, containment, mount rewriting or conversion of native
+paths to container paths. Existing working-directory, mount and output policies
+stay unchanged. Filesystem-looking URL/readiness values still require valid final
+destinations. Every operand retains its reference, sensitivity and context checks,
+even when cleaning removes its text.
+
+URL paths reject traversal (including recursively encoded dot segments/separators),
 backslashes, authority replacement, and query/fragment syntax. Go `net/url` owns
 URL parsing and escaping; valid existing path escapes are interpreted as path
 characters and escaped for the resulting URL. Formatting performs no numeric
@@ -286,7 +296,11 @@ environment:
     API_URL:
       url_path:
         base: {ref: {kind: resource, name: public, field: url}}
-        path: {literal: /api/}
+        parts: [{literal: api}, {literal: /v1/}]
+    REPORT_PATH:
+      file_path:
+        base: {literal: reports}
+        parts: [{literal: results}, {literal: junit.xml}]
 command:
   tool: app
   args:
@@ -308,6 +322,9 @@ assignment-order dependencies. Check every assignment even when a later layer
 overrides it. Runtime endpoints follow the actual consumer: host-native command
 probes use host endpoints even on container services; workload containers use
 private/reachable endpoints; daemon network probes use owned host destinations.
+Filesystem constructors use that same actual consumer's path syntax. Shared
+container/host-probe environment values retain typed filesystem constructions
+until each consumer resolves them, including nested private operands.
 Nested CA references remain limited to explicit environment assignments, with
 existing publication and mount requirements. A reference in a URL path grants no
 destination ownership, publication-cycle exemption or trust. Aggregate composed

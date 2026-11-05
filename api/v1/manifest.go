@@ -80,15 +80,17 @@ type Environment struct {
 
 // Value is exactly one literal, reference or bounded composition.
 type Value struct {
-	Literal *string    `json:"literal,omitempty" yaml:"literal,omitempty" jsonschema_description:"Literal string, including an empty string; one of literal, ref, format, host_port or url_path."`
-	Ref     *Reference `json:"ref,omitempty" yaml:"ref,omitempty" jsonschema_description:"Bounded symbolic reference; one of literal, ref, format, host_port or url_path."`
+	Literal *string    `json:"literal,omitempty" yaml:"literal,omitempty" jsonschema_description:"Literal string, including an empty string; one of literal, ref, format, host_port, url_path or file_path."`
+	Ref     *Reference `json:"ref,omitempty" yaml:"ref,omitempty" jsonschema_description:"Bounded symbolic reference; one of literal, ref, format, host_port, url_path or file_path."`
 	// Format substitutes sequential string operands without reinterpreting them.
 	Format *FormatValue `json:"format,omitempty" yaml:"format,omitempty" jsonschema_description:"Sequential %s substitution and %% literal percent; at most 1 MiB rendered bytes."`
 	// HostPort constructs an IPv6-safe host and numeric port pair.
 	HostPort *HostPortValue `json:"host_port,omitempty" yaml:"host_port,omitempty" jsonschema_description:"IPv6-safe hostname/IP and decimal port in 1..65535; at most 1 MiB rendered bytes."`
 	// URLPath appends a path beneath an absolute HTTP(S) base.
 	URLPath *URLPathValue `json:"url_path,omitempty" yaml:"url_path,omitempty" jsonschema_description:"Append beneath a credential-free absolute HTTP(S) base without query, fragment or traversal; at most 1 MiB rendered bytes."`
-	Secret  bool          `json:"secret,omitempty" yaml:"secret,omitempty" jsonschema_description:"Treat the value as sensitive in ordinary plan output."`
+	// FilePath joins and cleans paths for the actual native or container consumer.
+	FilePath *FilePathValue `json:"file_path,omitempty" yaml:"file_path,omitempty" jsonschema_description:"Join and clean filesystem base and parts; traversal is allowed without containment or path conversion; at most 1 MiB rendered bytes."`
+	Secret   bool           `json:"secret,omitempty" yaml:"secret,omitempty" jsonschema_description:"Treat the value as sensitive in ordinary plan output."`
 }
 
 // Reference identifies a value without expression evaluation or interpolation.

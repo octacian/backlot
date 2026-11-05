@@ -215,24 +215,27 @@ func environment(m v1.Manifest, e v1.Environment, field string) error {
 
 func value(m v1.Manifest, v v1.Value, field string) error {
 	count := 0
-	for _, present := range []bool{v.Literal != nil, v.Ref != nil, v.Format != nil, v.HostPort != nil, v.URLPath != nil} {
+	for _, present := range []bool{v.Literal != nil, v.Ref != nil, v.Format != nil, v.HostPort != nil, v.URLPath != nil, v.FilePath != nil} {
 		if present {
 			count++
 		}
 	}
 	if count != 1 {
-		return invalid(field, "provide exactly one literal, ref, format, host_port or url_path")
+		return invalid(field, "provide exactly one literal, ref, format, host_port, url_path or file_path")
 	}
 	if v.Ref == nil && v.Literal == nil {
 		if v.Format != nil && v.Format.Values == nil {
 			return invalid(field, "format requires template and values array")
+		}
+		if v.URLPath != nil && v.URLPath.Parts == nil || v.FilePath != nil && v.FilePath.Parts == nil {
+			return invalid(field, "path requires base and parts array")
 		}
 		for _, operand := range v.Operands() {
 			if err := value(m, operand, field); err != nil {
 				return err
 			}
 		}
-		if _, err := compose.Resolve(v, func(v v1.Value) (v1.Value, error) { return v, nil }); err != nil {
+		if _, err := compose.Resolve(v, "", func(v v1.Value) (v1.Value, error) { return v, nil }); err != nil {
 			return invalid(field, err.Error())
 		}
 		return nil
@@ -325,7 +328,7 @@ func probe(m v1.Manifest, p *v1.Probe, field string) error {
 				return invalid(field, "HTTP probe requires an origin reference or literal HTTP(S) URL")
 			}
 		} else if p.Target.Literal == nil {
-			if resolved, err := compose.Resolve(*p.Target, func(v v1.Value) (v1.Value, error) { return v, nil }); err != nil {
+			if resolved, err := compose.Resolve(*p.Target, v1.Native, func(v v1.Value) (v1.Value, error) { return v, nil }); err != nil {
 				return invalid(field, err.Error())
 			} else if resolved.Literal != nil {
 				copy := *p

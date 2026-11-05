@@ -16,6 +16,22 @@ func TestCompositionRecursiveBoundaries(t *testing.T) {
 		mutate func(*v1.Manifest)
 		valid  bool
 	}{
+		{"file secret discarded argv", func(m *v1.Manifest) {
+			secret := v1.Value{Literal: func() *string { s := "private-canary"; return &s }(), Secret: true}
+			m.Components["web"].Command.Args = []v1.Argument{{Value: filesystem(secret)}}
+		}, false},
+		{"file CA discarded argv", func(m *v1.Manifest) {
+			m.Components["web"].Command.Args = []v1.Argument{{Value: filesystem(m.Environments["trust"].Assign["CA"])}}
+		}, false},
+		{"file unattached discarded operand", func(m *v1.Manifest) {
+			m.Resources["hidden"] = v1.Resource{Kind: "directory"}
+			m.Environments["trust"].Assign["HIDDEN"] = filesystem(v1.Value{Ref: &v1.Reference{Kind: "resource", Name: "hidden", Field: "path"}})
+		}, false},
+		{"file cannot establish publication identity", func(m *v1.Manifest) {
+			p := m.Scenes["dev"].Publish
+			value := filesystem(*p.Probe.Target)
+			p.Probe.Target = &value
+		}, false},
 		{"nested CA environment", func(m *v1.Manifest) { e := m.Environments["trust"]; e.Assign["CA"] = composed(e.Assign["CA"]) }, true},
 		{"nested unknown ref", func(m *v1.Manifest) {
 			e := m.Environments["trust"]
@@ -72,12 +88,12 @@ func TestCompositionRecursiveBoundaries(t *testing.T) {
 			s := m.Scenes["dev"]
 			base := *s.Publish.Probe.Target
 			path := "/api/ready"
-			s.Publish.Probe.Target = &v1.Value{URLPath: &v1.URLPathValue{Base: base, Path: v1.Value{Literal: &path}}}
+			s.Publish.Probe.Target = &v1.Value{URLPath: &v1.URLPathValue{Base: base, Parts: []v1.Value{{Literal: &path}}}}
 		}, true},
 		{"origin only in publication path", func(m *v1.Manifest) {
 			s := m.Scenes["dev"]
 			base := "https://evil.invalid"
-			s.Publish.Probe.Target = &v1.Value{URLPath: &v1.URLPathValue{Base: v1.Value{Literal: &base}, Path: *s.Publish.Probe.Target}}
+			s.Publish.Probe.Target = &v1.Value{URLPath: &v1.URLPathValue{Base: v1.Value{Literal: &base}, Parts: []v1.Value{*s.Publish.Probe.Target}}}
 		}, false},
 		{"image composition", func(m *v1.Manifest) {
 			c := m.Components["web"]
@@ -114,5 +130,34 @@ func TestArgumentStrictUnionDecode(t *testing.T) {
 	if err := Decode([]byte(`tool: go
 args: [plain, {format: {template: '%s%%', values: [{literal: 'a b'}]}}]`), ".yaml", &c); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func filesystem(base v1.Value) v1.Value {
+	part := ".."
+	return v1.Value{FilePath: &v1.FilePathValue{Base: base, Parts: []v1.Value{{Literal: &part}}}}
+}
+
+func TestPathPartsStrictDecode(t *testing.T) {
+	for _, name := range []string{"url_path", "file_path"} {
+		for _, tc := range []struct {
+			fields string
+			valid  bool
+		}{
+			{"base: {literal: base}, parts: []", true},
+			{"base: {literal: base}, parts: [{literal: a}, {literal: b}]", true},
+			{"base: {literal: base}", false},
+			{"parts: []", false},
+			{"base: {literal: base}, parts: null", false},
+			{"base: {literal: base}, parts: [], extra: private-canary", false},
+			{"base: {literal: base}, path: {literal: old}", false},
+		} {
+			source := "tool: go\nargs: [{" + name + ": {" + tc.fields + "}}]"
+			var command v1.Command
+			err := Decode([]byte(source), ".yaml", &command)
+			if (err == nil) != tc.valid || err != nil && strings.Contains(err.Error(), "private-canary") {
+				t.Fatalf("%s: %v", source, err)
+			}
+		}
 	}
 }

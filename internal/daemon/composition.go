@@ -19,8 +19,8 @@ func plannedValue(v v1.Value) v1.PlannedValue {
 	return v1.PlannedValue{Composition: &v}
 }
 
-func resolveComposition(v v1.Value, leaf func(v1.Value) (string, error)) (string, error) {
-	resolved, err := compose.Resolve(v, func(v v1.Value) (v1.Value, error) {
+func resolveComposition(v v1.Value, runtime v1.Runtime, leaf func(v1.Value) (string, error)) (string, error) {
+	resolved, err := compose.Resolve(v, runtime, func(v v1.Value) (v1.Value, error) {
 		text, err := leaf(v)
 		return v1.Value{Literal: &text, Secret: v.Secret}, err
 	})

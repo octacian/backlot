@@ -1114,7 +1114,7 @@ func (s *service) launch(ctx context.Context, id, name, executable string, comma
 }
 func runtimeValue(value v1.PlannedValue, id string, p v1.PlanResponse, ports map[string]int) (string, error) {
 	if value.Composition != nil {
-		return resolveComposition(*value.Composition, func(v v1.Value) (string, error) { return runtimeValue(plannedValue(v), id, p, ports) })
+		return resolveComposition(*value.Composition, v1.Native, func(v v1.Value) (string, error) { return runtimeValue(plannedValue(v), id, p, ports) })
 	}
 
 	if value.Literal != nil {

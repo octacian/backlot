@@ -6,6 +6,9 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"path"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -45,12 +48,13 @@ func FormatCount(literal string) (int, error) {
 
 // Resolve replaces reference leaves and checks each known composition before use.
 // Unresolved operands remain typed; sensitivity includes every operand.
-func Resolve(v v1.Value, reference func(v1.Value) (v1.Value, error)) (v1.Value, error) {
+// An unknown runtime (empty string) preserves filesystem constructions for shared consumers.
+func Resolve(v v1.Value, runtime v1.Runtime, reference func(v1.Value) (v1.Value, error)) (v1.Value, error) {
 	if v.Ref != nil {
 		return reference(v)
 	}
 	operands := v.Operands()
-	if v.Format == nil && v.HostPort == nil && v.URLPath == nil {
+	if v.Format == nil && v.HostPort == nil && v.URLPath == nil && v.FilePath == nil {
 		return v, nil
 	}
 	resolved := make([]v1.Value, len(operands))
@@ -58,7 +62,7 @@ func Resolve(v v1.Value, reference func(v1.Value) (v1.Value, error)) (v1.Value, 
 	known := true
 	for i, child := range operands {
 		var err error
-		resolved[i], err = Resolve(child, reference)
+		resolved[i], err = Resolve(child, runtime, reference)
 		if err != nil {
 			return v1.Value{}, err
 		}
@@ -77,10 +81,19 @@ func Resolve(v v1.Value, reference func(v1.Value) (v1.Value, error)) (v1.Value, 
 	case v.HostPort != nil:
 		v.HostPort = &v1.HostPortValue{Host: resolved[0], Port: resolved[1]}
 	case v.URLPath != nil:
-		v.URLPath = &v1.URLPathValue{Base: resolved[0], Path: resolved[1]}
+		v.URLPath = &v1.URLPathValue{Base: resolved[0], Parts: resolved[1:]}
+	case v.FilePath != nil:
+		v.FilePath = &v1.FilePathValue{Base: resolved[0], Parts: resolved[1:]}
 	}
-	if known {
-		text, err := Render(v, texts)
+	if v.FilePath != nil {
+		for i, operand := range resolved {
+			if operand.Literal != nil && strings.ContainsRune(texts[i], 0) {
+				return v1.Value{}, ErrInvalid
+			}
+		}
+	}
+	if known && (v.FilePath == nil || runtime != "") {
+		text, err := Render(v, runtime, texts)
 		if err != nil {
 			return v1.Value{}, err
 		}
@@ -109,22 +122,20 @@ func Resolve(v v1.Value, reference func(v1.Value) (v1.Value, error)) (v1.Value, 
 		}
 	}
 	if v.URLPath != nil {
-		if resolved[0].Literal != nil {
-			if _, err := baseURL(texts[0]); err != nil {
-				return v1.Value{}, ErrInvalid
-			}
+		knownParts := make([]bool, len(resolved))
+		for i := range resolved {
+			knownParts[i] = resolved[i].Literal != nil
 		}
-		if resolved[1].Literal != nil {
-			if !safePath(texts[1]) {
-				return v1.Value{}, ErrInvalid
-			}
-			decoded, _ := url.PathUnescape(texts[1])
-			// A nonempty suffix needs at least "http://a/", even with an unknown base.
-			if texts[1] != "" && escapedSize(strings.TrimPrefix(decoded, "/")) > MaxBytes-len("http://a/") {
-				return v1.Value{}, ErrInvalid
-			}
+		if _, err := urlParts(texts, knownParts); err != nil {
+			return v1.Value{}, err
 		}
 	}
+	if v.FilePath != nil && known {
+		if _, err := filePath(texts, v1.Native); err != nil {
+			return v1.Value{}, err
+		}
+	}
+
 	if v.Format != nil {
 		n, err := FormatCount(v.Format.Template)
 		if err != nil || n != len(resolved) {
@@ -139,7 +150,7 @@ func Resolve(v v1.Value, reference func(v1.Value) (v1.Value, error)) (v1.Value, 
 }
 
 // Render checks byte accounting before allocating the composed output.
-func Render(v v1.Value, operands []string) (string, error) {
+func Render(v v1.Value, runtime v1.Runtime, operands []string) (string, error) {
 	switch {
 	case v.Format != nil:
 		return format(v.Format.Template, operands)
@@ -156,10 +167,15 @@ func Render(v v1.Value, operands []string) (string, error) {
 		}
 		return net.JoinHostPort(operands[0], operands[1]), nil
 	case v.URLPath != nil:
-		if len(operands) != 2 {
+		if len(operands) == 0 {
 			return "", ErrInvalid
 		}
-		return appendURL(operands[0], operands[1])
+		return urlParts(operands, nil)
+	case v.FilePath != nil:
+		if len(operands) == 0 || runtime == "" {
+			return "", ErrInvalid
+		}
+		return filePath(operands, runtime)
 	}
 	return "", ErrInvalid
 }
@@ -279,7 +295,7 @@ func safePath(path string) bool {
 }
 
 func baseURL(text string) (*url.URL, error) {
-	if len(text) > MaxBytes || strings.ContainsAny(text, "?#\\\x00\r\n") {
+	if strings.ContainsAny(text, "?#\\\x00\r\n") {
 		return nil, ErrInvalid
 	}
 	u, err := url.Parse(text)
@@ -313,26 +329,147 @@ func escapedSize(path string) int {
 	}
 	return size
 }
-func appendURL(base, path string) (string, error) {
-	u, err := baseURL(base)
-	if err != nil || !safePath(path) {
-		return "", ErrInvalid
+
+// urlParts measures the final escaped path before allocating it. Partial checks
+// use only a lower bound: unknown later parts can remove trailing boundary slashes.
+func urlParts(operands []string, known []bool) (string, error) {
+	complete := known == nil
+	base := operands[0]
+	var u *url.URL
+	var err error
+	if complete || known[0] {
+		u, err = baseURL(base)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		u = &url.URL{Scheme: "http", Host: "a"}
 	}
-	if path == "" {
+	paths := []string{u.Path}
+	appended := false
+	for i, part := range operands[1:] {
+		if !complete && !known[i+1] {
+			for len(paths) > 1 && strings.TrimRight(paths[len(paths)-1], "/") == "" {
+				paths = paths[:len(paths)-1]
+			}
+			paths[len(paths)-1] = strings.TrimRight(paths[len(paths)-1], "/")
+			continue
+		}
+		if !safePath(part) {
+			return "", ErrInvalid
+		}
+		if part == "" {
+			continue
+		}
+		decoded, err := url.PathUnescape(part)
+		if err != nil {
+			return "", ErrInvalid
+		}
+		for len(paths) > 1 && strings.TrimRight(paths[len(paths)-1], "/") == "" {
+			paths = paths[:len(paths)-1]
+		}
+		paths[len(paths)-1] = strings.TrimRight(paths[len(paths)-1], "/")
+		paths = append(paths, strings.TrimPrefix(decoded, "/"))
+		appended = true
+	}
+	if complete && !appended {
+		if len(base) > MaxBytes {
+			return "", ErrInvalid
+		}
 		return base, nil
 	}
-	// Treat suffix as a URL path, retaining valid existing escapes through net/url.
-	decoded, err := url.PathUnescape(path)
-	if err != nil {
-		return "", ErrInvalid
+	size := len(u.Scheme) + 3 + len(u.Host)
+	for i, part := range paths {
+		n := escapedSize(part)
+		if i > 0 {
+			n++
+		}
+		if n > MaxBytes-size {
+			return "", ErrInvalid
+		}
+		size += n
 	}
-	prefix := strings.TrimRight(u.Path, "/")
-	suffix := strings.TrimPrefix(decoded, "/")
-	size := len(u.Scheme) + 3 + len(u.Host) + escapedSize(prefix) + 1 + escapedSize(suffix)
-	if size > MaxBytes {
-		return "", ErrInvalid
+	if !complete {
+		return "", nil
 	}
-	u.Path = prefix + "/" + suffix
+	u.Path = strings.Join(paths, "/")
 	u.RawPath = ""
 	return u.String(), nil
+}
+
+// filePath cancels segments backwards before joining, so even enormous inputs
+// cleaned away by later parents never allocate an oversized intermediate string.
+// Supported native hosts and containers use slash separators; the selected Go
+// library owns the resulting path. This does not add Windows host support.
+func filePath(operands []string, runtime v1.Runtime) (string, error) {
+	rooted, nonempty := false, false
+	for _, part := range operands {
+		if strings.ContainsRune(part, 0) {
+			return "", ErrInvalid
+		}
+		if !nonempty && part != "" {
+			rooted = strings.HasPrefix(part, "/")
+			nonempty = true
+		}
+	}
+	parents, size := 0, 0
+	var segments []string
+	for i := len(operands) - 1; i >= 0; i-- {
+		rest := operands[i]
+		for rest != "" {
+			index := strings.LastIndexByte(rest, '/')
+			segment := rest[index+1:]
+			if index < 0 {
+				rest = ""
+			} else {
+				rest = rest[:index]
+			}
+			switch segment {
+			case "", ".":
+			case "..":
+				parents++
+			default:
+				if parents > 0 {
+					parents--
+					continue
+				}
+				if len(segment) > MaxBytes-size {
+					return "", ErrInvalid
+				}
+				size += len(segment)
+				if len(segments) > 0 {
+					size++
+				}
+				if size > MaxBytes {
+					return "", ErrInvalid
+				}
+				segments = append(segments, segment)
+			}
+		}
+	}
+	if !rooted {
+		for ; parents > 0; parents-- {
+			size += 2
+			if len(segments) > 0 {
+				size++
+			}
+			if size > MaxBytes {
+				return "", ErrInvalid
+			}
+			segments = append(segments, "..")
+		}
+	}
+	if rooted {
+		if size == MaxBytes {
+			return "", ErrInvalid
+		}
+		segments = append(segments, "/")
+	} else if len(segments) == 0 && nonempty {
+		segments = append(segments, ".")
+	}
+	slices.Reverse(segments)
+	if runtime == v1.Container {
+		return path.Join(segments...), nil
+	}
+	return filepath.Join(segments...), nil
 }

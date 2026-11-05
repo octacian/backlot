@@ -102,7 +102,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 		}
 		for _, environment := range environments {
 			for _, value := range environment.Assign {
-				if _, err := resolveValue(m, config, value, project, result); err != nil {
+				if _, err := resolveValue(m, config, value, project, result, environmentRuntime(c)); err != nil {
 					return v1.PlanResponse{}, err
 				}
 				if err := value.Walk(func(value v1.Value) error {
@@ -140,12 +140,12 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 				planned.Args = append(planned.Args, v1.StringArguments(request.TerminalArgs...)...)
 			}
 		}
-		planned.Args, err = resolveArguments(m, config, planned.Args, project, result)
+		planned.Args, err = resolveArguments(m, config, planned.Args, project, result, c.Runtime)
 		if err != nil {
 			return v1.PlanResponse{}, err
 		}
 		if planned.Command != nil {
-			planned.Command.Args, err = resolveArguments(m, config, planned.Command.Args, project, result)
+			planned.Command.Args, err = resolveArguments(m, config, planned.Command.Args, project, result, v1.Native)
 			if err != nil {
 				return v1.PlanResponse{}, err
 			}
@@ -172,7 +172,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 			planned.Fixtures = map[string]v1.PlannedFixture{}
 		}
 		for key, fixture := range c.Fixtures {
-			value, err := resolveValue(m, config, fixture.Value, project, result)
+			value, err := resolveValue(m, config, fixture.Value, project, result, v1.Native)
 			if err != nil {
 				return v1.PlanResponse{}, err
 			}
@@ -188,7 +188,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 				}
 				result.BuildImages[r.Name] = m.BuildImages[r.Name]
 			}
-			image, err := resolveValue(m, config, *c.Image, project, result)
+			image, err := resolveValue(m, config, *c.Image, project, result, v1.Native)
 			if err != nil {
 				return v1.PlanResponse{}, err
 			}
@@ -218,7 +218,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 					return v1.PlanResponse{}, err
 				}
 				command := *p.Command
-				command.Args, err = resolveArguments(m, config, command.Args, project, result)
+				command.Args, err = resolveArguments(m, config, command.Args, project, result, v1.Native)
 				if err != nil {
 					return v1.PlanResponse{}, err
 				}
@@ -226,7 +226,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 				planned.Readiness.Executable = executable
 			}
 			if p.Target != nil {
-				target, err := resolveValue(m, config, *p.Target, project, result)
+				target, err := resolveValue(m, config, *p.Target, project, result, v1.Native)
 				if err != nil {
 					return v1.PlanResponse{}, err
 				}
@@ -246,7 +246,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 	}
 	if scene.Publish != nil {
 		publication, probe := *scene.Publish, scene.Publish.Probe
-		value, err := resolveValue(m, config, *probe.Target, project, result)
+		value, err := resolveValue(m, config, *probe.Target, project, result, v1.Native)
 		if err != nil {
 			return v1.PlanResponse{}, err
 		}
@@ -395,8 +395,8 @@ func toolCandidate(l layers, name string) ToolSelection {
 	return selection
 }
 
-func resolveValue(m v1.Manifest, c resolvedConfig, v v1.Value, project string, p v1.PlanResponse) (resolvedValue, error) {
-	resolved, err := composition.Resolve(v, func(leaf v1.Value) (v1.Value, error) {
+func resolveValue(m v1.Manifest, c resolvedConfig, v v1.Value, project string, p v1.PlanResponse, runtime v1.Runtime) (resolvedValue, error) {
+	resolved, err := composition.Resolve(v, runtime, func(leaf v1.Value) (v1.Value, error) {
 		value, err := resolveLeaf(m, c, leaf, project, p)
 		return v1.Value{Literal: value.literal, Ref: value.symbolic, Secret: value.secret}, err
 	})
@@ -413,13 +413,13 @@ func resolveValue(m v1.Manifest, c resolvedConfig, v v1.Value, project string, p
 	return result, nil
 }
 
-func resolveArguments(m v1.Manifest, c resolvedConfig, args []v1.Argument, project string, p v1.PlanResponse) ([]v1.Argument, error) {
+func resolveArguments(m v1.Manifest, c resolvedConfig, args []v1.Argument, project string, p v1.PlanResponse, runtime v1.Runtime) ([]v1.Argument, error) {
 	result := slices.Clone(args)
 	for i, arg := range args {
 		if arg.Literal != nil {
 			continue
 		}
-		value, err := resolveValue(m, c, arg.Value, project, p)
+		value, err := resolveValue(m, c, arg.Value, project, p, runtime)
 		if err != nil {
 			return nil, err
 		}

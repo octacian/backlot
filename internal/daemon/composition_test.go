@@ -31,9 +31,21 @@ func TestCompositionRuntimeConsumersAndBounds(t *testing.T) {
 		if err != nil || got != tc.want {
 			t.Fatalf("%s: %q %v", tc.runtime, got, err)
 		}
+
+		path := v1.Value{FilePath: &v1.FilePathValue{Base: ref("host"), Parts: []v1.Value{ref("port"), fixtureLiteral(".."), fixtureLiteral("outside")}}}
+		path.Secret = true
+		snapshot.Secrets["server/environment/PRIVATE_PATH"] = plannedValue(composeFormat("%s", path))
+		got, err = resolvedValue(v1.PlannedValue{Redacted: true}, "server/environment/PRIVATE_PATH", "id", snapshot, result, entry, tc.runtime)
+		wantPath := "127.0.0.1/outside"
+		if tc.runtime == v1.Container {
+			wantPath = "db-private/outside"
+		}
+		if err != nil || got != wantPath {
+			t.Fatalf("private file actual consumer %s: %q %v", tc.runtime, got, err)
+		}
 	}
 	origin := fixtureRef("resource", "origin", "url")
-	value := v1.Value{URLPath: &v1.URLPathValue{Base: origin, Path: fixtureLiteral("/api/a b/")}}
+	value := v1.Value{URLPath: &v1.URLPathValue{Base: origin, Parts: []v1.Value{fixtureLiteral("/api/a b/")}}}
 	got, err := resolvedValue(plannedValue(value), "", "id", snapshot, result, entry, v1.Native)
 	if err != nil || got != "https://instance.example.test:8443/api/a%20b/" {
 		t.Fatal(got, err)
@@ -68,7 +80,7 @@ func TestCompositionPublicationUsesPathAndAuthority(t *testing.T) {
 	}))
 	defer server.Close()
 	origin := fixtureRef("resource", "origin", "url")
-	value := v1.Value{URLPath: &v1.URLPathValue{Base: origin, Path: fixtureLiteral("/api/ready")}}
+	value := v1.Value{URLPath: &v1.URLPathValue{Base: origin, Parts: []v1.Value{fixtureLiteral("/api/ready")}}}
 	snapshot := plan.Snapshot{Plan: v1.PlanResponse{Publish: &v1.Publication{Resource: "origin", Probe: v1.Probe{Target: &value}}}}
 	target, err := publicationTarget("id", snapshot, &v1.ExecutionResult{Origin: server.URL}, &execution{})
 	if err != nil {
@@ -89,7 +101,7 @@ func TestCompositionPublicationUsesPathAndAuthority(t *testing.T) {
 
 func TestCompositionConsumedPortsAndRetainedArguments(t *testing.T) {
 	port := fixtureRef("resource", "port", "port")
-	value := composeFormat("--listen=%s", composeEndpoint(fixtureLiteral("::1"), port))
+	value := v1.Value{FilePath: &v1.FilePathValue{Base: fixtureLiteral("base"), Parts: []v1.Value{composeFormat("%s", port), fixtureLiteral(".."), fixtureLiteral("leaf")}}}
 	for _, role := range []string{"native argv", "container argv", "probe argv", "probe target", "private env"} {
 		c := v1.PlannedComponent{Name: "consumer"}
 		snapshot := plan.Snapshot{Secrets: map[string]v1.PlannedValue{"consumer/environment/PRIVATE": plannedValue(value)}}

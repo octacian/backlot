@@ -407,6 +407,13 @@
                       "url_path"
                     ]
                   }
+                },
+                {
+                  "not": {
+                    "required": [
+                      "file_path"
+                    ]
+                  }
                 }
               ]
             }
@@ -612,6 +619,28 @@
       "type": "object",
       "description": "Environment explicitly layers selected inherited values, literal seeds and assignments."
     },
+    "FilePathValue": {
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/Value",
+          "description": "Base is the first filesystem path operand."
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/Value"
+          },
+          "type": "array",
+          "description": "Parts are appended in order; an empty array still normalizes Base."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "base",
+        "parts"
+      ],
+      "description": "FilePathValue joins and cleans paths using the actual consumer's filesystem syntax."
+    },
     "Fixture": {
       "properties": {
         "description": {
@@ -640,6 +669,13 @@
                   "not": {
                     "required": [
                       "url_path"
+                    ]
+                  }
+                },
+                {
+                  "not": {
+                    "required": [
+                      "file_path"
                     ]
                   }
                 }
@@ -1877,18 +1913,21 @@
           "$ref": "#/$defs/Value",
           "description": "Base is an absolute credential-free HTTP(S) URL without query or fragment."
         },
-        "path": {
-          "$ref": "#/$defs/Value",
-          "description": "Path appends beneath Base without traversal or authority replacement."
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/Value"
+          },
+          "type": "array",
+          "description": "Parts append beneath Base without traversal or authority replacement."
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
         "base",
-        "path"
+        "parts"
       ],
-      "description": "URLPathValue appends a path beneath an absolute HTTP(S) base."
+      "description": "URLPathValue appends ordered paths beneath an absolute HTTP(S) base."
     },
     "Value": {
       "oneOf": [
@@ -1933,6 +1972,17 @@
                   "not": {
                     "required": [
                       "url_path"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "file_path"
                     ]
                   }
                 }
@@ -1988,6 +2038,17 @@
                   }
                 }
               ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "file_path"
+                    ]
+                  }
+                }
+              ]
             }
           ],
           "required": [
@@ -2035,6 +2096,17 @@
                   "not": {
                     "required": [
                       "url_path"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "file_path"
                     ]
                   }
                 }
@@ -2090,6 +2162,17 @@
                   }
                 }
               ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "file_path"
+                    ]
+                  }
+                }
+              ]
             }
           ],
           "required": [
@@ -2141,21 +2224,94 @@
                   }
                 }
               ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "file_path"
+                    ]
+                  }
+                }
+              ]
             }
           ],
           "required": [
             "url_path"
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "literal"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "ref"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "format"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "host_port"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "not": {
+                    "required": [
+                      "url_path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "required": [
+            "file_path"
           ]
         }
       ],
       "properties": {
         "literal": {
           "type": "string",
-          "description": "Literal string, including an empty string; one of literal, ref, format, host_port or url_path."
+          "description": "Literal string, including an empty string; one of literal, ref, format, host_port, url_path or file_path."
         },
         "ref": {
           "$ref": "#/$defs/Reference",
-          "description": "Bounded symbolic reference; one of literal, ref, format, host_port or url_path."
+          "description": "Bounded symbolic reference; one of literal, ref, format, host_port, url_path or file_path."
         },
         "format": {
           "$ref": "#/$defs/FormatValue",
@@ -2168,6 +2324,10 @@
         "url_path": {
           "$ref": "#/$defs/URLPathValue",
           "description": "Append beneath a credential-free absolute HTTP(S) base without query, fragment or traversal; at most 1 MiB rendered bytes."
+        },
+        "file_path": {
+          "$ref": "#/$defs/FilePathValue",
+          "description": "Join and clean filesystem base and parts; traversal is allowed without containment or path conversion; at most 1 MiB rendered bytes."
         },
         "secret": {
           "type": "boolean",

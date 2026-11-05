@@ -14,7 +14,7 @@ and the help for commands/flags you will use. `dev`/`dev-dirty` are allowed. Use
 of global development builds must refresh installed skills with their runtime;
 capability/help presence is not semantic or provider-readiness proof.
 
-Use explicit `format.template` (`%s` and `%%` only), `host_port` and `url_path`
+Use explicit `format.template` (`%s` and `%%` only), `host_port`, `url_path` and `file_path`
 values for endpoint/argv assembly; see [value composition](references/manifest.md#compose-explicit-values).
 Keep each argv entry intact and credentials in sensitive environment assignments.
 

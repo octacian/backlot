@@ -174,7 +174,7 @@ func (HostMapping) JSONSchemaExtend(s *jsonschema.Schema) {
 
 // JSONSchemaExtend adds native/container and service/job conditional constraints.
 func (Component) JSONSchemaExtend(s *jsonschema.Schema) {
-	schemaProperty(s, "image").AllOf = append(schemaProperty(s, "image").AllOf, schemaForbid("format", "host_port", "url_path"))
+	schemaProperty(s, "image").AllOf = append(schemaProperty(s, "image").AllOf, schemaForbid("format", "host_port", "url_path", "file_path"))
 	schemaProperty(s, "kind").Enum = schemaEnum(string(Service), string(Job)).Enum
 	schemaProperty(s, "runtime").Enum = schemaEnum(string(Native), string(Container)).Enum
 	schemaProperty(s, "policy").Enum = schemaEnum("", string(FreshOnly), string(EachStart)).Enum
@@ -335,7 +335,7 @@ func (Command) JSONSchemaExtend(s *jsonschema.Schema) {
 
 // JSONSchemaExtend requires exactly one declared value payload.
 func (Value) JSONSchemaExtend(s *jsonschema.Schema) {
-	fields := []string{"literal", "ref", "format", "host_port", "url_path"}
+	fields := []string{"literal", "ref", "format", "host_port", "url_path", "file_path"}
 	for _, field := range fields {
 		branch := schemaRequire(field)
 		for _, other := range fields {
@@ -349,5 +349,5 @@ func (Value) JSONSchemaExtend(s *jsonschema.Schema) {
 
 // JSONSchemaExtend retains the literal/reference fixture contract.
 func (Fixture) JSONSchemaExtend(s *jsonschema.Schema) {
-	schemaProperty(s, "value").AllOf = append(schemaProperty(s, "value").AllOf, schemaForbid("format", "host_port", "url_path"))
+	schemaProperty(s, "value").AllOf = append(schemaProperty(s, "value").AllOf, schemaForbid("format", "host_port", "url_path", "file_path"))
 }

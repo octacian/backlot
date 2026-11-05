@@ -18,9 +18,9 @@ func TestCompositionPartialPlanningAndPrivacy(t *testing.T) {
 	config := resolvedConfig{Inputs: map[string]string{"path": "api a/%25/", "password": "private-canary"}}
 	origin := v1.Value{Ref: &v1.Reference{Kind: "resource", Name: "origin", Field: "url"}}
 	path := v1.Value{Ref: &v1.Reference{Kind: "input", Name: "path"}}
-	value := v1.Value{URLPath: &v1.URLPathValue{Base: origin, Path: path}}
-	got, err := resolveValue(m, config, value, "", v1.PlanResponse{})
-	if err != nil || got.wire().Composition == nil || got.wire().Composition.URLPath.Base.Ref == nil || got.wire().Composition.URLPath.Path.Literal == nil {
+	value := v1.Value{URLPath: &v1.URLPathValue{Base: origin, Parts: []v1.Value{path}}}
+	got, err := resolveValue(m, config, value, "", v1.PlanResponse{}, v1.Native)
+	if err != nil || got.wire().Composition == nil || got.wire().Composition.URLPath.Base.Ref == nil || got.wire().Composition.URLPath.Parts[0].Literal == nil {
 		t.Fatal("partial values lost", got, err)
 	}
 	for _, secret := range []v1.Value{
@@ -29,7 +29,7 @@ func TestCompositionPartialPlanningAndPrivacy(t *testing.T) {
 		{Literal: func() *string { s := "private-canary"; return &s }(), Secret: true},
 	} {
 		v := compositionFormat("%s:%s", origin, compositionFormat("%s", secret))
-		resolved, err := resolveValue(m, config, v, "", v1.PlanResponse{})
+		resolved, err := resolveValue(m, config, v, "", v1.PlanResponse{}, v1.Native)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -37,18 +37,18 @@ func TestCompositionPartialPlanningAndPrivacy(t *testing.T) {
 		if string(encoded) != `{"redacted":true}` || resolved.private().Composition == nil {
 			t.Fatalf("privacy/provenance: %s", encoded)
 		}
-		if _, err := resolveArguments(m, config, []v1.Argument{{Value: v}}, "", v1.PlanResponse{}); err == nil {
+		if _, err := resolveArguments(m, config, []v1.Argument{{Value: v}}, "", v1.PlanResponse{}, v1.Native); err == nil {
 			t.Fatal("sensitive argv accepted")
 		}
 	}
 	// Known inputs can exceed a composition cap without changing old literal behavior.
 	config.Inputs["path"] = strings.Repeat("x", 1<<20)
 	tooLarge := compositionFormat("x%s", path)
-	if _, err := resolveValue(m, config, tooLarge, "", v1.PlanResponse{}); err == nil || strings.Contains(err.Error(), config.Inputs["path"]) {
+	if _, err := resolveValue(m, config, tooLarge, "", v1.PlanResponse{}, v1.Native); err == nil || strings.Contains(err.Error(), config.Inputs["path"]) {
 		t.Fatal("known cap not sanitized", err)
 	}
 	delete(config.Inputs, "path")
-	if _, err := resolveValue(m, config, value, "", v1.PlanResponse{}); err == nil || !strings.Contains(err.Error(), "required value is missing") {
+	if _, err := resolveValue(m, config, value, "", v1.PlanResponse{}, v1.Native); err == nil || !strings.Contains(err.Error(), "required value is missing") {
 		t.Fatal("lost missing input diagnostic", err)
 	}
 }
@@ -82,5 +82,45 @@ scenes:
 				t.Fatal("known private destination was not rejected safely offline", err)
 			}
 		})
+	}
+}
+
+func TestFilePathActualConsumerPlanning(t *testing.T) {
+	base, part := "/base", "../outside/"
+	raw := v1.Value{FilePath: &v1.FilePathValue{Base: v1.Value{Literal: &base}, Parts: []v1.Value{{Literal: &part}}}}
+	private := raw
+	private.Secret = true
+	c := v1.Component{Runtime: v1.Container, Readiness: &v1.Probe{Kind: "command"}, Environment: v1.Environment{Assign: map[string]v1.Value{
+		"PUBLIC": compositionFormat("path=%s", raw), "PRIVATE": compositionFormat("%s", private),
+	}}}
+	for _, shared := range []bool{true, false} {
+		if !shared {
+			c.Readiness = nil
+		}
+		values, err := resolveEnvironmentValues(v1.Manifest{}, resolvedConfig{}, c, "", v1.PlanResponse{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"PUBLIC", "PRIVATE"} {
+			value := values[key]
+			if shared {
+				if value.composition == nil || value.composition.Format == nil || value.composition.Format.Values[0].FilePath == nil || value.literal != nil {
+					t.Fatal("shared consumer path prematurely folded", key, value)
+				}
+			} else if value.literal == nil {
+				t.Fatal("known container did not fold", key, value)
+			}
+			if key == "PRIVATE" {
+				wire := value.wire()
+				if !wire.Redacted || wire.Composition != nil || wire.Literal != nil {
+					t.Fatal("private path leaked", wire)
+				}
+				data, err := json.Marshal(value.private())
+				var retained v1.PlannedValue
+				if err != nil || json.Unmarshal(data, &retained) != nil || shared && retained.Composition == nil {
+					t.Fatal("private construction lost in snapshot", err)
+				}
+			}
+		}
 	}
 }

@@ -40,7 +40,8 @@ func OutputDirectory(project, relative string) (string, error) {
 }
 
 // OutputOverlap compares output paths and bounded ancestor identities, including
-// filesystem case aliases. It never scans subtrees or discovers other repositories.
+// filesystem case aliases once either overlapping target exists. Missing targets
+// must be materialized and rechecked before deletion. It never scans subtrees.
 func OutputOverlap(a, b string) (same, overlap bool, err error) {
 	same = a == b
 	overlap = same || strings.HasPrefix(a, b+string(filepath.Separator)) || strings.HasPrefix(b, a+string(filepath.Separator))

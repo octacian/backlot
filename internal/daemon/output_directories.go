@@ -31,9 +31,6 @@ func (s *service) prepareOutputDirectories(ctx context.Context, snapshot plan.Sn
 		return err
 	}
 	project := identity.source.ProjectPath
-	if err := plan.ValidateOutputs(project, snapshot.Manifest.Outputs, selected); err != nil {
-		return err
-	}
 	protected := []string{s.directory, filepath.Join(identity.checkout.Path, ".git")}
 	if identity.checkout.GitDirectory != "" {
 		common, err := projectconfig.GitCommonDirectory(identity.checkout.GitDirectory)
@@ -43,44 +40,70 @@ func (s *service) prepareOutputDirectories(ctx context.Context, snapshot plan.Sn
 		protected = append(protected, identity.checkout.GitDirectory, common)
 	}
 	sort.Strings(targets)
-	unique := targets[:0]
-	for _, relative := range targets {
-		if len(unique) > 0 && unique[len(unique)-1] == relative {
-			continue
+	preflight := func() ([]string, error) {
+		if err := plan.ValidateOutputs(project, snapshot.Manifest.Outputs, selected); err != nil {
+			return nil, err
 		}
-		target, err := plan.OutputDirectory(project, relative)
-		if err != nil {
-			return err
-		}
-		for _, anchor := range protected {
-			_, overlap, err := plan.OutputOverlap(target, anchor)
+		var unique []string
+		for _, relative := range targets {
+			if len(unique) > 0 && unique[len(unique)-1] == relative {
+				continue
+			}
+			target, err := plan.OutputDirectory(project, relative)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			if overlap {
-				return problem("invalid_output", "disposable output overlaps private daemon/resource state or checkout Git metadata")
+			for _, anchor := range protected {
+				_, overlap, err := plan.OutputOverlap(target, anchor)
+				if err != nil {
+					return nil, err
+				}
+				if overlap {
+					return nil, problem("invalid_output", "disposable output overlaps private daemon/resource state or checkout Git metadata")
+				}
+			}
+			duplicate := false
+			for _, previous := range unique {
+				same, _, err := plan.OutputOverlap(target, filepath.Join(project, previous))
+				if err != nil {
+					return nil, err
+				}
+				if same {
+					duplicate = true
+					break
+				}
+			}
+			if !duplicate {
+				unique = append(unique, relative)
 			}
 		}
-		duplicate := false
-		for _, previous := range unique {
-			same, _, err := plan.OutputOverlap(target, filepath.Join(project, previous))
-			if err != nil {
-				return err
-			}
-			if same {
-				duplicate = true
-				break
-			}
-		}
-		if !duplicate {
-			unique = append(unique, relative)
-		}
+		return unique, nil
+	}
+	unique, err := preflight()
+	if err != nil {
+		return err
 	}
 	root, err := os.OpenRoot(project)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = root.Close() }()
+	// Materialize safe targets without deletion so the filesystem resolves absent case aliases.
+	for _, relative := range unique {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := root.MkdirAll(relative, 0700); err != nil {
+			return err
+		}
+	}
+	unique, err = preflight()
+	if err != nil {
+		return err
+	}
+	if err := s.store.outputConflict(snapshot.Plan); err != nil {
+		return err
+	}
 	for _, relative := range unique {
 		if err := ctx.Err(); err != nil {
 			return err

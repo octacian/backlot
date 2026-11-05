@@ -112,8 +112,11 @@ filesystem aliases. Overlaps involving an opted-in output require the same
 directory, concurrency group and opt-in; nested or mixed-policy overlaps are
 rejected across scene declarations. Ordinary output overlap rules are unchanged.
 
-All targets are checked under the locks before removal. Cancelled lock waiters
-do not delete; a filesystem failure or cancellation during preparation can leave
+All targets are checked under the locks before removal. Missing selected directories
+may be created empty before this check so filesystem aliases can be resolved;
+offline planning defers aliases it cannot resolve without creation. Rejection
+preserves existing contents but may leave newly created empty directories.
+Cancelled lock waiters do not delete; a filesystem failure or cancellation during preparation can leave
 some directories empty, but launches no components. There is no rollback,
 automatic retry or preparation replay on daemon recovery. Locks and kept/uncertain
 consumer fences remain through collection and joined cleanup. These checks bound

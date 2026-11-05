@@ -62,6 +62,10 @@ daemon's private state and retained resource data, and with the checkout Git mar
 including filesystem aliases.
 Inspection or validation uncertainty fails closed. Preflight all selected targets
 before the first removal; no component launches unless every preparation succeeds.
+Missing selected directories may be created empty to resolve filesystem aliases
+before revalidating overlaps and consumer fences. Offline planning remains
+effect-free and defers unresolved aliases; rejected preparation may leave these
+new empty directories while preserving existing contents.
 
 Where an opted-in declaration overlaps another output declaration, allow only the
 same directory, concurrency group and opt-in; deduplicate its preparation. Reject

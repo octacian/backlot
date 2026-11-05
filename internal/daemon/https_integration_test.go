@@ -49,7 +49,8 @@ func httpsHarness(t *testing.T, binary, app, image, endpoint, containerHost stri
 	api := v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "fixture"}, Resources: []string{"api"}, Ports: map[string]v1.ServicePort{"http": {Resource: "api"}}, Environment: v1.Environment{Assign: map[string]v1.Value{"PORT": port("api"), "BIND": fixtureLiteral("0.0.0.0"), "ROLE": fixtureLiteral("api")}}, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(port("api")), Timeout: "10s"}}
 	web := v1.Component{Kind: v1.Service, Runtime: v1.Container, Image: ptrValue(fixtureLiteral(image)), Resources: []string{"web", "origin"}, Outputs: []string{"trust"}, Mounts: []v1.Mount{{Output: "trust", Target: "/trust", ReadOnly: true}}, Ports: map[string]v1.ServicePort{"http": {Resource: "web", ContainerPort: 8080}}, DependsOn: []v1.Dependency{{Component: "api", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"PORT": fixtureLiteral("8080"), "ROLE": fixtureLiteral("web"), "CERT": fixtureLiteral("/trust/cert.pem"), "ORIGIN": origin, "GATEWAY_ADDRESS": fixtureLiteral(containerHost + ":" + strconv.Itoa(f.Port))}}, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(port("web")), Timeout: "10s"}}
 	client := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: web.Image, Resources: []string{"origin", "api"}, Outputs: web.Outputs, Mounts: web.Mounts, DependsOn: []v1.Dependency{{Component: "web", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"CLIENT": fixtureLiteral("1"), "CERT": fixtureLiteral("/trust/cert.pem"), "ORIGIN": origin, "GATEWAY_ADDRESS": fixtureLiteral(containerHost + ":" + strconv.Itoa(f.Port)), "BACKEND_HOST": {Ref: &v1.Reference{Kind: "service", Name: "api", Field: "host"}}, "BACKEND_PORT": {Ref: &v1.Reference{Kind: "service", Name: "api", Field: "port", Port: "http"}}}}}
-	publication := &v1.Publication{Resource: "origin", Routes: []v1.Route{{Path: "/", Service: "web", Port: "http", Prefix: "preserve"}, {Path: "/api", Service: "api", Port: "http", Prefix: "strip"}}, Probe: v1.Probe{Kind: "http", Target: &origin, Timeout: "10s"}}
+	publicationTarget := v1.Value{URLPath: &v1.URLPathValue{Base: origin, Parts: []v1.Value{fixtureLiteral("/api/"), fixtureLiteral(""), fixtureLiteral("/value")}}}
+	publication := &v1.Publication{Resource: "origin", Routes: []v1.Route{{Path: "/", Service: "web", Port: "http", Prefix: "preserve"}, {Path: "/api", Service: "api", Port: "http", Prefix: "strip"}}, Probe: v1.Probe{Kind: "http", Target: &publicationTarget, Timeout: "10s"}}
 	resources := []string{"api", "web", "origin"}
 	h.manifest = v1.Manifest{Version: v1.ManifestVersion, Project: "https-fixture", Tools: map[string]string{"fixture": app}, Resources: map[string]v1.Resource{"api": {Kind: "port"}, "web": {Kind: "port"}, "origin": {Kind: "origin"}}, Outputs: map[string]v1.Output{"trust": {Path: "trust", ConcurrencyGroup: "fixture-trust"}}, Components: map[string]v1.Component{"api": api, "web": web, "client": client}, Scenes: map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"api", "web"}, Resources: resources, Publish: publication}, "test": {Lifetime: v1.Disposable, Components: []string{"api", "web", "client"}, Resources: resources, TerminalJob: "client", Publish: publication}}}
 	h.write()
@@ -208,7 +209,7 @@ func TestHTTPSRuntime(t *testing.T) {
 					if mode == "cancellation" {
 						script = "echo kept-artifact >/tmp/report; echo kept-output; exec sleep 90"
 					}
-					job.Args = []string{"sh", "-c", script}
+					job.Args = v1.StringArguments("sh", "-c", script)
 					job.Artifacts = map[string]v1.ArtifactSource{"report": {Path: "/tmp/report"}}
 					h.manifest.Components["client"] = job
 					h.write()
@@ -276,6 +277,20 @@ func TestHTTPSRuntime(t *testing.T) {
 			if fresh.Instance.ID == id || fresh.Instance.Execution.Origin == origin {
 				t.Fatal("destroy reused logical identity")
 			}
+			if _, err := h.cli.Destroy(context.Background(), fresh.Instance.ID); err != nil {
+				t.Fatal(err)
+			}
+			h.manifest.Scenes["dev"].Publish.Probe.Target.URLPath.Parts = []v1.Value{fixtureLiteral("/"), fixtureLiteral("ws")}
+			h.manifest.Scenes["dev"].Publish.Probe.Timeout = "1s"
+			h.write()
+			failed := h.state(h.run("dev").Instance.ID, v1.Failed)
+			if failed.Instance.Execution.CleanupFailure != "" || (failed.Instance.Execution.FailureDetail == nil || failed.Instance.Execution.FailureDetail.Code != "publication_unreachable") {
+				t.Fatal("multipart HTTP probe to WebSocket endpoint did not fail cleanly", failed.Instance.Execution)
+			}
+			if httpsBody(t, f, failed.Instance.Execution.Origin, "/api/value") != "unrelated sentinel" {
+				t.Fatal("failed publication left owned route")
+			}
+			t.Log("multipart publication succeeded at /api/value and HTTP probe at /ws failed with owned route cleanup")
 			t.Log("real daemon TLS/SSR; stop/start/restart/reset invariant; crash intent-effect recovery; disposable container origin client; destroy replacement verified")
 		})
 	}

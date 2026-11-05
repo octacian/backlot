@@ -4,6 +4,10 @@ This reference describes the current executable. Use `backlot COMMAND --help`
 for its complete options. Contributor build/test tooling lives in
 [Testing and tooling](testing.md#commands).
 
+Manifest argv entries may be scalar strings or [explicit composed values](manifest.md#compose-explicit-values),
+with one resolved value per argument. Arguments forwarded after `--` stay literal;
+Backlot performs no shell expansion and rejects sensitive manifest argv before effects.
+
 ## Commands and defaults
 
 In the tables, `SCENE`, `ID`, `SERVICE_ID`, `NAME` and `PATH` are placeholders.

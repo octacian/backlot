@@ -459,7 +459,7 @@ func newNativeHarnessConfigured(t *testing.T, binary, budget string, faults bool
 	literal := func(s string) v1.Value { return v1.Value{Literal: &s} }
 	port := v1.Value{Ref: &v1.Reference{Kind: "resource", Name: "port", Field: "port"}}
 	command := func(mode string) *v1.Command {
-		return &v1.Command{Tool: "fixture", Args: []string{"-test.run=TestNativeFixtureProcess", "--", mode}}
+		return &v1.Command{Tool: "fixture", Args: v1.StringArguments("-test.run=TestNativeFixtureProcess", "--", mode)}
 	}
 	fixtureToken := literal(h.controlToken)
 	fixtureToken.Secret = true
@@ -591,7 +591,7 @@ func TestNativeRuntime(t *testing.T) {
 		})
 	}
 	for _, kind := range []string{"service", "job"} {
-		for _, reference := range []string{"resource", "service"} {
+		for _, reference := range []string{"resource", "service", "composed-service"} {
 			t.Run("consumed-port-conflict-"+kind+"-"+reference, func(t *testing.T) { testConsumedPortConflict(t, binary, kind, reference) })
 		}
 	}
@@ -723,7 +723,7 @@ func TestNativeRuntime(t *testing.T) {
 		assertJobExit(final, 0)
 		h.absent()
 		job := h.manifest.Components["job"]
-		job.Command.Args[len(job.Command.Args)-1] = "job-fail"
+		job.Command.Args[len(job.Command.Args)-1] = v1.StringArguments("job-fail")[0]
 		h.manifest.Components["job"] = job
 		h.write()
 		r = h.run("test")
@@ -734,7 +734,7 @@ func TestNativeRuntime(t *testing.T) {
 	t.Run("startup-interruption-unlimited-command-probe", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
 		c := h.manifest.Components["server"]
-		c.Readiness = &v1.Probe{Kind: "command", Timeout: "0s", Command: &v1.Command{Tool: "fixture", Args: []string{"-test.run=TestNativeFixtureProcess", "--", "never"}}}
+		c.Readiness = &v1.Probe{Kind: "command", Timeout: "0s", Command: &v1.Command{Tool: "fixture", Args: v1.StringArguments("-test.run=TestNativeFixtureProcess", "--", "never")}}
 		h.manifest.Components["server"] = c
 		h.write()
 		request := h.request("dev")
@@ -753,7 +753,7 @@ func TestNativeRuntime(t *testing.T) {
 	t.Run("lease-expiry-and-unlimited-job", func(t *testing.T) {
 		h := newNativeHarness(t, binary, "400ms")
 		job := h.manifest.Components["job"]
-		job.Command.Args[len(job.Command.Args)-1] = "never"
+		job.Command.Args[len(job.Command.Args)-1] = v1.StringArguments("never")[0]
 		h.manifest.Components["job"] = job
 		h.write()
 		request := h.request("test")
@@ -783,7 +783,7 @@ func TestNativeRuntime(t *testing.T) {
 	t.Run("deadline-and-startup-failure", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
 		c := h.manifest.Components["server"]
-		c.Command.Args[len(c.Command.Args)-1] = "fail"
+		c.Command.Args[len(c.Command.Args)-1] = v1.StringArguments("fail")[0]
 		h.manifest.Components["server"] = c
 		h.write()
 		r := h.run("dev")
@@ -791,7 +791,7 @@ func TestNativeRuntime(t *testing.T) {
 		h.absent()
 		h.manifest.Components["server"] = newNativeComponent(h)
 		job := h.manifest.Components["job"]
-		job.Command.Args[len(job.Command.Args)-1] = "never"
+		job.Command.Args[len(job.Command.Args)-1] = v1.StringArguments("never")[0]
 		h.manifest.Components["job"] = job
 		h.write()
 		request := h.request("test")
@@ -822,7 +822,7 @@ func TestNativeRuntime(t *testing.T) {
 	t.Run("parent-exit-descendant-collection", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
 		c := h.manifest.Components["server"]
-		c.Command.Args[len(c.Command.Args)-1] = "parent-exit"
+		c.Command.Args[len(c.Command.Args)-1] = v1.StringArguments("parent-exit")[0]
 		h.manifest.Components["server"] = c
 		h.write()
 		r := h.run("dev")
@@ -838,7 +838,7 @@ func TestNativeRuntime(t *testing.T) {
 				h := newNativeHarness(t, binary)
 				c := h.manifest.Components["server"]
 				if kind == "command" {
-					c.Readiness = &v1.Probe{Kind: "command", Timeout: "2s", Command: &v1.Command{Tool: "fixture", Args: []string{"-test.run=TestNativeFixtureProcess", "--", "probe"}}}
+					c.Readiness = &v1.Probe{Kind: "command", Timeout: "2s", Command: &v1.Command{Tool: "fixture", Args: v1.StringArguments("-test.run=TestNativeFixtureProcess", "--", "probe")}}
 				} else {
 					listener, err := net.Listen("tcp", "127.0.0.1:0")
 					if err != nil {
@@ -1061,7 +1061,7 @@ func TestNativeRuntime(t *testing.T) {
 	t.Run("completed-job-gate", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
 		prep := h.manifest.Components["job"]
-		prep.Command = &v1.Command{Tool: "fixture", Args: []string{"-test.run=TestNativeFixtureProcess", "--", "prep"}}
+		prep.Command = &v1.Command{Tool: "fixture", Args: v1.StringArguments("-test.run=TestNativeFixtureProcess", "--", "prep")}
 		h.manifest.Components["prep"] = prep
 		job := h.manifest.Components["job"]
 		job.DependsOn = []v1.Dependency{{Component: "prep", Condition: v1.Completed}}
@@ -1096,7 +1096,7 @@ func TestNativeRuntime(t *testing.T) {
 	t.Run("service-loss-cancels-terminal", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
 		job := h.manifest.Components["job"]
-		job.Command.Args[len(job.Command.Args)-1] = "never"
+		job.Command.Args[len(job.Command.Args)-1] = v1.StringArguments("never")[0]
 		h.manifest.Components["job"] = job
 		h.write()
 		r := h.run("test")
@@ -1325,7 +1325,7 @@ func TestNativeRuntime(t *testing.T) {
 		marker := filepath.Join(h.project, "probe-started")
 		h.manifest.Tools["sh"] = "/bin/sh"
 		c := h.manifest.Components["server"]
-		c.Readiness = &v1.Probe{Kind: "command", Timeout: "0s", Command: &v1.Command{Tool: "sh", Args: []string{"-c", `: > "$1"; exec "$2" -test.run=TestNativeFixtureProcess -- never`, "probe", marker, h.manifest.Tools["fixture"]}}}
+		c.Readiness = &v1.Probe{Kind: "command", Timeout: "0s", Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", `: > "$1"; exec "$2" -test.run=TestNativeFixtureProcess -- never`, "probe", marker, h.manifest.Tools["fixture"])}}
 		h.manifest.Components["server"] = c
 		h.write()
 		request := h.request("dev")
@@ -1357,7 +1357,7 @@ func TestNativeRuntime(t *testing.T) {
 	t.Run("probe-timeout-with-unlimited-startup", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
 		c := h.manifest.Components["server"]
-		c.Readiness = &v1.Probe{Kind: "command", Timeout: "50ms", Command: &v1.Command{Tool: "fixture", Args: []string{"-test.run=TestNativeFixtureProcess", "--", "never"}}}
+		c.Readiness = &v1.Probe{Kind: "command", Timeout: "50ms", Command: &v1.Command{Tool: "fixture", Args: v1.StringArguments("-test.run=TestNativeFixtureProcess", "--", "never")}}
 		h.manifest.Components["server"] = c
 		h.write()
 		request := h.request("dev")
@@ -1373,7 +1373,7 @@ func TestNativeRuntime(t *testing.T) {
 	t.Run("startup-budget-bounds-unlimited-probe", func(t *testing.T) {
 		h := newNativeHarness(t, binary)
 		c := h.manifest.Components["server"]
-		c.Readiness = &v1.Probe{Kind: "command", Timeout: "0s", Command: &v1.Command{Tool: "fixture", Args: []string{"-test.run=TestNativeFixtureProcess", "--", "never"}}}
+		c.Readiness = &v1.Probe{Kind: "command", Timeout: "0s", Command: &v1.Command{Tool: "fixture", Args: v1.StringArguments("-test.run=TestNativeFixtureProcess", "--", "never")}}
 		h.manifest.Components["server"] = c
 		h.write()
 		request := h.request("dev")
@@ -1390,7 +1390,7 @@ func TestNativeRuntime(t *testing.T) {
 			t.Run(sig.String(), func(t *testing.T) {
 				h := newNativeHarness(t, binary)
 				job := h.manifest.Components["job"]
-				job.Command.Args[len(job.Command.Args)-1] = "never"
+				job.Command.Args[len(job.Command.Args)-1] = v1.StringArguments("never")[0]
 				h.manifest.Components["job"] = job
 				h.write()
 				command := exec.Command(binary, "run", "test", "--state-dir", h.dir, "--project", h.project, "--json", "--job-timeout", "0s", "--stop-grace", "0s")
@@ -1425,8 +1425,8 @@ func TestNativeRuntime(t *testing.T) {
 		h.manifest.Resources["data"] = v1.Resource{Kind: "directory"}
 		h.manifest.Resources["password"] = v1.Resource{Kind: "secret"}
 		env := v1.Environment{Assign: map[string]v1.Value{"DATA": {Ref: &v1.Reference{Kind: "resource", Name: "data", Field: "path"}}, "SECRET": {Ref: &v1.Reference{Kind: "resource", Name: "password", Field: "value"}}}}
-		prep := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.FreshOnly, Initializes: []string{"data"}, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: []string{"-c", "printf '%s\n' \"$SECRET\" >> \"$DATA/init\""}}}
-		each := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: []string{"-c", "echo start >> \"$DATA/starts\""}}, DependsOn: []v1.Dependency{{Component: "server", Condition: v1.Ready}}}
+		prep := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.FreshOnly, Initializes: []string{"data"}, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "printf '%s\n' \"$SECRET\" >> \"$DATA/init\"")}}
+		each := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "echo start >> \"$DATA/starts\"")}, DependsOn: []v1.Dependency{{Component: "server", Condition: v1.Ready}}}
 		server := h.manifest.Components["server"]
 		server.DependsOn = []v1.Dependency{{Component: "prep", Condition: v1.Completed}}
 		h.manifest.Components["server"] = server
@@ -1658,7 +1658,7 @@ func TestNativeRuntime(t *testing.T) {
 func ptr(text string) *string { return &text }
 func newNativeComponent(h *nativeHarness) v1.Component {
 	c := h.manifest.Components["server"]
-	c.Command.Args[len(c.Command.Args)-1] = "server"
+	c.Command.Args[len(c.Command.Args)-1] = v1.StringArguments("server")[0]
 	return c
 }
 

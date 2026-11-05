@@ -780,7 +780,12 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		componentCtx := startup
 		if component.Name == snapshot.Plan.TerminalJob {
 			if snapshot.Plan.Publish != nil {
-				if failure = awaitPublication(startup, result.Origin, snapshot.Plan.Publish.Probe.Timeout, services); failure != nil {
+				target, targetErr := publicationTarget(id, snapshot, result, entry)
+				if targetErr != nil {
+					failure = targetErr
+					return
+				}
+				if failure = awaitPublication(startup, target, snapshot.Plan.Publish.Probe.Timeout, services); failure != nil {
 					return
 				}
 			}
@@ -932,7 +937,12 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		}
 	}
 	if snapshot.Plan.Publish != nil && snapshot.Plan.Lifetime == v1.Persistent {
-		if failure = awaitPublication(startup, result.Origin, snapshot.Plan.Publish.Probe.Timeout, services); failure != nil {
+		target, targetErr := publicationTarget(id, snapshot, result, entry)
+		if targetErr != nil {
+			failure = targetErr
+			return
+		}
+		if failure = awaitPublication(startup, target, snapshot.Plan.Publish.Probe.Timeout, services); failure != nil {
 			return
 		}
 	}
@@ -1023,6 +1033,14 @@ func (s *service) launch(ctx context.Context, id, name, executable string, comma
 	if err := checkDirectory(); err != nil {
 		return nil, err
 	}
+	env, err := resolvedEnvironment(name, environment, id, snapshot, result, entry, v1.Native)
+	if err != nil {
+		return nil, err
+	}
+	args, err := resolvedArguments(command.Args, id, snapshot, result, entry, v1.Native)
+	if err != nil {
+		return nil, err
+	}
 	directory := filepath.Join(s.directory, "logs")
 	if err := localipc.Directory(directory, true); err != nil {
 		return nil, err
@@ -1074,10 +1092,6 @@ func (s *service) launch(ctx context.Context, id, name, executable string, comma
 		}
 		return nil, errors.Join(startErr, closeErr)
 	}
-	env, err := resolvedEnvironment(name, environment, id, snapshot, result, entry, v1.Native)
-	if err != nil {
-		return nil, err
-	}
 	if closeErr != nil {
 		return nil, closeErr
 	}
@@ -1095,10 +1109,14 @@ func (s *service) launch(ctx context.Context, id, name, executable string, comma
 	if workingDirectory == "" {
 		workingDirectory = filepath.Dir(snapshot.Plan.ManifestPath)
 	}
-	err = group.Activate(native.Spec{Executable: executable, Args: command.Args, Environment: env, Directory: workingDirectory, InstanceID: id, Component: name, Attempt: result.Attempt})
+	err = group.Activate(native.Spec{Executable: executable, Args: args, Environment: env, Directory: workingDirectory, InstanceID: id, Component: name, Attempt: result.Attempt})
 	return group, err
 }
 func runtimeValue(value v1.PlannedValue, id string, p v1.PlanResponse, ports map[string]int) (string, error) {
+	if value.Composition != nil {
+		return resolveComposition(*value.Composition, v1.Native, func(v v1.Value) (string, error) { return runtimeValue(plannedValue(v), id, p, ports) })
+	}
+
 	if value.Literal != nil {
 		return *value.Literal, nil
 	}
@@ -1267,29 +1285,45 @@ func (s *service) waitOwners() {
 // Never replay them or silently move those resources during a later bind retry.
 func consumeComponentPorts(consumed map[string]string, c v1.PlannedComponent, snapshot plan.Snapshot) {
 	consume := func(value v1.PlannedValue) {
-		r := value.Symbolic
-		if r == nil || r.Field != "port" {
-			return
-		}
-		resource := ""
-		if r.Kind == "resource" {
-			resource = r.Name
-		}
-		if r.Kind == "service" {
-			for _, service := range snapshot.Plan.Components {
-				if service.Name == r.Name {
-					resource = service.Ports[r.Port].Resource
-					break
+		_ = walkPlanned(value, func(v v1.Value) error {
+			r := v.Ref
+			if r == nil || r.Field != "port" {
+				return nil
+			}
+			resource := ""
+			if r.Kind == "resource" {
+				resource = r.Name
+			}
+			if r.Kind == "service" {
+				for _, service := range snapshot.Plan.Components {
+					if service.Name == r.Name {
+						resource = service.Ports[r.Port].Resource
+						break
+					}
 				}
 			}
-		}
-		if resource != "" && consumed[resource] == "" {
-			consumed[resource] = c.Name
-		}
+			if resource != "" && consumed[resource] == "" {
+				consumed[resource] = c.Name
+			}
+			return nil
+		})
 	}
 	for _, port := range c.Ports {
 		if consumed[port.Resource] == "" {
 			consumed[port.Resource] = c.Name
+		}
+	}
+	for _, arg := range c.Args {
+		consume(plannedValue(arg.Value))
+	}
+	if c.Command != nil {
+		for _, arg := range c.Command.Args {
+			consume(plannedValue(arg.Value))
+		}
+	}
+	if c.Readiness != nil && c.Readiness.Command != nil {
+		for _, arg := range c.Readiness.Command.Args {
+			consume(plannedValue(arg.Value))
 		}
 	}
 	for key, value := range c.Environment {

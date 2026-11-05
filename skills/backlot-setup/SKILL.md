@@ -15,6 +15,10 @@ capabilities and targeted command help before using the procedures below. Allow
 `dev`/`dev-dirty`; users of global development builds must refresh installed skill
 copies as their runtime changes. Capability/help presence does not prove semantics.
 
+Use explicit `format.template` (`%s` and `%%` only), `host_port`, `url_path` and `file_path`
+values for endpoint/argv assembly; see [value composition](references/manifest.md#compose-explicit-values).
+Keep each argv entry intact and credentials in sensitive environment assignments.
+
 1. Inspect the application's own instructions and working foreground/build/test
    commands. Preserve its tools and argument vectors. Read
    [adoption](references/adoption.md) to map them to components, scene lifetimes,

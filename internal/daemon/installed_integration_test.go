@@ -23,7 +23,7 @@ func TestInstalledBinary(t *testing.T) {
 	}
 	h := newNativeHarness(t, binary)
 	h.manifest = v1.Manifest{Version: v1.ManifestVersion, Project: "installed-fixture", Tools: map[string]string{"sh": "/bin/sh"}, Components: map[string]v1.Component{
-		"server": {Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "sh", Args: []string{"-c", `sleep 600 & child=$!; printf '%s %s %s' "$$" "$child" "$(ps -o pgid= -p $$)" > "$PIDFILE"; wait`}}, Environment: v1.Environment{Assign: map[string]v1.Value{"PIDFILE": fixtureLiteral(h.pids)}}, Readiness: &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "sh", Args: []string{"-c", `test -s "$PIDFILE"`}}, Timeout: "3s"}},
+		"server": {Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", `sleep 600 & child=$!; printf '%s %s %s' "$$" "$child" "$(ps -o pgid= -p $$)" > "$PIDFILE"; wait`)}, Environment: v1.Environment{Assign: map[string]v1.Value{"PIDFILE": fixtureLiteral(h.pids)}}, Readiness: &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", `test -s "$PIDFILE"`)}, Timeout: "3s"}},
 	}, Scenes: map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"server"}}}}
 	h.write()
 	if !Doctor(context.Background(), h.dir).Healthy {
@@ -51,7 +51,7 @@ func TestInstalledBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.absent()
-	h.manifest.Components["server"] = v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "sh", Args: []string{"-c", "exit 23"}}, Readiness: &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "sh", Args: []string{"-c", "exit 1"}}, Timeout: "1s"}}
+	h.manifest.Components["server"] = v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "exit 23")}, Readiness: &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "exit 1")}, Timeout: "1s"}}
 	h.write()
 	failed := h.run("dev")
 	h.state(failed.Instance.ID, v1.Failed)

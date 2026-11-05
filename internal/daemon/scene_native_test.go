@@ -457,7 +457,7 @@ func TestStartupDetailsCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A new failed startup must not hydrate details or claim readiness.
-	server.Command.Args = []string{"-test.run=TestNativeFixtureProcess", "--", "fail"}
+	server.Command.Args = v1.StringArguments("-test.run=TestNativeFixtureProcess", "--", "fail")
 	h.manifest.Components["server"] = server
 	h.write()
 	out, err := execute("restart", id, "--state-dir", h.dir, "--json", "--stop-grace", "50ms")

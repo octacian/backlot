@@ -42,7 +42,7 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			case "cleanup-failure":
 				script += "; while [ ! -f /private/release ]; do sleep 0.1; done"
 			}
-			job.Args = []string{"sh", "-c", script, "job"}
+			job.Args = v1.StringArguments("sh", "-c", script, "job")
 			job.Fixtures = map[string]v1.Fixture{"directory": {Value: fixtureRef("resource", "directory", "path")}}
 			job.Artifacts = map[string]v1.ArtifactSource{"report": {Path: "/tmp/report"}}
 			if mode == "collection-failure" {

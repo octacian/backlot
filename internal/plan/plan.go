@@ -3,6 +3,7 @@ package plan
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	composition "github.com/octacian/backlot/internal/compose"
 	"github.com/octacian/backlot/internal/manifest"
 )
 
@@ -100,8 +102,16 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 		}
 		for _, environment := range environments {
 			for _, value := range environment.Assign {
-				if value.Ref != nil && value.Ref.Kind == "resource" && value.Ref.Field == "ca_cert_path" && (config.Caddy == nil || config.Caddy.Mode != "managed") {
-					return v1.PlanResponse{}, problem("invalid_contract", "components."+name+".environment", "ca_cert_path requires explicit managed Caddy configuration")
+				if _, err := resolveValue(m, config, value, project, result, environmentRuntime(c)); err != nil {
+					return v1.PlanResponse{}, err
+				}
+				if err := value.Walk(func(value v1.Value) error {
+					if value.Ref != nil && value.Ref.Kind == "resource" && value.Ref.Field == "ca_cert_path" && (config.Caddy == nil || config.Caddy.Mode != "managed") {
+						return problem("invalid_contract", "components."+name+".environment", "ca_cert_path requires explicit managed Caddy configuration")
+					}
+					return nil
+				}); err != nil {
+					return v1.PlanResponse{}, err
 				}
 			}
 		}
@@ -125,9 +135,19 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 		}
 		if name == scene.TerminalJob {
 			if planned.Command != nil {
-				planned.Command.Args = append(planned.Command.Args, request.TerminalArgs...)
+				planned.Command.Args = append(planned.Command.Args, v1.StringArguments(request.TerminalArgs...)...)
 			} else {
-				planned.Args = append(planned.Args, request.TerminalArgs...)
+				planned.Args = append(planned.Args, v1.StringArguments(request.TerminalArgs...)...)
+			}
+		}
+		planned.Args, err = resolveArguments(m, config, planned.Args, project, result, c.Runtime)
+		if err != nil {
+			return v1.PlanResponse{}, err
+		}
+		if planned.Command != nil {
+			planned.Command.Args, err = resolveArguments(m, config, planned.Command.Args, project, result, v1.Native)
+			if err != nil {
+				return v1.PlanResponse{}, err
 			}
 		}
 		for _, o := range c.Outputs {
@@ -152,7 +172,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 			planned.Fixtures = map[string]v1.PlannedFixture{}
 		}
 		for key, fixture := range c.Fixtures {
-			value, err := resolveValue(m, config, fixture.Value, project, result)
+			value, err := resolveValue(m, config, fixture.Value, project, result, v1.Native)
 			if err != nil {
 				return v1.PlanResponse{}, err
 			}
@@ -168,7 +188,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 				}
 				result.BuildImages[r.Name] = m.BuildImages[r.Name]
 			}
-			image, err := resolveValue(m, config, *c.Image, project, result)
+			image, err := resolveValue(m, config, *c.Image, project, result, v1.Native)
 			if err != nil {
 				return v1.PlanResponse{}, err
 			}
@@ -197,12 +217,23 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 				if err != nil {
 					return v1.PlanResponse{}, err
 				}
+				command := *p.Command
+				command.Args, err = resolveArguments(m, config, command.Args, project, result, v1.Native)
+				if err != nil {
+					return v1.PlanResponse{}, err
+				}
+				planned.Readiness.Command = &command
 				planned.Readiness.Executable = executable
 			}
 			if p.Target != nil {
-				target, err := resolveValue(m, config, *p.Target, project, result)
+				target, err := resolveValue(m, config, *p.Target, project, result, v1.Native)
 				if err != nil {
 					return v1.PlanResponse{}, err
+				}
+				if target.literal != nil {
+					if err := manifest.ValidateProbeTarget(p.Kind, *target.literal); err != nil {
+						return v1.PlanResponse{}, problem("invalid_contract", "components."+name+".readiness.target", "resolved readiness target must be numeric TCP host:port or a credential-free HTTP(S) URL")
+					}
 				}
 				if snapshot != nil && target.secret {
 					snapshot.Secrets[name+"/readiness"] = target.private()
@@ -212,6 +243,26 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 			}
 		}
 		result.Components = append(result.Components, planned)
+	}
+	if scene.Publish != nil {
+		publication, probe := *scene.Publish, scene.Publish.Probe
+		value, err := resolveValue(m, config, *probe.Target, project, result, v1.Native)
+		if err != nil {
+			return v1.PlanResponse{}, err
+		}
+		target := v1.Value{Literal: value.literal, Ref: value.symbolic}
+		if value.composition != nil {
+			target = *value.composition
+		}
+		if value.secret {
+			target = v1.Value{Secret: true}
+			if snapshot != nil {
+				snapshot.Secrets["publish/readiness"] = value.private()
+			}
+		}
+		probe.Target = &target
+		publication.Probe = probe
+		result.Publish = &publication
 	}
 	if layers.private.Provenance.Present {
 		// Selected bare PATH tools contribute their actual resolved executables.
@@ -281,6 +332,7 @@ func tool(l layers, name, project, component, role string, snapshot *Snapshot) (
 type resolvedValue struct {
 	literal          *string
 	symbolic         *v1.Reference
+	composition      *v1.Value
 	secret           bool
 	implicitBaseline bool
 }
@@ -289,10 +341,10 @@ func (v resolvedValue) wire() v1.PlannedValue {
 	if v.secret {
 		return v1.PlannedValue{Redacted: true}
 	}
-	return v1.PlannedValue{Literal: v.literal, Symbolic: v.symbolic}
+	return v1.PlannedValue{Literal: v.literal, Symbolic: v.symbolic, Composition: v.composition}
 }
 
-func resolveValue(m v1.Manifest, c resolvedConfig, v v1.Value, project string, p v1.PlanResponse) (resolvedValue, error) {
+func resolveLeaf(m v1.Manifest, c resolvedConfig, v v1.Value, project string, p v1.PlanResponse) (resolvedValue, error) {
 	result := resolvedValue{literal: v.Literal, secret: v.Secret}
 	if v.Ref == nil {
 		return result, nil
@@ -341,4 +393,44 @@ func toolCandidate(l layers, name string) ToolSelection {
 		selection.Candidate, selection.SourceLayer, selection.SourcePath = override, "private", l.private.Provenance.Path
 	}
 	return selection
+}
+
+func resolveValue(m v1.Manifest, c resolvedConfig, v v1.Value, project string, p v1.PlanResponse, runtime v1.Runtime) (resolvedValue, error) {
+	resolved, err := composition.Resolve(v, runtime, func(leaf v1.Value) (v1.Value, error) {
+		value, err := resolveLeaf(m, c, leaf, project, p)
+		return v1.Value{Literal: value.literal, Ref: value.symbolic, Secret: value.secret}, err
+	})
+	if err != nil {
+		if !errors.Is(err, composition.ErrInvalid) {
+			return resolvedValue{}, err
+		}
+		return resolvedValue{}, problem("invalid_composition", "value", "invalid composition inputs or output exceeds 1 MiB")
+	}
+	result := resolvedValue{literal: resolved.Literal, symbolic: resolved.Ref, secret: resolved.Secret}
+	if resolved.Literal == nil && resolved.Ref == nil {
+		result.composition = &resolved
+	}
+	return result, nil
+}
+
+func resolveArguments(m v1.Manifest, c resolvedConfig, args []v1.Argument, project string, p v1.PlanResponse, runtime v1.Runtime) ([]v1.Argument, error) {
+	result := slices.Clone(args)
+	for i, arg := range args {
+		if arg.Literal != nil {
+			continue
+		}
+		value, err := resolveValue(m, c, arg.Value, project, p, runtime)
+		if err != nil {
+			return nil, err
+		}
+		if value.secret {
+			return nil, problem("invalid_contract", "args", "sensitive values are not permitted in argv")
+		}
+		resolved := v1.Value{Literal: value.literal, Ref: value.symbolic}
+		if value.composition != nil {
+			resolved = *value.composition
+		}
+		result[i] = v1.Argument{Value: resolved}
+	}
+	return result, nil
 }

@@ -158,7 +158,8 @@ other finite execution budgets). Command probes contain
 an explicit native tool command, whose availability is checked. Network probes
 contain a `target` value: TCP uses a symbolic port or literal `host:port` with a
 numeric port in 1..65535 (TCP service-name ports are unsupported). HTTP uses a
-symbolic origin or literal HTTP(S) URL without credentials. Explicit
+symbolic origin or literal HTTP(S) URL without credentials; composed TCP/HTTP
+targets follow [explicit value composition](#compose-explicit-values). Explicit
 HTTP(S) ports, including Caddy admin endpoint ports, must be in 1..65535; omitted
 ports retain the scheme default and an explicitly empty port is invalid. A symbolic
 service port is resolved at execution; offline planning invents no numeric port.
@@ -225,7 +226,7 @@ presence/validity, with no network call or certificate/DNS check.
 
 ## Values and environment
 
-A value contains exactly one `literal` string or `ref` object, optionally
+A value contains exactly one `literal`, `ref`, `format`, `host_port`, `url_path` or `file_path` payload, optionally
 `secret: true`. A reference has explicit `kind`, `name`, `field` and, only for a
 service port, `port`. Supported shapes are:
 
@@ -239,7 +240,7 @@ service port, `port`. Supported shapes are:
 | `output` | Attached output | `path` | Resolve project-relative output path |
 
 Resource fields are `port.port`, `directory.path`, `volume.name`, `network.name`,
-`secret.value`, `origin.url` or `origin.ca_cert_path`, and allocation
+`secret.value`, `origin.url`, `origin.hostname` or `origin.ca_cert_path`, and allocation
 `host`, `port`, `database`, `username`, `password`. Allocation passwords are
 automatically sensitive. `ca_cert_path` is only for
 explicit component environment assignments (including explicitly selected reusable sets), requires
@@ -248,8 +249,89 @@ and stays symbolic offline. Container assignments also require an explicit
 `origin_ca_cert` mount and resolve to its target. See [explicit application trust](https.md#explicit-application-trust). Unused reference fields may be omitted or
 empty strings; nonempty extra values are rejected. Prefer omission when authoring
 manifests.
-There are no concatenation, expressions, variable substitutions or embedded
-`${...}` references. Literal strings retain their literal characters.
+`origin.hostname` is the canonical hostname without scheme or port, with the same
+attachment, selection and publication requirements as `origin.url`.
+
+### Compose explicit values
+
+Use compositions in explicit environment assignments, native/container argv
+entries and TCP/HTTP readiness targets. Operands are recursive values, with the
+same reference and context checks at every level. Images and fixtures keep their
+existing literal/reference forms. Each composition has a 1 MiB **rendered byte**
+limit, checked before rendering known offline output and final hydrated output,
+including URL escaping and filesystem cleaning; raw operand length is not the
+rendered size when later cleaning can shorten it. Existing literals, references and scalar argv keep their
+previous compatibility and limits.
+
+| Payload | Behavior |
+| --- | --- |
+| `format: {template: '%s:%s', values: [Value, Value]}` | Substitute the next string for each `%s`; `%%` emits one percent. Require exact operand count; reject every other verb, flag, width, precision or index. |
+| `host_port: {host: Value, port: Value}` | Validate a hostname/numeric IP and decimal port in 1..65535; join IPv6 with brackets. Supply the host without brackets. |
+| `url_path: {base: Value, parts: [Value, ...]}` | Append parts in order beneath a credential-free absolute HTTP(S) base without query/fragment. One separator at each boundary; a single leading slash does not replace the base. Empty parts are no-ops; `[]` preserves the validated base exactly. Preserve interior characters and the last nonempty part's trailing slash. |
+| `file_path: {base: Value, parts: [Value, ...]}` | Join and clean base plus parts using Go `filepath.Join` for native consumers and POSIX `path.Join` for containers on every daemon OS. `[]` still normalizes the base. `..` may escape the base; empty paths and separators follow the selected library. Reject NUL in every operand, including parts later removed by cleaning. |
+
+Both path constructors require `base` and a non-null `parts` array; the former
+unshipped URL `path` field is not accepted. Filesystem joining only constructs a
+string: no filesystem access, containment, mount rewriting or conversion of native
+paths to container paths. Existing working-directory, mount and output policies
+stay unchanged. Filesystem-looking URL/readiness values still require valid final
+destinations. Every operand retains its reference, sensitivity and context checks,
+even when cleaning removes its text.
+
+URL paths reject traversal (including recursively encoded dot segments/separators),
+backslashes, authority replacement, and query/fragment syntax. Go `net/url` owns
+URL parsing and escaping; valid existing path escapes are interpreted as path
+characters and escaped for the resulting URL. Formatting performs no numeric
+conversion, recursive percent processing, automatic credential escaping or shell
+expansion. Application connection-string conventions remain application-owned.
+For example:
+
+```yaml
+environment:
+  assign:
+    DB_ENDPOINT:
+      host_port:
+        host: {ref: {kind: service, name: database, field: host}}
+        port: {ref: {kind: service, name: database, field: port, port: sql}}
+    API_URL:
+      url_path:
+        base: {ref: {kind: resource, name: public, field: url}}
+        parts: [{literal: api}, {literal: /v1/}]
+    REPORT_PATH:
+      file_path:
+        base: {literal: reports}
+        parts: [{literal: results}, {literal: junit.xml}]
+command:
+  tool: app
+  args:
+    - serve
+    - format:
+        template: '--port=%s'
+        values: [{ref: {kind: resource, name: http_port, field: port}}]
+```
+
+Each argv entry resolves to exactly one argument: spaces, percent signs and
+special characters are retained without splitting or quoting. Forwarded CLI
+arguments remain literal strings. Sensitive argv, including nested secret
+references, is rejected before effects. Environment sensitivity includes the
+outer value and every operand; redact the whole sensitive composition.
+
+Offline plans partially resolve known operands while preserving typed unresolved
+compositions and reference provenance. There are no environment references or
+assignment-order dependencies. Check every assignment even when a later layer
+overrides it. Runtime endpoints follow the actual consumer: host-native command
+probes use host endpoints even on container services; workload containers use
+private/reachable endpoints; daemon network probes use owned host destinations.
+Filesystem constructors use that same actual consumer's path syntax. Shared
+container/host-probe environment values retain typed filesystem constructions
+until each consumer resolves them, including nested private operands.
+Nested CA references remain limited to explicit environment assignments, with
+existing publication and mount requirements. A reference in a URL path grants no
+destination ownership, publication-cycle exemption or trust. Aggregate composed
+probes retain the selected canonical origin and ordinary TLS/marker checks.
+
+There is no concatenation operator, expression language, variable substitution or
+embedded `${...}` reference. Literal strings retain their literal characters.
 
 A component explicitly lists `environment_sets`, then declares its own
 `environment`. Each set/environment may have `pass_through`, `seeds`, `assign`
@@ -266,10 +348,10 @@ order followed by the component environment:
 Check all required environment keys after layering; missing or empty values
 fail. Symbolic references satisfy presence, without claiming allocation.
 Assignment sensitivity follows `secret: true`, secret input declarations or
-secret resources. For conservative safety, **all inherited and seed values are
+secret resources, including every nested operand. For conservative safety, **all inherited and seed values are
 redacted** in ordinary plans, including the baseline. Non-sensitive explicit
 literals remain visible. Redacted values carry neither a literal nor a symbolic
-payload; the plan never serializes raw environment definitions or machine config.
+or composition payload; the plan never serializes raw environment definitions or machine config.
 
 Seeds are UTF-8 regular files bounded to 1 MiB, with safe project-relative paths
 and no symlink escape. Blank lines and lines whose first non-whitespace character

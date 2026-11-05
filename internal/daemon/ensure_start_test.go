@@ -494,7 +494,7 @@ func TestEnsureStartProtectedDriftPreservesFailedSnapshot(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				initializer.Command.Args = append(initializer.Command.Args, "changed")
+				initializer.Command.Args = append(initializer.Command.Args, v1.StringArguments("changed")...)
 				manifest.Components["check"] = initializer
 				write()
 			}

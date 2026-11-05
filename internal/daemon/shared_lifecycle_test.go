@@ -218,7 +218,7 @@ func (f *sharedMariaDBFixture) addLive(t *testing.T) string {
 			base.Environment.Assign["DB_STOP_FILE"] = fixtureLiteral(proof)
 		}
 		// Forwarded TCP can accept before application SQL initialization and HTTP serving.
-		base.Readiness = &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "consumer", Args: []string{"check-http"}}, Timeout: "30s"}
+		base.Readiness = &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "consumer", Args: v1.StringArguments("check-http")}, Timeout: "30s"}
 		f.h.manifest.Components[name] = base
 		f.h.manifest.Scenes[name] = v1.Scene{Lifetime: v1.Persistent, Components: []string{name}, Resources: []string{"database", "http"}}
 	}

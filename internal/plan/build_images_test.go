@@ -33,7 +33,7 @@ func TestBuildImagesRemainSymbolicOffline(t *testing.T) {
 	if err = manifest.Decode(data, ".yaml", &m); err != nil {
 		t.Fatal(err)
 	}
-	m.Components["noop"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "sh", Args: []string{"-c", "exit 0"}}}
+	m.Components["noop"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "exit 0")}}
 	m.Scenes["host"] = v1.Scene{Lifetime: v1.Persistent, Components: []string{"noop"}}
 	raw, _ := json.Marshal(m)
 	if err = os.Remove(filepath.Join(root, "backlot.yaml")); err != nil {

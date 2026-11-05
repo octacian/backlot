@@ -387,3 +387,42 @@ func TestOriginHostMappingSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestCompositionArgumentSchema(t *testing.T) {
+	schema := compile(t, "manifest-v1.schema.json")
+	minimal := `version: backlot/v1
+project: demo
+tools: {go: go}
+components:
+  test: {kind: job, runtime: native, policy: each-start, command: {tool: go, args: [ARG]}}
+scenes:
+  test: {lifetime: disposable, components: [test], terminal_job: test}
+`
+	for _, tc := range []struct {
+		arg   string
+		valid bool
+	}{
+		{"'a b %s'", true},
+		{"{literal: 'a b'}", true},
+		{"{format: {template: '%s%%', values: [{literal: 'a b'}]}}", true},
+		{"{host_port: {host: {literal: '::1'}, port: {literal: '8080'}}}", true},
+		{"{url_path: {base: {literal: 'https://example.test/base'}, parts: [{literal: api}, {literal: '/v1/'}]}}", true},
+		{"{url_path: {base: {literal: 'https://example.test'}, parts: []}}", true},
+		{"{file_path: {base: {literal: /base}, parts: [{literal: '..'}, {literal: out}]}}", true},
+		{"{file_path: {base: {literal: ''}, parts: []}}", true},
+		{"{file_path: {base: {literal: /base}}}", false},
+		{"{file_path: {parts: []}}", false},
+		{"{file_path: {base: {literal: /base}, parts: null}}", false},
+		{"{url_path: {base: {literal: 'https://example.test'}, path: {literal: old}}}", false},
+		{"{url_path: {base: {literal: 'https://example.test'}, parts: null}}", false},
+		{"23", false},
+		{"{format: {literal: '%s', values: [{literal: a}]}}", false},
+		{"{format: {template: '%s', values: [{literal: a, extra: b}]}}", false},
+		{"{literal: a, format: {template: '', values: []}}", false},
+		{"{format: {template: ''}}", false},
+	} {
+		if err := schema.Validate(yamlValue(t, []byte(strings.Replace(minimal, "ARG", tc.arg, 1)))); (err == nil) != tc.valid {
+			t.Fatalf("%s valid=%v: %v", tc.arg, tc.valid, err)
+		}
+	}
+}

@@ -21,6 +21,10 @@ environments:
     assign:
       DB_HOST: {ref: {kind: service, name: database, field: host}}
       DB_PORT: {ref: {kind: service, name: database, field: port, port: sql}}
+      DB_ENDPOINT:
+        host_port:
+          host: {ref: {kind: service, name: database, field: host}}
+          port: {ref: {kind: service, name: database, field: port, port: sql}}
       DB_USER: {literal: app}
       DB_PASSWORD: {ref: {kind: resource, name: db_app, field: value}}
     required: [DB_HOST, DB_PORT, DB_USER, DB_PASSWORD]
@@ -28,6 +32,10 @@ environments:
     seeds: [web.env]
     assign:
       APP_ORIGIN: {ref: {kind: resource, name: public, field: url}}
+      API_URL:
+        url_path:
+          base: {ref: {kind: resource, name: public, field: url}}
+          parts: [{literal: api}, {literal: /}]
 components:
   database:
     kind: service
@@ -75,7 +83,13 @@ components:
         PORT: {ref: {kind: resource, name: api_port, field: port}}
         APP_ORIGIN: {ref: {kind: resource, name: public, field: url}}
     depends_on: [{component: migrate, condition: completed}]
-    readiness: {kind: tcp, target: {ref: {kind: service, name: backend, field: port, port: http}}, timeout: 30s}
+    readiness:
+      kind: tcp
+      target:
+        host_port:
+          host: {literal: 127.0.0.1}
+          port: {ref: {kind: service, name: backend, field: port, port: http}}
+      timeout: 30s
   watch:
     kind: service
     runtime: native

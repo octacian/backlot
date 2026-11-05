@@ -192,7 +192,9 @@ func TestApplicationSessionAndStrictHelperPolicies(t *testing.T) {
 			data, err := os.ReadFile(ready)
 			if err == nil {
 				child, _ = strconv.Atoi(string(data))
-				break
+				if child > 0 {
+					break
+				}
 			}
 			time.Sleep(10 * time.Millisecond)
 		}

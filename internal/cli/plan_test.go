@@ -40,7 +40,7 @@ func TestPlanCLIForwardingAndJSONErrors(t *testing.T) {
 	if err := decoder.Decode(&p); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(p.Components[0].Command.Args, []string{"test", "./...", "-run", "TestThing", "--config", "runner-value"}) {
+	if !reflect.DeepEqual(p.Components[0].Command.Args, v1.StringArguments("test", "./...", "-run", "TestThing", "--config", "runner-value")) {
 		t.Fatalf("forwarded args=%v", p.Components[0].Command.Args)
 	}
 	if err := decoder.Decode(&p); !errors.Is(err, io.EOF) {

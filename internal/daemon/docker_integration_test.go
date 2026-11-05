@@ -172,9 +172,9 @@ func (h *dockerHarness) componentEnv() v1.Environment {
 }
 func (h *dockerHarness) alpine() {
 	env := h.componentEnv()
-	init := v1.Component{Kind: v1.Job, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"sh", "-c", "echo initialized >> /data/init; printf '%s' \"$SECRET\" > /private/secret"}, Policy: v1.FreshOnly, Initializes: []string{"data", "directory"}, Resources: []string{"data", "directory", "secret"}, Mounts: []v1.Mount{{Resource: "data", Target: "/data"}, {Resource: "directory", Target: "/private"}}, Environment: env}
-	server := v1.Component{Kind: v1.Service, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"sh", "-c", "while true; do nc -l -p 8080 < /dev/null; done"}, Resources: []string{"data", "directory", "secret", "port"}, Mounts: init.Mounts, Environment: env, Ports: map[string]v1.ServicePort{"http": {Resource: "port", ContainerPort: 8080}}, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(fixtureRef("resource", "port", "port")), Timeout: "30s"}, DependsOn: []v1.Dependency{{Component: "init", Condition: v1.Completed}}}
-	each := v1.Component{Kind: v1.Job, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"sh", "-c", "test \"$(cat /private/secret)\" = \"$SECRET\"; echo start >> /data/starts; echo terminal-output"}, Policy: v1.EachStart, Resources: []string{"data", "directory", "secret"}, Mounts: init.Mounts, Environment: env, DependsOn: []v1.Dependency{{Component: "server", Condition: v1.Ready}}}
+	init := v1.Component{Kind: v1.Job, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: v1.StringArguments("sh", "-c", "echo initialized >> /data/init; printf '%s' \"$SECRET\" > /private/secret"), Policy: v1.FreshOnly, Initializes: []string{"data", "directory"}, Resources: []string{"data", "directory", "secret"}, Mounts: []v1.Mount{{Resource: "data", Target: "/data"}, {Resource: "directory", Target: "/private"}}, Environment: env}
+	server := v1.Component{Kind: v1.Service, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: v1.StringArguments("sh", "-c", "while true; do nc -l -p 8080 < /dev/null; done"), Resources: []string{"data", "directory", "secret", "port"}, Mounts: init.Mounts, Environment: env, Ports: map[string]v1.ServicePort{"http": {Resource: "port", ContainerPort: 8080}}, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(fixtureRef("resource", "port", "port")), Timeout: "30s"}, DependsOn: []v1.Dependency{{Component: "init", Condition: v1.Completed}}}
+	each := v1.Component{Kind: v1.Job, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: v1.StringArguments("sh", "-c", "test \"$(cat /private/secret)\" = \"$SECRET\"; echo start >> /data/starts; echo terminal-output"), Policy: v1.EachStart, Resources: []string{"data", "directory", "secret"}, Mounts: init.Mounts, Environment: env, DependsOn: []v1.Dependency{{Component: "server", Condition: v1.Ready}}}
 	h.manifest.Components = map[string]v1.Component{"init": init, "server": server, "each": each}
 	resources := []string{"data", "directory", "secret", "port"}
 	h.manifest.Scenes = map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"init", "server", "each"}, Resources: resources}, "test": {Lifetime: v1.Disposable, Components: []string{"init", "server", "each"}, Resources: resources, TerminalJob: "each"}}
@@ -395,7 +395,7 @@ func TestDockerRuntime(t *testing.T) {
 		h := newDockerHarness(t, binary, endpoint)
 		h.alpine()
 		server := h.manifest.Components["server"]
-		server.Args = []string{"sh", "-c", "trap 'sleep 7; echo final-stop-marker; exit 0' TERM; echo stop-ready; while true; do nc -l -p 8080 < /dev/null & wait $!; done"}
+		server.Args = v1.StringArguments("sh", "-c", "trap 'sleep 7; echo final-stop-marker; exit 0' TERM; echo stop-ready; while true; do nc -l -p 8080 < /dev/null & wait $!; done")
 		server.DependsOn = nil
 		h.manifest.Components = map[string]v1.Component{"server": server}
 		h.manifest.Scenes = map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"server"}, Resources: []string{"data", "directory", "secret", "port"}}}
@@ -440,7 +440,7 @@ func TestDockerRuntime(t *testing.T) {
 			c.Resources = append(c.Resources, "network")
 			c.Environment.Assign["NETWORK"] = fixtureRef("resource", "network", "name")
 			if name == "init" {
-				c.Args[2] += "; printf '%s' \"$NETWORK\" > /private/network"
+				*c.Args[2].Literal += "; printf '%s' \"$NETWORK\" > /private/network"
 			}
 			h.manifest.Components[name] = c
 		}
@@ -1097,7 +1097,7 @@ func TestDockerRuntime(t *testing.T) {
 	t.Run("implicit-network-endpoint-drift-preserves-live-service", func(t *testing.T) {
 		h := newDockerHarness(t, binary, endpoint)
 		env := v1.Environment{Assign: map[string]v1.Value{"BACKLOT_FIXTURE": fixtureLiteral(h.token), "INSTANCE": fixtureRef("instance", "", "id")}}
-		h.manifest.Components = map[string]v1.Component{"server": {Kind: v1.Service, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"sh", "-c", "while true; do nc -l -p 8080 < /dev/null; done"}, Resources: []string{"port"}, Ports: map[string]v1.ServicePort{"http": {Resource: "port", ContainerPort: 8080}}, Environment: env, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(fixtureRef("resource", "port", "port")), Timeout: "15s"}}}
+		h.manifest.Components = map[string]v1.Component{"server": {Kind: v1.Service, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: v1.StringArguments("sh", "-c", "while true; do nc -l -p 8080 < /dev/null; done"), Resources: []string{"port"}, Ports: map[string]v1.ServicePort{"http": {Resource: "port", ContainerPort: 8080}}, Environment: env, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(fixtureRef("resource", "port", "port")), Timeout: "15s"}}}
 		h.manifest.Scenes = map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"server"}, Resources: []string{"port"}}}
 		h.write()
 		id := h.run("dev").Instance.ID
@@ -1155,7 +1155,7 @@ func TestDockerRuntime(t *testing.T) {
 					if mode == "missing-image" {
 						image = "backlot-fixture-absent:" + h.token
 					}
-					h.manifest.Components = map[string]v1.Component{"job": {Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral(image)), Args: []string{"true"}, Resources: []string{"data"}}}
+					h.manifest.Components = map[string]v1.Component{"job": {Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral(image)), Args: v1.StringArguments("true"), Resources: []string{"data"}}}
 					h.manifest.Scenes = map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"job"}, Resources: []string{"data"}}}
 					h.write()
 					command := exec.Command(binary, "run", "dev", "--project", h.project, "--config", h.config, "--state-dir", h.dir, "--json")
@@ -1330,7 +1330,7 @@ func TestDockerRuntime(t *testing.T) {
 		h := newDockerHarness(t, binary, endpoint)
 		h.alpine()
 		init := h.manifest.Components["init"]
-		init.Args = []string{"sh", "-c", "if ! test -f /private/attempt; then touch /private/attempt; echo failed-initialization; exit 19; fi; echo initialized >> /data/init; printf '%s' \"$SECRET\" > /private/secret"}
+		init.Args = v1.StringArguments("sh", "-c", "if ! test -f /private/attempt; then touch /private/attempt; echo failed-initialization; exit 19; fi; echo initialized >> /data/init; printf '%s' \"$SECRET\" > /private/secret")
 		h.manifest.Components["init"] = init
 		h.write()
 		id := h.run("dev").Instance.ID
@@ -1362,7 +1362,7 @@ func TestDockerRuntime(t *testing.T) {
 		if code != 0 || strings.TrimSpace(text) != "1\n2" {
 			t.Fatal("restart job policy", text, code)
 		}
-		init.Args = append(init.Args, "changed")
+		init.Args = append(init.Args, v1.StringArguments("changed")...)
 		h.manifest.Components["init"] = init
 		h.write()
 		req := h.request("dev")
@@ -1444,7 +1444,7 @@ func TestDockerRuntime(t *testing.T) {
 		// Two disposable runs stay overlapping until the test releases each private
 		// terminal. Their service mounts expose their independent retained state.
 		each := h.manifest.Components["each"]
-		each.Args = []string{"sh", "-c", "while [ ! -f /private/release ]; do sleep 0.1; done"}
+		each.Args = v1.StringArguments("sh", "-c", "while [ ! -f /private/release ]; do sleep 0.1; done")
 		h.manifest.Components["each"] = each
 		h.write()
 		da, db := h.run("test"), h.run("test")
@@ -1477,7 +1477,7 @@ func TestDockerRuntime(t *testing.T) {
 		// A separate scene writes an explicitly shared output through two concurrent
 		// disposable runs. The atomic directory detects overlap inside the real job.
 		h.manifest.Outputs = map[string]v1.Output{"build": {Path: "build", ConcurrencyGroup: "build"}}
-		job := v1.Component{Kind: v1.Job, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Policy: v1.EachStart, Args: []string{"sh", "-c", "mkdir /output/lock || exit 41; echo start; sleep 0.4; rmdir /output/lock; echo done"}, Outputs: []string{"build"}, Mounts: []v1.Mount{{Output: "build", Target: "/output"}}}
+		job := v1.Component{Kind: v1.Job, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Policy: v1.EachStart, Args: v1.StringArguments("sh", "-c", "mkdir /output/lock || exit 41; echo start; sleep 0.4; rmdir /output/lock; echo done"), Outputs: []string{"build"}, Mounts: []v1.Mount{{Output: "build", Target: "/output"}}}
 		h.manifest.Components["output"] = job
 		h.manifest.Scenes["output"] = v1.Scene{Lifetime: v1.Disposable, Components: []string{"output"}, TerminalJob: "output"}
 		h.write()
@@ -1502,7 +1502,7 @@ func TestDockerRuntime(t *testing.T) {
 	})
 	t.Run("bounded-log-records-retained-before-destroy", func(t *testing.T) {
 		h := newDockerHarness(t, binary, endpoint)
-		job := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"sh", "-c", "head -c 16384 /dev/zero; printf '\\377\\376'; printf 'ordinary-output\\n'"}}
+		job := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: v1.StringArguments("sh", "-c", "head -c 16384 /dev/zero; printf '\\377\\376'; printf 'ordinary-output\\n'")}
 		job.Environment = v1.Environment{Assign: map[string]v1.Value{"BACKLOT_FIXTURE": fixtureLiteral(h.token), "INSTANCE": fixtureRef("instance", "", "id")}}
 		h.manifest.Components = map[string]v1.Component{"logs": job}
 		h.manifest.Scenes = map[string]v1.Scene{"logs": {Lifetime: v1.Persistent, Components: []string{"logs"}}}
@@ -1606,8 +1606,8 @@ func TestDockerRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		h.manifest.Tools = map[string]string{"docker": docker}
-		build := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "docker", Args: []string{"--host", endpoint, "build", "--pull=false", "--network=none", "--label", "io.backlot.fixture=" + h.token, "--tag", image, "."}}}
-		job := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral(image)), Args: []string{"sh", "-c", "test \"$(cat /witness)\" = \"$EXPECTED\" && echo built-image-consumed"}, Environment: v1.Environment{Assign: map[string]v1.Value{"EXPECTED": fixtureLiteral(h.token)}}, DependsOn: []v1.Dependency{{Component: "build", Condition: v1.Completed}}}
+		build := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "docker", Args: v1.StringArguments("--host", endpoint, "build", "--pull=false", "--network=none", "--label", "io.backlot.fixture="+h.token, "--tag", image, ".")}}
+		job := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral(image)), Args: v1.StringArguments("sh", "-c", "test \"$(cat /witness)\" = \"$EXPECTED\" && echo built-image-consumed"), Environment: v1.Environment{Assign: map[string]v1.Value{"EXPECTED": fixtureLiteral(h.token)}}, DependsOn: []v1.Dependency{{Component: "build", Condition: v1.Completed}}}
 		h.manifest.Components = map[string]v1.Component{"build": build, "consume": job}
 		h.manifest.Scenes = map[string]v1.Scene{"build": {Lifetime: v1.Disposable, Components: []string{"build", "consume"}, TerminalJob: "consume"}}
 		h.write()
@@ -1740,11 +1740,11 @@ func TestDockerRuntime(t *testing.T) {
 		server.Outputs = []string{"shared"}
 		server.Mounts = append(server.Mounts, v1.Mount{Output: "shared", Target: "/output"})
 		h.manifest.Components["server"] = server
-		h.manifest.Components["blocked"] = v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"true"}, Outputs: []string{"shared"}, Mounts: []v1.Mount{{Output: "shared", Target: "/output"}}}
+		h.manifest.Components["blocked"] = v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: v1.StringArguments("true"), Outputs: []string{"shared"}, Mounts: []v1.Mount{{Output: "shared", Target: "/output"}}}
 		h.manifest.Scenes["blocked"] = v1.Scene{Lifetime: v1.Disposable, Components: []string{"blocked"}, TerminalJob: "blocked"}
 		h.write()
 		peer := h.manifest.Components["server"]
-		peer.Args = []string{"sh", "-c", "echo recovery-peer; exec sleep 300"}
+		peer.Args = v1.StringArguments("sh", "-c", "echo recovery-peer; exec sleep 300")
 		peer.Ports = nil
 		if err := os.Mkdir(filepath.Join(h.project, "probe"), 0700); err != nil {
 			t.Fatal(err)
@@ -1753,7 +1753,7 @@ func TestDockerRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		h.manifest.Tools = map[string]string{"probe": "sh"}
-		peer.Readiness = &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "probe", WorkingDirectory: "probe", Args: []string{"-c", "test -f host-marker"}}, Timeout: "3s"}
+		peer.Readiness = &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "probe", WorkingDirectory: "probe", Args: v1.StringArguments("-c", "test -f host-marker")}, Timeout: "3s"}
 		peer.Resources = []string{"data", "directory", "secret"}
 		h.manifest.Components["peer"] = peer
 		scene := h.manifest.Scenes["dev"]

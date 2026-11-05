@@ -112,7 +112,7 @@ func (h *harness) publishedOverlap(one, two string, dev, production v1.Instance)
 			t.Fatal("overlap manifest malformed")
 		}
 		m.Tools["sh"] = "/bin/sh"
-		m.Components["published-hold"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "sh", Args: []string{"-c", `mkdir -p reports; echo published-disposable-ready; echo holding > reports/published.txt; while [ ! -f reports/release ]; do sleep 0.05; done; echo published-disposable-complete; echo completed > reports/published.txt`}}, DependsOn: []v1.Dependency{{Component: "container-client", Condition: v1.Completed}}, Outputs: []string{"reports"}, Artifacts: map[string]v1.ArtifactSource{"report": {Path: "reports/published.txt"}}}
+		m.Components["published-hold"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", `mkdir -p reports; echo published-disposable-ready; echo holding > reports/published.txt; while [ ! -f reports/release ]; do sleep 0.05; done; echo published-disposable-complete; echo completed > reports/published.txt`)}, DependsOn: []v1.Dependency{{Component: "container-client", Condition: v1.Completed}}, Outputs: []string{"reports"}, Artifacts: map[string]v1.ArtifactSource{"report": {Path: "reports/published.txt"}}}
 		scene := m.Scenes["ui-test"]
 		scene.Components = append([]string(nil), scene.Components...)
 		for n, name := range scene.Components {

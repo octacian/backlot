@@ -89,9 +89,12 @@ func (s *service) stopKept(id string, entry *execution) (v1.Instance, error) {
 func sanitizeResult(result *v1.ExecutionResult, snapshot plan.Snapshot, entry *execution) {
 	redact := func(text string) string {
 		for _, value := range snapshot.Secrets {
-			if value.Literal != nil && *value.Literal != "" {
-				text = strings.ReplaceAll(text, *value.Literal, "[redacted]")
-			}
+			_ = walkPlanned(value, func(v v1.Value) error {
+				if v.Literal != nil && *v.Literal != "" {
+					text = strings.ReplaceAll(text, *v.Literal, "[redacted]")
+				}
+				return nil
+			})
 		}
 		if entry.resources != nil {
 			for _, resource := range entry.resources.Resources {

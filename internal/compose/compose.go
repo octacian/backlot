@@ -248,8 +248,24 @@ func safePath(path string) bool {
 		}
 		decoded, err := url.PathUnescape(current)
 		if err != nil {
-			// A literal percent is supported only after decoding a valid layer.
-			return depth > 0
+			if depth == 0 {
+				return false
+			}
+			// A decoded literal percent must not hide valid escapes elsewhere in this layer.
+			var layer strings.Builder
+			layer.Grow(len(current))
+			prefix, rest, _ := strings.Cut(current, "%")
+			layer.WriteString(prefix)
+			for part := range strings.SplitSeq(rest, "%") {
+				piece, err := url.PathUnescape("%" + part)
+				if err != nil {
+					layer.WriteByte('%')
+					layer.WriteString(part)
+				} else {
+					layer.WriteString(piece)
+				}
+			}
+			decoded = layer.String()
 		}
 		if decoded == current {
 			return true

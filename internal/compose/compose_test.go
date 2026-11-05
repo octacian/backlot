@@ -187,3 +187,76 @@ func TestPartialConstructorByteBounds(t *testing.T) {
 		t.Fatalf("empty suffix cap witness: %v", err)
 	}
 }
+
+func TestURLPathMixedEncodingRejection(t *testing.T) {
+	unknown := v1.Value{Ref: &v1.Reference{Kind: "resource", Name: "origin", Field: "url"}}
+	for _, seed := range []string{"%2e", "%2E%2e", ".%2e", "%2f", "%2F", "%5c", "%5C", "%00", "%0a", "%0d"} {
+		encoded := seed
+		for depth := 0; depth < 6; depth++ {
+			percent := "%25"
+			for percentDepth := 0; percentDepth < 4; percentDepth++ {
+				paths := []string{encoded + "/" + percent, percent + "/" + encoded, "safe/" + encoded + "/" + percent + "/tail"}
+				if seed != "%2e" && seed != "%2E%2e" && seed != ".%2e" {
+					paths = append(paths, percent+encoded, encoded+percent)
+				}
+				for _, path := range paths {
+					for _, role := range []string{"suffix", "base"} {
+						value := v1.Value{URLPath: &v1.URLPathValue{Base: unknown, Path: literal(path)}}
+						hydration := "https://example.test/base"
+						if role == "base" {
+							value.URLPath = &v1.URLPathValue{Base: literal(hydration + "/" + path), Path: unknown}
+							hydration = "x"
+						}
+						for _, hydrated := range []bool{false, true} {
+							_, err := Resolve(value, func(v v1.Value) (v1.Value, error) {
+								if hydrated {
+									return literal(hydration), nil
+								}
+								return v, nil
+							})
+							if err != ErrInvalid {
+								t.Fatalf("role=%s hydrated=%v path=%q: want sanitized rejection, got %v", role, hydrated, path, err)
+							}
+						}
+					}
+				}
+				percent = strings.ReplaceAll(percent, "%", "%25")
+			}
+			encoded = strings.ReplaceAll(encoded, "%", "%25")
+		}
+	}
+}
+
+func TestURLPathMixedEncodingPreservesBenignPaths(t *testing.T) {
+	for _, tc := range []struct{ path, escaped string }{
+		{"%25", "%25"},
+		{"%25/%25", "%25/%25"},
+		{"%25done/雪/", "%25done/%E9%9B%AA/"},
+		{"x%2520y", "x%2520y"},
+		{"%25/%2520/雪/", "%25/%2520/%E9%9B%AA/"},
+		{"%2520/%25G0/%252525", "%2520/%25G0/%252525"},
+		{"%25%252e/%252e%25", "%25%252e/%252e%25"},
+		{strings.Repeat("%25", 1024), strings.Repeat("%25", 1024)},
+	} {
+		for _, role := range []string{"suffix", "base"} {
+			base, path := "https://example.test/base", tc.path
+			want := base + "/" + tc.escaped
+			if role == "base" {
+				base, path = base+"/"+tc.path, "x"
+				want = strings.TrimRight(want, "/") + "/x"
+			}
+			got, err := Render(v1.Value{URLPath: &v1.URLPathValue{}}, []string{base, path})
+			if err != nil || got != want {
+				t.Fatalf("role=%s path=%q: %q %v", role, tc.path, got, err)
+			}
+		}
+	}
+	for _, path := range []string{"%", "%0", "%GG", "%25/%"} {
+		if _, err := Render(v1.Value{URLPath: &v1.URLPathValue{}}, []string{"http://a", path}); err != ErrInvalid {
+			t.Fatalf("malformed initial escape %q: %v", path, err)
+		}
+	}
+	if _, err := Render(v1.Value{URLPath: &v1.URLPathValue{}}, []string{"http://a", "%" + strings.Repeat("25", 66)}); err != ErrInvalid {
+		t.Fatalf("excessive encoding depth: %v", err)
+	}
+}

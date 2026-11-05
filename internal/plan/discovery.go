@@ -26,7 +26,7 @@ func declarations(project string) (Source, v1.Manifest, error) {
 }
 
 func sceneSummary(name string, s v1.Scene) v1.SceneSummary {
-	return v1.SceneSummary{Name: name, Lifetime: s.Lifetime, ComponentCount: len(s.Components), TerminalJob: s.TerminalJob, Publication: s.Publish != nil}
+	return v1.SceneSummary{Tasks: s.Tasks, Name: name, Lifetime: s.Lifetime, ComponentCount: len(s.Components), TerminalJob: s.TerminalJob, Publication: s.Publish != nil}
 }
 
 // ListScenes validates declarations without loading configuration or prerequisites.
@@ -113,13 +113,23 @@ func DescribeScene(project, name string) (v1.SceneDescriptionResponse, error) {
 	if err != nil {
 		return r, err
 	}
+	for _, name := range scene.Tasks {
+		if !slices.Contains(order, name) {
+			order = append(order, name)
+		}
+	}
 	for _, n := range order {
 		c := m.Components[n]
 		d := v1.DeclaredComponent{Name: n, Kind: c.Kind, Runtime: c.Runtime, Policy: c.Policy, DependsOn: c.DependsOn, Resources: c.Resources, Outputs: c.Outputs, Ports: c.Ports, Mounts: c.Mounts, HostMappings: c.HostMappings, Artifacts: c.Artifacts}
 		if c.Readiness != nil {
 			d.Readiness = c.Readiness.Kind
 		}
-		r.Components = append(r.Components, d)
+		if slices.Contains(scene.Components, n) {
+			r.Components = append(r.Components, d)
+		}
+		if slices.Contains(scene.Tasks, n) {
+			r.Tasks = append(r.Tasks, d)
+		}
 		if c.Runtime == v1.Container {
 			r.Prerequisites.Docker = true
 		}

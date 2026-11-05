@@ -98,7 +98,9 @@ func (s *store) filteredList(request v1.FilteredListRequest) (v1.ListResponse, e
 			}
 			summary := v1.InstanceSummary{ID: i.ID, Project: i.Plan.Project, Scene: i.Plan.Scene, Checkout: i.Checkout.Path, Status: i.Status, Lifetime: i.Plan.Lifetime, CreatedAt: i.CreatedAt}
 			if i.Execution != nil {
-				summary.Origin = i.Execution.Origin
+				if i.Task == nil {
+					summary.Origin = i.Execution.Origin
+				}
 			}
 			result.Instances = append(result.Instances, summary)
 		}

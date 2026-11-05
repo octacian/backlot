@@ -28,6 +28,10 @@ func Resolve(request v1.PlanRequest) (v1.PlanResponse, error) {
 }
 
 func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.PlanResponse, error) {
+	return resolveSelected(request, snapshot, source, "")
+}
+
+func resolveSelected(request v1.PlanRequest, snapshot *Snapshot, source Source, task string) (v1.PlanResponse, error) {
 	var result v1.PlanResponse
 	file, project := source.ManifestPath, source.ProjectPath
 
@@ -55,7 +59,7 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 			return result, problem("invalid_arguments", "terminal_args", "NUL is not permitted")
 		}
 	}
-	result = v1.PlanResponse{APIVersion: v1.Version, Project: m.Project, Checkout: source.CheckoutPath, ManifestPath: file, ManifestDigest: layers.manifestDigest, ConfigDigest: layers.machineDigest, Scene: request.Scene, Lifetime: scene.Lifetime, StartupDetails: scene.StartupDetails, TerminalJob: scene.TerminalJob, Resources: map[string]v1.Resource{}, Outputs: map[string]v1.Output{}, Publish: scene.Publish}
+	result = v1.PlanResponse{APIVersion: v1.Version, Project: m.Project, Checkout: source.CheckoutPath, ManifestPath: file, ManifestDigest: layers.manifestDigest, ConfigDigest: layers.machineDigest, Scene: request.Scene, Lifetime: scene.Lifetime, Tasks: scene.Tasks, StartupDetails: scene.StartupDetails, TerminalJob: scene.TerminalJob, Resources: map[string]v1.Resource{}, Outputs: map[string]v1.Output{}, Publish: scene.Publish}
 	for _, name := range scene.Resources {
 		result.Resources[name] = m.Resources[name]
 		if r := m.Resources[name]; r.Kind == "allocation" {
@@ -74,6 +78,19 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 	order, err := manifest.Order(m, scene)
 	if err != nil {
 		return v1.PlanResponse{}, err
+	}
+	startup := slices.Clone(order)
+	if task != "" {
+		if !slices.Contains(scene.Tasks, task) {
+			return result, problem("task_unavailable", "tasks", "task is not enabled; explicitly restart the parent to accept declarations")
+		}
+		order = []string{task}
+	} else {
+		for _, name := range scene.Tasks {
+			if !slices.Contains(order, name) {
+				order = append(order, name)
+			}
+		}
 	}
 	selectedOutputs := map[string]bool{}
 	for _, name := range order {
@@ -150,8 +167,10 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 				return v1.PlanResponse{}, err
 			}
 		}
-		for _, o := range c.Outputs {
-			result.Outputs[o] = m.Outputs[o]
+		if task == "" && slices.Contains(startup, name) {
+			for _, o := range c.Outputs {
+				result.Outputs[o] = m.Outputs[o]
+			}
 		}
 		env, err := resolveEnvironmentValues(m, config, c, project, result)
 		if err != nil {
@@ -242,9 +261,29 @@ func resolve(request v1.PlanRequest, snapshot *Snapshot, source Source) (v1.Plan
 				planned.Readiness.Target = &wire
 			}
 		}
-		result.Components = append(result.Components, planned)
+		if slices.Contains(scene.Tasks, name) && snapshot != nil {
+			if snapshot.Tasks == nil {
+				snapshot.Tasks = map[string]TaskCapture{}
+			}
+			capture, err := captureTask(m, config, project, planned, snapshot.Secrets, scene)
+			if err != nil {
+				return v1.PlanResponse{}, err
+			}
+			snapshot.Tasks[name] = capture
+		}
+		if task == "" && slices.Contains(startup, name) {
+			result.Components = append(result.Components, planned)
+		} else if snapshot != nil {
+			// Task-only private values belong to their capture, not protected startup inputs.
+			for key := range snapshot.Secrets {
+				if strings.HasPrefix(key, name+"/") {
+					delete(snapshot.Secrets, key)
+					delete(snapshot.ImplicitBaseline, key)
+				}
+			}
+		}
 	}
-	if scene.Publish != nil {
+	if scene.Publish != nil && task == "" {
 		publication, probe := *scene.Publish, scene.Publish.Probe
 		value, err := resolveValue(m, config, *probe.Target, project, result, v1.Native)
 		if err != nil {

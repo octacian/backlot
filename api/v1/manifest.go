@@ -208,6 +208,8 @@ type Publication struct {
 
 // Scene explicitly selects all work and resources for one workflow.
 type Scene struct {
+	// Tasks enables finite native each-start jobs for explicit invocation.
+	Tasks          []string                 `json:"tasks,omitempty" yaml:"tasks,omitempty" jsonschema_description:"Native each-start jobs explicitly enabled on a persistent scene; never added to startup work."`
 	StartupDetails []StartupDetailSelection `json:"startup_details,omitempty" yaml:"startup_details,omitempty" jsonschema_description:"Ordered fixtures automatically displayed after persistent startup, including selected sensitive values."`
 	Lifetime       Lifetime                 `json:"lifetime" yaml:"lifetime" jsonschema_description:"Persistent retains data; disposable runs finish at a terminal job."`
 	Components     []string                 `json:"components" yaml:"components" jsonschema_description:"Explicit nonempty selection of component names; dependencies are never included implicitly."`

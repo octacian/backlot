@@ -1,7 +1,7 @@
 package v1
 
 // StateVersion identifies the supported durable database format.
-const StateVersion = 13
+const StateVersion = 14
 
 // InstanceStatus distinguishes metadata preparation from observed execution.
 type InstanceStatus string
@@ -66,6 +66,8 @@ type Operation struct {
 
 // Instance is the redacted durable public view of preparation and optional execution.
 type Instance struct {
+	// Task records independent execution lineage when this instance borrows a parent.
+	Task *TaskBinding `json:"task,omitempty"`
 	// CheckoutParent preserves the original registration across association changes.
 	CheckoutParent string `json:"checkout_parent,omitempty"`
 	// Association exposes current selection separately from recorded launch provenance.

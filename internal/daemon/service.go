@@ -44,6 +44,8 @@ type service struct {
 	beforeExecution func(string)
 	// beforeSceneMutation is a test seam between recorded resolution and its mutation lock.
 	beforeSceneMutation func(string)
+	// beforeTaskMutation gates tests between parent observation and serialized admission.
+	beforeTaskMutation func(string)
 }
 
 func validatePlanRequest(request v1.PlanRequest) error {

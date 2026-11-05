@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,6 +57,30 @@ func TestNativeFixtureProcess(t *testing.T) {
 		for {
 			time.Sleep(time.Hour)
 		}
+	case "task-auth":
+		marker := slices.Index(os.Args, "--")
+		cwd, err := os.Getwd()
+		if err != nil || cwd != os.Getenv("EXPECTED_CWD") || marker < 0 || len(os.Args) < marker+3 || os.Args[marker+2] != os.Getenv("PARENT") {
+			os.Exit(31)
+		}
+		request, err := http.NewRequest(http.MethodGet, os.Getenv("URL"), nil)
+		if err != nil {
+			os.Exit(32)
+		}
+		request.Header.Set("Authorization", os.Getenv("TOKEN"))
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			os.Exit(33)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			os.Exit(34)
+		}
+		fmt.Println("authenticated task boundary", os.Args[marker+3:])
+		if slices.Contains(os.Args[marker+3:], "fail") {
+			os.Exit(23)
+		}
+		os.Exit(0)
 	case "prep":
 		os.Exit(0)
 	case "fail":
@@ -159,7 +184,11 @@ func TestNativeFixtureProcess(t *testing.T) {
 	if err != nil {
 		os.Exit(22)
 	}
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if token := os.Getenv("TOKEN"); token != "" && request.Header.Get("Authorization") != token {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
 		if os.Getenv("HTTP_STATUS") == "503" {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}

@@ -104,7 +104,20 @@ func (s *service) deleteAttempt(a v1.Attempt, history bool) error {
 	if !committed {
 		return nil
 	}
-	return s.finishEvidenceDeletion(intent)
+	if err := s.finishEvidenceDeletion(intent); err != nil {
+		return err
+	}
+	if history {
+		i, err := s.store.inspect(a.InstanceID)
+		if err != nil {
+			return err
+		}
+		if i.Task != nil {
+			_, err = s.eraseDestroyed(i.ID)
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *service) finishEvidenceDeletion(d evidenceDeletion) error {
@@ -356,7 +369,7 @@ func (s *service) pruneHistory(ctx context.Context, q v1.HistoryPruneRequest) (v
 	defer s.evidence.mu.Unlock()
 	unlock := s.lockMutation(q.InstanceID)
 	defer unlock()
-	entries, err := s.store.attempts(q.InstanceID)
+	entries, err := s.store.retentionScope(q.InstanceID)
 	if err != nil {
 		return response, err
 	}
@@ -438,8 +451,20 @@ func (s *service) retryEvidenceDeletions() error {
 }
 
 func (s *service) eraseDestroyed(id string) (v1.Instance, error) {
+	if err := s.store.guardDependentTasks(id); err != nil {
+		return v1.Instance{}, err
+	}
+	children, err := s.store.dependentTasks(id)
+	if err != nil {
+		return v1.Instance{}, err
+	}
+	for _, child := range children {
+		if _, err := s.eraseDestroyed(child); err != nil {
+			return v1.Instance{}, err
+		}
+	}
 	var instance v1.Instance
-	err := s.store.db.Update(func(tx *bolt.Tx) error {
+	err = s.store.db.Update(func(tx *bolt.Tx) error {
 		r, err := load(tx, id)
 		if err != nil {
 			return err

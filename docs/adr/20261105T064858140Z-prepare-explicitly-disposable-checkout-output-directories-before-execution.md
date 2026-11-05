@@ -7,7 +7,7 @@ summary: "Allow an explicit output-directory opt-in to authorize bounded prepara
 tags: [outputs, lifecycle, evidence, ownership]
 supersedes: []
 superseded_by: []
-related: [/docs/adr/20261103T174043965Z-reassociate-retained-projects-through-explicit-current-bindings.md, /docs/adr/20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md]
+related: [/docs/adr/20261103T174043965Z-reassociate-retained-projects-through-explicit-current-bindings.md, /docs/adr/20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md, /docs/adr/20261105T063300829Z-run-declared-native-tasks-against-accepted-ready-scenes.md]
 tracking: ["https://github.com/octacian/backlot/issues/113"]
 implemented_by: ["https://github.com/octacian/backlot/pull/123"]
 ---
@@ -45,7 +45,9 @@ than artifact naming or inferred filesystem ownership, grants deletion authority
 over that scratch subtree only; it never adopts retained resource ownership.
 
 Prepare each selected opted-in directory once, after acquiring all selected output
-locks and before launching any component, for both persistent and disposable work.
+locks or atomic task output reservations and before launching any component, for
+both persistent and disposable work. Borrowed tasks prepare only their own selected
+outputs; they never reacquire parent startup locks or prepare parent-only outputs.
 Joining accepted work, offline planning and metadata preparation do not clear it.
 Compatible new starts and explicit restarts prepare again after prior owners and
 collectors join. Healthy starts keep accepted settings and report drift; later
@@ -54,7 +56,7 @@ initialization stamps remain unchanged: a skipped fresh-only job does not repopu
 an emptied output or claim artifacts. Use each-start producers for repeatable files.
 
 Revalidate source identity, output paths and consumer conflicts under the acquired
-locks before deletion. Require a strict manifest-directory descendant with safe
+locks or task reservations before deletion. Require a strict manifest-directory descendant with safe
 relative syntax and a directory or absent target. Reject symlink components on
 the path, including internal aliases, and use root-relative filesystem operations;
 never follow links found inside the disposable tree. Reject overlap with this

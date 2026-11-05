@@ -14,6 +14,9 @@ import (
 // decoders retain historical gaps; this does not validate historical plan graphs,
 // current files, providers or project registration. Never resave decoded values.
 func validateStateAuthority(tx *bolt.Tx) error {
+	if err := validateTaskAuthority(tx); err != nil {
+		return err
+	}
 	if err := validateStateNineAuthority(tx); err != nil {
 		return err
 	}
@@ -257,4 +260,64 @@ func validateBuildImageResults(tx *bolt.Tx) error {
 		}
 	}
 	return nil
+}
+
+// validateTaskAuthority uses private instance/runtime journals, never public history.
+func validateTaskAuthority(tx *bolt.Tx) error {
+	return tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
+		var r record
+		if err := decodeRecord(data, string(key), &r); err != nil {
+			return err
+		}
+		i := r.Instance
+		if i.Task == nil {
+			return nil
+		}
+		binding := i.Task
+		if !validID(binding.InstanceID) || !validID(binding.Attempt) || !validID(binding.Generation) || binding.InstanceID == i.ID || binding.Name == "" || i.Plan.Lifetime != v1.Disposable {
+			return problem("state_corrupt", "invalid dependent task binding")
+		}
+		parent, err := load(tx, binding.InstanceID)
+		if err != nil {
+			return err
+		}
+		if parent.Instance.Task != nil || parent.Instance.Plan.Lifetime != v1.Persistent {
+			return problem("state_corrupt", "invalid task parent authority")
+		}
+		if active(i.Status) || i.Execution != nil && i.Execution.CleanupFailure != "" {
+			if parent.Instance.Execution == nil || parent.Instance.Execution.Attempt != binding.Attempt {
+				return problem("state_corrupt", "live task parent attempt mismatch")
+			}
+			runtime, err := decodeRuntime(tx.Bucket([]byte("runtime")).Get(key))
+			if err != nil {
+				return err
+			}
+			if i.Execution == nil || runtime.Attempt != i.Execution.Attempt {
+				return problem("state_corrupt", "task runtime attempt mismatch")
+			}
+			generation := binding.Attempt
+			if data := tx.Bucket([]byte("resources")).Get([]byte(binding.InstanceID)); data != nil {
+				g, err := decodeResources(data)
+				if err != nil {
+					return err
+				}
+				if g.ID != "" {
+					generation = g.ID
+				}
+			}
+			if generation != binding.Generation {
+				return problem("state_corrupt", "task resource generation mismatch")
+			}
+		}
+		if data := tx.Bucket([]byte("resources")).Get(key); data != nil {
+			g, err := decodeResources(data)
+			if err != nil {
+				return err
+			}
+			if g.ID != "" {
+				return problem("state_corrupt", "task cannot own parent resources")
+			}
+		}
+		return nil
+	})
 }

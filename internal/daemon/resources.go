@@ -415,6 +415,9 @@ func verifyResource(ctx context.Context, d *dockerEngine, r ownedResource) error
 // removeNetworks requires joined consumers and a durable cleanup obligation.
 // It retires only instance networks; data and shared allocations stay retained.
 func (s *store) removeNetworks(ctx context.Context, id string, g *resourceGeneration, d *dockerEngine) (failure error) {
+	if err := s.guardDependentTasks(id); err != nil {
+		return err
+	}
 	defer func() {
 		if failure != nil {
 			failure = errors.Join(&v1.PlanError{Code: "cleanup_failed", Field: "resources.network", Message: "instance network cleanup incomplete; restore provider/ownership or remove foreign consumers and retry stop"}, failure)
@@ -485,6 +488,9 @@ func (s *store) removeResources(ctx context.Context, id string) error {
 	return s.removeResourcesWithForce(ctx, id, false)
 }
 func (s *store) removeResourcesWithForce(ctx context.Context, id string, force bool) error {
+	if err := s.guardDependentTasks(id); err != nil {
+		return err
+	}
 	if err := s.guardAbandonedData(id); err != nil {
 		return err
 	}

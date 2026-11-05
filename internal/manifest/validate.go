@@ -565,6 +565,38 @@ func scene(m v1.Manifest, name string, s v1.Scene) error {
 			return invalid(f+".startup_details", "select an existing fixture and a nonempty single-line label")
 		}
 	}
+	if err := unique(s.Tasks, f+".tasks"); err != nil {
+		return err
+	}
+	if len(s.Tasks) > 0 && s.Lifetime != v1.Persistent {
+		return invalid(f+".tasks", "tasks require a persistent scene")
+	}
+	for _, name := range s.Tasks {
+		c, ok := m.Components[name]
+		if !ok || c.Kind != v1.Job || c.Runtime != v1.Native || c.Policy != v1.EachStart || len(c.Initializes) != 0 {
+			return invalid(f+".tasks", "enable native each-start jobs without initialization")
+		}
+		for _, image := range m.BuildImages {
+			if image.Producer == name {
+				return invalid(f+".tasks", "tasks cannot produce build images")
+			}
+		}
+		for _, r := range c.Resources {
+			if !slices.Contains(s.Resources, r) {
+				return invalid(f+".tasks", "task resources must already be selected by the parent")
+			}
+		}
+		for _, d := range c.DependsOn {
+			if !slices.Contains(s.Components, d.Component) {
+				return invalid(f+".tasks", "task dependencies must be selected parent components")
+			}
+		}
+		for _, value := range componentValues(m, c) {
+			if err := selectedReference(m, s, c, value, f+".tasks"); err != nil {
+				return err
+			}
+		}
+	}
 	ports := map[string]bool{}
 	initializers := map[string]bool{}
 	for _, name := range s.Components {

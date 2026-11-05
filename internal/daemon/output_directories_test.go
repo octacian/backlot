@@ -84,7 +84,7 @@ func TestPrepareOutputDirectories(t *testing.T) {
 			if mode == "all-targets-preflight" {
 				outputs["invalid"] = v1.Output{Path: ".git", ConcurrencyGroup: "git", EmptyBeforeExecution: true}
 			}
-			snapshot := plan.Snapshot{Manifest: v1.Manifest{Outputs: outputs}, Plan: v1.PlanResponse{Outputs: outputs}}
+			snapshot := plan.Snapshot{Manifest: v1.Manifest{Outputs: outputs}, Plan: v1.PlanResponse{ManifestPath: source.ManifestPath, Checkout: identity.checkout.Path, Outputs: outputs}}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			if mode == "cancelled" {
@@ -112,7 +112,7 @@ func TestPrepareOutputDirectories(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = state.db.Close() }()
-			err = (&service{directory: private, store: state}).prepareOutputDirectories(ctx, snapshot, identity)
+			err = (&service{directory: private, store: state}).prepareOutputDirectories(ctx, snapshot, identity, "")
 			success := mode == "empty" || mode == "absent" || mode == "opt-out"
 			if (err == nil) != success {
 				t.Fatalf("preparation error=%v, want success=%v", err, success)
@@ -220,8 +220,8 @@ func TestPrepareInitiallyAbsentOutputAliases(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			snapshot := plan.Snapshot{Manifest: v1.Manifest{Outputs: outputs}, Plan: v1.PlanResponse{Outputs: selected}}
-			err = f.s.prepareOutputDirectories(context.Background(), snapshot, identity)
+			snapshot := plan.Snapshot{Manifest: v1.Manifest{Outputs: outputs}, Plan: v1.PlanResponse{ManifestPath: source.ManifestPath, Checkout: identity.checkout.Path, Outputs: selected}}
+			err = f.s.prepareOutputDirectories(context.Background(), snapshot, identity, "")
 			reject := caseAliases && mode != "same-directory"
 			if (err != nil) != reject {
 				t.Fatalf("caseAliases=%v reject=%v error=%v", caseAliases, reject, err)
@@ -250,8 +250,12 @@ func TestPrepareInitiallyAbsentOutputAliases(t *testing.T) {
 }
 
 func TestMaterializedOutputAliasesFenceRetainedConsumers(t *testing.T) {
-	for _, mode := range []string{"active", "kept", "uncertain"} {
-		t.Run(mode, func(t *testing.T) {
+	for _, test := range []struct{ mode, taskID string }{
+		{"active", ""}, {"kept", ""}, {"uncertain", ""},
+		{"active", "task-self"}, {"kept", "task-self"}, {"uncertain", "task-self"},
+	} {
+		mode := test.mode
+		t.Run(mode+test.taskID, func(t *testing.T) {
 			f := newControlledExpiry(t)
 			prepared, err := f.s.prepare(context.Background(), request(f.root, f.config, "test"))
 			if err != nil {
@@ -302,7 +306,7 @@ func TestMaterializedOutputAliasesFenceRetainedConsumers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = f.s.prepareOutputDirectories(context.Background(), next, identity)
+			err = f.s.prepareOutputDirectories(context.Background(), next, identity, test.taskID)
 			_, aliasErr := os.Stat(filepath.Join(f.root, "reports"))
 			caseAliases := aliasErr == nil
 			if (err != nil) != caseAliases {

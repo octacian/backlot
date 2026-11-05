@@ -1047,7 +1047,7 @@
       "properties": {
         "empty_before_execution": {
           "type": "boolean",
-          "description": "Irreversibly empty and recreate this scratch directory under output locks before each new execution; omitted or false preserves existing contents."
+          "description": "Irreversibly empty and recreate this scratch directory under output locks or task reservations before each new execution; omitted or false preserves existing contents."
         },
         "path": {
           "type": "string",
@@ -1676,6 +1676,25 @@
             ]
           },
           "then": {
+            "properties": {
+              "tasks": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "lifetime": {
+                "const": "disposable"
+              }
+            },
+            "required": [
+              "lifetime"
+            ]
+          },
+          "then": {
             "allOf": [
               {
                 "required": [
@@ -1720,6 +1739,15 @@
         }
       ],
       "properties": {
+        "tasks": {
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Native each-start jobs explicitly enabled on a persistent scene; never added to startup work."
+        },
         "startup_details": {
           "items": {
             "$ref": "#/$defs/StartupDetailSelection"

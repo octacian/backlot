@@ -161,3 +161,86 @@ func TestEmptyOutputPersistentLifecycle(t *testing.T) {
 		t.Fatal("explicit new start did not prepare", err)
 	}
 }
+
+func TestTaskEmptyOutputDirectories(t *testing.T) {
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
+	h := newNativeHarness(t, binary)
+	h.manifest.Tools["sh"] = "/bin/sh"
+	h.manifest.Outputs = map[string]v1.Output{
+		"parent":  {Path: "parent-output", ConcurrencyGroup: "parent", EmptyBeforeExecution: true},
+		"reports": {Path: "reports", ConcurrencyGroup: "reports", EmptyBeforeExecution: true},
+	}
+	server := h.manifest.Components["server"]
+	server.Outputs = []string{"parent"}
+	h.manifest.Components["server"] = server
+	h.manifest.Components["report"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart,
+		Outputs: []string{"reports"}, Artifacts: map[string]v1.ArtifactSource{"reports": {Path: "reports"}},
+		Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", `test ! -e reports/stale && test ! -e reports/current || exit 42; echo current > reports/current; exit "$1"`, "report")},
+	}
+	scene := h.manifest.Scenes["dev"]
+	blocked := h.manifest.Components["report"]
+	blocked.Outputs = []string{"parent"}
+	h.manifest.Components["blocked"] = blocked
+	scene.Tasks = []string{"report", "blocked"}
+	h.manifest.Scenes["dev"] = scene
+	h.write()
+	if err := os.Mkdir(filepath.Join(h.project, "reports"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(h.project, "reports", "stale")
+	if err := os.WriteFile(stale, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	parent := h.state(h.run("dev").Instance.ID, v1.RuntimeReady).Instance
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatal("parent startup prepared task-only output", err)
+	}
+	witness := filepath.Join(h.project, "parent-output", "witness")
+	if err := os.WriteFile(witness, []byte("parent"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := h.cli.RunTask(context.Background(), v1.TaskRunRequest{APIVersion: v1.Version, Target: v1.SceneTarget{InstanceID: parent.ID}, Task: "blocked"})
+	code(t, err, "output_conflict")
+	if data, err := os.ReadFile(witness); err != nil || string(data) != "parent" {
+		t.Fatal("rejected task prepared parent output", string(data), err)
+	}
+	var archive string
+	for _, exit := range []string{"0", "23"} {
+		r, err := h.cli.RunTask(context.Background(), v1.TaskRunRequest{APIVersion: v1.Version, Target: v1.SceneTarget{InstanceID: parent.ID}, Task: "report", Args: []string{exit}, Options: v1.ExecutionOptions{JobTimeout: "10s", StopGrace: "50ms"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h.tokens == nil {
+			h.tokens = map[string]string{}
+		}
+		h.tokens[r.Instance.ID] = r.LeaseToken
+		want := v1.Succeeded
+		if exit == "23" {
+			want = v1.Failed
+		}
+		final := h.state(r.Instance.ID, want).Instance
+		result := final.Execution
+		if result.Failure != "" || result.CollectionFailure != "" || result.CleanupFailure != "" || result.TerminalExitCode == nil || len(result.Artifacts) != 1 {
+			t.Fatalf("task outcomes: %+v", result)
+		}
+		if exit == "23" && *result.TerminalExitCode != 23 {
+			t.Fatal("lost task exit", result)
+		}
+		if _, err := os.Stat(stale); !os.IsNotExist(err) {
+			t.Fatal("stale task report retained", err)
+		}
+		if archive == "" {
+			archive = filepath.Join(result.Artifacts[0].Path, "reports", "current")
+		}
+		for path, want := range map[string]string{archive: "current\n", witness: "parent"} {
+			data, err := os.ReadFile(path)
+			if err != nil || string(data) != want {
+				t.Fatal("archive/parent changed", path, string(data), err)
+			}
+		}
+		current := h.state(parent.ID, v1.RuntimeReady).Instance
+		if current.Execution.Attempt != parent.Execution.Attempt || current.Execution.Ports["port"] != parent.Execution.Ports["port"] {
+			t.Fatal("task changed parent generation")
+		}
+	}
+}

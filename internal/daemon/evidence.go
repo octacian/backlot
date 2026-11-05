@@ -193,7 +193,14 @@ func (s *service) pruneEvidence() error {
 		count = DefaultRetentionAttempts
 	}
 	for _, id := range ids {
-		entries, err := s.store.attempts(id)
+		instance, err := s.store.inspect(id)
+		if err != nil {
+			return err
+		}
+		if instance.Task != nil {
+			continue
+		}
+		entries, err := s.store.retentionScope(id)
 		if err != nil {
 			return err
 		}
@@ -202,7 +209,7 @@ func (s *service) pruneEvidence() error {
 			if retentionStart(&a.Result) != "" {
 				completed++
 			}
-			lock := s.mutationLock(id)
+			lock := s.mutationLock(a.InstanceID)
 			if !lock.TryLock() {
 				continue
 			}
@@ -214,7 +221,7 @@ func (s *service) pruneEvidence() error {
 					if err != nil {
 						return err
 					}
-					all = append(all, candidate{id: id, attempt: a.Result.Attempt, start: start, expired: a.Result.EvidenceExpired})
+					all = append(all, candidate{id: a.InstanceID, attempt: a.Result.Attempt, start: start, expired: a.Result.EvidenceExpired})
 				}
 			}
 			lock.Unlock()
@@ -233,6 +240,8 @@ func (s *service) pruneEvidence() error {
 			}
 			all = append(all, candidate{id: id, start: start})
 		}
+	}
+	for _, id := range ids {
 		size, err := s.evidenceSize(id)
 		if err != nil {
 			return err

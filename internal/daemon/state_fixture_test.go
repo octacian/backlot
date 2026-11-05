@@ -40,6 +40,10 @@ func TestRetainedStateTen(t *testing.T) {
 func TestRetainedStateEleven(t *testing.T) {
 	testRetainedState(t, copyStateFixture(t, "testdata/state/v11/state.db"), 11)
 }
+func TestRetainedStateThirteen(t *testing.T) {
+	testRetainedState(t, copyStateFixture(t, "testdata/state/v13/state.db"), 13)
+}
+
 func TestRetainedStateTwelve(t *testing.T) {
 	testRetainedState(t, copyStateFixture(t, "testdata/state/v12/state.db"), 12)
 }
@@ -71,7 +75,7 @@ func testRetainedState(t *testing.T, dir string, version int) {
 		wantInstances = 3
 	}
 	wantSlots := 1
-	if version == 12 {
+	if version == 12 || version == 13 {
 		wantSlots = 2
 	}
 	if before["meta"]["version"] != strconv.Itoa(version) || len(before["instances"]) != wantInstances || len(before["checkouts"]) != 1 || len(before["persistent"]) != wantSlots || len(before["snapshots"]) != wantInstances || len(before["secrets"]) != wantInstances {
@@ -124,8 +128,10 @@ func testRetainedState(t *testing.T, dir string, version int) {
 				t.Fatal(err)
 			}
 			comparable := stateContents(t, s)
-			for _, name := range []string{"project_bindings", "checkout_bindings"} {
-				delete(comparable, name)
+			if version < 13 {
+				for _, name := range []string{"project_bindings", "checkout_bindings"} {
+					delete(comparable, name)
+				}
 			}
 			if version < 12 {
 				for _, name := range []string{"attempts", "attempt_sequences", "evidence_deletions"} {
@@ -151,7 +157,7 @@ func testRetainedState(t *testing.T, dir string, version int) {
 				if i.Plan.Lifetime == v1.Persistent && i.Status == v1.Prepared {
 					prepared = true
 				}
-				if ((i.Plan.Lifetime == v1.Disposable && i.Status == v1.Succeeded) || (version == 12 && i.Status == v1.Stopped)) && i.Execution != nil && len(i.Execution.NativeCleanup) == 1 && i.Execution.NativeCleanup[0].Confidence == v1.ObservedEmpty {
+				if ((i.Plan.Lifetime == v1.Disposable && i.Status == v1.Succeeded) || ((version == 12 || version == 13) && i.Status == v1.Stopped)) && i.Execution != nil && len(i.Execution.NativeCleanup) == 1 && i.Execution.NativeCleanup[0].Confidence == v1.ObservedEmpty {
 					completed = true
 				}
 			}
@@ -318,5 +324,44 @@ func TestRetainedStateTwelveSharedRegistration(t *testing.T) {
 		if err := state.db.Close(); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestTaskMigrationRejectsInventedLegacyCapturesUnchanged(t *testing.T) {
+	dir := copyStateFixture(t, "testdata/state/v13/state.db")
+	path := filepath.Join(dir, "state.db")
+	db, err := bolt.Open(path, 0600, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Update(func(tx *bolt.Tx) error {
+		c := tx.Bucket([]byte("snapshots")).Cursor()
+		key, data := c.First()
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil {
+			return err
+		}
+		fields["tasks"] = json.RawMessage(`{}`)
+		return put(tx, "snapshots", string(key), fields)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s, err := openStore(dir); err == nil {
+		_ = s.db.Close()
+		t.Fatal("invented legacy capture accepted")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("failed migration changed predecessor bytes")
 	}
 }

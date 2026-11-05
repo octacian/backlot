@@ -27,6 +27,7 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `plan SCENE [--project PATH] [--config PATH] [-- ARGS...]` | Offline selected input/seed/tool resolution; no daemon/provider effects |
 | `prepare SCENE [--project PATH] [--config PATH]` | Daemon records metadata only; returns disposable lease when applicable |
 | `run SCENE [--project PATH] [--config PATH] [-- ARGS...]` | Execute; persistent returns at readiness, disposable after collection/cleanup |
+| `task run TASK --scene SCENE [--project PATH] [-- ARGS...]` / `task run TASK --instance ID [-- ARGS...]` | Explicit finite native task against an already-ready persistent parent; returns its independent leased execution result |
 | `scene start SCENE [--project PATH] [--config PATH]` | Ensure a named persistent scene is running in the selected checkout |
 | `restart ID [--config PATH]` | Persistent only; read current recorded project/config sources and apply compatible drift, retaining data |
 | `reset ID [--config PATH]` | Persistent only; stop, remove old owned generation, then start fresh; destructive |
@@ -165,6 +166,33 @@ waive shared ownership proof only; consumer/native/private-resource fences remai
 These are distinct recovery decisions, not general cleanup bypasses. Read
 [native recovery](daemon.md#native-execution) and [shared force cleanup](containers.md#explicit-operator-force-cleanup)
 before use. Normal cleanup always uses authenticated recorded ownership.
+
+## Declared task invocation
+
+```sh
+backlot task run maintenance --scene dev --project . --json -- --dry-run
+backlot task run maintenance --instance PARENT_ID --state-dir /private/backlot --json
+```
+
+Choose exactly one `--scene` or `--instance`. Named targeting uses the existing
+recorded checkout/project selection; `--project` applies only to `--scene`.
+Arguments after the task name are literal; use `--` for application flags.
+The parent must already be ready with a matching accepted capture. Missing capture
+or relevant drift returns `restart_required`; explicitly restart the parent to
+accept current declarations. There is no `--config`, implicit start/restart,
+keep-on-failure or interactive shell mode. Held output groups or overlapping paths
+return `output_conflict` immediately.
+
+`--job-timeout` defaults to 30m and `--stop-grace` to 10s; `0s` job timeout is still
+subject to the finite client lease. The client waits, renews its task lease and
+on SIGINT/SIGTERM cancels/joins only that task. Successful JSON is one
+`InstanceResponse`; `instance.task` gives parent instance, attempt, generation and
+task name. Its own `instance.id` addresses `inspect`, `status`, `logs`, `history`,
+`renew`, `cancel` and `stop`. The task preserves the exact application exit code;
+orchestration, collection and cleanup failures remain separate and return nonzero.
+Task cleanup cannot be waived with `stop --force`.
+A lost mutation reply means unknown acceptance; inspect recorded scope before
+explicit recovery and never automatically retry.
 
 ## CLI invocation and results
 

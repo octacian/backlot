@@ -743,6 +743,10 @@ func resolvedEnvironment(name string, environment map[string]v1.PlannedValue, id
 	return env, nil
 }
 func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, result *v1.ExecutionResult, entry *execution, runtime v1.Runtime) (string, error) {
+	if entry != nil && entry.referencePlan != nil {
+		id = entry.referenceID
+		snap.Plan = *entry.referencePlan
+	}
 	if value.Redacted {
 		value = snap.Secrets[key]
 	}

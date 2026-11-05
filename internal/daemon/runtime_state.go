@@ -10,15 +10,14 @@ import (
 	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 	bolt "go.etcd.io/bbolt"
-	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
 
 type runtimeRecord struct {
+	OutputPaths   map[string]string   `json:"output_paths,omitempty"`
 	ExportSource  *v1.ExportSource    `json:"export_source,omitempty"`
 	StartedAt     string              `json:"started_at,omitempty"`
 	Gateway       *gateway.Intent     `json:"gateway,omitempty"`
@@ -29,6 +28,9 @@ type runtimeRecord struct {
 	Attempt       string              `json:"attempt"`
 	Groups        []native.Identity   `json:"groups"`
 	Options       v1.ExecutionOptions `json:"options"`
+
+	// GatewayOnlyCleanup records joined consumer cleanup for this attempt, never route removal.
+	GatewayOnlyCleanup bool `json:"gateway_only_cleanup,omitempty"`
 }
 
 func (s *store) snapshot(id string) (plan.Snapshot, error) {
@@ -72,7 +74,23 @@ func decodeRuntime(data []byte) (r runtimeRecord, err error) {
 }
 
 func (s *store) saveRuntime(id string, r runtimeRecord) error {
-	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, "runtime", id, r) })
+	return s.db.Update(func(tx *bolt.Tx) error {
+		var owner record
+		if data := tx.Bucket([]byte("instances")).Get([]byte(id)); data != nil {
+			if err := decodeRecord(data, id, &owner); err != nil {
+				return err
+			}
+		}
+		if owner.Instance.Task != nil {
+			if owner.Instance.Execution == nil || owner.Instance.Execution.Attempt != r.Attempt {
+				return problem("conflict", "task journal writer no longer owns attempt")
+			}
+			if err := taskWriterParent(tx, owner.Instance); err != nil {
+				return err
+			}
+		}
+		return put(tx, "runtime", id, r)
+	})
 }
 func (s *store) execution(id string, status v1.InstanceStatus, result *v1.ExecutionResult) (v1.Instance, error) {
 	var out v1.Instance
@@ -80,6 +98,11 @@ func (s *store) execution(id string, status v1.InstanceStatus, result *v1.Execut
 		r, err := load(tx, id)
 		if err != nil {
 			return err
+		}
+		if r.Instance.Task != nil {
+			if err := taskWriterParent(tx, r.Instance); err != nil {
+				return err
+			}
 		}
 		if result != nil && r.Instance.Execution != nil && r.Instance.Execution.Attempt != result.Attempt {
 			return problem("conflict", "execution writer no longer owns current attempt")
@@ -156,6 +179,22 @@ func (s *store) runtimeRecoveryIDs() ([]string, error) {
 	return ids, err
 }
 func (s *store) recoverExecution(id string) error {
+	ids, err := s.dependentTasks(id)
+	if err != nil {
+		return err
+	}
+	for _, child := range ids {
+		if err := s.recoverExecution(child); err != nil {
+			return err
+		}
+		i, err := s.inspect(child)
+		if err != nil {
+			return err
+		}
+		if i.Execution != nil && i.Execution.CleanupFailure != "" {
+			return problem("cleanup_failed", "dependent task cleanup incomplete; parent resources preserved")
+		}
+	}
 	r, err := s.runtime(id)
 	if err != nil {
 		return err
@@ -171,7 +210,7 @@ func (s *store) recoverExecution(id string) error {
 	result.NativeCleanup = append([]v1.NativeCleanupResult(nil), result.NativeCleanup...)
 	var cleanup error
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
-	cleanup = s.removeGateway(cleanupCtx, id, &r)
+	gatewayCleanup := s.removeGateway(cleanupCtx, id, &r)
 	cleanupCancel()
 	g, err := s.resources(id)
 	if err != nil {
@@ -231,6 +270,12 @@ func (s *store) recoverExecution(id string) error {
 			cleanup = errors.Join(cleanup, problem("cleanup_failed", observed.Detail))
 		}
 	}
+	// Route unavailability must not hide successful authenticated consumer cleanup.
+	// Keep its intent and failure, allowing explicit gateway recovery to retry it.
+	// An empty legacy journal alone cannot establish consumer absence.
+	consumerProof := r.GatewayOnlyCleanup || pendingAbsent || len(r.Groups) > 0 || len(g.Containers) > 0
+	r.GatewayOnlyCleanup = gatewayCleanup != nil && cleanup == nil && consumerProof
+	cleanup = errors.Join(gatewayCleanup, cleanup)
 	consumersStopped := cleanup == nil
 	if consumersStopped {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -240,11 +285,15 @@ func (s *store) recoverExecution(id string) error {
 		// Native uncertainty prevented retrying a separately recorded network failure.
 		for _, detail := range result.CleanupDetails {
 			if detail.Field == "resources.network" {
+				r.GatewayOnlyCleanup = false
 				cleanup = errors.Join(cleanup, &detail)
 			}
 		}
 	}
 
+	if err := s.saveRuntime(id, r); err != nil {
+		return err
+	}
 	// Reassess transient non-native failures; retain native fences through their
 	// typed observations rather than making an old mixed error string sticky.
 	result.CleanupFailure = ""
@@ -260,6 +309,9 @@ func (s *store) recoverExecution(id string) error {
 	}
 	if consumersStopped && result.CompletedAt != "" && !active(completedStatus) && !result.Kept {
 		_, err := s.execution(id, completedStatus, &result)
+		if err == nil {
+			err = s.retireTaskInputs(id)
+		}
 		return err
 	}
 	for i := range result.Components {
@@ -278,7 +330,7 @@ func (s *store) recoverExecution(id string) error {
 	if _, err := s.execution(id, v1.Interrupted, &result); err != nil {
 		return err
 	}
-	return nil
+	return s.retireTaskInputs(id)
 }
 
 func parseDuration(value string, fallback time.Duration) (time.Duration, error) {
@@ -295,52 +347,11 @@ func parseDuration(value string, fallback time.Duration) (time.Duration, error) 
 // outputConflict fences incompatible declarations across old/new snapshots of
 // the same checkout. Group renaming must not bypass a live output consumer.
 func (s *store) outputConflict(requestedPlan v1.PlanResponse) error {
-	return s.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
-			var r record
-			if err := decodeRecord(data, string(key), &r); err != nil {
-				return err
-			}
-			instance := r.Instance
-			if instance.Execution == nil || associatedCheckout(instance).Path != requestedPlan.Checkout {
-				return nil
-			}
-			uncertain := instance.Execution.CleanupFailure != ""
-			if !active(instance.Status) && !uncertain && !instance.Execution.Kept {
-				return nil
-			}
-			for _, existing := range instance.Plan.Outputs {
-				for _, requested := range requestedPlan.Outputs {
-					if existing.ConcurrencyGroup == requested.ConcurrencyGroup {
-						if uncertain {
-							return problem("cleanup_failed", "uncertain owned consumer blocks checkout output group; resolve cleanup before launching")
-						}
-						continue
-					}
-					oldPath, err := plan.OutputPath(associatedProject(instance), existing.Path)
-					if err != nil {
-						return err
-					}
-					newPath, err := plan.OutputPath(filepath.Dir(requestedPlan.ManifestPath), requested.Path)
-					if err != nil {
-						return err
-					}
-					separator := string(filepath.Separator)
-					overlap := oldPath == newPath || strings.HasPrefix(oldPath, newPath+separator) || strings.HasPrefix(newPath, oldPath+separator)
-					if existing.EmptyBeforeExecution || requested.EmptyBeforeExecution {
-						_, overlap, err = plan.OutputOverlap(oldPath, newPath)
-						if err != nil {
-							return err
-						}
-					}
-					if overlap {
-						return problem("unsafe_drift", "overlapping checkout output declarations changed groups while another consumer is active or uncertain; stop it before launching")
-					}
-				}
-			}
-			return nil
-		})
-	})
+	paths, err := outputPaths(requestedPlan)
+	if err != nil {
+		return err
+	}
+	return s.db.View(func(tx *bolt.Tx) error { return outputConflictTx(tx, requestedPlan, paths, "", false) })
 }
 
 func (s *store) cleanupFailures() error {
@@ -373,6 +384,13 @@ func (s *store) acceptExecutionSnapshot(id string, journal runtimeRecord, result
 	err := s.db.Update(func(tx *bolt.Tx) error {
 		r, err := load(tx, id)
 		if err != nil {
+			return err
+		}
+		requested := r.Instance.Plan
+		if snapshot != nil {
+			requested = snapshot.Plan
+		}
+		if err := outputConflictTx(tx, requested, journal.OutputPaths, id, false); err != nil {
 			return err
 		}
 		if expected != nil {

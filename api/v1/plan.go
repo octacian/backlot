@@ -12,6 +12,8 @@ type PlanRequest struct {
 
 // PlanResponse is a redacted, allocation-free execution plan.
 type PlanResponse struct {
+	// Tasks lists enabled task names without private launch details.
+	Tasks                 []string                 `json:"tasks,omitempty"`
 	BuildImages           map[string]BuildImage    `json:"build_images,omitempty"`
 	SharedServices        map[string]SharedService `json:"shared_services,omitempty"`
 	StartupDetails        []StartupDetailSelection `json:"startup_details,omitempty"`

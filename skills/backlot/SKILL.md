@@ -40,6 +40,14 @@ Keep each argv entry intact and credentials in sensitive environment assignments
    ordinary run uses `instance`, named startup nests it under `result.instance`.
    A repeated ordinary start may reuse existing work; returned identity alone does
    not make that work task-owned. See [CLI results](references/cli.md#interpreting-machine-results).
+   For an enabled administrative task, use `task run TASK --scene NAME --json -- ARGS`
+   or `--instance PARENT_ID` against an already-ready accepted parent. Record the
+   returned independent task ID; `instance.id` references inside the task still
+   mean the parent. Do not retrieve credentials to reconstruct its environment.
+   Read [task invocation](references/cli.md#declared-task-invocation) first. Relevant
+   drift requires explicit parent restart; held outputs reject immediately. Task
+   cancellation/lease expiry leaves the parent running. Stop only the task ID;
+   task cleanup cannot be waived, and parent teardown must join dependent consumers.
 4. Check the original test exit separately from orchestration, collection, cleanup,
    kept resources and any last-observed error. Status exit 0 can describe a failed
    execution. A missing mutation reply means unknown acceptance, not rejection or

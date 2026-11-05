@@ -378,7 +378,7 @@ bin/backlot restart INSTANCE_ID --state-dir /absolute/private/backlot --json
 ```
 
 `run` and `restart` accept flags before or after the target. Arguments after `--`
-are forwarded only to a disposable terminal job. The finite JSON result is one
+are forwarded to a disposable terminal job; `task run` forwards them to its selected task. The finite JSON result is one
 `InstanceResponse`; the original terminal-job exit code is under
 `instance.execution.components[].exit_code`. Any orchestration, cancellation,
 collection or cleanup failure returns nonzero. Following logs emits one typed
@@ -505,6 +505,29 @@ The CLI waits for persistent ready or disposable terminal status through inspect
 raw API callers must renew disposable capabilities while polling. Logs pages use
 an absolute unfiltered record offset, so component filtering preserves cursor
 progress. Inspect and cancel remain shared across metadata and runtime execution.
+
+## Tasks borrowing a ready parent
+
+[Declared tasks](manifest.md#declared-native-tasks) bind to an already-ready persistent
+parent in this daemon. Admission rechecks its exact instance, attempt and resource
+generation, including resource-free scenes. Tasks use accepted native endpoints and
+paired credentials, with independent guardian, log and result identities. They never
+replace the parent result or start missing dependencies or allocations.
+
+Admission atomically reserves declared outputs before activation. A group held by
+the parent or a peer, or overlapping accepted/current canonical paths, rejects
+immediately, including aliases and renamed groups. Disjoint tasks may run together;
+task output locks never queue. Undeclared writes and hostile concurrent filesystem mutation
+retain the existing cooperative limits.
+
+Parent stop/restart/reset/destroy, attached cancellation, failure teardown and daemon
+shutdown fence admission, then cancel and join dependent owners and collectors
+before releasing services, networks or data. Uncertain cleanup preserves parent and
+output fences; a collection gap alone does not imply a live consumer. Task exit,
+cancellation or lease expiry cleans only task-owned work. Recovery reconciles and
+interrupts tasks before parent effects, never resumes them, and uses private
+attempt-bound journals rather than public history as authority. Reassociation
+requires dependent consumers independently settled too.
 
 ## Managed gateway control
 

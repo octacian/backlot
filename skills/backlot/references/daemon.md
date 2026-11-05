@@ -45,6 +45,29 @@ ambiguous. [Selection rules](daemon.md#recorded-selection-and-stop) define the e
 For the daily command sequence see [operations](operations.md#daily-loop); current
 flags/defaults and output framing live in the [CLI reference](cli.md).
 
+## Tasks borrowing a ready parent
+
+[Declared tasks](manifest.md#declared-native-tasks) bind to an already-ready persistent
+parent in this daemon. Admission rechecks its exact instance, attempt and resource
+generation, including resource-free scenes. Tasks use accepted native endpoints and
+paired credentials, with independent guardian, log and result identities. They never
+replace the parent result or start missing dependencies or allocations.
+
+Admission atomically reserves declared outputs before activation. A group held by
+the parent or a peer, or overlapping accepted/current canonical paths, rejects
+immediately, including aliases and renamed groups. Disjoint tasks may run together;
+task output locks never queue. Undeclared writes and hostile concurrent filesystem mutation
+retain the existing cooperative limits.
+
+Parent stop/restart/reset/destroy, attached cancellation, failure teardown and daemon
+shutdown fence admission, then cancel and join dependent owners and collectors
+before releasing services, networks or data. Uncertain cleanup preserves parent and
+output fences; a collection gap alone does not imply a live consumer. Task exit,
+cancellation or lease expiry cleans only task-owned work. Recovery reconciles and
+interrupts tasks before parent effects, never resumes them, and uses private
+attempt-bound journals rather than public history as authority. Reassociation
+requires dependent consumers independently settled too.
+
 ## Named persistent scenes
 
 Use `scene` to target a persistent scene by name in the current checkout. Start

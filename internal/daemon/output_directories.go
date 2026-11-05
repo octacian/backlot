@@ -8,11 +8,13 @@ import (
 
 	"github.com/octacian/backlot/internal/plan"
 	"github.com/octacian/backlot/internal/projectconfig"
+	bolt "go.etcd.io/bbolt"
 )
 
 // prepareOutputDirectories runs only for new executions, under all selected
-// output locks. Preflight every target before the first irreversible removal.
-func (s *service) prepareOutputDirectories(ctx context.Context, snapshot plan.Snapshot, identity capturedSource) error {
+// output locks or task reservations. Preflight all targets before removal.
+// taskID excludes only the current task reservation from the final consumer check.
+func (s *service) prepareOutputDirectories(ctx context.Context, snapshot plan.Snapshot, identity capturedSource, taskID string) error {
 	selected := map[string]bool{}
 	var targets []string
 	for name, output := range snapshot.Plan.Outputs {
@@ -101,7 +103,13 @@ func (s *service) prepareOutputDirectories(ctx context.Context, snapshot plan.Sn
 	if err != nil {
 		return err
 	}
-	if err := s.store.outputConflict(snapshot.Plan); err != nil {
+	paths, err := outputPaths(snapshot.Plan)
+	if err != nil {
+		return err
+	}
+	if err := s.store.db.View(func(tx *bolt.Tx) error {
+		return outputConflictTx(tx, snapshot.Plan, paths, taskID, taskID != "")
+	}); err != nil {
 		return err
 	}
 	for _, relative := range unique {

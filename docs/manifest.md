@@ -11,7 +11,7 @@ translate an existing application's commands.
 backlot plan test --project examples/adoption --json -- -run TestExample
 ```
 
-Scene names are project-defined. Only a disposable terminal job receives forwarded
+Scene names are project-defined. Disposable terminal jobs and explicitly invoked native tasks receive forwarded
 arguments. See the [CLI reference](cli.md#cli-invocation-and-results) for syntax,
 errors and framing; a plan establishes neither runtime readiness nor execution.
 
@@ -99,8 +99,8 @@ command side effects.
 
 Set `empty_before_execution: true` only for a disposable scratch directory, such
 as reports. Backlot removes and recreates each selected opted-in directory once
-per new execution, after all output locks are acquired and before any component
-launches. Omitted or false preserves contents. Joining accepted work, offline
+per new execution, after all output locks or task output reservations are acquired
+and before any component launches. Omitted or false preserves contents. Joining accepted work, offline
 planning and metadata preparation never empty outputs. New starts and explicit
 restarts prepare again; healthy starts retain accepted settings and report drift.
 
@@ -112,8 +112,8 @@ filesystem aliases. Overlaps involving an opted-in output require the same
 directory, concurrency group and opt-in; nested or mixed-policy overlaps are
 rejected across scene declarations. Ordinary output overlap rules are unchanged.
 
-All targets are checked under the locks before removal. Missing selected directories
-may be created empty before this check so filesystem aliases can be resolved;
+All targets are checked under the owned output locks or task reservations before
+removal. Missing selected directories may be created empty before this check so filesystem aliases can be resolved;
 offline planning defers aliases it cannot resolve without creation. Rejection
 preserves existing contents but may leave newly created empty directories.
 Cancelled lock waiters do not delete; a filesystem failure or cancellation during preparation can leave
@@ -124,6 +124,49 @@ cooperative checkout execution, not hostile filesystem or mount manipulation.
 Fresh-only initialization stamps are unchanged: a skipped producer does not
 repopulate an emptied directory. Use each-start jobs for repeatable reports; see
 [evidence](evidence.md#declared-artifacts-and-fixtures) for collection limits.
+
+## Declared native tasks
+
+Enable native `job` components with `policy: each-start` in a persistent scene's
+`tasks` list for explicit invocation. `components` selects automatic startup work;
+a component in both lists also runs at startup. Tasks cannot initialize resources
+or produce build images. Every attached resource and dependency must already be selected by
+the parent; dependencies test accepted ready services or successful/skipped parent
+jobs without launching work.
+
+```yaml
+components:
+  maintenance:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: app, args: [maintenance]}
+    resources: [database]
+    environment:
+      assign:
+        PASSWORD: {ref: {kind: resource, name: database, field: password}}
+scenes:
+  dev:
+    lifetime: persistent
+    components: [server]
+    resources: [database]
+    tasks: [maintenance]
+```
+
+This fragment assumes the application's existing `app`, `server` and allocation
+resource declarations. Task environments use native endpoints and the parent's
+accepted paired credentials, including composed values; `instance.id` means the
+parent ID. Sensitive values stay in environment mappings, never argv. Task output
+and artifact declarations use the existing project-relative anchors.
+
+Each new parent attempt validates and privately captures every enabled task's tools,
+cwd, seeds and inputs, even for unused tasks. Task outputs are validated without
+acquiring startup locks. Invocation rejects relevant changes to current configuration
+or referenced parent contracts and unavailable inputs; explicit parent restart is
+required. Unrelated task edits do not invalidate the capture. Legacy snapshots
+have no task captures, and ordinary joins never add them. See
+[invocation](cli.md#declared-task-invocation) and
+[parent ownership](daemon.md#tasks-borrowing-a-ready-parent).
 
 ## Native working directories
 

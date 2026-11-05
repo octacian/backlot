@@ -25,8 +25,8 @@ var guides = map[string][]string{
 	"adoption": nil, "cli": nil, "platforms": nil, "evidence": nil,
 	"agent-skills": {"Compatibility"},
 	"operations":   {"Go installation", "Release archive installation", "Upgrade, removal and compatibility", "Daily loop", "Diagnosis and recovery"},
-	"manifest":     {"Project declarations", "Native working directories", "Components and scenes", "Values and environment", "Machine schema and results", "Registered private project configuration", "Shared-service declarations", "Execution-scoped build images"},
-	"daemon":       {"Identity and lifecycle", "Named persistent scenes", "Scoped provider diagnostics", "Declared startup details", "Bounded recorded discovery and active policy"},
+	"manifest":     {"Project declarations", "Declared native tasks", "Native working directories", "Components and scenes", "Values and environment", "Machine schema and results", "Registered private project configuration", "Shared-service declarations", "Execution-scoped build images"},
+	"daemon":       {"Identity and lifecycle", "Tasks borrowing a ready parent", "Named persistent scenes", "Scoped provider diagnostics", "Declared startup details", "Bounded recorded discovery and active policy"},
 	"containers":   {"State compatibility", "Generations, jobs and drift", "Ownership and recovery", "Project-scoped shared services"},
 	"https":        {"Managed local HTTPS", "Explicit application trust", "Scene contract", "Conflicts, failures and recovery"},
 }

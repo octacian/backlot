@@ -118,7 +118,7 @@ type Resource struct {
 // Output declares a checkout-relative mutable path and serialization group.
 type Output struct {
 	// EmptyBeforeExecution authorizes emptying this scratch directory before each new execution.
-	EmptyBeforeExecution bool   `json:"empty_before_execution,omitempty" yaml:"empty_before_execution,omitempty" jsonschema_description:"Irreversibly empty and recreate this scratch directory under output locks before each new execution; omitted or false preserves existing contents."`
+	EmptyBeforeExecution bool   `json:"empty_before_execution,omitempty" yaml:"empty_before_execution,omitempty" jsonschema_description:"Irreversibly empty and recreate this scratch directory under output locks or task reservations before each new execution; omitted or false preserves existing contents."`
 	Path                 string `json:"path" yaml:"path" jsonschema:"minLength=1" jsonschema_description:"Safe checkout-relative mutable output path."`
 	ConcurrencyGroup     string `json:"concurrency_group" yaml:"concurrency_group" jsonschema:"minLength=1" jsonschema_description:"Named serialization group for overlapping checkout outputs."`
 }
@@ -210,6 +210,8 @@ type Publication struct {
 
 // Scene explicitly selects all work and resources for one workflow.
 type Scene struct {
+	// Tasks enables finite native each-start jobs for explicit invocation.
+	Tasks          []string                 `json:"tasks,omitempty" yaml:"tasks,omitempty" jsonschema_description:"Native each-start jobs explicitly enabled on a persistent scene; never added to startup work."`
 	StartupDetails []StartupDetailSelection `json:"startup_details,omitempty" yaml:"startup_details,omitempty" jsonschema_description:"Ordered fixtures automatically displayed after persistent startup, including selected sensitive values."`
 	Lifetime       Lifetime                 `json:"lifetime" yaml:"lifetime" jsonschema_description:"Persistent retains data; disposable runs finish at a terminal job."`
 	Components     []string                 `json:"components" yaml:"components" jsonschema_description:"Explicit nonempty selection of component names; dependencies are never included implicitly."`

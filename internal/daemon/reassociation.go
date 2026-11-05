@@ -325,7 +325,11 @@ func (s *service) projectPreview(request v1.ReassociationRequest) (result v1.Rea
 	}
 	if selectErr == nil && opRoot == runtimeRoot {
 		for _, i := range result.Instances {
-			if !i.Selected || i.Status == v1.Destroyed {
+			recorded, e := s.store.inspect(i.ID)
+			if e != nil {
+				return result, e
+			}
+			if !i.Selected || i.Status == v1.Destroyed || recorded.Task != nil {
 				continue
 			}
 			snapshot, e := plan.Prepare(source, v1.PlanRequest{Scene: i.Scene, ProjectPath: source.ProjectPath, ConfigPath: request.ConfigPath})

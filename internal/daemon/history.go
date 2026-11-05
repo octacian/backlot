@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -317,4 +318,31 @@ func validateHistoryDeletionState(tx *bolt.Tx) error {
 		}
 		return nil
 	})
+}
+
+// retentionScope shares one completed-attempt budget across a parent and its tasks.
+func (s *store) retentionScope(id string) ([]v1.Attempt, error) {
+	entries, err := s.attempts(id)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := s.dependentTasks(id)
+	if err != nil {
+		return nil, err
+	}
+	for _, child := range ids {
+		attempts, err := s.attempts(child)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, attempts...)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		a, b := entries[i], entries[j]
+		if a.StartedAt != b.StartedAt {
+			return a.StartedAt > b.StartedAt
+		}
+		return a.Result.Attempt > b.Result.Attempt
+	})
+	return entries, nil
 }

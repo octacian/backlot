@@ -85,6 +85,9 @@ func (s *service) stopRuntimeRequest(ctx context.Context, request v1.StopRequest
 	if (request.Force || request.ExpectedAttempt != "") && ((before.Execution != nil && request.ExpectedAttempt != before.Execution.Attempt) || (before.Execution == nil && request.ExpectedAttempt != "")) {
 		return before, problem("conflict", "selected execution attempt changed; inspect before issuing a new stop")
 	}
+	if before.Task != nil && request.Force {
+		return before, problem("invalid_arguments", "task cleanup cannot be waived; retain parent and output fences until authenticated cleanup succeeds")
+	}
 	instance, err := s.stopExecution(request.InstanceID)
 	var detail *v1.PlanError
 	if !request.Force || !errors.As(err, &detail) || detail.Code != "cleanup_failed" {
@@ -124,6 +127,9 @@ func (s *service) stopRuntimeRequest(ctx context.Context, request v1.StopRequest
 // Ordinary route/container cleanup must succeed; only native obligations can be
 // waived. Commit history, public warning, result and released claims atomically.
 func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Instance, error) {
+	if err := s.guardDependentTasks(id); err != nil {
+		return v1.Instance{}, err
+	}
 	var instance v1.Instance
 	journal, err := s.runtime(id)
 	if err != nil {

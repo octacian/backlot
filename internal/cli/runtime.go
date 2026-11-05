@@ -224,6 +224,10 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 	if err != nil {
 		return output(c, nil, err)
 	}
+	return waitExecution(signalCtx, c, cli, request.Options, response, cancellationCode)
+}
+
+func waitExecution(signalCtx context.Context, c *urfave.Command, cli *client.Client, options v1.ExecutionOptions, response v1.InstanceResponse, cancellationCode func() int) error {
 	id := response.Instance.ID
 	attempt := startupAttempt(response.Instance)
 	manifestDrift, configDrift := response.ManifestDrift, response.ConfigDrift
@@ -231,8 +235,8 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 	for {
 		if signalCtx.Err() != nil {
 			grace := 10 * time.Second
-			if request.Options.StopGrace != "" {
-				grace, _ = time.ParseDuration(request.Options.StopGrace)
+			if options.StopGrace != "" {
+				grace, _ = time.ParseDuration(options.StopGrace)
 			}
 			cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
 			stopped, stopErr := cli.StopExecutionWithRequest(cleanup, v1.StopRequest{APIVersion: v1.Version, InstanceID: id, ExpectedAttempt: attempt})
@@ -301,8 +305,8 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 		select {
 		case <-signalCtx.Done():
 			grace := 10 * time.Second
-			if request.Options.StopGrace != "" {
-				grace, _ = time.ParseDuration(request.Options.StopGrace)
+			if options.StopGrace != "" {
+				grace, _ = time.ParseDuration(options.StopGrace)
 			}
 			cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
 			stopped, stopErr := cli.StopExecutionWithRequest(cleanup, v1.StopRequest{APIVersion: v1.Version, InstanceID: id, ExpectedAttempt: attempt})
@@ -322,7 +326,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 		case <-time.After(50 * time.Millisecond):
 		}
 		next, inspectErr := cli.Inspect(signalCtx, id)
-		err = inspectErr
+		err := inspectErr
 		if err != nil {
 			if signalCtx.Err() != nil {
 				continue

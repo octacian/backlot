@@ -225,7 +225,8 @@ select the union. `--dry-run` reports selected attempt IDs, selector reasons, pr
 bytes without effects; it is advisory and apply rechecks protection under the same
 fences. Protected active/kept/cleanup-uncertain work is never deleted. Prune removes
 selected history and evidence, leaving application data, credentials and private
-snapshots intact. The current instance result remains current-state truth even if
+snapshots intact for scene executions. Completed task pruning also retires its
+independent result to an execution-free tombstone. The current scene instance result remains current-state truth even if
 its history row is pruned, with expired evidence; exact history stays unavailable
 on later current-result updates. New attempts retain increasing acceptance order.
 File deletion intent survives a crash or incomplete removal and is retried by the
@@ -241,6 +242,22 @@ admission or effects; an old strict daemon rejects the unknown field with
 `invalid_document`/400. No marker-free fallback exists. Older clients must upgrade
 to destroy on a new daemon or read its execution-free destroyed tombstones.
 Lost/unusable mutation replies still mean unknown acceptance/completion.
+
+### Task evidence and retirement
+
+Tasks have independent IDs, attempt results, native logs and artifact collections;
+use that task ID for inspection/history/export. Exact application exit and
+collection/cleanup failures remain independent. Task application streams retain
+the same sensitivity as all application evidence; ordinary results do not reveal
+accepted environment credentials.
+
+Completed task outcomes share their parent's completed-attempt retention count,
+including parent-scoped manual pruning. Active and cleanup-uncertain tasks remain
+protected. Settled tasks retire private launch snapshots and inputs; they are not
+a historical secret archive. Restart/reset preserves bounded diagnosis. Successful
+parent destroy erases dependent results, logs, artifacts and private material too;
+failed filesystem erasure retains durable deletion intent and must be retried.
+Task completion/cancellation never destroys parent data.
 
 ## Portable per-instance export
 

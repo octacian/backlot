@@ -23,6 +23,11 @@ func validID(id string) bool {
 }
 func validateInstance(response v1.InstanceResponse) error {
 	instance := response.Instance
+	if b := instance.Task; b != nil {
+		if !validID(b.InstanceID) || !validID(b.Attempt) || !validID(b.Generation) || b.InstanceID == instance.ID || b.Name == "" || instance.Plan.Lifetime != v1.Disposable {
+			return responseError()
+		}
+	}
 	if instance.CheckoutParent != "" && !validID(instance.CheckoutParent) {
 		return responseError()
 	}
@@ -115,7 +120,11 @@ func validateExecution(instance v1.Instance) error {
 	if !validID(result.Attempt) {
 		return responseError()
 	}
-	if err := validateOrigin(instance.ID, result.Origin); err != nil {
+	originID := instance.ID
+	if instance.Task != nil {
+		originID = instance.Task.InstanceID
+	}
+	if err := validateOrigin(originID, result.Origin); err != nil {
 		return err
 	}
 	if instance.Status == v1.RuntimeReady && instance.Plan.Publish != nil && result.Origin == "" {

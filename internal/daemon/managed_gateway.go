@@ -186,6 +186,9 @@ func (s *store) stopManaged(r *managedRecord, group *native.Group) error {
 	if r.Status == "unconfigured" && r.Identity == nil && !r.Pending {
 		return nil
 	}
+	if err := s.publishedActive(); err != nil {
+		return err
+	}
 	if r.Pending {
 		previous, err := native.PreviousBoot(r.PendingBoot)
 		if err != nil || !previous {
@@ -328,7 +331,7 @@ func (s *store) publishedActive() error {
 				return err
 			}
 			i := r.Instance
-			if i.Plan.Publish != nil && i.Execution != nil && (active(i.Status) || i.Execution.Kept) {
+			if i.Plan.Publish != nil && i.Execution != nil && (active(i.Status) || i.Execution.Kept || i.Execution.CleanupFailure != "") {
 				return problem("gateway_busy", "stop all active published scenes before gateway stop/restart")
 			}
 			return nil

@@ -21,27 +21,31 @@ import (
 )
 
 type execution struct {
-	attempt          string
-	acceptImages     bool
-	allowImageChange bool
-	shared           map[string]sharedConnection
-	attachment       *attachment // guarded by service.mu; never persisted
-	caCertPath       string
-	kept             bool
-	cancel           context.CancelFunc
-	done             chan struct{}
-	mu               sync.Mutex
-	groups           []*native.Group
-	jobs             map[string]workload
-	services         map[string]workload
-	components       map[string]workload
-	containers       []*dockerWork
-	docker           *dockerEngine
-	resources        *resourceGeneration
-	outputRelease    func()
-	err              error
-	source           capturedSource
-	grace            time.Duration
+	taskAdmissionClosed bool // guarded by service.mu; teardown closes before joining dependents
+	borrowed            bool
+	referenceID         string
+	referencePlan       *v1.PlanResponse
+	attempt             string
+	acceptImages        bool
+	allowImageChange    bool
+	shared              map[string]sharedConnection
+	attachment          *attachment // guarded by service.mu; never persisted
+	caCertPath          string
+	kept                bool
+	cancel              context.CancelFunc
+	done                chan struct{}
+	mu                  sync.Mutex
+	groups              []*native.Group
+	jobs                map[string]workload
+	services            map[string]workload
+	components          map[string]workload
+	containers          []*dockerWork
+	docker              *dockerEngine
+	resources           *resourceGeneration
+	outputRelease       func()
+	err                 error
+	source              capturedSource
+	grace               time.Duration
 }
 type deadlines struct{ startup, job, grace time.Duration }
 
@@ -337,6 +341,10 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		}
 	}
 	r := runtimeRecord{ExportSource: &v1.ExportSource{Project: snapshot.Plan.Project, Scene: snapshot.Plan.Scene, Lifetime: snapshot.Plan.Lifetime, CheckoutID: identity.checkout.ID, GitHead: launchGitCommit(ctx, identity.checkout), ManifestDigest: snapshot.Plan.ManifestDigest, ConfigDigest: snapshot.Plan.ConfigDigest, EffectiveConfigDigest: snapshot.Plan.EffectiveConfigDigest}, StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Attempt: attempt, Groups: []native.Identity{}, Options: request.Options, ConfigPath: request.Plan.ConfigPath}
+	r.OutputPaths, err = outputPaths(snapshot.Plan)
+	if err != nil {
+		return empty, err
+	}
 	var expected *startObservation
 	if ordinaryPersistent {
 		expected = &observed
@@ -365,7 +373,16 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	return response, nil
 }
 func (s *service) stopExecution(id string) (v1.Instance, error) {
+	if err := s.store.fenceTaskAdmission(id); err != nil {
+		return v1.Instance{}, err
+	}
+	if err := s.stopDependents(id); err != nil {
+		return v1.Instance{}, err
+	}
 	s.mu.Lock()
+	if entry := s.executions[id]; entry != nil {
+		entry.taskAdmissionClosed = true
+	}
 	if entry := s.executions[id]; entry != nil && entry.attachment != nil {
 		entry.attachment.ended = true
 	}
@@ -539,7 +556,16 @@ func (s *service) acquireOutputs(ctx context.Context, p v1.PlanResponse) (func()
 	return release, nil
 }
 func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot, journal runtimeRecord, entry *execution, result *v1.ExecutionResult, identity capturedSource) {
-	defer close(entry.done)
+	defer func() {
+		close(entry.done)
+		if entry.borrowed && result.CompletedAt != "" && result.CleanupFailure == "" {
+			s.mu.Lock()
+			if s.executions[id] == entry {
+				delete(s.executions, id)
+			}
+			s.mu.Unlock()
+		}
+	}()
 	d, _ := executionDeadlines(journal.Options)
 	status := v1.Failed
 	var failure error
@@ -564,10 +590,21 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			}
 		}
 		s.mu.Lock()
+		entry.taskAdmissionClosed = true
 		shuttingDown := s.closing
 		s.mu.Unlock()
 		sanitizeResult(result, snapshot, entry)
 		_ = save(v1.Stopping)
+		if !entry.borrowed {
+			if err := s.stopDependents(id); err != nil {
+				result.CleanupFailure = "dependent task cleanup incomplete; parent resources preserved"
+				result.CompletedAt = time.Now().UTC().Format(time.RFC3339Nano)
+				entry.mu.Lock()
+				entry.err = errors.Join(err, save(v1.Failed))
+				entry.mu.Unlock()
+				return
+			}
+		}
 		potentialKeep := journal.Options.KeepOnFailure && snapshot.Plan.Lifetime == v1.Disposable && !shuttingDown
 		var cleanup error
 		var cleanupMu sync.Mutex
@@ -661,7 +698,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			cleanup = errors.New(result.CleanupFailure)
 		}
 
-		if entry.resources != nil && cleanup == nil && !keep {
+		if entry.resources != nil && !entry.borrowed && cleanup == nil && !keep {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			cleanup = s.store.cleanupContainers(cleanupCtx, id, entry.resources, entry.docker)
 			if cleanup == nil {
@@ -672,7 +709,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		if entry.docker != nil && !keep {
 			_ = entry.docker.Close()
 		}
-		if snapshot.Plan.Lifetime == v1.Disposable && cleanup == nil && !keep && !shuttingDown {
+		if snapshot.Plan.Lifetime == v1.Disposable && !entry.borrowed && cleanup == nil && !keep && !shuttingDown {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			cleanup = s.store.removeResources(cleanupCtx, id)
 			cancel()
@@ -721,40 +758,47 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			entry.mu.Unlock()
 		}
 		if cleanup == nil && !keep {
+			if err := s.store.retireTaskInputs(id); err != nil {
+				entry.mu.Lock()
+				entry.err = err
+				entry.mu.Unlock()
+			}
 			entry.releaseOutputs()
 		}
 	}()
 	startup, cancel := withDeadline(ctx, d.startup)
 	defer cancel()
-	if failure = s.store.outputConflict(snapshot.Plan); failure != nil {
-		return
-	}
-	release, failure = s.acquireOutputs(startup, snapshot.Plan)
-	if failure != nil {
-		return
-	}
-	entry.mu.Lock()
-	entry.outputRelease = release
-	entry.mu.Unlock()
-	if failure = s.allocateResources(startup, id, snapshot, entry); failure != nil {
-		return
-	}
-	if failure = s.prepareBuildImages(startup, id, snapshot, entry); failure != nil {
-		return
-	}
-	for name, resource := range snapshot.Plan.Resources {
-		if resource.Kind != "port" {
-			continue
-		}
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			failure = err
+	if !entry.borrowed {
+		if failure = s.store.outputConflict(snapshot.Plan); failure != nil {
 			return
 		}
-		result.Ports[name] = listener.Addr().(*net.TCPAddr).Port
-		if err := listener.Close(); err != nil {
-			failure = err
+		release, failure = s.acquireOutputs(startup, snapshot.Plan)
+		if failure != nil {
 			return
+		}
+		entry.mu.Lock()
+		entry.outputRelease = release
+		entry.mu.Unlock()
+		if failure = s.allocateResources(startup, id, snapshot, entry); failure != nil {
+			return
+		}
+		if failure = s.prepareBuildImages(startup, id, snapshot, entry); failure != nil {
+			return
+		}
+		for name, resource := range snapshot.Plan.Resources {
+			if resource.Kind != "port" {
+				continue
+			}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				failure = err
+				return
+			}
+			result.Ports[name] = listener.Addr().(*net.TCPAddr).Port
+			if err := listener.Close(); err != nil {
+				failure = err
+				return
+			}
 		}
 	}
 	if failure = s.captureFixtures(id, snapshot, result, entry); failure != nil {

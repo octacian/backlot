@@ -11,7 +11,7 @@ translate an existing application's commands.
 backlot plan test --project examples/adoption --json -- -run TestExample
 ```
 
-Scene names are project-defined. Only a disposable terminal job receives forwarded
+Scene names are project-defined. Disposable terminal jobs and explicitly invoked native tasks receive forwarded
 arguments. See the [CLI reference](cli.md#cli-invocation-and-results) for syntax,
 errors and framing; a plan establishes neither runtime readiness nor execution.
 
@@ -96,6 +96,50 @@ ancestors cannot escape the project through symlinks. Components list their
 outputs. The executor serializes these groups per canonical checkout
 across scenes and runs; a plan is not a lock. Backlot cannot infer undeclared
 command side effects.
+
+## Declared native tasks
+
+Enable reusable native `job` components with `policy: each-start` in a persistent
+scene's `tasks` list. They run only on explicit invocation; `components` remains
+the automatic startup graph. A component selected in both lists still runs at
+startup under its existing policy. Tasks cannot initialize resources or produce
+build images. Every attached resource and dependency must already be selected by
+the parent; dependencies test accepted ready services or successful/skipped parent
+jobs without launching work.
+
+```yaml
+components:
+  maintenance:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: app, args: [maintenance]}
+    resources: [database]
+    environment:
+      assign:
+        PASSWORD: {ref: {kind: resource, name: database, field: password}}
+scenes:
+  dev:
+    lifetime: persistent
+    components: [server]
+    resources: [database]
+    tasks: [maintenance]
+```
+
+This fragment assumes the application's existing `app`, `server` and allocation
+resource declarations. Task environments use native endpoints and the parent's
+accepted paired credentials, including composed values; `instance.id` means the
+parent ID. Sensitive values stay in environment mappings, never argv. Task output
+and artifact declarations use the existing project-relative anchors.
+
+Enabling a task validates and privately captures its tools, cwd, seeds and inputs
+when the parent accepts a new attempt, even if the task is never invoked. Outputs
+are validated without acquiring startup locks. Invocation compares only that
+task's effective captured configuration and referenced parent contracts with current
+sources; a relevant change or unavailable input requires explicit parent restart.
+Unrelated task edits do not invalidate it. Legacy snapshots have no task captures;
+ordinary joins never add them. See [invocation](cli.md#declared-task-invocation) and
+[parent ownership](daemon.md#tasks-borrowing-a-ready-parent).
 
 ## Native working directories
 

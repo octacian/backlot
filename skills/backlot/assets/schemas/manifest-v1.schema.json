@@ -1672,6 +1672,25 @@
             ]
           },
           "then": {
+            "properties": {
+              "tasks": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "lifetime": {
+                "const": "disposable"
+              }
+            },
+            "required": [
+              "lifetime"
+            ]
+          },
+          "then": {
             "allOf": [
               {
                 "required": [
@@ -1716,6 +1735,15 @@
         }
       ],
       "properties": {
+        "tasks": {
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+          },
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Native each-start jobs explicitly enabled on a persistent scene; never added to startup work."
+        },
         "startup_details": {
           "items": {
             "$ref": "#/$defs/StartupDetailSelection"

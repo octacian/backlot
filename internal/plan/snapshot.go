@@ -8,6 +8,8 @@ import (
 // Snapshot retains validated declarations and resolved sensitive values privately.
 // Allocation references stay symbolic; this is preparation, never execution.
 type Snapshot struct {
+	// Tasks retains explicitly accepted task contracts, absent on legacy captures.
+	Tasks              map[string]TaskCapture    `json:"tasks,omitempty"`
 	ToolSelections     []ToolSelection           `json:"-"` // Current lookup observations, never retained launch provenance.
 	PrivateSourceState string                    `json:"-"` // Safe partial current-source status; never persisted as launch fact.
 	PrivateProvenance  *projectconfig.Provenance `json:"private_provenance,omitempty"`

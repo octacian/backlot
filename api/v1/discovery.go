@@ -10,6 +10,8 @@ import (
 
 // SceneSummary describes declared work, without satisfying prerequisites.
 type SceneSummary struct {
+	// Tasks lists explicitly enabled native job names, without command or input values.
+	Tasks          []string `json:"tasks,omitempty"`
 	Name           string   `json:"name"`
 	Lifetime       Lifetime `json:"lifetime"`
 	ComponentCount int      `json:"component_count"`
@@ -78,6 +80,8 @@ type Prerequisites struct {
 
 // SceneDescriptionResponse describes a selected graph in dependency-first order.
 type SceneDescriptionResponse struct {
+	// Tasks describes enabled task contracts separately from automatic startup work.
+	Tasks          []DeclaredComponent              `json:"tasks,omitempty"`
 	APIVersion     string                           `json:"api_version"`
 	Project        string                           `json:"project"`
 	ManifestPath   string                           `json:"manifest_path"`
@@ -205,12 +209,12 @@ type ContractsResponse struct {
 
 // SupportedReadContracts returns the installed discovery and existing evidence modes.
 func SupportedReadContracts() []ReadContract {
-	return []ReadContract{{ID: "scene-declarations/v1", Mode: "finite"}, {ID: "instance-filter/v1", Mode: "finite"}, {ID: "log-page/v1", Mode: "finite"}, {ID: "attempt-history/v1", Mode: "finite"}, {ID: "configuration/v1", Mode: "finite"}, {ID: "logs/v1", Mode: "ndjson"}, {ID: "backlot.export/v1", Mode: "finite"}}
+	return []ReadContract{{ID: "task-executions/v1", Mode: "finite"}, {ID: "scene-declarations/v1", Mode: "finite"}, {ID: "instance-filter/v1", Mode: "finite"}, {ID: "log-page/v1", Mode: "finite"}, {ID: "attempt-history/v1", Mode: "finite"}, {ID: "configuration/v1", Mode: "finite"}, {ID: "logs/v1", Mode: "ndjson"}, {ID: "backlot.export/v1", Mode: "finite"}}
 }
 
 // SupportedDaemonReadContracts lists finite daemon reads, excluding local declarations.
 func SupportedDaemonReadContracts() []ReadContract {
-	return []ReadContract{{ID: "instance-filter/v1", Mode: "finite"}, {ID: "log-page/v1", Mode: "finite"}, {ID: "attempt-history/v1", Mode: "finite"}, {ID: "configuration/v1", Mode: "finite"}, {ID: "logs/v1", Mode: "finite"}, {ID: "backlot.export/v1", Mode: "finite"}}
+	return []ReadContract{{ID: "task-executions/v1", Mode: "finite"}, {ID: "instance-filter/v1", Mode: "finite"}, {ID: "log-page/v1", Mode: "finite"}, {ID: "attempt-history/v1", Mode: "finite"}, {ID: "configuration/v1", Mode: "finite"}, {ID: "logs/v1", Mode: "finite"}, {ID: "backlot.export/v1", Mode: "finite"}}
 }
 
 // LogPageRequest selects a bounded scan of retained output with transient continuation.

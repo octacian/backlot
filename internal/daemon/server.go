@@ -425,6 +425,17 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				return
 			}
 			writeJSON(w, response)
+		case "/v1/tasks/run":
+			var request v1.TaskRunRequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.runTask(r.Context(), request)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
 		case "/v1/run", "/v1/restart", "/v1/reset":
 			var request v1.RunRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {

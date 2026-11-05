@@ -34,6 +34,12 @@ Keep each argv entry intact and credentials in sensitive environment assignments
    Declare selected dependencies/resources explicitly, terminal_job for disposable
    tests, and output concurrency groups for generated files. Offline schema success
    does not replace `backlot plan` or actual execution.
+   For finite administrative work on retained data, enable existing native
+   each-start jobs through persistent `scene.tasks`; keep initialization in the
+   startup graph. Declare only parent-selected resources/dependency predicates and
+   disjoint task outputs. Enabling captures required task inputs/tools/cwd at parent
+   acceptance; joins do not retrofit captures. Map credentials directly through
+   sensitive environment references. See [tasks](references/manifest.md#declared-native-tasks).
 3. Discover with `scene list --json` and `scene describe NAME --json`; inspect
    `config show --json`. Configure required inputs through explicit `project setup`
    in a terminal or a private import/stdin, never secret argv or committed values.

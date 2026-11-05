@@ -14,7 +14,7 @@ type stateMigration struct {
 
 // Retain each real step from v9 onward. Source checks belong to the step,
 // before conversion; current layout/authority checks run only after the chain.
-var stateMigrations = []stateMigration{{9, 10, migrateStateNine}, {10, 11, migrateStateTen}, {11, 12, migrateStateEleven}, {12, 13, migrateStateTwelve}}
+var stateMigrations = []stateMigration{{9, 10, migrateStateNine}, {10, 11, migrateStateTen}, {11, 12, migrateStateEleven}, {12, 13, migrateStateTwelve}, {13, 14, migrateStateThirteen}}
 
 func migrateStateNine(tx *bolt.Tx) error {
 	for _, name := range stateNineBuckets {
@@ -90,6 +90,39 @@ func migrateStateTen(tx *bolt.Tx) error {
 		}
 		if _, exists := raw["build_images"]; exists {
 			return problem("state_corrupt", "source version 10 cannot contain build-image pins")
+		}
+		return nil
+	})
+}
+
+// migrateStateThirteen fences dependent consumers; legacy snapshots gain no task captures.
+func migrateStateThirteen(tx *bolt.Tx) error {
+	if err := validateStateAuthority(tx); err != nil {
+		return err
+	}
+	if err := tx.Bucket([]byte("snapshots")).ForEach(func(_, data []byte) error {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil {
+			return err
+		}
+		if _, exists := fields["tasks"]; exists {
+			return problem("state_corrupt", "predecessor cannot contain accepted task captures")
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return tx.Bucket([]byte("instances")).ForEach(func(_, data []byte) error {
+		var fields struct {
+			Instance struct {
+				Task json.RawMessage `json:"task"`
+			} `json:"instance"`
+		}
+		if err := json.Unmarshal(data, &fields); err != nil {
+			return err
+		}
+		if len(fields.Instance.Task) > 0 {
+			return problem("state_corrupt", "predecessor state cannot contain dependent task authority")
 		}
 		return nil
 	})

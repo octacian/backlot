@@ -147,3 +147,42 @@ func TestSessionListenerTransportPrivacy(t *testing.T) {
 		})
 	}
 }
+
+func TestSessionListenerDialPrivacy(t *testing.T) {
+	root, err := os.MkdirTemp("/tmp", "bl-listener-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
+		}
+	})
+	socket := filepath.Join(root, "private-canary.sock")
+	group := &Group{Identity: Identity{Purpose: "application", Control: socket}}
+	for _, mode := range []string{"cancel", "deadline", "missing"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			want := error(os.ErrNotExist)
+			switch mode {
+			case "cancel":
+				canceled, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = canceled
+				want = context.Canceled
+			case "deadline":
+				expired, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+				defer cancel()
+				ctx = expired
+				want = context.DeadlineExceeded
+			}
+			owned, conflict, err := group.ListenerEndpoint(ctx, "127.0.0.1:12345")
+			if owned || conflict || err == nil || !errors.Is(err, want) {
+				t.Fatalf("dial classification: owned=%v conflict=%v err=%v", owned, conflict, err)
+			}
+			if err.Error() != "session listener authority unavailable" || strings.Contains(err.Error(), root) {
+				t.Fatal("private dial details escaped", err)
+			}
+		})
+	}
+}

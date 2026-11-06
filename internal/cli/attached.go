@@ -39,6 +39,7 @@ func attachedRecord(c *urfave.Command, record v1.AttachedRecord) error {
 		if err := output(c, *record.Result, nil); err != nil {
 			return err
 		}
+		return startupDetailsOutput(c, record.Result.StartupDetails)
 	}
 	return nil
 }
@@ -105,6 +106,7 @@ func runAttached(ctx context.Context, c *urfave.Command, cli *client.Client, gra
 	interval := min(100*time.Millisecond, lease/4)
 	logs := v1.LogsRequest{APIVersion: v1.Version, InstanceID: request.InstanceID}
 	previous := v1.InstanceStatus("")
+	summaryEmitted := false
 	pendingCode := 0
 	for {
 		code := pendingCode
@@ -140,9 +142,54 @@ func runAttached(ctx context.Context, c *urfave.Command, cli *client.Client, gra
 			if kind != "starting" && kind != "ready" {
 				kind = "stopping"
 			}
-			if err = emit(kind, &response, nil, ""); err != nil {
+			ready := response
+			if kind == "ready" && !summaryEmitted && len(instance.Plan.StartupDetails) > 0 {
+				signalCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+				bounded, cancel := context.WithTimeout(signalCtx, min(lease/4, 5*time.Second))
+				ready.StartupDetails = startupSummary(bounded, cli, response)
+				cancel()
+				interrupted := signalCtx.Err() != nil
+				if interrupted {
+					stop()
+					continue
+				}
+				// Recheck ownership/readiness after private reads without retaining hydrated values.
+				bounded, cancel = context.WithTimeout(signalCtx, min(lease/4, 5*time.Second))
+				next, renewErr := cli.Attached(bounded, request, false)
+				cancel()
+				interrupted = signalCtx.Err() != nil
+				stop()
+				if interrupted {
+					continue
+				}
+				if renewErr != nil {
+					return renewErr
+				}
+				if next.Result == nil || next.Result.Instance.ID != request.InstanceID || startupAttempt(next.Result.Instance) != request.Owner.Attempt {
+					return startupConflict()
+				}
+				response = *next.Result
+				response.ManifestDrift, response.ConfigDrift = manifestDrift, configDrift
+				if response.Instance.Status != v1.RuntimeReady {
+					continue
+				}
+			}
+			select {
+			case received := <-signals:
+				pendingCode = 130
+				if received == syscall.SIGTERM {
+					pendingCode = 143
+				}
+				continue
+			default:
+				if ctx.Err() != nil {
+					continue
+				}
+			}
+			if err = emit(kind, &ready, nil, ""); err != nil {
 				return err
 			}
+			summaryEmitted = summaryEmitted || kind == "ready"
 			previous = instance.Status
 		}
 		drainCtx := ctx

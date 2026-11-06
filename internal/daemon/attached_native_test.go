@@ -7,9 +7,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -21,6 +23,118 @@ func TestAttachedNativeCLI(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "backlot")
 	if out, err := exec.Command("go", "build", "-race", "-o", binary, "../../cmd/backlot").CombinedOutput(); err != nil {
 		t.Fatal(err, string(out))
+	}
+	t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", filepath.Join(shortTemp(t), "registry"))
+	for _, entry := range []string{"scene", "run"} {
+		for _, machine := range []bool{false, true} {
+			t.Run(fmt.Sprintf("startup-details/%s/json=%t", entry, machine), func(t *testing.T) {
+				h := newNativeHarness(t, binary)
+				server := h.manifest.Components["server"]
+				server.Fixtures = map[string]v1.Fixture{
+					"password": {Value: v1.Value{Literal: ptr("attached-selected-canary"), Secret: true}},
+					"other":    {Value: v1.Value{Literal: ptr("attached-unselected-canary"), Secret: true}},
+				}
+				h.manifest.Components["server"] = server
+				scene := h.manifest.Scenes["dev"]
+				scene.StartupDetails = []v1.StartupDetailSelection{{Component: "server", Fixture: "password", Label: "Demo password"}}
+				h.manifest.Scenes["dev"] = scene
+				h.write()
+				config := filepath.Join(h.project, "machine.json")
+				if err := os.WriteFile(config, []byte(`{"version":"backlot/v1"}`), 0600); err != nil {
+					t.Fatal(err)
+				}
+				args := []string{entry}
+				if entry == "scene" {
+					args = append(args, "start")
+				}
+				args = append(args, "dev", "--attached", "--config", config, "--state-dir", h.dir, "--stop-grace", "50ms")
+				if machine {
+					args = append(args, "--json")
+				}
+				cmd := exec.Command(binary, args...)
+				cmd.Dir = h.project
+				reader, err := cmd.StdoutPipe()
+				if err != nil {
+					t.Fatal(err)
+				}
+				var out, diag bytes.Buffer
+				cmd.Stderr = &diag
+				if err := cmd.Start(); err != nil {
+					t.Fatal(err)
+				}
+				done, ready := make(chan struct{}), make(chan struct{}, 1)
+				var waitErr error
+				go func() {
+					defer close(done)
+					scanner := bufio.NewScanner(reader)
+					scanner.Buffer(make([]byte, 4096), 1<<20)
+					for scanner.Scan() {
+						line := scanner.Text()
+						out.WriteString(line + "\n")
+						if strings.Contains(line, "attached-selected-canary") {
+							select {
+							case ready <- struct{}{}:
+							default:
+							}
+						}
+					}
+					waitErr = cmd.Wait()
+				}()
+				t.Cleanup(func() {
+					select {
+					case <-done:
+					default:
+						_ = cmd.Process.Kill()
+						<-done
+					}
+				})
+				select {
+				case <-ready:
+				case <-done:
+					t.Fatal("summary missing", waitErr, diag.String())
+				case <-time.After(20 * time.Second):
+					t.Fatal("summary timeout")
+				}
+				if err := cmd.Process.Signal(os.Interrupt); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case <-done:
+				case <-time.After(20 * time.Second):
+					t.Fatal("cleanup timeout")
+				}
+				if exit, ok := waitErr.(*exec.ExitError); !ok || exit.ExitCode() != 130 {
+					t.Fatal("interrupt outcome", waitErr)
+				}
+				if strings.Count(out.String(), "attached-selected-canary") != 1 || strings.Contains(out.String()+diag.String(), "attached-unselected-canary") {
+					t.Fatal("wrong disclosure")
+				}
+				var id string
+				if machine {
+					for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+						var record v1.AttachedRecord
+						if err := json.Unmarshal([]byte(line), &record); err != nil {
+							t.Fatal(err)
+						}
+						if record.Result != nil {
+							id = record.Result.Instance.ID
+							if record.Result.StartupDetails != nil && record.Type != "ready" {
+								t.Fatal("summary escaped ready")
+							}
+						}
+					}
+				} else if !strings.Contains(out.String(), "Demo password: attached-selected-canary") {
+					t.Fatal("missing human label")
+				}
+				if id != "" {
+					status, err := h.cli.Inspect(context.Background(), id)
+					if err != nil || status.StartupDetails != nil {
+						t.Fatal("summary persisted", err)
+					}
+				}
+				h.absent()
+			})
+		}
 	}
 	for _, scenario := range []struct {
 		name   string
@@ -197,13 +311,24 @@ func TestAttachedNativeCLI(t *testing.T) {
 		server := h.manifest.Components["server"]
 		server.Environment.Assign["DELAY_BIND"] = fixtureLiteral("1")
 		server.Readiness.Timeout = "100ms"
+		server.Fixtures = map[string]v1.Fixture{"password": {Value: v1.Value{Literal: ptr("failed-start-private-canary"), Secret: true}}}
+		scene := h.manifest.Scenes["dev"]
+		scene.StartupDetails = []v1.StartupDetailSelection{{Component: "server", Fixture: "password", Label: "Password"}}
+		h.manifest.Scenes["dev"] = scene
 		h.manifest.Components["server"] = server
 		h.write()
-		cmd := exec.Command(binary, "run", "--attached", "--json", "--state-dir", h.dir, "--stop-grace", "50ms", "dev")
+		config := filepath.Join(h.project, "machine.json")
+		if err := os.WriteFile(config, []byte(`{"version":"backlot/v1"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(binary, "run", "--config", config, "--attached", "--json", "--state-dir", h.dir, "--stop-grace", "50ms", "dev")
 		cmd.Dir = h.project
 		out, err := cmd.Output()
 		if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
 			t.Fatal("startup failure exit", err)
+		}
+		if bytes.Contains(out, []byte("failed-start-private-canary")) {
+			t.Fatal("failed readiness disclosed secret")
 		}
 		var failed bool
 		for _, line := range bytes.Split(bytes.TrimSpace(out), []byte("\n")) {
@@ -211,7 +336,7 @@ func TestAttachedNativeCLI(t *testing.T) {
 			if err := json.Unmarshal(line, &record); err != nil {
 				t.Fatal(err)
 			}
-			if record.Type == "ready" {
+			if record.Type == "ready" || record.Result != nil && record.Result.StartupDetails != nil {
 				t.Fatal("alive process was reported ready")
 			}
 			if record.Type == "failure" {

@@ -277,7 +277,7 @@ func TestCancelledOutputWaiterArtifacts(t *testing.T) {
 	}
 	h := newNativeHarness(t, binary, "30s")
 	h.manifest.Tools["sh"] = "/bin/sh"
-	h.manifest.Outputs = map[string]v1.Output{"evidence": {Path: "evidence", ConcurrencyGroup: "reports"}}
+	h.manifest.Outputs = map[string]v1.Output{"evidence": {Path: "evidence", ConcurrencyGroup: "reports", EmptyBeforeExecution: true}}
 	job := h.manifest.Components["job"]
 	job.Outputs = []string{"evidence"}
 	job.Environment.Assign["RUN_ID"] = v1.Value{Ref: &v1.Reference{Kind: "instance", Field: "id"}}

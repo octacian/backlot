@@ -1045,6 +1045,10 @@
     },
     "Output": {
       "properties": {
+        "empty_before_execution": {
+          "type": "boolean",
+          "description": "Irreversibly empty and recreate this scratch directory under output locks or task reservations before each new execution; omitted or false preserves existing contents."
+        },
         "path": {
           "type": "string",
           "minLength": 1,

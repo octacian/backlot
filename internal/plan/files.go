@@ -184,11 +184,11 @@ func OutputPath(root, relative string) (string, error) {
 	}
 }
 
-// validateOutputs compares reusable declarations across scenes so separate plans
+// ValidateOutputs compares reusable declarations across scenes so separate plans
 // cannot assign different groups to the same storage. Unavailable unselected
 // paths do not block planning; selected paths still require containment checks.
-func validateOutputs(root string, outputs map[string]v1.Output, selected map[string]bool) error {
-	paths := map[string]string{}
+func ValidateOutputs(root string, outputs map[string]v1.Output, selected map[string]bool) error {
+	paths := map[string]v1.Output{}
 	for name, output := range outputs {
 		resolved, err := OutputPath(root, output.Path)
 		if err != nil {
@@ -197,13 +197,29 @@ func validateOutputs(root string, outputs map[string]v1.Output, selected map[str
 			}
 			continue
 		}
-		for existing, group := range paths {
+		for existing, other := range paths {
 			separator := string(filepath.Separator)
-			if (resolved == existing || strings.HasPrefix(resolved, existing+separator) || strings.HasPrefix(existing, resolved+separator)) && group != output.ConcurrencyGroup {
-				return problem("invalid_output", "outputs."+name, "overlapping canonical output paths must share a concurrency group; update concurrency_group")
+			same := resolved == existing
+			overlap := same || strings.HasPrefix(resolved, existing+separator) || strings.HasPrefix(existing, resolved+separator)
+			if output.EmptyBeforeExecution || other.EmptyBeforeExecution {
+				same, overlap, err = OutputOverlap(resolved, existing)
+				if err != nil {
+					return err
+				}
+			}
+			if overlap {
+				if other.ConcurrencyGroup == output.ConcurrencyGroup && (!output.EmptyBeforeExecution && !other.EmptyBeforeExecution || same && output.EmptyBeforeExecution == other.EmptyBeforeExecution) {
+					continue
+				}
+				return problem("invalid_output", "outputs."+name, "overlapping canonical outputs must share a concurrency group; disposable outputs also require the same directory and opt-in")
 			}
 		}
-		paths[resolved] = output.ConcurrencyGroup
+		paths[resolved] = output
+		if selected[name] && output.EmptyBeforeExecution {
+			if _, err := OutputDirectory(root, output.Path); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

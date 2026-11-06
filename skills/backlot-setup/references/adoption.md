@@ -91,7 +91,10 @@ Backlot does not invent application environment names or concatenate URLs.
 If no build is needed, remove that component and its dependency from both scenes.
 If commands write `dist` or reports, declare their outputs/groups before concurrent
 use; [the existing adoption manifest](https://github.com/octacian/backlot/blob/6177c64f60654657a914857edbffb69b8316a41b/examples/adoption/backlot.yaml) shows
-build outputs. Backlot cannot lock undeclared writes. Each selected dependency
+build outputs. For disposable report directories, explicitly opt into
+`empty_before_execution: true` to remove previous files before any component
+starts; see [output preparation](manifest.md#project-declarations). Backlot cannot
+lock undeclared writes. Each selected dependency
 must be listed in the scene; a reference alone does not select or wait for it.
 
 A TCP probe observes a listener, not schema or credential correctness. Use a

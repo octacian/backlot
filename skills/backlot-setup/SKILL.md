@@ -32,7 +32,9 @@ Keep each argv entry intact and credentials in sensitive environment assignments
    application. Use `command.working_directory` for package-local native entry
    points; keep tool/output/artifact/seed anchors at the manifest. Its [seed](assets/examples/adoption/defaults.env) is literal data.
    Declare selected dependencies/resources explicitly, terminal_job for disposable
-   tests, and output concurrency groups for generated files. Offline schema success
+   tests, and output concurrency groups for generated files. Use
+   `empty_before_execution: true` only with explicit authority to erase the whole
+   scratch directory; see [output preparation](references/manifest.md#project-declarations). Offline schema success
    does not replace `backlot plan` or actual execution.
    For finite administrative work on retained data, enable existing native
    each-start jobs through persistent `scene.tasks`; keep initialization in the

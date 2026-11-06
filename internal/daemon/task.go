@@ -280,7 +280,7 @@ func outputConflictTx(tx *bolt.Tx, p v1.PlanResponse, paths map[string]string, s
 			return err
 		}
 		i := r.Instance
-		if self != "" && i.Task == nil {
+		if self != "" && !immediate && i.Task == nil {
 			return nil
 		}
 		if i.Execution == nil || associatedCheckout(i).Path != p.Checkout || !active(i.Status) && i.Execution.CleanupFailure == "" && !i.Execution.Kept {
@@ -311,7 +311,17 @@ func outputConflictTx(tx *bolt.Tx, p v1.PlanResponse, paths map[string]string, s
 				}
 				for _, a := range []string{journal.OutputPaths[oldName], oldCurrent} {
 					for _, b := range []string{paths[name]} {
-						if a != "" && b != "" && overlaps(a, b) {
+						if a == "" || b == "" {
+							continue
+						}
+						overlap := overlaps(a, b)
+						if old.EmptyBeforeExecution || next.EmptyBeforeExecution {
+							_, overlap, err = plan.OutputOverlap(a, b)
+							if err != nil {
+								return err
+							}
+						}
+						if overlap {
 							if !immediate && i.Task == nil {
 								return problem("unsafe_drift", "overlapping checkout output declarations changed groups while another consumer is active or uncertain; stop it before launching")
 							}

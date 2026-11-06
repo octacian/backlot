@@ -204,7 +204,7 @@ func TestKeptRuntimeFencesOutputDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	requested := response.Instance.Plan
-	requested.Outputs = map[string]v1.Output{"report": {Path: "reports/result", ConcurrencyGroup: "new"}}
+	requested.Outputs = map[string]v1.Output{"report": {Path: "reports/result", ConcurrencyGroup: "new", EmptyBeforeExecution: true}}
 	if err := state.outputConflict(requested); err == nil {
 		t.Fatal("kept live output consumer allowed overlapping group drift")
 	}

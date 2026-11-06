@@ -97,17 +97,22 @@ func Validate(m v1.Manifest) error {
 			return invalid("resources."+name, "allocation requires a declared shared_service; other kinds cannot select one")
 		}
 	}
-	outputPaths := map[string]string{}
+	outputPaths := map[string]v1.Output{}
 	for name, o := range m.Outputs {
 		if !safePath(o.Path) || !identifier.MatchString(o.ConcurrencyGroup) {
 			return invalid("outputs."+name, "declare a safe relative path and concurrency_group")
 		}
-		for existing, group := range outputPaths {
-			if (o.Path == existing || strings.HasPrefix(o.Path, existing+"/") || strings.HasPrefix(existing, o.Path+"/")) && group != o.ConcurrencyGroup {
-				return invalid("outputs."+name, "overlapping output paths must share a concurrency group")
+		for existing, other := range outputPaths {
+			if o.Path == existing || strings.HasPrefix(o.Path, existing+"/") || strings.HasPrefix(existing, o.Path+"/") {
+				if other.ConcurrencyGroup != o.ConcurrencyGroup {
+					return invalid("outputs."+name, "overlapping output paths must share a concurrency group")
+				}
+				if (o.EmptyBeforeExecution || other.EmptyBeforeExecution) && (o.Path != existing || o.EmptyBeforeExecution != other.EmptyBeforeExecution) {
+					return invalid("outputs."+name, "disposable output overlaps require the same directory, group and empty_before_execution setting")
+				}
 			}
 		}
-		outputPaths[o.Path] = o.ConcurrencyGroup
+		outputPaths[o.Path] = o
 	}
 	for name, e := range m.Environments {
 		if err := environment(m, e, "environments."+name); err != nil {

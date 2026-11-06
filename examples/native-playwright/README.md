@@ -2,7 +2,8 @@
 
 This adopter recipe uses a native Node server and native Playwright 1.64.1
 Chromium. Backlot gives each invocation a dynamic loopback port, forwards the
-terminal argument vector and retains `reports/` before stopping the scene.
+terminal argument vector, empties the opted-in `reports/` directory under its
+output lock before any component starts, and retains it before stopping the scene.
 No gateway, certificate, container or browser shard matrix is needed.
 
 From the repository root, build Backlot with `make build`. Install application

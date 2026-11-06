@@ -55,6 +55,14 @@ for leases, operator overrides and exit results.
 
 ## Declared artifacts and fixtures
 
+Attempt archives separate destinations; they do not prove source freshness. For
+scratch reports, opt into [empty output preparation](manifest.md#project-declarations)
+with `empty_before_execution: true` to prevent a previous report surviving an early
+producer failure. Launched producers can still leave partial files; empty sources
+do not prove final reports or attribute writes from undeclared external processes.
+Unlaunched/skipped components claim no artifacts, missing sources still fail
+collection, and earlier archives remain governed by evidence retention.
+
 Components can declare named artifact sources and discoverable fixture identities:
 
 ```yaml

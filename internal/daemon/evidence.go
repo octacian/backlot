@@ -209,16 +209,21 @@ func (s *service) pruneEvidence() error {
 			if retentionStart(&a.Result) != "" {
 				completed++
 			}
+			protection, err := s.store.attemptProtection(a)
+			if err != nil {
+				return err
+			}
 			lock := s.mutationLock(a.InstanceID)
 			if !lock.TryLock() {
 				continue
 			}
-			if completed > count && !attemptProtected(a) {
+			if completed > count && protection == "" {
 				err = s.deleteAttempt(a, true)
 			} else {
-				if !attemptProtected(a) {
+				if protection == "" {
 					start, err := time.Parse(time.RFC3339Nano, retentionStart(&a.Result))
 					if err != nil {
+						lock.Unlock()
 						return err
 					}
 					all = append(all, candidate{id: a.InstanceID, attempt: a.Result.Attempt, start: start, expired: a.Result.EvidenceExpired})

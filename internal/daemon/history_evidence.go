@@ -63,6 +63,7 @@ func (s *service) deleteAttempt(a v1.Attempt, history bool) error {
 	key := attemptKey(a.InstanceID, a.Sequence)
 	intent := evidenceDeletion{InstanceID: a.InstanceID, Attempt: a.Result.Attempt}
 	committed := false
+	boot, _ := native.CurrentBoot()
 	if err := s.store.db.Update(func(tx *bolt.Tx) error {
 		data := tx.Bucket([]byte("attempts")).Get([]byte(key))
 		if data == nil {
@@ -72,7 +73,11 @@ func (s *service) deleteAttempt(a v1.Attempt, history bool) error {
 		if err := json.Unmarshal(data, &current); err != nil {
 			return err
 		}
-		if current.Result.Attempt != a.Result.Attempt || attemptProtected(current) {
+		protection, err := taskAttemptProtection(tx, current, boot)
+		if err != nil {
+			return err
+		}
+		if current.Result.Attempt != a.Result.Attempt || protection != "" {
 			return nil
 		}
 		a = current
@@ -294,7 +299,11 @@ func (s *service) expireUnknownEvidence(id string, age time.Duration, overBytes 
 	}
 	represented := map[string]bool{}
 	for _, a := range entries {
-		if attemptProtected(a) {
+		protection, err := s.store.attemptProtection(a)
+		if err != nil {
+			return 0, err
+		}
+		if protection != "" {
 			return 0, nil
 		}
 		represented[a.Result.Attempt] = true
@@ -399,8 +408,12 @@ func (s *service) pruneHistory(ctx context.Context, q v1.HistoryPruneRequest) (v
 		if err != nil {
 			return response, err
 		}
-		protected := attemptProtected(a)
-		response.Attempts = append(response.Attempts, v1.PrunedAttempt{Reasons: reasons, Protection: attemptProtection(a), Attempt: a.Result.Attempt, Protected: protected, Bytes: size})
+		protection, err := s.store.attemptProtection(a)
+		if err != nil {
+			return response, err
+		}
+		protected := protection != ""
+		response.Attempts = append(response.Attempts, v1.PrunedAttempt{Reasons: reasons, Protection: protection, Attempt: a.Result.Attempt, Protected: protected, Bytes: size})
 		if !protected {
 			selected = append(selected, a)
 		}
@@ -451,11 +464,29 @@ func (s *service) retryEvidenceDeletions() error {
 }
 
 func (s *service) eraseDestroyed(id string) (v1.Instance, error) {
-	if err := s.store.guardDependentTasks(id); err != nil {
-		return v1.Instance{}, err
-	}
 	children, err := s.store.dependentTasks(id)
 	if err != nil {
+		return v1.Instance{}, err
+	}
+	// Retry only already-authorized tombstone erasure before checking live consumers.
+	for _, child := range children {
+		err := s.store.db.View(func(tx *bolt.Tx) error {
+			r, err := load(tx, child)
+			if err != nil {
+				return err
+			}
+			_, err = consumerErased(tx, r)
+			return err
+		})
+		var detail *v1.PlanError
+		if errors.As(err, &detail) && detail.Code == "cleanup_failed" {
+			err = s.finishEvidenceDeletion(evidenceDeletion{InstanceID: child})
+		}
+		if err != nil {
+			return v1.Instance{}, err
+		}
+	}
+	if err := s.store.guardDependentTasks(id); err != nil {
 		return v1.Instance{}, err
 	}
 	for _, child := range children {

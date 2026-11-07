@@ -42,6 +42,23 @@ func TestSharedNamedWireContract(t *testing.T) {
 	if _, err := c.Shared(context.Background(), "inspect", request); err != nil {
 		t.Fatal(err)
 	}
+	response.Services[0].LastTransition = &v1.SharedTransition{From: "stopped", To: "running", Cause: "explicit_shared_start", At: "2026-11-06T23:00:00Z"}
+	if _, err := c.Shared(context.Background(), "inspect", request); err != nil {
+		t.Fatal(err)
+	}
+	for _, transition := range []v1.SharedTransition{
+		{From: "running", To: "running", Cause: "consumer_start", At: "2026-11-06T23:00:00Z"},
+		{From: "", To: "running", Cause: "consumer_start", At: "2026-11-06T23:00:00Z"},
+		{From: "stopped", To: "running", Cause: "private-detail", At: "2026-11-06T23:00:00Z"},
+		{From: "stopped", To: "running", Cause: "consumer_start", At: "unknown"},
+		{From: "running", To: "stopped", Cause: "explicit_shared_stop", At: "2026-11-06T23:00:00Z"},
+	} {
+		response.Services[0].LastTransition = &transition
+		if _, err := c.Shared(context.Background(), "inspect", request); err == nil {
+			t.Fatal("invalid/mismatched transition accepted")
+		}
+	}
+	response.Services[0].LastTransition = nil
 	response.Services[0].Status = "guessing"
 	if _, err := c.Shared(context.Background(), "inspect", request); err == nil {
 		t.Fatal("unvalidated shared state")

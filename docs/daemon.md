@@ -477,6 +477,20 @@ or abandoned-data deletion guards. Doctor keeps an incomplete historical-observa
 check failed and explains the recorded resource release independently from launch eligibility. Root exit, EOF or closed listeners alone never
 establish cleanup. No raw process/session identities are public results.
 
+`execution.settlement` separates current release from these historical observations.
+A verified current cleanup covers every exact launch, including readiness helpers,
+pending effects, containers, publication, networks and dependent tasks. One successful
+sibling receipt cannot release another launch. Legacy per-component cleanup summaries
+remain historical observations; without exact current proof or independently verified
+all-launch previous-boot absence, native eligibility remains unknown. A new attempt or changed effect
+invalidates its private release proof; status reads reevaluate the records without
+writing or refreshing observation time. Explicit stop retries ownerless interrupted
+effects and can report settled while preserving `interrupted`, original completion,
+worst native confidence and collection gaps. Doctor reports current consumer
+settlement separately from its historical native-observation check. Unknown or
+partially surviving effects remain fenced; no application or server starts during
+recovery. Retained data still requires its independent destructive-cleanup safeguards.
+
 All native launch intents/effects, including command probes, record kernel boot
 identity before allocation. A different boot releases obsolete process claims,
 never collection gaps. The guardian-only pipe lets a live anchor terminate its own
@@ -520,7 +534,10 @@ replace the parent result or start missing dependencies or allocations.
 Admission atomically reserves declared outputs before activation. A group held by
 the parent or a peer, or overlapping accepted/current canonical paths, rejects
 immediately, including aliases and renamed groups. Disjoint tasks may run together;
-task output locks never queue. Undeclared writes and hostile concurrent filesystem mutation
+task output locks never queue. Terminal consumers with unknown current release still
+reserve overlapping outputs; independently verified current release frees those
+reservations while retaining historical cleanup observations. The final directory
+clearing check uses the same current proof. Undeclared writes and hostile concurrent filesystem mutation
 retain the existing cooperative limits.
 
 Parent stop/restart/reset/destroy, attached cancellation, failure teardown and daemon

@@ -101,6 +101,11 @@ func validateExecution(instance v1.Instance) error {
 	if result == nil {
 		return nil
 	}
+	if s := result.Settlement; s != nil {
+		if s.Validate() != nil || s.InstanceID != instance.ID || s.Attempt != result.Attempt {
+			return responseError()
+		}
+	}
 	if err := v1.ValidateBuildImages(instance.ID, result.BuildImages, result.ImageChangeWarnings); err != nil {
 		return responseError()
 	}
@@ -114,7 +119,7 @@ func validateExecution(instance v1.Instance) error {
 			}
 		}
 	}
-	if err := validateNativeCleanup(result.NativeCleanup, result.Attempt, result.Components, result.CleanupFailure, instance.NativeOwnershipWarnings); err != nil {
+	if err := validateNativeCleanup(result.NativeCleanup, result.Attempt, result.Components, result.CleanupFailure, instance.NativeOwnershipWarnings, result.Settlement); err != nil {
 		return err
 	}
 	if !validID(result.Attempt) {
@@ -201,6 +206,9 @@ func validateOutcome(status v1.InstanceStatus, exit *int, cancelled bool, failur
 }
 
 func validateExportResult(result v1.ExportResult) error {
+	if s := result.Settlement; s != nil && (s.Validate() != nil || s.InstanceID != result.InstanceID || s.Attempt != result.Attempt) {
+		return responseError()
+	}
 	if err := v1.ValidateBuildImages(result.InstanceID, result.BuildImages, result.ImageChangeWarnings); err != nil {
 		return responseError()
 	}
@@ -209,20 +217,22 @@ func validateExportResult(result v1.ExportResult) error {
 	default:
 		return responseError()
 	}
-	if err := validateNativeCleanup(result.NativeCleanup, result.Attempt, result.Components, result.CleanupFailure, result.NativeOwnershipWarnings); err != nil {
+	if err := validateNativeCleanup(result.NativeCleanup, result.Attempt, result.Components, result.CleanupFailure, result.NativeOwnershipWarnings, result.Settlement); err != nil {
 		return err
 	}
 	return validateOutcome(result.Status, result.TerminalExitCode, result.Cancelled, result.Failure, result.CollectionFailure, result.CleanupFailure, result.Components)
 }
 
-func validateNativeCleanup(results []v1.NativeCleanupResult, attempt string, components []v1.ComponentResult, failure string, warnings []v1.NativeOwnershipWarning) error {
+func validateNativeCleanup(results []v1.NativeCleanupResult, attempt string, components []v1.ComponentResult, failure string, warnings []v1.NativeOwnershipWarning, settlement *v1.ConsumerSettlement) error {
+	// The enclosing result reports current fences independently of worst native history.
+	reported := settlement != nil && settlement.Validate() == nil && settlement.Attempt == attempt
 	seen := map[string]bool{}
 	names := map[string]bool{}
 	for _, c := range components {
 		names[c.Name] = true
 	}
 	for _, r := range results {
-		if r.Validate() != nil || r.Attempt != attempt || !names[r.Component] || seen[r.Component] || r.FencesResources(warnings) && failure == "" {
+		if r.Validate() != nil || r.Attempt != attempt || !names[r.Component] || seen[r.Component] || r.FencesResources(warnings) && failure == "" && !reported {
 			return responseError()
 		}
 		seen[r.Component] = true

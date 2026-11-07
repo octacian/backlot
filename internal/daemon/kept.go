@@ -49,17 +49,15 @@ func (s *service) stopKept(id string, entry *execution) (v1.Instance, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cleanup = errors.Join(cleanup, s.store.removeGateway(ctx, id, &journal))
-	for _, observed := range instance.Execution.NativeCleanup {
-		if observed.FencesResources(instance.NativeOwnershipWarnings) {
-			cleanup = errors.Join(cleanup, errors.New("native cleanup observation remains incomplete"))
-			break
-		}
-	}
+	cleanup = errors.Join(cleanup, verifyNativeRelease(journal, instance.Execution))
 	if cleanup == nil && entry.resources != nil {
 		cleanup = s.store.cleanupContainers(ctx, id, entry.resources, entry.docker)
 		if cleanup == nil {
 			cleanup = s.store.removeNetworks(ctx, id, entry.resources, entry.docker)
 		}
+	}
+	if cleanup == nil {
+		cleanup = s.store.recordConsumerRelease(ctx, id, journal, v1.SettlementExplicitStop, true)
 	}
 	if cleanup != nil {
 		instance.Execution.CleanupFailure = "retained runtime cleanup failed"
@@ -72,6 +70,7 @@ func (s *service) stopKept(id string, entry *execution) (v1.Instance, error) {
 	}
 	entry.kept = false
 	instance.Execution.Kept = false
+	instance.Execution.CleanupFailure, instance.Execution.CleanupDetails = "", nil
 	for i := range instance.Execution.Components {
 		if instance.Execution.Components[i].Status == "ready" {
 			instance.Execution.Components[i].Status = "stopped"
@@ -82,7 +81,11 @@ func (s *service) stopKept(id string, entry *execution) (v1.Instance, error) {
 	if release != nil {
 		release()
 	}
-	return s.store.execution(id, v1.Stopped, instance.Execution)
+	status := v1.Stopped
+	if instance.Execution.Outcome == v1.Cancelled {
+		status = v1.Cancelled
+	}
+	return s.store.execution(id, status, instance.Execution)
 }
 
 // sanitizeResult applies only to Backlot diagnostics, never application streams.

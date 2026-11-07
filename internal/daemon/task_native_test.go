@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"maps"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/native"
 )
 
 func enableNativeTasks(h *nativeHarness, modes ...string) {
@@ -374,5 +376,156 @@ func TestTaskParentMutationFences(t *testing.T) {
 				h.state(parent.ID, v1.Interrupted)
 			}
 		})
+	}
+}
+
+// TestTaskUnknownRecoveryRemainsInspectable retains real launch authority before
+// simulating an interrupted native effect acknowledgment in the private journal.
+func TestTaskUnknownRecoveryRemainsInspectable(t *testing.T) {
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
+	h := newNativeHarness(t, binary, "30s")
+	h.manifest.Resources["data"] = v1.Resource{Kind: "directory"}
+	server := h.manifest.Components["server"]
+	server.Resources = append(server.Resources, "data")
+	server.Fixtures = map[string]v1.Fixture{"data": {Value: fixtureRef("resource", "data", "path")}}
+	h.manifest.Components["server"] = server
+	for name, scene := range h.manifest.Scenes {
+		scene.Resources = append(scene.Resources, "data")
+		h.manifest.Scenes[name] = scene
+	}
+	enableNativeTasks(h, "never")
+	h.write()
+	parent := h.state(h.run("dev").Instance.ID, v1.RuntimeReady).Instance
+	child := runHarnessTask(h, parent.ID, "never").Instance
+	deadline := time.Now().Add(5 * time.Second)
+	launched := false
+	for time.Now().Before(deadline) {
+		current, err := h.cli.Inspect(context.Background(), child.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(current.Instance.Execution.Components) == 1 && current.Instance.Execution.Components[0].Status == "running" {
+			launched = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !launched {
+		t.Fatal("real task launch missing")
+	}
+	h.retainGuardianCleanup(parent.ID)
+	h.retainGuardianCleanup(child.ID)
+	fixtures, err := h.cli.Fixtures(context.Background(), v1.FixturesRequest{APIVersion: v1.Version, InstanceID: parent.ID, Component: "server"})
+	if err != nil || len(fixtures.Fixtures) != 1 {
+		t.Fatal("parent data fixture unavailable", err)
+	}
+	marker := filepath.Join(fixtures.Fixtures[0].Value, "unknown-child-witness")
+	if err := os.WriteFile(marker, []byte("retained parent data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	crash := func() {
+		t.Helper()
+		if err := h.process.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		_ = h.process.Wait()
+		h.waited = true
+	}
+	crash()
+	state, err := openStore(h.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := state.runtime(child.ID)
+	if err != nil || len(original.Groups) == 0 {
+		t.Fatal("original owned task authority missing", err)
+	}
+	snapshot, secrets := storedBytes(t, state, "snapshots", child.ID), storedBytes(t, state, "secrets", child.ID)
+	if len(snapshot) == 0 || len(secrets) == 0 {
+		t.Fatal("active task private launch inputs missing")
+	}
+	boot, err := native.CurrentBoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown := original
+	unknown.Groups = nil
+	unknown.LaunchPending = true
+	unknown.PendingBoot = boot
+	unknown.Release = nil
+	if err := state.saveRuntime(child.ID, unknown); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restored := false
+	defer func() {
+		if restored {
+			return
+		}
+		if !h.waited {
+			_ = h.process.Process.Kill()
+			_ = h.process.Wait()
+			h.waited = true
+		}
+		state, err := openStore(h.dir)
+		if err == nil {
+			err = state.saveRuntime(child.ID, original)
+			_ = state.db.Close()
+		}
+		if err != nil {
+			h.cleanupUnverified = true
+			t.Error("exact fixture authority restoration failed; preserving private state", err)
+		}
+	}()
+	h.start() // The daemon must serve inspection while unknown children keep parents fenced.
+	for _, id := range []string{parent.ID, child.ID} {
+		current, err := h.cli.Inspect(context.Background(), id)
+		if err != nil || current.Instance.Status != v1.Interrupted || current.Instance.Execution.CleanupFailure == "" || current.Instance.Execution.Settlement == nil || current.Instance.Execution.Settlement.State == v1.ConsumerSettled {
+			t.Fatal("unknown recovery was inaccessible or falsely settled", err)
+		}
+	}
+	if _, err := h.cli.StopExecution(context.Background(), parent.ID); err == nil {
+		t.Fatal("parent stopped through unknown child fence")
+	}
+	request := h.request("dev")
+	request.InstanceID = parent.ID
+	if _, err := h.cli.Restart(context.Background(), request); err == nil {
+		t.Fatal("parent restarted through unknown child fence")
+	}
+	if _, err := h.cli.Destroy(context.Background(), parent.ID); err == nil {
+		t.Fatal("parent data destroyed through unknown child fence")
+	}
+	if data, err := os.ReadFile(marker); err != nil || string(data) != "retained parent data" {
+		t.Fatal("unknown child changed retained parent data", err)
+	}
+	crash()
+	state, err = openStore(h.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(snapshot, storedBytes(t, state, "snapshots", child.ID)) || !bytes.Equal(secrets, storedBytes(t, state, "secrets", child.ID)) {
+		t.Fatal("cleanup-fenced task inputs retired")
+	}
+	if err := state.saveRuntime(child.ID, original); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restored = true
+	h.start()
+	for _, id := range []string{parent.ID, child.ID} {
+		current, err := h.cli.Inspect(context.Background(), id)
+		if err != nil || current.Instance.Status != v1.Interrupted || current.Instance.Execution.CleanupFailure != "" || current.Instance.Execution.CollectionFailure == "" || current.Instance.Execution.Settlement == nil || current.Instance.Execution.Settlement.State != v1.ConsumerSettled {
+			t.Fatal("restored exact launch authority failed to settle independently", err)
+		}
+	}
+	if _, err := h.cli.Destroy(context.Background(), parent.ID); err != nil {
+		t.Fatal("verified parent/child fixture cleanup failed", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("explicit verified destruction left parent data", err)
 	}
 }

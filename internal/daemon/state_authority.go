@@ -47,6 +47,9 @@ func validateStateNineAuthority(tx *bolt.Tx) error {
 		if result == nil {
 			return nil
 		}
+		if s := result.Settlement; s != nil && (s.Validate() != nil || s.Attempt != result.Attempt) {
+			return problem("state_corrupt", "invalid consumer settlement diagnostic; preserve state")
+		}
 		for _, r := range result.NativeCleanup {
 			if err := r.Validate(); err != nil || r.Attempt != result.Attempt || !hasComponent(result.Components, r.Component) {
 				return problem("state_corrupt", "invalid native cleanup observation or release; preserve state with matching binary")
@@ -69,6 +72,9 @@ func validateStateNineAuthority(tx *bolt.Tx) error {
 		}
 		if err := checkResult(r.Instance.Execution); err != nil {
 			return err
+		}
+		if result := r.Instance.Execution; result != nil && result.Settlement != nil && result.Settlement.InstanceID != r.Instance.ID {
+			return problem("state_corrupt", "consumer settlement diagnostic belongs to another instance")
 		}
 		return checkHistory(r.NativeAbandonments)
 	}); err != nil {

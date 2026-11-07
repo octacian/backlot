@@ -73,8 +73,33 @@ func TestTaskRecoveryAuthorityAndReleaseFences(t *testing.T) {
 	if err != nil || c.Status != v1.Interrupted || c.Execution.Attempt != i.Execution.Attempt {
 		t.Fatal("task recovery", c, err)
 	}
+	if err := f.s.store.guardDependentTasks(parent); err == nil {
+		t.Fatal("empty legacy journal invented task release")
+	}
+	for _, bucket := range []string{"snapshots", "secrets"} {
+		if len(storedBytes(t, f.s.store, bucket, child)) == 0 {
+			t.Fatal("unproven child launch inputs erased")
+		}
+	}
+	// This fixture owns a known zero-launch task. Exercise the real current-owner
+	// producer separately; recovery cannot infer the same fact from empty bytes.
+	journal, err := f.s.store.runtime(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.store.recordConsumerRelease(context.Background(), child, journal, v1.SettlementExecutionCleanup, true); err != nil {
+		t.Fatal(err)
+	}
+	// Reconcile the earlier recovery failure using the new exact owner fact;
+	// publishing a fact alone must not silently clear an independent cleanup error.
+	if err := f.s.store.recoverExecutionCause(child, v1.SettlementExplicitStop, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.store.retireTaskInputs(child); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.s.store.guardDependentTasks(parent); err != nil {
-		t.Fatal("settled task retained live fence", err)
+		t.Fatal("known zero-launch producer retained live fence", err)
 	}
 	p, err := f.s.store.inspect(parent)
 	if err != nil {
@@ -135,7 +160,7 @@ func TestTaskUncertainCleanupProtectsParentAndRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	journal.Attempt, journal.GatewayOnlyCleanup = p.Execution.Attempt, true
-	journal.Gateway = &gateway.Intent{}
+	journal.Gateway = &gateway.Intent{ID: newID(), Endpoint: "http://127.0.0.1:1", Scope: "fixture", Host: "fixture.localhost", Route: json.RawMessage(`{}`)}
 	if err := f.s.store.saveRuntime(parent, journal); err != nil {
 		t.Fatal(err)
 	}
@@ -167,6 +192,13 @@ func TestTaskUncertainCleanupProtectsParentAndRetention(t *testing.T) {
 	c.Execution.CleanupFailure = ""
 	c.Execution.CollectionFailure = "collection gap"
 	if _, err := f.s.store.execution(child, v1.Failed, c.Execution); err != nil {
+		t.Fatal(err)
+	}
+	childJournal, err := f.s.store.runtime(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.store.recordConsumerRelease(context.Background(), child, childJournal, v1.SettlementExecutionCleanup, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.s.store.guardDependentTasks(parent); err != nil {

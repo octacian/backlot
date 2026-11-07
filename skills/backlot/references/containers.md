@@ -2,7 +2,7 @@
 
 ## State compatibility
 
-The durable state format is version 15; version 9 is the minimum supported baseline. Pre-v9
+The durable state format is version 16; version 9 is the minimum supported baseline. Pre-v9
 formats, including 6 and 8, are rejected unchanged; no migration from those
 preproduction formats is provided. From v9 onward, retain every real Go migration
 so the newest binary can apply the complete path when users skip releases,
@@ -15,7 +15,8 @@ outcomes only; overwritten earlier attempts cannot be reconstructed. The 12-to-1
 step seeds current project and checkout bindings from retained origins, preserving
 ownership, credentials and history for later [explicit reassociation](cli.md#reassociate-retained-project-data).
 The 14-to-15 step fences logical registration and staged marker repair. Legacy
-observations remain unrecorded; migration never publishes markers or infers release.
+observations remain unrecorded; migration never publishes markers or infers release. Version 16 fences current consumer-release and shared-transition semantics;
+old records gain no proof, observation time or transition history during upgrade.
 
 Source validation, transformations, current authority validation and the final
 version fence share one write transaction. Any precommit error, cancellation or
@@ -157,8 +158,12 @@ directory ownership/privacy, replaced/symlinked path and volume/network safeguar
 
 After a daemon crash, verifiably owned surviving containers are stopped, available
 logs are retained, and containers and verified-unused instance networks are removed.
-Data/credentials remain retained;
-instances become interrupted and require an explicit start after diagnosis. Unknown ownership stays
+Container removal requires an independent absence check of the exact Engine ID;
+a successful delete reply alone does not release its obligation. A collection
+failure stays visible even when independently authenticated cleanup succeeds.
+Data/credentials remain retained. Unfinished executions become interrupted;
+completed executions retain their original outcome and completion time while
+cleanup observations change. Another start remains explicit. Unknown ownership stays
 untouched. An unfinished intent with a verifiably owned effect can be recorded on explicit
 start; an authoritatively absent network can be recreated, while missing or
 unverifiable retained storage requires reset/destroy rather than silently creating
@@ -231,7 +236,13 @@ backlot shared destroy --state-dir /absolute/private/daemon --json SERVICE_ID
 
 List/inspect report durable lifecycle state, retained allocation counts and pending
 release counts with bounded control-failure diagnostics; they are not SQL health
-probes. Instance inspect also retains failed explicit cleanup diagnostics. Start also happens for selected scene dependencies.
+probes. Optional `last_transition` reports the latest actual status change with
+`from`, `to`, `cause` and `at`. Causes distinguish consumer start, allocation release,
+explicit shared control, daemon recovery and shutdown. Reads, repeated unchanged
+status and resource-only saves preserve that observation. Older records without it
+have unknown transition history. Successful destroy erases the retained transition;
+its response includes the final destroyed transition. Instance inspect also retains
+failed explicit cleanup diagnostics. Start also happens for selected scene dependencies.
 Stop/restart refuse active/kept dependents. Destroy refuses every retained allocation;
 explicitly destroy those instances first. Scene stop never stops the shared server.
 Server declarations/endpoint must match retained configuration exactly; use distinct

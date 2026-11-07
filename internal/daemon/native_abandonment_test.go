@@ -70,6 +70,9 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	if len(retained.NativeAbandonments) != 1 || !retained.NativeAbandonments[0].Pending || retained.NativeAbandonments[0].Result.CleanupFailure == "" || *retained.NativeAbandonments[0].Result.TerminalExitCode != 17 {
 		t.Fatal("exact private history lost")
 	}
+	if forced.Execution.Settlement == nil || forced.Execution.Settlement.State == v1.ConsumerSettled {
+		t.Fatal("force waiver fabricated verified consumer release")
+	}
 	if len(forced.Execution.NativeCleanup) != 1 || forced.Execution.NativeCleanup[0] != original.NativeCleanup[0] || forced.Execution.NativeCleanup[0].FencesResources(forced.NativeOwnershipWarnings) {
 		t.Fatal("waiver lost historical observation or kept native claim fenced")
 	}

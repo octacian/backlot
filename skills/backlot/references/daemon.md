@@ -56,7 +56,10 @@ replace the parent result or start missing dependencies or allocations.
 Admission atomically reserves declared outputs before activation. A group held by
 the parent or a peer, or overlapping accepted/current canonical paths, rejects
 immediately, including aliases and renamed groups. Disjoint tasks may run together;
-task output locks never queue. Undeclared writes and hostile concurrent filesystem mutation
+task output locks never queue. Terminal consumers with unknown current release still
+reserve overlapping outputs; independently verified current release frees those
+reservations while retaining historical cleanup observations. The final directory
+clearing check uses the same current proof. Undeclared writes and hostile concurrent filesystem mutation
 retain the existing cooperative limits.
 
 Parent stop/restart/reset/destroy, attached cancellation, failure teardown and daemon

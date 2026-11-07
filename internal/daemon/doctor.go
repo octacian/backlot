@@ -192,6 +192,13 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 		s.doctorGateway(ctx, &r, snap, instance)
 	}
 	if instance.Execution != nil {
+		if settlement := instance.Execution.Settlement; settlement != nil {
+			status := v1.DoctorFailed
+			if settlement.State == v1.ConsumerSettled {
+				status = v1.DoctorOK
+			}
+			diagnosticAdd(&r, "consumer_settlement", "attempt", status, "Current consumer release: "+string(settlement.State)+" ("+string(settlement.Cause)+"); historical outcomes and collection gaps remain independent")
+		}
 		for _, cleanup := range instance.Execution.NativeCleanup {
 			status := v1.DoctorOK
 			if cleanup.Confidence != v1.ObservedEmpty {

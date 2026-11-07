@@ -1,5 +1,7 @@
 package v1
 
+import "time"
+
 // SharedService declares a retained project-owned SQL server independently
 // of scene allocations. Bundled managers support explicitly owned volume storage and
 // generated private administration; it never adopts an external server.
@@ -22,14 +24,16 @@ type SharedRequest struct {
 // SharedStatus is a safe view of durable server intent and allocation counts.
 // Private engine capabilities, administrative and application secrets are absent.
 type SharedStatus struct {
-	ID              string `json:"id"`
-	ProjectID       string `json:"project_id"`
-	Name            string `json:"name"`
-	Configuration   string `json:"configuration"`
-	Status          string `json:"status"`
-	Allocations     int    `json:"allocations"`
-	PendingReleases int    `json:"pending_releases"`
-	Failure         string `json:"failure,omitempty"`
+	// LastTransition is the latest actual status change; absent legacy history stays unknown.
+	LastTransition  *SharedTransition `json:"last_transition,omitempty"`
+	ID              string            `json:"id"`
+	ProjectID       string            `json:"project_id"`
+	Name            string            `json:"name"`
+	Configuration   string            `json:"configuration"`
+	Status          string            `json:"status"`
+	Allocations     int               `json:"allocations"`
+	PendingReleases int               `json:"pending_releases"`
+	Failure         string            `json:"failure,omitempty"`
 }
 
 // SharedResponse returns project-scoped retained services without private authority.
@@ -44,4 +48,42 @@ type SharedDestroyRequest struct {
 	APIVersion string `json:"api_version"`
 	ServiceID  string `json:"service_id"`
 	Force      bool   `json:"force,omitempty"`
+}
+
+// SharedTransition records one actual shared-service status change without private authority.
+type SharedTransition struct {
+	// From is the prior status, empty only for the first intent.
+	From string `json:"from"`
+	// To is the resulting status.
+	To string `json:"to"`
+	// Cause identifies the operation responsible for the change.
+	Cause string `json:"cause"`
+	// At is the actual UTC observation time.
+	At string `json:"at"`
+}
+
+// Validate rejects unknown statuses, causes, timestamps and no-op transitions.
+func (t SharedTransition) Validate() error {
+	validStatus := func(status string) bool {
+		switch status {
+		case "intent", "running", "stopped", "uncertain", "destroying", "destroyed":
+			return true
+		}
+		return false
+	}
+	bad := func() error {
+		return &PlanError{Code: "invalid_response", Message: "invalid shared-service transition"}
+	}
+	if !validStatus(t.To) || t.From == t.To || t.From == "" && t.To != "intent" || t.From != "" && !validStatus(t.From) {
+		return bad()
+	}
+	switch t.Cause {
+	case "consumer_start", "allocation_release", "explicit_shared_start", "explicit_shared_restart", "explicit_shared_stop", "explicit_shared_destroy", "daemon_recovery", "daemon_shutdown":
+	default:
+		return bad()
+	}
+	if _, err := time.Parse(time.RFC3339Nano, t.At); err != nil {
+		return bad()
+	}
+	return nil
 }

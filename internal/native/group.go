@@ -292,7 +292,7 @@ func (g *Group) Stop(grace time.Duration) (err error) {
 	return nil
 }
 
-// CleanupResult returns the last session cleanup result; strict helpers return nil.
+// CleanupResult returns the retained worst session observation; strict helpers return nil.
 func (g *Group) CleanupResult() *v1.NativeCleanupResult {
 	g.mu.Lock()
 	defer g.mu.Unlock()

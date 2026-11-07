@@ -1215,8 +1215,20 @@ func TestNativeRuntime(t *testing.T) {
 			t.Fatal("replacement lost warning or inherited old gap", replacement.Instance.Execution)
 		}
 
-		if _, err := h.cli.StopExecution(context.Background(), r.Instance.ID); err != nil {
-			t.Fatal(err)
+		currentAuthorities := h.guardianCapabilities(r.Instance.ID)
+		h.expectShutdownFailureAfterFixtureExit("cleanup_failed", pgid, identity, currentAuthorities...)
+		// Restart does not prove the abandoned same-boot launch absent. Joining
+		// the replacement must retain that separate data/repair fence.
+		_, err = h.cli.StopExecution(context.Background(), r.Instance.ID)
+		code(t, err, "cleanup_failed")
+		stopped, err := h.cli.Inspect(context.Background(), r.Instance.ID)
+		if err != nil || stopped.Instance.Execution.Settlement.State == v1.ConsumerSettled || len(stopped.Instance.NativeOwnershipWarnings) != 1 {
+			t.Fatal("replacement stop waived historical native authority", err)
+		}
+		for _, authority := range currentAuthorities {
+			if _, err := native.StopResult(authority, 0); err != nil {
+				t.Fatal("replacement exact launch cleanup", err)
+			}
 		}
 	})
 
@@ -1587,6 +1599,7 @@ func TestNativeRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		original := append([]native.Identity(nil), journal.Groups...)
+		h.expectShutdownFailureAfterCleanup("cleanup_failed", original)
 		// This synthetic journal loss checks recovery diagnostics and no signaling
 		// without authority. Retained fixture authorities independently stop the
 		// originals below; daemon shutdown need not repeat the recovered error.

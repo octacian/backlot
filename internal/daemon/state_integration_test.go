@@ -321,7 +321,7 @@ func TestStateUncertainEffectRemainsDiagnosable(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := svc.store.inspect(instance.ID)
-	if err != nil || got.Execution.CleanupFailure == "" || got.Execution.CollectionFailure == "" || len(got.Execution.NativeCleanup) != 0 {
+	if err != nil || got.Status != instance.Status || got.Execution.Outcome != result.Outcome || got.Execution.CompletedAt != result.CompletedAt || got.Execution.CleanupFailure == "" || got.Execution.CollectionFailure != result.CollectionFailure || len(got.Execution.NativeCleanup) != 0 || got.Execution.Settlement == nil || got.Execution.Settlement.State == v1.ConsumerSettled {
 		t.Fatal("missing recorded authority fabricated release/collection/session observation", err)
 	}
 }

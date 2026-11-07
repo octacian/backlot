@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 	bolt "go.etcd.io/bbolt"
 )
@@ -117,6 +118,7 @@ func (s *service) resolveScene(target v1.SceneTarget, persistentOnly bool) (v1.S
 	if boundaryErr != nil && !os.IsNotExist(boundaryErr) {
 		return response, problem("checkout_identity", "cannot inspect Git checkout boundary")
 	}
+	boot, _ := native.CurrentBoot()
 	err = s.store.db.View(func(tx *bolt.Tx) error {
 		// Collect recorded locations before filtering by scene/status. This also makes
 		// destroyed history available for nearest-project discovery and non-Git roots.
@@ -170,8 +172,12 @@ func (s *service) resolveScene(target v1.SceneTarget, persistentOnly bool) (v1.S
 			if err != nil {
 				return err
 			}
+			instance, err := inspectRecord(tx, r, boot)
+			if err != nil {
+				return err
+			}
 			response.Outcome = v1.SceneFound
-			response.Result = &v1.InstanceResponse{APIVersion: v1.Version, Instance: r.Instance}
+			response.Result = &v1.InstanceResponse{APIVersion: v1.Version, Instance: instance}
 		}
 		return nil
 	})

@@ -228,7 +228,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 				return empty, err
 			}
 		}
-		if err := s.store.recoverExecution(id); err != nil {
+		if err := s.store.recoverExecutionCause(id, v1.SettlementExplicitStop, false); err != nil {
 			return empty, err
 		}
 		acceptanceSnapshot = &snapshot
@@ -392,10 +392,20 @@ func (s *service) stopExecution(id string) (v1.Instance, error) {
 	s.mu.Unlock()
 	instance, err := s.joinExecution(id)
 	var typed *v1.PlanError
-	if errors.As(err, &typed) && typed.Code == "cleanup_failed" {
-		s.mu.Lock()
-		entry := s.executions[id]
-		s.mu.Unlock()
+	s.mu.Lock()
+	entry := s.executions[id]
+	s.mu.Unlock()
+	if entry != nil && instance.Execution != nil && entry.attempt == instance.Execution.Attempt && instance.Execution.Kept {
+		entry.mu.Lock()
+		kept := entry.kept
+		entry.mu.Unlock()
+		// A cancellation can enter investigation retention while the owner joins.
+		// A later stop uses stopKept; this live owner is not interrupted recovery.
+		if kept {
+			return instance, err
+		}
+	}
+	if err == nil && instance.Execution != nil && (instance.Execution.Settlement == nil || instance.Execution.Settlement.State != v1.ConsumerSettled) || errors.As(err, &typed) && typed.Code == "cleanup_failed" {
 		if entry != nil {
 			select {
 			case <-entry.done:
@@ -404,7 +414,21 @@ func (s *service) stopExecution(id string) (v1.Instance, error) {
 			}
 		}
 
-		if recoveryErr := s.store.recoverExecution(id); recoveryErr != nil {
+		if err != nil {
+			// A completed owner can retain its teardown error after its child settles.
+			// Reload under the caller's mutation ownership; never retry another attempt.
+			current, readErr := s.store.inspect(id)
+			if readErr != nil {
+				return instance, err
+			}
+			instance = current
+			if instance.Execution == nil || entry != nil && entry.attempt != instance.Execution.Attempt {
+				return instance, err
+			}
+		}
+
+		emptyVerified := entry != nil && entry.attempt == instance.Execution.Attempt && len(entry.groups) == 0 && len(entry.containers) == 0
+		if recoveryErr := s.store.recoverExecutionCause(id, v1.SettlementExplicitStop, emptyVerified); recoveryErr != nil {
 			return instance, recoveryErr
 		}
 		instance, err = s.store.inspect(id)
@@ -417,6 +441,24 @@ func (s *service) stopExecution(id string) (v1.Instance, error) {
 	}
 	if err == nil && !active(instance.Status) && (instance.Execution == nil || !instance.Execution.Kept) {
 		err = s.stopInstanceNetworks(&instance)
+	}
+	if err == nil && instance.Execution != nil && (instance.Execution.Settlement == nil || instance.Execution.Settlement.State != v1.ConsumerSettled) {
+		// A repeated acknowledged force-stop is idempotent, but its unknown native
+		// survivors remain a data/repair fence. It cannot waive another effect.
+		waived := false
+		for _, warning := range instance.NativeOwnershipWarnings {
+			waived = waived || warning.Attempt == instance.Execution.Attempt && warning.RecordedAt != ""
+		}
+		if settlement := instance.Execution.Settlement; settlement != nil {
+			for _, blocker := range settlement.Blockers {
+				waived = waived && (blocker.Code == "native_abandoned" || blocker.Code == "no_release_evidence")
+			}
+		} else {
+			waived = false
+		}
+		if !waived {
+			err = problem("cleanup_failed", "consumer release remains unverified; inspect current settlement and restore recorded ownership before retrying stop")
+		}
 	}
 	return instance, err
 }
@@ -697,9 +739,6 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 
 		joined.Wait()
 		omitActiveNativeSuccess(result, entry)
-		if cleanup == nil && result.CleanupFailure != "" {
-			cleanup = errors.New(result.CleanupFailure)
-		}
 
 		if entry.resources != nil && !entry.borrowed && cleanup == nil && !keep {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -753,6 +792,16 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			result.CleanupDetails = cleanupDetails(cleanup)
 			status = v1.Failed
 		}
+		if cleanup == nil && !keep {
+			proofCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			cleanup = s.store.recordConsumerRelease(proofCtx, id, journal, v1.SettlementExecutionCleanup, true)
+			cancel()
+			if cleanup != nil {
+				result.CleanupFailure, result.CleanupDetails, status = cleanup.Error(), cleanupDetails(cleanup), v1.Failed
+			} else {
+				result.CleanupFailure, result.CleanupDetails = "", nil
+			}
+		}
 		result.CompletedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		sanitizeResult(result, snapshot, entry)
 		if err := save(status); err != nil {
@@ -786,11 +835,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			return
 		}
 	}
-	taskID := ""
-	if entry.borrowed {
-		taskID = id
-	}
-	if failure = s.prepareOutputDirectories(startup, snapshot, identity, taskID); failure != nil {
+	if failure = s.prepareOutputDirectories(startup, snapshot, identity, id); failure != nil {
 		return
 	}
 	if !entry.borrowed {

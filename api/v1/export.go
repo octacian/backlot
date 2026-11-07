@@ -27,6 +27,8 @@ type ExportResponse struct {
 
 // ExportResult preserves original runtime outcomes without private runtime records.
 type ExportResult struct {
+	// Settlement preserves the selected attempt release observation without cleanup authority.
+	Settlement              *ConsumerSettlement      `json:"settlement,omitempty"`
 	BuildImages             []BuildImageResult       `json:"build_images,omitempty"`
 	ImageChangeWarnings     []ImageChangeWarning     `json:"image_change_warnings,omitempty"`
 	NativeOwnershipWarnings []NativeOwnershipWarning `json:"native_ownership_warnings,omitempty"`

@@ -65,6 +65,11 @@ func output(c *urfave.Command, value any, err error) error {
 			if _, err = fmt.Fprintf(c.Writer, "Shared %s (%s/%s): %s\nAllocations: %d; pending releases: %d\n", service.ID, service.ProjectID, service.Name, service.Status, service.Allocations, service.PendingReleases); err != nil {
 				return err
 			}
+			if transition := service.LastTransition; transition != nil {
+				if _, err = fmt.Fprintf(c.Writer, "Transition: %s -> %s (%s at %s)\n", transition.From, transition.To, transition.Cause, transition.At); err != nil {
+					return err
+				}
+			}
 			if service.Failure != "" {
 				if _, err = fmt.Fprintln(c.Writer, "Failure:", service.Failure); err != nil {
 					return err
@@ -119,6 +124,26 @@ func output(c *urfave.Command, value any, err error) error {
 			}
 			if _, err = fmt.Fprintf(c.Writer, "Attempt: %s\nOutcome: %s; cancelled: %t; kept resources: %t; evidence expired: %t\n", execution.Attempt, outcome, execution.Cancelled, execution.Kept, execution.EvidenceExpired); err != nil {
 				return err
+			}
+			if settlement := execution.Settlement; settlement != nil {
+				if _, err = fmt.Fprintf(c.Writer, "Consumers: %s (%s)\n", settlement.State, settlement.Cause); err != nil {
+					return err
+				}
+				if settlement.ObservedAt != "" {
+					if _, err = fmt.Fprintln(c.Writer, "Release observed:", settlement.ObservedAt); err != nil {
+						return err
+					}
+				}
+				for _, blocker := range settlement.Blockers {
+					if _, err = fmt.Fprintf(c.Writer, "Consumer fence [%s]: %s %s\n", blocker.Code, blocker.InstanceID, blocker.Component); err != nil {
+						return err
+					}
+				}
+				if settlement.OmittedBlockers > 0 {
+					if _, err = fmt.Fprintln(c.Writer, "Further consumer fences:", settlement.OmittedBlockers); err != nil {
+						return err
+					}
+				}
 			}
 			if len(execution.NativeCleanup) > 0 {
 				if _, err = fmt.Fprintln(c.Writer, "Native cleanup is bounded observation, not universal descendant absence."); err != nil {

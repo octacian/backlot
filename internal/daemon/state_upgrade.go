@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
+	v1 "github.com/octacian/backlot/api/v1"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -14,7 +15,30 @@ type stateMigration struct {
 
 // Retain each real step from v9 onward. Source checks belong to the step,
 // before conversion; current layout/authority checks run only after the chain.
-var stateMigrations = []stateMigration{{9, 10, migrateStateNine}, {10, 11, migrateStateTen}, {11, 12, migrateStateEleven}, {12, 13, migrateStateTwelve}, {13, 14, migrateStateThirteen}}
+var stateMigrations = []stateMigration{{9, 10, migrateStateNine}, {10, 11, migrateStateTen}, {11, 12, migrateStateEleven}, {12, 13, migrateStateTwelve}, {13, 14, migrateStateThirteen}, {14, 15, migrateStateFourteen}}
+
+func migrateStateFourteen(tx *bolt.Tx) error {
+	if err := validateStateAuthority(tx); err != nil {
+		return err
+	}
+	// Legacy evidence remains unrecorded; enrollment is a separate source-validated mutation.
+	for _, name := range bindingBuckets {
+		if err := tx.Bucket([]byte(name)).ForEach(func(_, raw []byte) error {
+			var b struct {
+				Current struct {
+					Registration *v1.RegistrationIdentity `json:"registration"`
+				} `json:"current"`
+			}
+			if json.Unmarshal(raw, &b) != nil || b.Current.Registration != nil {
+				return problem("state_corrupt", "predecessor cannot contain logical registration mappings")
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return validateBindings(tx)
+}
 
 func migrateStateNine(tx *bolt.Tx) error {
 	for _, name := range stateNineBuckets {

@@ -14,7 +14,7 @@ import (
 )
 
 func TestPrepareOutputDirectories(t *testing.T) {
-	for _, mode := range []string{"empty", "absent", "opt-out", "cancelled", "symlink", "internal-symlink", "file", "private-state", "git-marker", "git-directory", "git-common", "invalid-common", "changed-project", "unsafe-relative", "root", "all-targets-preflight"} {
+	for _, mode := range []string{"empty", "absent", "opt-out", "cancelled", "symlink", "internal-symlink", "file", "private-state", "git-marker", "local-registration", "git-directory", "git-common", "invalid-common", "changed-project", "unsafe-relative", "root", "all-targets-preflight"} {
 		t.Run(mode, func(t *testing.T) {
 			project := shortTemp(t)
 			writeFixture(t, project)
@@ -31,6 +31,9 @@ func TestPrepareOutputDirectories(t *testing.T) {
 			scratch := "reports"
 			private := shortTemp(t)
 			switch mode {
+			case "local-registration":
+				put(filepath.Join(project, ".backlot-local", "stale"), "keep")
+				scratch = ".backlot-local"
 			case "git-marker":
 				put(filepath.Join(project, ".git", "HEAD"), "ref: refs/heads/main\n")
 				scratch = ".git"
@@ -77,6 +80,12 @@ func TestPrepareOutputDirectories(t *testing.T) {
 				t.Fatal(err)
 			}
 			identity, err := captureSource(source)
+			if mode == "invalid-common" {
+				if err == nil {
+					t.Fatal("invalid common metadata captured")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -2,7 +2,7 @@
 title: "Recognize local projects through durable registration markers"
 date: 2026-11-06
 status: accepted
-implementation: not-started
+implementation: in-progress
 summary: "Separate logical checkout and common-anchor registration from physical source checks, preserving immutable owners and explicit repair."
 tags: [identity, recovery, ownership, state, configuration]
 supersedes: [/docs/adr/20261103T174043965Z-reassociate-retained-projects-through-explicit-current-bindings.md]

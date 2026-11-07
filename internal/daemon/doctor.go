@@ -118,15 +118,24 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 		if raw, e := projectconfig.Read(source.ManifestPath); e == nil && manifest.Decode(raw, filepath.Ext(source.ManifestPath), &document) == nil {
 			identity, e := identifyShared(source, document.Project)
 			if e == nil {
+				state := "legacy"
+				if identity.Registration.CommonID != "" {
+					state = "enrolled"
+				}
+				r.Registration = &v1.RegistrationResult{State: state, Identity: identity.Registration, Conflicts: []v1.RegistrationConflict{}}
 				e = s.store.db.View(func(tx *bolt.Tx) error {
-					owner, err := boundShared(tx, identity)
-					if err != nil || tx.Bucket([]byte("shared_projects")).Get([]byte(owner.ID)) == nil {
-						return err
-					}
 					checkout, err := identify(source.CheckoutPath)
 					if err != nil {
 						return err
 					}
+					if _, err := locateCheckout(tx, checkout); err != nil {
+						return err
+					}
+					owner, err := boundShared(tx, identity)
+					if err != nil || tx.Bucket([]byte("shared_projects")).Get([]byte(owner.ID)) == nil {
+						return err
+					}
+
 					parent, err := locateCheckout(tx, checkout)
 					if err != nil || tx.Bucket([]byte("checkout_bindings")).Get([]byte(parent)) == nil {
 						return err
@@ -137,6 +146,9 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 			}
 			failure := "shared registration conflicts; use project diagnose and explicit reassociation; records preserved"
 			var detail *v1.PlanError
+			if errors.As(e, &detail) && detail.Registration != nil {
+				r.Registration = detail.Registration
+			}
 			if errors.As(e, &detail) && detail.Code == "project_unverified" {
 				failure = "project_unverified: checkout has not verified the current shared binding; use project diagnose and explicit reassociation; records preserved"
 			}
@@ -528,6 +540,9 @@ func checkCurrentComposition(r *v1.DoctorResponse, launch plan.Snapshot) {
 	addPrivatePath(r, "current_private_config", current)
 	if current.PrivateSourceState != "" {
 		r.Paths[len(r.Paths)-1].State = current.PrivateSourceState
+		if current.PrivateSourceState == "conflict" {
+			r.Paths[len(r.Paths)-1].State = "rebound"
+		}
 	}
 
 	if err != nil {

@@ -23,7 +23,7 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `config show [--project PATH] [--config PATH] [--state-dir PATH]` | Validated safe caller layers/candidates and prospective defaults; no executable/provider probes |
 | `project setup [--project PATH] [--config PATH]` | First terminal setup enrolls private inputs/tools; existing setup inspects. See edit options below |
 | `project diagnose [--project PATH] [--config PATH]` | Read-only recorded/current identity, retained owners and blockers |
-| `project reassociate --project PATH --project-id PROJECT_ID --checkout-id CHECKOUT_ID [--config PATH]` | Read-only exact-owner repair preview; explicit `--apply --preview DIGEST` commits daemon associations |
+| `project reassociate --project PATH --checkout-id CHECKOUT_ID [--project-id PROJECT_ID] [--config PATH]` | Read-only exact-owner repair preview; explicit `--apply --preview DIGEST` commits daemon associations |
 | `plan SCENE [--project PATH] [--config PATH] [-- ARGS...]` | Offline selected input/seed/tool resolution; no daemon/provider effects |
 | `prepare SCENE [--project PATH] [--config PATH]` | Daemon records metadata only; returns disposable lease when applicable |
 | `run SCENE [--project PATH] [--config PATH] [-- ARGS...]` | Execute; persistent returns at readiness, disposable after collection/cleanup |
@@ -90,12 +90,40 @@ server may stay live. Apply preserves IDs, data, credentials, allocations and cl
 authority; it never automatically adopts, merges, renames or cleans up projects.
 Relative project location and manifest filename must remain unchanged.
 
-The requesting checkout, per-worktree Git directory and resolved common-directory
-sharing anchor are distinct; paths do not prove permanence, and device/inode drift
-indicates identity change, not replacement. Repair missing/self-pointing `commondir`
-explicitly before retrying; per-worktree admin metadata cannot be a sharing anchor.
+Ordinary enrolled recognition uses the same local marker at the same canonical path;
+it needs no stop or repair after a device-number change. Physical source checks still
+protect each preparation/launch/task operation. Repair missing/self-pointing Git
+`commondir` metadata explicitly. `project diagnose` and typed registration errors
+report roles, paths, retained owners, staged publication and the next action.
 
-For stale private setup, run `project setup --reassociate --from FILE` with explicit
+For a different-path copied marker, choose which exact checkout receives fresh IDs:
+
+```sh
+backlot project reassociate --project /copy --fresh-identity-at /copy --json
+backlot project reassociate --project /copy --fresh-identity-at /copy --apply --preview DIGEST --json
+backlot project reassociate --project /copy --fresh-identity-at /original --checkout-id ORIGINAL_ID --json
+```
+
+Without `--json`, an interactive conflict offers the two paths and returns a preview.
+Apply still requires its exact digest and `--apply`. Choosing the copy leaves the
+original's consumers and private inputs alone. Choosing the original requires its
+exact retained checkout ID and stopped/joined affected consumers satisfying the
+established cleanup checks; retained owners,
+data and credentials stay at the original path. A genuine linked common directory
+stays shared; copied common metadata gets a fresh common role. Other projects at a
+changed common anchor are included in the affected claims, without recomposing their
+scenes. The copy needs explicit new private setup and receives fresh daemon owners.
+
+Marker publication and the selected store are separate stages. A failed/interrupted
+stage remains fenced with its exact owner and path; inspect a fresh preview and
+explicitly apply, never blindly retry. Private setup is independently staged. After
+rotating the original, `project setup --reassociate --project /original` reconciles
+its private marker mapping while retaining the same immutable generation. Restore
+missing originals or resolve their exact ownership explicitly; no stale claim expires.
+Checkout-only projects omit `--project-id`; real retained shared obligations still
+require their exact shared owner. No shared owner is fabricated for native/no-SQL work.
+
+For mismatched legacy private setup, run `project setup --reassociate --from FILE` with explicit
 values, then repreview; credentials are never imported implicitly. The selected
 registry (`BACKLOT_PROJECT_CONFIG_DIR` or user default) must agree with the daemon's.
 Align it and restart the daemon if needed; no operation-specific override persists.

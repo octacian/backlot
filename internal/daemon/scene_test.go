@@ -148,13 +148,13 @@ func TestRecordedSceneIdentityAndExplicitEscape(t *testing.T) {
 		}
 	})
 	_, err := s.scene(v1.SceneTarget{CWD: moved, Scene: "dev"}, false)
-	code(t, err, "checkout_moved")
+	code(t, err, "project_registration")
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
 	}
 	git(t, root, "init", "-q")
 	_, err = s.scene(v1.SceneTarget{CWD: root, Scene: "dev"}, true)
-	code(t, err, "checkout_replaced")
+	code(t, err, "project_registration")
 	r, err := s.scene(v1.SceneTarget{InstanceID: prepared.Instance.ID}, true)
 	if err != nil || r.Outcome != v1.SceneAlreadyStopped || r.Result.Instance.Status != v1.Prepared {
 		t.Fatal(r, err)

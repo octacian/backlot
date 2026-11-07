@@ -18,6 +18,8 @@ type ProjectAssociation struct {
 
 // ProjectIdentity describes an observed shared anchor, never provider authority.
 type ProjectIdentity struct {
+	// Registration identifies the local anchor without rekeying its retained owner.
+	Registration RegistrationIdentity `json:"registration,omitzero"`
 	// ID hashes the filesystem identity, relative location and declared project.
 	ID string `json:"id"`
 	// Anchor is the resolved Git common directory or non-Git project directory.
@@ -32,6 +34,8 @@ type ProjectIdentity struct {
 
 // ReassociationRequest selects exact retained owners and acknowledges a preview on apply.
 type ReassociationRequest struct {
+	// FreshIdentityAt explicitly selects the canonical checkout whose markers rotate.
+	FreshIdentityAt string `json:"fresh_identity_at,omitempty"`
 	// APIVersion selects the typed local API contract.
 	APIVersion string `json:"api_version"`
 	// ProjectPath selects the absolute destination project or manifest.
@@ -52,7 +56,7 @@ type ReassociationRequest struct {
 
 // Validate rejects invalid selectors before filesystem reads or effects.
 func (r ReassociationRequest) Validate() error {
-	if r.APIVersion != Version || !scenePath(r.ProjectPath) || !scenePath(r.RegistryRoot) || r.ConfigPath != "" && !scenePath(r.ConfigPath) || r.Apply && (r.ProjectID == "" || r.CheckoutID == "" || r.Preview == "") || !r.Apply && r.Preview != "" {
+	if r.APIVersion != Version || !scenePath(r.ProjectPath) || !scenePath(r.RegistryRoot) || r.ConfigPath != "" && !scenePath(r.ConfigPath) || r.FreshIdentityAt != "" && !scenePath(r.FreshIdentityAt) || r.Apply && (r.FreshIdentityAt == "" && r.CheckoutID == "" || r.Preview == "") || !r.Apply && r.Preview != "" {
 		return &PlanError{Code: "invalid_request", Message: "reassociation requires absolute project/registry/config paths; apply requires exact project and checkout IDs plus preview acknowledgement"}
 	}
 	for _, id := range []string{r.ProjectID, r.CheckoutID, r.Preview} {
@@ -139,6 +143,8 @@ type FilesystemObservation struct {
 
 // ReassociationResponse is the canonical safe actionable preview and applied result.
 type ReassociationResponse struct {
+	// Registration exposes local marker observations and selected-store conflicts.
+	Registration *RegistrationResult `json:"registration,omitempty"`
 	// StateRevision is opaque freshness for retained registrations and consumers.
 	StateRevision string `json:"state_revision"`
 	// APIVersion identifies the typed local API contract.
@@ -177,6 +183,11 @@ type ReassociationResponse struct {
 
 // Validate checks the coherent preview envelope returned by a daemon.
 func (r ReassociationResponse) Validate() error {
+	if r.Registration != nil {
+		if err := r.Registration.Validate(); err != nil {
+			return err
+		}
+	}
 	if r.APIVersion != Version || !buildImageHex(r.DaemonGeneration) || !buildImageHex(r.Preview) || !buildImageHex(r.Current.ID) || !buildImageHex(r.Checkout.ID) || r.Projects == nil || r.Instances == nil || r.Services == nil || r.Allocations == nil || r.Blockers == nil {
 		return &PlanError{Code: "invalid_response", Message: "invalid project reassociation result"}
 	}

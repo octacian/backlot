@@ -154,7 +154,7 @@ func (s *service) resolveScene(target v1.SceneTarget, persistentOnly bool) (v1.S
 			if project != nearest {
 				continue
 			}
-			if instance.Checkout.Path != checkout.Path || instance.Checkout.ID != checkout.ID || instance.Checkout.GitDirectory != checkout.GitDirectory {
+			if !sameCheckoutValue(instance.Checkout, checkout) {
 				return problem("checkout_changed", "recorded project checkout identity changed; use explicit recorded ID")
 			}
 			if instance.lifetime != v1.Persistent || instance.status == v1.Destroyed || instance.scene != target.Scene {
@@ -179,7 +179,14 @@ func (s *service) resolveScene(target v1.SceneTarget, persistentOnly bool) (v1.S
 }
 
 func sameCheckout(a, b *v1.CheckoutIdentity) bool {
-	return a != nil && b != nil && a.ID == b.ID && a.Path == b.Path && a.GitDirectory == b.GitDirectory
+	if a != nil && b != nil && a.Registration.CheckoutID != "" && b.Registration.CheckoutID != "" {
+		return a.Path == b.Path && a.GitDirectory == b.GitDirectory && a.Registration == b.Registration
+	}
+	return a != nil && b != nil && sameCheckoutPhysical(*a, *b)
+}
+
+func sameCheckoutPhysical(a, b v1.CheckoutIdentity) bool {
+	return a.ID == b.ID && a.Path == b.Path && a.GitDirectory == b.GitDirectory
 }
 
 func (s *service) scene(target v1.SceneTarget, stop bool) (v1.SceneResponse, error) {

@@ -12,7 +12,7 @@ for Docker execution and retained resource lifecycle; Publication and retained e
 | Term | Meaning |
 | --- | --- |
 | Project | Stable manifest `project` identifier and project-directory location; a label alone is not ownership |
-| Checkout | Canonical filesystem/Git-directory identity; linked worktrees are distinct runtime scopes; branch/HEAD are provenance |
+| Checkout | Local registration marker plus canonical location; linked worktrees have distinct checkout roles and share a common role; physical observations and branch/HEAD are provenance |
 | Scene | Named manifest selection of components/resources with explicit persistent or disposable lifetime |
 | Instance | Recorded runtime/metadata identity; persistent project + checkout + scene converges on one instance, disposable invocations get new IDs |
 | Attempt | One accepted execution within an instance; separates logs, results, attachment and build-image provenance across starts |
@@ -112,15 +112,18 @@ that environment, stop and explicitly start the daemon from the intended context
 
 Persistent duplicates converge on project + checkout + scene, including concurrent
 requests and symlink aliases. Every disposable preparation gets a new instance and
-operation ID. Canonical checkout identity combines filesystem identity for the
-checkout and its Git directory (when present); two real Git worktrees differ.
-Snapshot reads bind to canonical project/checkout identities captured before reading
-manifest, configuration or seed inputs. Acceptance rechecks both identities and
-paths; an in-flight replacement is rejected before any durable intent is recorded.
-Branch/HEAD text is provenance, never ownership. A moved checkout or changed checkout path refuses automatic adoption, preserving
-old records. Use [explicit retained-project reassociation](cli.md#reassociate-retained-project-data)
-to review and apply supported association changes. Non-Git projects use
-the project directory's filesystem identity.
+operation ID. Local checkout/common markers and registered canonical locations select
+immutable retained owners across device-number changes. Recognition does not rewrite
+launch history, rekey allocations, change binding revisions or stop/recompose peers.
+An unavailable sibling checkout does not prevent recognition. Non-Git and projects
+without shared SQL use the same registration boundary.
+
+Snapshot reads still capture physical project, checkout/admin and common-directory
+identity before reading inputs. Acceptance and launch recheck those objects, Git
+links and markers; in-flight replacement refuses the snapshot. Branch/HEAD text is
+provenance, never ownership. Missing or conflicting marker claims preserve records
+and direct you to [explicit repair](cli.md#reassociate-retained-project-data).
+Exact-ID cleanup continues to use recorded capabilities independently of current sources.
 
 Repeated persistent preparation reports manifest/config drift, including effective
 working-directory target changes, and returns
@@ -208,7 +211,7 @@ Malformed recorded selectors or disagreement with existing persistent slots prod
 ID inspection/cleanup remains independent of named selection.
 
 Before explicit reassociation, moved/identity-changed checkouts or unavailable
-project/Git identity fail selection; use
+project/Git registration fail selection; use
 recorded IDs. No force or path-only adoption exists. Project subdirectories within
 an unchanged Git checkout have no separately persisted inode identity; selection
 uses their recorded canonical location. Non-Git projects use the recorded project
@@ -703,7 +706,7 @@ private/effective provenance stays unrecorded. Eligible persistent starts captur
 current project-only values with existing retained-resource/sensitive-drift fences
 and adopt them with execution acceptance; rejected starts preserve old provenance.
 Starting/ready joins retain their recorded configuration. The independent project
-registry remains format 1.
+registry reads legacy format 1 and writes format 2.
 See [state upgrade and operation](containers.md#state-compatibility) and
 [private setup, provenance and retention](manifest.md#registered-private-project-configuration).
 

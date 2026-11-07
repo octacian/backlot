@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/registration"
 )
 
 const setupManifest = `version: backlot/v1
@@ -348,6 +349,91 @@ func TestDeclarationRemediationIdentifiesLayer(t *testing.T) {
 			// Restore the deliberately edited immutable fixture for consistent teardown.
 			if err := os.WriteFile(saved.PrivatePath, privateBefore, 0600); err != nil {
 				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestMetadataEnrollmentResultMatchesInspection(t *testing.T) {
+	for _, mode := range []string{"legacy", "same-path-marker-repair"} {
+		t.Run(mode, func(t *testing.T) {
+			project, machine := setupFixture(t)
+			registryRoot := t.TempDir()
+			if err := os.Chmod(registryRoot, 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", registryRoot)
+			setup := openSetup(t, v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine, Edit: true})
+			first := saveSetup(t, setup, map[string]string{"token": "owned-enrollment-value", "unused": "kept"}, nil)
+			before, err := os.ReadFile(first.PrivatePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "legacy" {
+				path := filepath.Join(registryRoot, "projects.json")
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var legacy struct {
+					Version  int                                   `json:"version"`
+					Revision string                                `json:"revision"`
+					Projects map[string]map[string]json.RawMessage `json:"projects"`
+				}
+				if err := json.Unmarshal(raw, &legacy); err != nil {
+					t.Fatal(err)
+				}
+				legacy.Version = 1
+				for _, entry := range legacy.Projects {
+					delete(entry, "common_id")
+					delete(entry, "checkout_path")
+					delete(entry, "admin_path")
+				}
+				raw, err = json.Marshal(legacy)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.RemoveAll(filepath.Join(project, ".backlot-local")); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				location, err := registration.Locate(project, project)
+				if err != nil {
+					t.Fatal(err)
+				}
+				unlock, err := registration.Lock(context.Background(), location)
+				if err != nil {
+					t.Fatal(err)
+				}
+				func() {
+					defer unlock()
+					identity, err := registration.Read(location)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := registration.Rotate(location, "common", identity.CommonID); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Remove(filepath.Join(location.Admin, "backlot-checkout.json")); err != nil {
+						t.Fatal(err)
+					}
+				}()
+			}
+			setup = openSetup(t, v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine, Reassociate: true})
+			result, err := setup.Enroll(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			fresh := openSetup(t, v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine}).Inspect()
+			if !result.Changed || !result.Registered || result.Registration == nil || result.Registration.State != "enrolled" || result.Registration.Validate() != nil || result.Registration.State != fresh.Registration.State || result.Registration.Identity != fresh.Registration.Identity {
+				t.Fatal("enrollment response disagreed with inspection")
+			}
+			after, err := os.ReadFile(first.PrivatePath)
+			if err != nil || result.Association != first.Association || result.PrivatePath != first.PrivatePath || string(before) != string(after) {
+				t.Fatal("metadata enrollment changed private generation/values", err)
 			}
 		})
 	}

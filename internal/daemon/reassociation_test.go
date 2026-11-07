@@ -174,7 +174,7 @@ func TestReassociationReadOnlyAndAtomic(t *testing.T) {
 	code(t, f.apply(t, preview), "stale_preview")
 	f.move(t, "project")
 	_, err = f.s.prepare(context.Background(), request(f.project, f.config, "dev"))
-	code(t, err, "project_moved")
+	code(t, err, "project_registration")
 	if err := f.apply(t, f.preview(t)); err != nil {
 		t.Fatal("explicit move back failed", err)
 	}
@@ -345,6 +345,37 @@ func TestReassociationPrivateSetupAndOpaqueFreshness(t *testing.T) {
 	f.write(t)
 	secret := "private-fixture-value-never-disclose"
 	fixtureInputs(t, f.project, f.config, map[string]string{"token": secret})
+	// Exercise the retained v1 private-association path, independently of marker duplicate resolution.
+	root, err := projectconfig.Root(f.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registryPath := filepath.Join(root, "projects.json")
+	rawRegistry, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy struct {
+		Version  int                                   `json:"version"`
+		Revision string                                `json:"revision"`
+		Projects map[string]map[string]json.RawMessage `json:"projects"`
+	}
+	if err := json.Unmarshal(rawRegistry, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	legacy.Version = 1
+	for _, entry := range legacy.Projects {
+		delete(entry, "common_id")
+		delete(entry, "checkout_path")
+		delete(entry, "admin_path")
+	}
+	rawRegistry, err = json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(registryPath, rawRegistry, 0600); err != nil {
+		t.Fatal(err)
+	}
 	f.move(t, "moved")
 	blocked := f.preview(t)
 	if len(blocked.Blockers) == 0 || blocked.Private.RecordedAssociation == "" {
@@ -770,28 +801,21 @@ func TestReassociationR4DoctorUnverifiedBinding(t *testing.T) {
 	if err := f.apply(t, f.preview(t)); err != nil {
 		t.Fatal(err)
 	}
-	// Force only the checkout verification stale through a real second shared binding repair.
-	peer := f.preparePeer(t).Checkout.Path
-	gitPath := filepath.Join(f.project, ".git")
-	if err := os.Rename(gitPath, gitPath+"-old"); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(gitPath, 0700); err != nil {
-		t.Fatal(err)
-	}
-	entries, err := os.ReadDir(gitPath + "-old")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		if err := os.Rename(filepath.Join(gitPath+"-old", e.Name()), filepath.Join(gitPath, e.Name())); err != nil {
-			t.Fatal(err)
+	peerInstance := f.preparePeer(t)
+	peer := peerInstance.Checkout.Path
+	// Retain the legitimate unverified acknowledgement shape produced by pre-marker repair.
+	if err := f.s.store.db.Update(func(tx *bolt.Tx) error {
+		b, err := readCheckoutBinding(tx, checkoutParent(peerInstance))
+		if err != nil {
+			return err
 		}
-	}
-	if err := f.apply(t, f.preview(t)); err != nil {
+		b.Shared[f.request.ProjectID] = ""
+		return put(tx, "checkout_bindings", checkoutParent(peerInstance), b)
+	}); err != nil {
 		t.Fatal(err)
 	}
-	git(t, f.project, "worktree", "repair", peer)
+	var err error
+
 	_, err = f.s.prepare(context.Background(), request(peer, f.config, "dev"))
 	code(t, err, "project_unverified")
 	r, err := f.s.doctor(context.Background(), v1.DoctorRequest{APIVersion: v1.Version, ProjectPath: peer, Scene: "dev", ConfigPath: f.config})

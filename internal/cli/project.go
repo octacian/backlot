@@ -16,7 +16,7 @@ import (
 )
 
 func projectCommand() *urfave.Command {
-	return &urfave.Command{Name: "project", Usage: "Manage explicit private project setup", Commands: []*urfave.Command{projectIdentityCommand("diagnose"), projectIdentityCommand("reassociate"), {Name: "setup", ArgsUsage: " ", Description: "Inspect registered setup without flags; first setup prompts in a terminal. Explicit edits preserve unspecified private entries. Reassociation registers moved or replaced project identity using explicit new values; it does not import old credentials.\n\nExamples:\n  backlot project setup\n  backlot project setup --edit\n  backlot project setup --from private.yaml --reassociate", Usage: "Configure once or inspect registered inputs and tools", Flags: []urfave.Flag{
+	return &urfave.Command{Name: "project", Usage: "Manage explicit private project setup", Commands: []*urfave.Command{projectIdentityCommand("diagnose"), projectIdentityCommand("reassociate"), {Name: "setup", ArgsUsage: " ", Description: "Inspect registered setup without flags; first setup prompts in a terminal. Explicit edits preserve unspecified private entries. Reassociation without input edits enrolls an exact existing or same-path staged association without rotating its private generation. Mismatched legacy locations require explicit new values; different-path marker copies require selected-path repair. Fresh setup at another path does not import old credentials.\n\nExamples:\n  backlot project setup\n  backlot project setup --edit\n  backlot project setup --from private.yaml --reassociate", Usage: "Configure once or inspect registered inputs and tools", Flags: []urfave.Flag{
 		&urfave.StringFlag{Name: "project", Usage: "Project directory or manifest path (default: discover from working directory)"}, &urfave.StringFlag{Name: "config", Usage: "Machine configuration path (default: per-user configuration)"}, &urfave.StringFlag{Name: "from", Usage: "Import bounded private YAML/JSON document; - reads stdin"},
 		&urfave.StringSliceFlag{Name: "generate", Usage: "Explicitly accept generation for a declared eligible input; repeat for multiple inputs"},
 		&urfave.StringSliceFlag{Name: "remove-input", Usage: "Remove a named private input entry; repeat for multiple entries"}, &urfave.StringSliceFlag{Name: "remove-tool", Usage: "Remove a named private tool override; repeat for multiple entries"},
@@ -73,6 +73,13 @@ func projectSetup(ctx context.Context, c *urfave.Command) error {
 		return output(c, nil, err)
 	}
 	result := setup.Inspect()
+	if request.Reassociate && from == "" && !request.Edit && len(request.Generate) == 0 && len(request.RemoveInputs) == 0 && len(request.RemoveTools) == 0 && result.Registered {
+		result, err = setup.Enroll(ctx)
+		if err != nil {
+			return output(c, nil, err)
+		}
+		return setupOutput(c, result)
+	}
 	interactive := term.IsTerminal(int(os.Stdin.Fd()))
 	if !mutation && result.Registered {
 		return setupOutput(c, result)

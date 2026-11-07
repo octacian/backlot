@@ -40,11 +40,13 @@ type SetupTool struct {
 
 // ProjectSetupResponse is the named local setup/inspection envelope.
 type ProjectSetupResponse struct {
-	APIVersion  string       `json:"api_version"`
-	Registered  bool         `json:"registered"`
-	Changed     bool         `json:"changed"`
-	Association string       `json:"association,omitempty"`
-	PrivatePath string       `json:"private_path,omitempty"`
-	Inputs      []SetupInput `json:"inputs"`
-	Tools       []SetupTool  `json:"tools"`
+	// Registration reports captured local enrollment without private values.
+	Registration *RegistrationResult `json:"registration,omitempty"`
+	APIVersion   string              `json:"api_version"`
+	Registered   bool                `json:"registered"`
+	Changed      bool                `json:"changed"`
+	Association  string              `json:"association,omitempty"`
+	PrivatePath  string              `json:"private_path,omitempty"`
+	Inputs       []SetupInput        `json:"inputs"`
+	Tools        []SetupTool         `json:"tools"`
 }

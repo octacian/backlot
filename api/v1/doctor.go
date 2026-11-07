@@ -75,16 +75,23 @@ type DoctorPath struct {
 // DoctorResponse reports observations only, never application/browser trust or aggregate readiness.
 // Healthy means no observed failed check; deferred/unsupported checks remain incomplete evidence.
 type DoctorResponse struct {
-	APIVersion string        `json:"api_version"`
-	Healthy    bool          `json:"healthy"`
-	Scope      string        `json:"scope"`
-	InstanceID string        `json:"instance_id,omitempty"`
-	Paths      []DoctorPath  `json:"paths"`
-	Checks     []DoctorCheck `json:"checks"`
+	// Registration reports current selected-store identity independently of provider readiness.
+	Registration *RegistrationResult `json:"registration,omitempty"`
+	APIVersion   string              `json:"api_version"`
+	Healthy      bool                `json:"healthy"`
+	Scope        string              `json:"scope"`
+	InstanceID   string              `json:"instance_id,omitempty"`
+	Paths        []DoctorPath        `json:"paths"`
+	Checks       []DoctorCheck       `json:"checks"`
 }
 
 // Validate checks decoded diagnostic enums and failure consistency.
 func (r DoctorResponse) Validate() error {
+	if r.Registration != nil {
+		if err := r.Registration.Validate(); err != nil {
+			return err
+		}
+	}
 	bad := func() error { return &PlanError{Code: "invalid_response", Message: "invalid doctor response contract"} }
 	if r.APIVersion != Version || (r.Scope != "daemon" && r.Scope != "scene" && r.Scope != "instance") || r.Checks == nil || r.Paths == nil {
 		return bad()

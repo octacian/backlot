@@ -46,7 +46,7 @@ func identifyShared(source plan.Source, project string) (sharedProjectIdentity, 
 	if err != nil {
 		return sharedProjectIdentity{}, err
 	}
-	return sharedProjectIdentity{ID: hash(fs + "/" + relative + "/" + project), Anchor: anchor, Filesystem: fs, Relative: relative, Project: project}, nil
+	return sharedProjectIdentity{ID: hash(fs + "/" + relative + "/" + project), Anchor: anchor, Filesystem: fs, Relative: relative, Project: project, Registration: checkout.Registration}, nil
 }
 
 func registerSharedProject(tx *bolt.Tx, next sharedProjectIdentity) error {
@@ -56,6 +56,14 @@ func registerSharedProject(tx *bolt.Tx, next sharedProjectIdentity) error {
 			return err
 		}
 		if owner != next {
+			binding, err := readProjectBinding(tx, owner.ID)
+			if err != nil {
+				return err
+			}
+			if binding.Current.Registration.CommonID == "" && sameProjectPhysical(binding.Current, next) {
+				binding.Current.Registration = next.Registration
+				return put(tx, "project_bindings", owner.ID, binding)
+			}
 			return nil
 		}
 	}

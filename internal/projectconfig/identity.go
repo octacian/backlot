@@ -11,6 +11,7 @@ import (
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/localipc"
 	"github.com/octacian/backlot/internal/manifest"
+	"github.com/octacian/backlot/internal/registration"
 )
 
 // Identity binds a manifest location to a canonical local repository object.
@@ -35,39 +36,22 @@ func Identify(project, checkout, file string) (Identity, error) {
 	if err != nil || !within(checkout, canonical) {
 		return result, manifest.SourceError(problem("manifest is unavailable or escapes checkout"), "manifest", file)
 	}
-	git := filepath.Join(checkout, ".git")
-	info, err := os.Lstat(git)
-	if err == nil {
-		result.Git = true
-		if !info.IsDir() {
-			data, e := Read(git)
-			if e != nil || !strings.HasPrefix(string(data), "gitdir: ") {
-				return result, problem("invalid Git marker; repair Git metadata before project setup")
-			}
-			git = strings.TrimSpace(strings.TrimPrefix(string(data), "gitdir: "))
-			if !filepath.IsAbs(git) {
-				git = filepath.Join(checkout, git)
-			}
-		}
-		git, err = filepath.EvalSymlinks(git)
-		if err != nil {
-			return result, problem("Git directory unavailable; repair Git metadata")
-		}
-		result.Directory, err = GitCommonDirectory(git)
-		if err != nil {
-			return result, err
-		}
+	location, err := registration.Locate(project, checkout)
+	if err != nil {
+		return result, problem("Git directory unavailable; repair Git metadata")
+	}
+	result.Git = location.Git
+	if result.Git {
+		result.Directory = location.Common
 		result.Manifest, _ = filepath.Rel(checkout, canonical)
-	} else if os.IsNotExist(err) {
+	} else {
 		result.Directory, err = filepath.EvalSymlinks(project)
 		result.Manifest = filepath.Base(canonical)
-	} else {
-		return result, problem("cannot inspect Git marker")
 	}
 	if err != nil {
 		return result, problem("association directory unavailable")
 	}
-	info, err = os.Stat(result.Directory)
+	info, err := os.Stat(result.Directory)
 	if err != nil || !info.IsDir() {
 		return result, problem("association directory must exist")
 	}
@@ -75,35 +59,5 @@ func Identify(project, checkout, file string) (Identity, error) {
 	return result, err
 }
 
-// GitCommonDirectory resolves bounded sharing metadata, refusing linked admin anchors.
-// It does not execute Git or validate repository objects, history or permanence.
-func GitCommonDirectory(git string) (string, error) {
-	marker := filepath.Join(git, "commondir")
-	if _, err := os.Lstat(marker); err == nil {
-		data, err := Read(marker)
-		if err != nil {
-			return "", err
-		}
-		value := strings.TrimSpace(string(data))
-		if value == "" || strings.ContainsAny(value, "\x00\r\n") {
-			return "", problem("invalid Git common-directory marker; repair Git metadata")
-		}
-		if filepath.IsAbs(value) {
-			git = value
-		} else {
-			git = filepath.Join(git, value)
-		}
-	} else if !os.IsNotExist(err) {
-		return "", problem("cannot inspect Git common-directory marker")
-	}
-	anchor, err := filepath.EvalSymlinks(git)
-	if err != nil {
-		return "", problem("Git common directory unavailable; repair Git metadata")
-	}
-	if _, err := os.Lstat(filepath.Join(anchor, "gitdir")); err == nil {
-		return "", problem("invalid or ambiguous linked Git metadata; repair commondir before project association")
-	} else if !os.IsNotExist(err) {
-		return "", problem("cannot inspect Git common-directory anchor")
-	}
-	return anchor, nil
-}
+// GitCommonDirectory resolves bounded sharing metadata without invoking Git.
+func GitCommonDirectory(git string) (string, error) { return registration.GitCommonDirectory(git) }

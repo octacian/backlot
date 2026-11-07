@@ -1,12 +1,12 @@
 ---
 title: "Reassociate retained projects through explicit current bindings"
 date: 2026-11-03
-status: accepted
+status: superseded
 implementation: in-progress
 summary: "Separate retained ownership from explicitly reviewed current bindings so moved or identity-changed projects can reconnect data without automatic adoption."
 tags: [identity, shared-services, state, migration, configuration, cli, recovery]
 supersedes: [/docs/adr/20261019T050443877Z-add-project-scoped-shared-service-allocations.md, /docs/adr/20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md]
-superseded_by: []
+superseded_by: [/docs/adr/20261106T230242771Z-recover-device-only-bindings-after-verified-consumer-settlement.md]
 related: [/docs/adr/20261021T001732173Z-register-private-project-configuration.md, /docs/adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md, /docs/adr/20261103T174849392Z-select-bounded-working-directories-for-native-commands.md]
 tracking: []
 implemented_by: [https://github.com/octacian/backlot/pull/120]

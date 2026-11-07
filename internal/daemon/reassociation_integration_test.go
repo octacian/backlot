@@ -112,7 +112,13 @@ func TestSharedReassociationEarlyFlow(t *testing.T) {
 		t.Fatal("new launch did not record current checkout")
 	}
 	peerAfter, err := f.h.cli.Inspect(context.Background(), peer.Instance.ID)
-	if err != nil || !sameCheckoutValue(peerBefore.Instance.Association.Checkout, peerAfter.Instance.Association.Checkout) {
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedPeer := peerBefore.Instance.Association.Checkout.Registration
+	expectedPeer.CommonPath = after.Instance.Checkout.Registration.CommonPath
+	expectedPeer.CommonID = after.Instance.Checkout.Registration.CommonID
+	if !sameCheckoutPhysical(peerBefore.Instance.Association.Checkout, peerAfter.Instance.Association.Checkout) || peerAfter.Instance.Association.Checkout.Registration != expectedPeer || peerAfter.Instance.Checkout != peerBefore.Instance.Checkout {
 		t.Fatal("unavailable peer redirected", err)
 	}
 	verifySharedWitness(t, f.db(t, peerCredential), peerWitness)

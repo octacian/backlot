@@ -12,6 +12,7 @@ import (
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/plan"
+	"github.com/octacian/backlot/internal/registration"
 )
 
 func problem(code, message string) error { return &v1.PlanError{Code: code, Message: message} }
@@ -69,6 +70,14 @@ func identify(path string) (v1.CheckoutIdentity, error) {
 		return result, problem("checkout_identity", "cannot inspect Git marker")
 	}
 	result.ID = hash(identity)
+	location, err := registration.Locate(canonical, canonical)
+	if err != nil {
+		return result, problem("project_identity", "invalid or ambiguous Git common-directory metadata; repair Git metadata explicitly")
+	}
+	result.Registration, err = registration.Observe(location)
+	if err != nil {
+		return result, problem("project_registration", err.Error())
+	}
 	return result, nil
 }
 
@@ -76,9 +85,12 @@ func identify(path string) (v1.CheckoutIdentity, error) {
 // checkout. Acceptance rechecks both identities but always records the original,
 // so a path replacement can never adopt an already-read snapshot as its own.
 type capturedSource struct {
-	source          plan.Source
-	checkout        v1.CheckoutIdentity
-	projectIdentity string
+	source               plan.Source
+	checkout             v1.CheckoutIdentity
+	projectIdentity      string
+	registrationLocation registration.Location
+	registrationIdentity registration.Identity
+	commonIdentity       string
 }
 
 func captureSource(source plan.Source) (capturedSource, error) {
@@ -92,6 +104,25 @@ func captureSource(source plan.Source) (capturedSource, error) {
 		return result, err
 	}
 	result.checkout, err = identify(source.CheckoutPath)
+	if err != nil {
+		return result, err
+	}
+	result.registrationLocation, err = registration.Locate(source.ProjectPath, source.CheckoutPath)
+	if err != nil {
+		return result, err
+	}
+	result.registrationIdentity, err = registration.Read(result.registrationLocation)
+	if err != nil {
+		return result, err
+	}
+	if info, statErr := os.Stat(result.registrationLocation.Common); statErr == nil {
+		result.commonIdentity, err = fileIdentity(info)
+		if err != nil {
+			return result, err
+		}
+	} else if !os.IsNotExist(statErr) {
+		return result, statErr
+	}
 	return result, err
 }
 
@@ -107,7 +138,7 @@ func (original capturedSource) verify() error {
 	if err != nil {
 		return changed()
 	}
-	if current.projectIdentity != original.projectIdentity || current.checkout.ID != original.checkout.ID || current.checkout.Path != original.checkout.Path || current.checkout.GitDirectory != original.checkout.GitDirectory {
+	if current.projectIdentity != original.projectIdentity || current.checkout.ID != original.checkout.ID || current.checkout.Path != original.checkout.Path || current.checkout.GitDirectory != original.checkout.GitDirectory || current.commonIdentity != original.commonIdentity || current.registrationLocation != original.registrationLocation || current.registrationIdentity != original.registrationIdentity {
 		return changed()
 	}
 	return nil

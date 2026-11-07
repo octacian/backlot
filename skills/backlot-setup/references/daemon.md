@@ -5,7 +5,7 @@
 | Term | Meaning |
 | --- | --- |
 | Project | Stable manifest `project` identifier and project-directory location; a label alone is not ownership |
-| Checkout | Canonical filesystem/Git-directory identity; linked worktrees are distinct runtime scopes; branch/HEAD are provenance |
+| Checkout | Local registration marker plus canonical location; linked worktrees have distinct checkout roles and share a common role; physical observations and branch/HEAD are provenance |
 | Scene | Named manifest selection of components/resources with explicit persistent or disposable lifetime |
 | Instance | Recorded runtime/metadata identity; persistent project + checkout + scene converges on one instance, disposable invocations get new IDs |
 | Attempt | One accepted execution within an instance; separates logs, results, attachment and build-image provenance across starts |
@@ -139,7 +139,7 @@ Malformed recorded selectors or disagreement with existing persistent slots prod
 ID inspection/cleanup remains independent of named selection.
 
 Before explicit reassociation, moved/identity-changed checkouts or unavailable
-project/Git identity fail selection; use
+project/Git registration fail selection; use
 recorded IDs. No force or path-only adoption exists. Project subdirectories within
 an unchanged Git checkout have no separately persisted inode identity; selection
 uses their recorded canonical location. Non-Git projects use the recorded project

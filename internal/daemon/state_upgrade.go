@@ -30,6 +30,7 @@ func migrateStateFifteen(tx *bolt.Tx) error {
 			}
 			var source struct {
 				Release    json.RawMessage `json:"consumer_release"`
+				PreNative  json.RawMessage `json:"native_not_started"`
 				Transition json.RawMessage `json:"last_transition"`
 				Result     *oldResult      `json:"result"`
 				Instance   struct {
@@ -43,7 +44,7 @@ func migrateStateFifteen(tx *bolt.Tx) error {
 				return problem("state_corrupt", "invalid version 15 source record")
 			}
 			present := func(r *oldResult) bool { return r != nil && r.Settlement != nil }
-			if source.Release != nil || source.Transition != nil || present(source.Result) || present(source.Instance.Execution) {
+			if source.PreNative != nil || source.Release != nil || source.Transition != nil || present(source.Result) || present(source.Instance.Execution) {
 				return problem("state_corrupt", "version 15 source contains version 16 consumer evidence")
 			}
 			for _, a := range source.Abandonments {

@@ -164,7 +164,7 @@ func (s *service) runTask(ctx context.Context, q v1.TaskRunRequest) (v1.Instance
 	snapshot.Plan.BuildImages = nil
 	result := &v1.ExecutionResult{Attempt: attempt, Components: []v1.ComponentResult{}, Ports: maps.Clone(parent.Execution.Ports), Origin: parent.Execution.Origin}
 	now := time.Now().UTC()
-	runtime := runtimeRecord{Attempt: attempt, Options: q.Options, StartedAt: now.Format(time.RFC3339Nano), OutputPaths: capture.Paths}
+	runtime := runtimeRecord{NativeNotStarted: true, Attempt: attempt, Options: q.Options, StartedAt: now.Format(time.RFC3339Nano), OutputPaths: capture.Paths}
 	out.LeaseToken = newID()
 	instance := v1.Instance{ID: id, Task: binding, CheckoutParent: checkoutParent(parent), Checkout: parent.Checkout, Plan: snapshot.Plan, Status: v1.Starting, Execution: result, CreatedAt: now.Format(time.RFC3339Nano), LeaseExpiresAt: now.Add(s.lease).Format(time.RFC3339Nano), Operation: v1.Operation{ID: newID(), Status: v1.Starting, Allocations: []v1.AllocationRecord{{ID: newID(), Kind: "private_snapshot", OwnershipToken: newID(), Phase: "effect"}}}}
 	boot, _ := native.CurrentBoot()

@@ -62,7 +62,7 @@ func TestSettlementMigrationFifteenPreservesUnknownProof(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if j.Release != nil {
+			if j.Release != nil || j.NativeNotStarted {
 				t.Fatal("upgrade invented exact release")
 			}
 			if len(j.Groups) == 0 {
@@ -102,7 +102,7 @@ func TestSettlementMigrationFifteenPreservesUnknownProof(t *testing.T) {
 }
 
 func TestSettlementMigrationRejectsFutureSourceUnchanged(t *testing.T) {
-	for _, mode := range []string{"release", "transition", "current", "attempt", "abandonment", "managed-abandonment"} {
+	for _, mode := range []string{"native-not-started", "release", "transition", "current", "attempt", "abandonment", "managed-abandonment"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := copyStateFixture(t, "testdata/state/v15/state.db")
 			path := filepath.Join(dir, "state.db")
@@ -113,6 +113,8 @@ func TestSettlementMigrationRejectsFutureSourceUnchanged(t *testing.T) {
 			if err := db.Update(func(tx *bolt.Tx) error {
 				bucket, field := "runtime", "consumer_release"
 				switch mode {
+				case "native-not-started":
+					field = "native_not_started"
 				case "transition":
 					bucket, field = "shared_services", "last_transition"
 				case "current", "abandonment":

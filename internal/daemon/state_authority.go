@@ -80,13 +80,22 @@ func validateStateNineAuthority(tx *bolt.Tx) error {
 	}); err != nil {
 		return err
 	}
-	if err := tx.Bucket([]byte("runtime")).ForEach(func(_, data []byte) error {
+	if err := tx.Bucket([]byte("runtime")).ForEach(func(key, data []byte) error {
 		r, err := decodeRuntime(data)
 		if err != nil {
 			return err
 		}
 		if r.LaunchPurpose != "" && r.LaunchPurpose != "application" {
 			return problem("state_corrupt", "unknown native launch purpose; preserve state with matching binary")
+		}
+		if r.NativeNotStarted {
+			owner, err := load(tx, string(key))
+			if err != nil {
+				return err
+			}
+			if _, err := consumerRecords(tx, owner); err != nil {
+				return err
+			}
 		}
 		return nil
 	}); err != nil {

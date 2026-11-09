@@ -343,7 +343,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 			result.Origin += ":" + strconv.Itoa(*snapshot.Caddy.HTTPSPort)
 		}
 	}
-	r := runtimeRecord{ExportSource: &v1.ExportSource{Project: snapshot.Plan.Project, Scene: snapshot.Plan.Scene, Lifetime: snapshot.Plan.Lifetime, CheckoutID: identity.checkout.ID, GitHead: launchGitCommit(ctx, identity.checkout), ManifestDigest: snapshot.Plan.ManifestDigest, ConfigDigest: snapshot.Plan.ConfigDigest, EffectiveConfigDigest: snapshot.Plan.EffectiveConfigDigest}, StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Attempt: attempt, Groups: []native.Identity{}, Options: request.Options, ConfigPath: request.Plan.ConfigPath}
+	r := runtimeRecord{NativeNotStarted: true, ExportSource: &v1.ExportSource{Project: snapshot.Plan.Project, Scene: snapshot.Plan.Scene, Lifetime: snapshot.Plan.Lifetime, CheckoutID: identity.checkout.ID, GitHead: launchGitCommit(ctx, identity.checkout), ManifestDigest: snapshot.Plan.ManifestDigest, ConfigDigest: snapshot.Plan.ConfigDigest, EffectiveConfigDigest: snapshot.Plan.EffectiveConfigDigest}, StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Attempt: attempt, Groups: []native.Identity{}, Options: request.Options, ConfigPath: request.Plan.ConfigPath}
 	r.OutputPaths, err = outputPaths(snapshot.Plan)
 	if err != nil {
 		return empty, err
@@ -1171,6 +1171,7 @@ func (s *service) launch(ctx context.Context, id, name, executable string, comma
 		_ = file.Close()
 		return nil, err
 	}
+	journal.NativeNotStarted = false
 	journal.LaunchPurpose = "application"
 	journal.LaunchPending, journal.PendingBoot = true, boot
 	if err := s.store.saveRuntime(id, *journal); err != nil {

@@ -74,11 +74,18 @@ func consumerRecords(tx *bolt.Tx, selected record) (f consumerFacts, err error) 
 			return f, err
 		}
 	}
-	if raw := tx.Bucket([]byte("attempt_sequences")).Get([]byte(id)); raw != nil {
+	sequences := tx.Bucket([]byte("attempt_sequences"))
+	if sequences == nil {
+		return f, problem("state_corrupt", "consumer acceptance namespace missing; preserved")
+	}
+	if raw := sequences.Get([]byte(id)); raw != nil {
 		f.sequence, err = strconv.ParseInt(string(raw), 10, 64)
 		if err != nil || f.sequence <= 0 {
 			return f, problem("state_corrupt", "invalid consumer acceptance sequence")
 		}
+	}
+	if f.runtime.NativeNotStarted && (i.Execution == nil || f.sequence == 0 || f.runtime.Attempt != executionAttempt(i) || len(i.Execution.NativeCleanup) != 0) {
+		return f, problem("state_corrupt", "pre-native boundary disagrees with current attempt; preserved")
 	}
 	if b := i.Task; b != nil {
 		if !validID(b.InstanceID) || !validID(b.Attempt) || !validID(b.Generation) || !manifest.ValidIdentifier(b.Name) || b.InstanceID == id || !validID(executionAttempt(i)) {
@@ -418,13 +425,14 @@ func consumerEffectRevision(tx *bolt.Tx, r record) (string, error) {
 		Sequence                                                                      int64
 		Task                                                                          *v1.TaskBinding
 		Pending                                                                       bool
+		NativeNotStarted                                                              bool `json:",omitempty"`
 		Groups                                                                        []native.Identity
 		Gateway                                                                       *gateway.Intent
 		Containers                                                                    []ownedResource
 		Networks                                                                      map[string]ownedResource
 		Abandoned                                                                     []abandoned
 		Dependents                                                                    []dependent
-	}{ID: f.record.Instance.ID, Attempt: executionAttempt(f.record.Instance), Generation: f.resources.ID, Endpoint: f.resources.Endpoint, RuntimeAttempt: f.runtime.Attempt, Sequence: f.sequence, Task: f.record.Instance.Task, Pending: f.runtime.LaunchPending, PendingBoot: f.runtime.PendingBoot, LaunchPurpose: f.runtime.LaunchPurpose, Groups: f.runtime.Groups, Gateway: f.runtime.Gateway, Containers: f.resources.Containers, Networks: map[string]ownedResource{}}
+	}{ID: f.record.Instance.ID, Attempt: executionAttempt(f.record.Instance), Generation: f.resources.ID, Endpoint: f.resources.Endpoint, RuntimeAttempt: f.runtime.Attempt, Sequence: f.sequence, Task: f.record.Instance.Task, Pending: f.runtime.LaunchPending, NativeNotStarted: f.runtime.NativeNotStarted, PendingBoot: f.runtime.PendingBoot, LaunchPurpose: f.runtime.LaunchPurpose, Groups: f.runtime.Groups, Gateway: f.runtime.Gateway, Containers: f.resources.Containers, Networks: map[string]ownedResource{}}
 	for name, resource := range f.resources.Resources {
 		if resource.Kind == "network" {
 			effects.Networks[name] = resource

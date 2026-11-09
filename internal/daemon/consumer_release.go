@@ -83,7 +83,7 @@ func (s *store) recordConsumerRelease(ctx context.Context, id string, j runtimeR
 		if err != nil {
 			return err
 		}
-		if j.Attempt != executionAttempt(r.Instance) || j.Attempt != f.runtime.Attempt || j.LaunchPending || f.runtime.LaunchPending || !reflect.DeepEqual(j.Groups, f.runtime.Groups) || j.PendingBoot != f.runtime.PendingBoot || j.LaunchPurpose != f.runtime.LaunchPurpose {
+		if j.Attempt != executionAttempt(r.Instance) || j.Attempt != f.runtime.Attempt || j.LaunchPending || f.runtime.LaunchPending || !reflect.DeepEqual(j.Groups, f.runtime.Groups) || j.PendingBoot != f.runtime.PendingBoot || j.LaunchPurpose != f.runtime.LaunchPurpose || j.NativeNotStarted != f.runtime.NativeNotStarted {
 			return problem("cleanup_failed", "consumer launch authority changed before release; preserved")
 		}
 		revision, err = consumerEffectRevision(tx, r)
@@ -95,7 +95,7 @@ func (s *store) recordConsumerRelease(ctx context.Context, id string, j runtimeR
 	if f.runtime.Gateway != nil || f.runtime.GatewayOnlyCleanup {
 		return problem("cleanup_failed", "publication cleanup remains pending; resources preserved")
 	}
-	proof := emptyVerified || len(j.Groups) > 0
+	proof := emptyVerified || j.NativeNotStarted || len(j.Groups) > 0
 	var targets []ownedResource
 	for _, r := range f.resources.Containers {
 		if !r.Removed {

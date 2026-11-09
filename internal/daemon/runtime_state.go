@@ -30,6 +30,10 @@ type runtimeRecord struct {
 	Groups        []native.Identity   `json:"groups"`
 	Options       v1.ExecutionOptions `json:"options"`
 
+	// NativeNotStarted is accepted with the attempt and consumed before native intent.
+	// Its absence in older journals is unknown, never proof of zero launches.
+	NativeNotStarted bool `json:"native_not_started,omitempty"`
+
 	// GatewayOnlyCleanup records joined consumer cleanup for this attempt, never route removal.
 	GatewayOnlyCleanup bool `json:"gateway_only_cleanup,omitempty"`
 }
@@ -74,6 +78,9 @@ func decodeRuntime(data []byte) (r runtimeRecord, err error) {
 	if r.Attempt != "" && !validID(r.Attempt) {
 		return r, problem("state_corrupt", "invalid runtime attempt; preserved")
 	}
+	if r.NativeNotStarted && (!validID(r.Attempt) || r.LaunchPending || r.PendingBoot != "" || r.LaunchPurpose != "" || len(r.Groups) != 0) {
+		return r, problem("state_corrupt", "invalid pre-native launch boundary; preserved")
+	}
 	return r, nil
 }
 
@@ -91,6 +98,16 @@ func (s *store) saveRuntime(id string, r runtimeRecord) error {
 			}
 			if err := taskWriterParent(tx, owner.Instance); err != nil {
 				return err
+			}
+		}
+		if r.NativeNotStarted {
+			current, err := decodeRuntime(tx.Bucket([]byte("runtime")).Get([]byte(id)))
+			if err != nil {
+				return err
+			}
+			// Only acceptance creates this witness; stale writers cannot restore it.
+			if !current.NativeNotStarted || current.Attempt != r.Attempt {
+				return problem("conflict", "native launch boundary was already consumed; preserved")
 			}
 		}
 		return put(tx, "runtime", id, r)
@@ -358,7 +375,7 @@ func (s *store) recoverExecutionCause(id string, cause v1.ConsumerSettlementCaus
 		}
 	}
 	currentContainers := slices.ContainsFunc(g.Containers, func(c ownedResource) bool { return c.Attempt == result.Attempt })
-	proofMissing := r.Attempt != result.Attempt || (!released && !emptyVerified && !pendingAbsent && !r.GatewayOnlyCleanup && len(r.Groups) == 0 && !currentContainers)
+	proofMissing := r.Attempt != result.Attempt || (!released && !emptyVerified && !r.NativeNotStarted && !pendingAbsent && !r.GatewayOnlyCleanup && len(r.Groups) == 0 && !currentContainers)
 	if proofMissing {
 		cleanup = errors.Join(cleanup, problem("cleanup_failed", "native guardian ownership effect is absent or mismatched; preserve uncertain processes and inspect private state"))
 	}
@@ -416,7 +433,7 @@ func (s *store) recoverExecutionCause(id string, cause v1.ConsumerSettlementCaus
 	// Route unavailability must not hide successful authenticated consumer cleanup.
 	// Keep its intent and failure, allowing explicit gateway recovery to retry it.
 	// An empty legacy journal alone cannot establish consumer absence.
-	consumerProof := released || emptyVerified || r.GatewayOnlyCleanup || pendingAbsent || len(r.Groups) > 0 || currentContainers
+	consumerProof := released || emptyVerified || r.NativeNotStarted || r.GatewayOnlyCleanup || pendingAbsent || len(r.Groups) > 0 || currentContainers
 	r.GatewayOnlyCleanup = gatewayCleanup != nil && cleanup == nil && consumerProof
 	cleanup = errors.Join(gatewayCleanup, cleanup)
 	consumersStopped := cleanup == nil

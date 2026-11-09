@@ -17,6 +17,7 @@ type projectBinding struct {
 	Acknowledgement string                `json:"acknowledgement,omitempty"`
 }
 type checkoutBinding struct {
+	PendingPath     string              `json:"pending_registration_path,omitempty"`
 	Current         v1.CheckoutIdentity `json:"current"`
 	Revision        string              `json:"revision"`
 	Shared          map[string]string   `json:"shared,omitempty"`
@@ -45,10 +46,33 @@ func readProjectBinding(tx *bolt.Tx, id string) (b projectBinding, err error) {
 }
 func locateCheckout(tx *bolt.Tx, next v1.CheckoutIdentity) (string, error) {
 	found := ""
+	var commonConflict error
 	err := tx.Bucket([]byte("checkout_bindings")).ForEach(func(key, data []byte) error {
 		b, err := readCheckoutBinding(tx, string(key))
 		if err != nil {
 			return err
+		}
+		if b.PendingPath != "" {
+			if next.Path == b.PendingPath || next.Path == b.Current.Path {
+				return &v1.PlanError{Code: "project_registration", Message: "registration publication is staged; inspect and explicitly repair the exact retained checkout", Registration: &v1.RegistrationResult{State: "staged", Identity: next.Registration, Conflicts: []v1.RegistrationConflict{{Role: "checkout", Path: next.Path, ClaimedPath: b.Current.Path, CheckoutID: string(key)}}, NextAction: "project reassociate"}}
+			}
+			return nil
+		}
+		old, observed := b.Current.Registration, next.Registration
+		if old.CommonID != "" && observed.CommonID == old.CommonID && observed.CommonPath != old.CommonPath {
+			commonConflict = registrationConflict("common", next.Path, b.Current.Path, string(key), "", observed)
+		}
+		if old.CheckoutID != "" {
+			if old.CheckoutID == observed.CheckoutID || b.Current.Path == next.Path {
+				if old != observed || b.Current.Path != next.Path {
+					return registrationConflict("checkout", next.Path, b.Current.Path, string(key), "", observed)
+				}
+				if found != "" {
+					return problem("conflict", "ambiguous checkout registration")
+				}
+				found = string(key)
+				return nil
+			}
 		}
 		if b.Current.Path == next.Path || b.Current.ID == next.ID {
 			if !sameCheckout(&b.Current, &next) {
@@ -68,6 +92,9 @@ func locateCheckout(tx *bolt.Tx, next v1.CheckoutIdentity) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if commonConflict != nil {
+		return "", commonConflict
+	}
 	if found != "" {
 		return found, nil
 	}
@@ -84,8 +111,26 @@ func boundShared(tx *bolt.Tx, current sharedProjectIdentity) (sharedProjectIdent
 		if err != nil {
 			return err
 		}
+		if old, next := b.Current.Registration, current.Registration; old.CommonID != "" {
+			if next.CommonID == old.CommonID && next.CommonPath != old.CommonPath {
+				return registrationConflict("common", current.Anchor, b.Current.Anchor, "", string(key), next)
+			}
+			if sharedPath(b.Current) == sharedPath(current) || next.CommonID == old.CommonID && b.Current.Relative == current.Relative && b.Current.Project == current.Project {
+				if next.CommonID != old.CommonID || next.CommonPath != old.CommonPath || sharedPath(b.Current) != sharedPath(current) || next.Git != old.Git {
+					return registrationConflict("common", current.Anchor, b.Current.Anchor, "", string(key), next)
+				}
+				if found {
+					return problem("conflict", "ambiguous common registration")
+				}
+				found = true
+				if json.Unmarshal(tx.Bucket([]byte("shared_projects")).Get(key), &owner) != nil {
+					return problem("state_corrupt", "shared registration parent unavailable")
+				}
+				return nil
+			}
+		}
 		if b.Current.ID == current.ID || sharedPath(b.Current) == sharedPath(current) {
-			if b.Current != current {
+			if !sameProjectPhysical(b.Current, current) {
 				code := "project_moved"
 				if b.Current.ID != current.ID {
 					code = "project_replaced"
@@ -113,6 +158,27 @@ func boundShared(tx *bolt.Tx, current sharedProjectIdentity) (sharedProjectIdent
 	}
 	return current, nil
 }
+
+func sameProjectPhysical(a, b sharedProjectIdentity) bool {
+	a.Registration = v1.RegistrationIdentity{}
+	b.Registration = v1.RegistrationIdentity{}
+	return a == b
+}
+
+func sameSharedBinding(a, b sharedProjectIdentity) bool {
+	if a.Registration.CommonID != "" && b.Registration.CommonID != "" {
+		return a.Anchor == b.Anchor && a.Relative == b.Relative && a.Project == b.Project && a.Registration.CommonID == b.Registration.CommonID && a.Registration.CommonPath == b.Registration.CommonPath && a.Registration.Git == b.Registration.Git
+	}
+	return sameProjectPhysical(a, b)
+}
+
+func registrationConflict(role, path, claimed, checkout, project string, observed v1.RegistrationIdentity) error {
+	state := "conflict"
+	if observed.CommonID == "" || observed.CheckoutID == "" {
+		state = "missing"
+	}
+	return &v1.PlanError{Code: "project_registration", Message: "registration differs from its selected-store claim; use project diagnose and explicit repair", Registration: &v1.RegistrationResult{State: state, Identity: observed, Conflicts: []v1.RegistrationConflict{{Role: role, Path: path, ClaimedPath: claimed, CheckoutID: checkout, ProjectID: project}}, NextAction: "project reassociate"}}
+}
 func sharedPath(p sharedProjectIdentity) string { return p.Anchor + "/" + p.Relative + "/" + p.Project }
 func associateInstance(tx *bolt.Tx, i *v1.Instance) error {
 	// Exact-ID observation/cleanup does not require valid named-selection metadata.
@@ -128,7 +194,7 @@ func associateInstance(tx *bolt.Tx, i *v1.Instance) error {
 	}
 	if b.Revision == "" {
 		var origin v1.CheckoutIdentity
-		if json.Unmarshal(tx.Bucket([]byte("checkouts")).Get([]byte(checkoutParent(*i))), &origin) != nil || !sameCheckout(&origin, &i.Checkout) {
+		if json.Unmarshal(tx.Bucket([]byte("checkouts")).Get([]byte(checkoutParent(*i))), &origin) != nil || !sameCheckoutPhysical(origin, i.Checkout) {
 			return problem("state_corrupt", "recorded checkout and stable parent disagree")
 		}
 	}
@@ -222,13 +288,27 @@ func validateBindings(tx *bolt.Tx) error {
 		}
 	}
 	claims := map[string]string{}
+	commonClaims := map[string]string{}
+	claimCommon := func(r v1.RegistrationIdentity) error {
+		if r.CommonID == "" {
+			return nil
+		}
+		if old, ok := commonClaims[r.CommonID]; ok && old != r.CommonPath {
+			return problem("state_corrupt", "common registration claims different canonical anchors")
+		}
+		commonClaims[r.CommonID] = r.CommonPath
+		return nil
+	}
 	if err := tx.Bucket([]byte("project_bindings")).ForEach(func(k, d []byte) error {
 		b, err := readProjectBinding(tx, string(k))
 		if err != nil {
 			return err
 		}
 		var origin sharedProjectIdentity
-		if json.Unmarshal(tx.Bucket([]byte("shared_projects")).Get(k), &origin) != nil || b.Current.Project != origin.Project || b.Current.Relative != origin.Relative || !filepath.IsLocal(b.Current.Relative) || b.Revision != "" && !validID(b.Revision) || b.Acknowledgement != "" && !validID(b.Acknowledgement) || b.Revision == "" && b.Current != origin {
+		if err := claimCommon(b.Current.Registration); err != nil {
+			return err
+		}
+		if json.Unmarshal(tx.Bucket([]byte("shared_projects")).Get(k), &origin) != nil || b.Current.Project != origin.Project || b.Current.Relative != origin.Relative || !filepath.IsLocal(b.Current.Relative) || b.Revision != "" && !validID(b.Revision) || b.Acknowledgement != "" && !validID(b.Acknowledgement) || b.Revision == "" && !sameProjectPhysical(b.Current, origin) || b.Current.Registration.Validate() != nil {
 			return problem("state_corrupt", "invalid shared binding origin/revision")
 		}
 		if tx.Bucket([]byte("shared_projects")).Get(k) == nil || b.Current.ID != hash(b.Current.Filesystem+"/"+b.Current.Relative+"/"+b.Current.Project) {
@@ -257,7 +337,26 @@ func validateBindings(tx *bolt.Tx) error {
 			return problem("state_corrupt", "checkout binding origin missing")
 		}
 		var origin v1.CheckoutIdentity
-		if json.Unmarshal(tx.Bucket([]byte("checkouts")).Get(k), &origin) != nil || b.Revision != "" && !validID(b.Revision) || b.Acknowledgement != "" && !validID(b.Acknowledgement) || b.Revision == "" && !sameCheckoutValue(b.Current, origin) {
+		if b.PendingPath != "" {
+			if !filepath.IsAbs(b.PendingPath) || foreignOrigin(tx, "paths", b.PendingPath, string(k)) {
+				return problem("state_corrupt", "invalid staged registration location")
+			}
+		} else {
+			if err := claimCommon(b.Current.Registration); err != nil {
+				return err
+			}
+			if id := b.Current.Registration.CheckoutID; id != "" {
+				claim := "registration/" + id
+				if claims[claim] != "" {
+					return problem("state_corrupt", "checkout registration has multiple owners")
+				}
+				claims[claim] = string(k)
+			}
+		}
+		if b.Current.Registration.Validate() != nil || b.Current.Registration.CheckoutID != "" && b.Current.Registration.CheckoutPath != b.Current.Path {
+			return problem("state_corrupt", "invalid checkout registration location")
+		}
+		if json.Unmarshal(tx.Bucket([]byte("checkouts")).Get(k), &origin) != nil || b.Revision != "" && !validID(b.Revision) || b.Acknowledgement != "" && !validID(b.Acknowledgement) || b.Revision == "" && !sameCheckoutPhysical(b.Current, origin) {
 			return problem("state_corrupt", "invalid checkout binding revision")
 		}
 		if tx.Bucket([]byte("checkouts")).Get([]byte(b.Current.ID)) != nil && b.Current.ID != string(k) || foreignOrigin(tx, "paths", b.Current.Path, string(k)) {
@@ -391,6 +490,9 @@ func validateRepairOwners(tx *bolt.Tx, project, checkout string) error {
 		if err != nil {
 			return err
 		}
+		if project == "" && (len(owners) > 0 || len(r.Instance.Plan.SharedServices) > 0) {
+			return problem("reassociation_blocked", "checkout has retained shared obligations; select their exact owner")
+		}
 		for owner := range owners {
 			if owner != project {
 				return problem("reassociation_blocked", "selected checkout or retained allocation belongs to another shared project; independent owners cannot merge")
@@ -402,7 +504,7 @@ func validateRepairOwners(tx *bolt.Tx, project, checkout string) error {
 	if err != nil {
 		return err
 	}
-	if !known {
+	if project != "" && !known {
 		return problem("reassociation_blocked", "selected checkout association with retained shared project is unproven")
 	}
 	return nil

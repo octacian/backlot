@@ -226,6 +226,17 @@ func (s *store) beginSelected(snapshot plan.Snapshot, checkout v1.CheckoutIdenti
 			if err := tx.Bucket([]byte("paths")).Put([]byte(checkout.Path), []byte(parent)); err != nil {
 				return err
 			}
+		} else if checkout.Registration.CheckoutID != "" {
+			binding, err := readCheckoutBinding(tx, parent)
+			if err != nil {
+				return err
+			}
+			if binding.Current.Registration.CheckoutID == "" {
+				binding.Current.Registration = checkout.Registration
+				if err := put(tx, "checkout_bindings", parent, binding); err != nil {
+					return err
+				}
+			}
 		}
 		p := snapshot.Plan
 		key := p.Project + "/" + parent + "/" + p.Scene

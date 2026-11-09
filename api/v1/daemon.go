@@ -1,7 +1,7 @@
 package v1
 
 // StateVersion identifies the supported durable database format.
-const StateVersion = 14
+const StateVersion = 15
 
 // InstanceStatus distinguishes metadata preparation from observed execution.
 type InstanceStatus string
@@ -40,10 +40,12 @@ type ControlRequest struct {
 
 // CheckoutIdentity records canonical checkout and filesystem/Git provenance.
 type CheckoutIdentity struct {
-	ID           string `json:"id"`
-	Path         string `json:"path"`
-	GitDirectory string `json:"git_directory,omitempty"`
-	GitHead      string `json:"git_head,omitempty"`
+	// Registration selects logical continuity separately from physical launch provenance.
+	Registration RegistrationIdentity `json:"registration,omitzero"`
+	ID           string               `json:"id"`
+	Path         string               `json:"path"`
+	GitDirectory string               `json:"git_directory,omitempty"`
+	GitHead      string               `json:"git_head,omitempty"`
 }
 
 // AllocationRecord preserves intent/effect ownership across interruption.

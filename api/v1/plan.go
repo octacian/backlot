@@ -77,11 +77,13 @@ type ErrorResponse struct {
 
 // PlanError identifies a failure category and field/component context.
 type PlanError struct {
-	Code        string `json:"code"`
-	SourceLayer string `json:"source_layer,omitempty"`
-	SourcePath  string `json:"source_path,omitempty"`
-	Field       string `json:"field,omitempty"`
-	Message     string `json:"message"`
+	// Registration contains safe actionable selected-store registration diagnostics.
+	Registration *RegistrationResult `json:"registration,omitempty"`
+	Code         string              `json:"code"`
+	SourceLayer  string              `json:"source_layer,omitempty"`
+	SourcePath   string              `json:"source_path,omitempty"`
+	Field        string              `json:"field,omitempty"`
+	Message      string              `json:"message"`
 }
 
 // Error formats diagnostic fields and quotes the declaration path.

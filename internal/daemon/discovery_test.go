@@ -93,7 +93,7 @@ func TestFilteredDiscoveryRecordedLocations(t *testing.T) {
 	}
 	git(t, root, "init", "-q")
 	_, err = s.store.filteredList(q)
-	code(t, err, "checkout_replaced")
+	code(t, err, "project_registration")
 	if _, err := s.store.inspect(outer.Instance.ID); err != nil {
 		t.Fatal("explicit history lost", err)
 	}

@@ -40,6 +40,8 @@ func OpenSetup(request v1.ProjectSetupRequest) (*Setup, error) {
 func (s *Setup) Inspect() v1.ProjectSetupResponse {
 	l := s.layers
 	r := v1.ProjectSetupResponse{APIVersion: v1.Version, Registered: l.private.Provenance.Present, Association: l.private.Provenance.Association, PrivatePath: l.private.Provenance.Path, Inputs: []v1.SetupInput{}, Tools: []v1.SetupTool{}}
+	registration := l.private.Registration()
+	r.Registration = &registration
 	for _, name := range slices.Sorted(maps.Keys(l.manifest.Inputs)) {
 		declaration := l.manifest.Inputs[name]
 		value := l.effective.Inputs[name]
@@ -58,6 +60,18 @@ func (s *Setup) Inspect() v1.ProjectSetupResponse {
 		r.Tools = append(r.Tools, v1.SetupTool{Name: name, Executable: executable, Overridden: ok})
 	}
 	return r
+}
+
+// Enroll updates an explicitly selected existing association without rotating inputs.
+func (s *Setup) Enroll(ctx context.Context) (v1.ProjectSetupResponse, error) {
+	p, err := s.layers.private.EnrollPrivate(ctx)
+	if err != nil {
+		return v1.ProjectSetupResponse{}, err
+	}
+	s.layers.private.Provenance = p
+	r := s.Inspect()
+	r.Changed = true
+	return r, nil
 }
 
 // Save validates and publishes a full candidate; unspecified private entries are preserved.
@@ -127,6 +141,12 @@ func (s *Setup) Save(ctx context.Context, update v1.PrivateConfig, generate, rem
 			return fail("inputs."+name, "setup requires every declared input; provide a value or explicitly accept eligible generation")
 		}
 	}
+	selection, unlock, err := s.layers.private.Enroll(ctx)
+	if err != nil {
+		return v1.ProjectSetupResponse{}, err
+	}
+	defer unlock()
+	s.layers.private = selection
 	provenance, err := s.layers.private.Commit(ctx, candidate, func() error {
 		next, err := loadLayers(s.source, s.request.ConfigPath, true, s.request.Reassociate)
 		if err != nil {

@@ -7,7 +7,6 @@ import (
 	"sort"
 
 	"github.com/octacian/backlot/internal/plan"
-	"github.com/octacian/backlot/internal/projectconfig"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -33,14 +32,7 @@ func (s *service) prepareOutputDirectories(ctx context.Context, snapshot plan.Sn
 		return err
 	}
 	project := identity.source.ProjectPath
-	protected := []string{s.directory, filepath.Join(identity.checkout.Path, ".git")}
-	if identity.checkout.GitDirectory != "" {
-		common, err := projectconfig.GitCommonDirectory(identity.checkout.GitDirectory)
-		if err != nil {
-			return err
-		}
-		protected = append(protected, identity.checkout.GitDirectory, common)
-	}
+	protected := []string{s.directory, filepath.Join(identity.checkout.Path, ".git"), identity.registrationLocation.Admin, identity.registrationLocation.Common}
 	sort.Strings(targets)
 	preflight := func() ([]string, error) {
 		if err := plan.ValidateOutputs(project, snapshot.Manifest.Outputs, selected); err != nil {
@@ -61,7 +53,7 @@ func (s *service) prepareOutputDirectories(ctx context.Context, snapshot plan.Sn
 					return nil, err
 				}
 				if overlap {
-					return nil, problem("invalid_output", "disposable output overlaps private daemon/resource state or checkout Git metadata")
+					return nil, problem("invalid_output", "disposable output overlaps private daemon/resource state or checkout registration metadata")
 				}
 			}
 			duplicate := false

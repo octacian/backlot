@@ -15,6 +15,8 @@ import (
 	"github.com/octacian/backlot/internal/manifest"
 	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
+	"github.com/octacian/backlot/internal/projectconfig"
+	"github.com/octacian/backlot/internal/registration"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -67,6 +69,9 @@ func (s *service) prepareSelected(ctx context.Context, request v1.PrepareRequest
 	if err != nil {
 		return v1.InstanceResponse{}, err
 	}
+	if err := s.enrollSource(ctx, source); err != nil {
+		return v1.InstanceResponse{}, err
+	}
 	original, err := captureSource(source)
 	if err != nil {
 		return v1.InstanceResponse{}, err
@@ -82,8 +87,38 @@ func (s *service) prepareSelected(ctx context.Context, request v1.PrepareRequest
 	return s.prepareCaptured(ctx, snapshot, original, request.Plan.Scene, persistentOnly, nil)
 }
 
+// enrollSource refuses retained-path mismatches before publishing any marker.
+func (s *service) enrollSource(ctx context.Context, source plan.Source) error {
+	if err := ctx.Err(); err != nil {
+		return problem("cancelled", "request cancelled before acceptance")
+	}
+	checkout, err := identify(source.CheckoutPath)
+	if err != nil {
+		return err
+	}
+	if err := s.store.db.View(func(tx *bolt.Tx) error { _, err := locateCheckout(tx, checkout); return err }); err != nil {
+		return err
+	}
+	err = projectconfig.EnrollSource(ctx, source.ProjectPath, source.CheckoutPath, source.ManifestPath)
+	if ctx.Err() != nil {
+		return problem("cancelled", "request cancelled before acceptance")
+	}
+	return err
+}
+
 // prepareCaptured accepts the exact generation resolved by preparation or launch.
 func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, original capturedSource, scene string, persistentOnly bool, observed *startObservation) (v1.InstanceResponse, error) {
+	unlockMarkers, err := registration.LockRead(ctx, original.registrationLocation)
+	if err != nil {
+		if ctx.Err() != nil {
+			return v1.InstanceResponse{}, problem("cancelled", "request cancelled before acceptance")
+		}
+		if changed := original.verify(); changed != nil {
+			return v1.InstanceResponse{}, changed
+		}
+		return v1.InstanceResponse{}, problem("project_registration", err.Error())
+	}
+	defer unlockMarkers()
 	if persistentOnly && snapshot.Plan.Lifetime != v1.Persistent {
 		return v1.InstanceResponse{}, problem("invalid_lifetime", "scene start requires a persistent scene; use run for disposable work")
 	}
@@ -108,6 +143,10 @@ func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, o
 	}
 	s.store.bindingGate.Lock()
 	defer s.store.bindingGate.Unlock()
+	// Admission may have waited behind marker rotation; never publish the earlier capture.
+	if err := original.verify(); err != nil {
+		return v1.InstanceResponse{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closing {

@@ -550,14 +550,29 @@ Setup stores a registry at `backlot/projects.json` under `os.UserConfigDir()` an
 immutable private generations under `backlot/projects/`, outside the checkout.
 Managed directories/files must be user-owned and private (0700/0600); unsafe
 existing boundaries are rejected rather than repaired. Import files are copied,
-not ongoing dependencies. Git common-directory path plus filesystem identity
-and repository-relative manifest path bind the association. Linked worktrees
-reuse it; monorepo manifest paths isolate it. Names/remotes and independent
-clones do not enroll. Moved/replaced repository identities require explicit
-`project setup --reassociate` and explicit new values; old credentials are not
-implicitly imported. This repairs private setup only; retained daemon projects require
-[separate preview/apply](cli.md#reassociate-retained-project-data).
-Non-Git projects bind canonical directory identity and manifest filename.
+not ongoing dependencies. Registry format 2 maps a local common registration marker,
+its canonical anchor, Git classification and relative manifest to the same immutable
+private association and generation. Linked worktrees reuse it; monorepo manifests
+remain distinct. Ordinary clones start fresh. The same administrative marker at the
+same registered canonical path means continuity, including private inputs, even if
+filesystem device numbers change. This is the local development trust policy; it
+does not distinguish hostile same-user restoration at that exact path.
+
+Setup and preparation enroll `backlot-common.json` in the resolved Git common
+directory and `backlot-checkout.json` in each checkout's administrative directory.
+Non-Git projects use `.backlot-local/` with both files. These files are local,
+untracked administrative metadata, not owner IDs or credentials. Do not commit or
+copy them into an independent clone. No Git configuration or ignore file is edited.
+Read-only commands never enroll; already enrolled read-only sources work. Invalid,
+missing-at-enrolled-path or unwritable markers require explicit setup/repair.
+
+Exact legacy reads remain supported. Use `project setup --reassociate` without input
+edits to explicitly enroll an exact existing private association or reconcile its
+same-path marker stage without rotating the private file. A legacy location mismatch
+still requires explicit new values (`--reassociate --from FILE`). Duplicate markers
+at a different path require [selected-path repair](cli.md#reassociate-retained-project-data)
+first; they never import the original path's secrets. Setup changes only the private
+registry; daemon ownership repair is a separate acknowledged stage.
 
 Ordinary plan/prepare/run/restart/reset and scene diagnostics automatically read
 the registered layer. Validate manifest, machine, and private sources independently,
@@ -567,7 +582,8 @@ null or unused. Remove old fields and supply project values explicitly; no shim,
 import or migration occurs. Invalid overridden/unused
 entries still fail. Registered missing/unsafe/invalid files fail explicitly,
 including for scenes that use no inputs. Unregistered projects can select work
-that needs no inputs; selected missing values direct you to project setup. Ordinary operations create no registry, locks, or secrets.
+that needs no inputs; selected missing values direct you to project setup. Read-only operations create no registry, locks, markers or secrets. Mutating setup and
+preparation may publish local markers; only explicit setup writes private generations.
 Relative private tools resolve from the project directory; bare PATH names and
 absolute paths remain supported. Only selected scene inputs/tools are required.
 Provider settings stay in the shared machine document; there is no per-command

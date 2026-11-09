@@ -211,10 +211,23 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 					t.Fatal(err)
 				}
 				recovered, err := h.cli.StopExecution(context.Background(), id)
+				if err != nil || recovered.Instance.Execution == nil {
+					t.Fatal("cleanup retry failed", err)
+				}
+				before, after := result.Settlement, recovered.Instance.Execution.Settlement
+				if before == nil || before.State != v1.ConsumerUnsettled || before.Cause != v1.SettlementIncomplete {
+					t.Fatal("cleanup failure lost current consumer fence", before)
+				}
+				if after == nil || after.Validate() != nil || after.InstanceID != id || after.Attempt != result.Attempt || after.Generation != before.Generation || after.State != v1.ConsumerSettled || after.Cause != v1.SettlementExplicitStop || after.ObservedAt == "" {
+					t.Fatal("cleanup retry did not verify current consumer release", after)
+				}
 				expected := *result
 				expected.CleanupFailure, expected.CleanupDetails = "", nil
-				if err != nil || !reflect.DeepEqual(recovered.Instance.Execution, &expected) {
-					t.Fatal("cleanup retry changed original execution result", err)
+				actual := *recovered.Instance.Execution
+				// Current release changes independently of the original execution facts.
+				expected.Settlement, actual.Settlement = nil, nil
+				if recovered.Instance.Status != final.Status || !reflect.DeepEqual(actual, expected) {
+					t.Fatal("cleanup retry changed original execution result")
 				}
 				if _, err := h.cli.Destroy(context.Background(), id); err != nil {
 					t.Fatal("cleanup could not recover", err)

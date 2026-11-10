@@ -22,6 +22,7 @@ func TestAttachedNativeCLI(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-race", "-o", binary, "../../cmd/backlot").CombinedOutput(); err != nil {
 		t.Fatal(err, string(out))
 	}
+	t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", filepath.Join(shortTemp(t), "registry"))
 	for _, scenario := range []struct {
 		name   string
 		signal os.Signal
@@ -39,11 +40,14 @@ func TestAttachedNativeCLI(t *testing.T) {
 			h.manifest.Components["prep"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.FreshOnly, Initializes: []string{"data"}, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "printf '%s' \"$SECRET\" > \"$DATA/init\"")}}
 			h.manifest.Components["verify"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Resources: []string{"data", "password"}, Environment: env, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", `test "$(cat "$DATA/init")" = "$SECRET"`)}, DependsOn: []v1.Dependency{{Component: "server", Condition: v1.Ready}}}
 			server := h.manifest.Components["server"]
+			server.Fixtures = map[string]v1.Fixture{"password": {Value: v1.Value{Ref: &v1.Reference{Kind: "resource", Name: "password", Field: "value"}}}}
+			server.Resources = append(server.Resources, "password")
 			server.DependsOn = []v1.Dependency{{Component: "prep", Condition: v1.Completed}}
 			h.manifest.Components["server"] = server
 			h.manifest.Components["peer"] = v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "exec sleep 120")}, Readiness: &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "true")}, Timeout: "2s"}}
 			h.manifest.Scenes["peer"] = v1.Scene{Lifetime: v1.Persistent, Components: []string{"peer"}}
 			scene := h.manifest.Scenes["dev"]
+			scene.StartupDetails = []v1.StartupDetailSelection{{Component: "server", Fixture: "password", Label: "Password"}}
 			scene.Components = append(scene.Components, "prep", "job", "verify")
 			scene.Resources = append(scene.Resources, "data", "password")
 			h.manifest.Scenes["dev"] = scene
@@ -97,7 +101,7 @@ func TestAttachedNativeCLI(t *testing.T) {
 				close(records)
 				close(done)
 			}()
-			var id string
+			var id, startupPassword string
 			logs := map[string]bool{}
 			ready := false
 			deadline := time.After(25 * time.Second)
@@ -114,7 +118,15 @@ func TestAttachedNativeCLI(t *testing.T) {
 						id = record.Result.Instance.ID
 					}
 					if record.Type == "ready" {
+						summary := record.Result.StartupDetails
+						if ready || summary == nil || summary.Warning != nil || len(summary.Details) != 1 || summary.Attempt != record.Result.Instance.Execution.Attempt || summary.Details[0].Value == "" {
+							t.Fatal("missing or repeated startup details")
+						}
+						startupPassword = summary.Details[0].Value
 						ready = true
+					}
+					if record.Type != "ready" && record.Result != nil && record.Result.StartupDetails != nil {
+						t.Fatal("summary escaped ready record")
 					}
 					if record.Log != nil {
 						logs[record.Log.Component] = true
@@ -133,7 +145,7 @@ func TestAttachedNativeCLI(t *testing.T) {
 				t.Fatal("retained data missing", err)
 			}
 			before, err := os.ReadFile(paths[0])
-			if err != nil || len(before) == 0 {
+			if err != nil || len(before) == 0 || string(before) != startupPassword {
 				t.Fatal("paired credential not initialized", err)
 			}
 			if scenario.name == "external-stop" {
@@ -158,6 +170,9 @@ func TestAttachedNativeCLI(t *testing.T) {
 			}
 			terminal := ""
 			for record := range records {
+				if record.Type == "ready" || record.Result != nil && record.Result.StartupDetails != nil {
+					t.Fatal("startup details repeated after readiness")
+				}
 				if record.Type == "failure" || record.Type == "stopped" {
 					terminal = record.Type
 				}
@@ -197,13 +212,24 @@ func TestAttachedNativeCLI(t *testing.T) {
 		server := h.manifest.Components["server"]
 		server.Environment.Assign["DELAY_BIND"] = fixtureLiteral("1")
 		server.Readiness.Timeout = "100ms"
+		server.Fixtures = map[string]v1.Fixture{"password": {Value: v1.Value{Literal: ptr("failed-start-private-canary"), Secret: true}}}
+		scene := h.manifest.Scenes["dev"]
+		scene.StartupDetails = []v1.StartupDetailSelection{{Component: "server", Fixture: "password", Label: "Password"}}
+		h.manifest.Scenes["dev"] = scene
 		h.manifest.Components["server"] = server
 		h.write()
-		cmd := exec.Command(binary, "run", "--attached", "--json", "--state-dir", h.dir, "--stop-grace", "50ms", "dev")
+		config := filepath.Join(h.project, "machine.json")
+		if err := os.WriteFile(config, []byte(`{"version":"backlot/v1"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(binary, "run", "--config", config, "--attached", "--json", "--state-dir", h.dir, "--stop-grace", "50ms", "dev")
 		cmd.Dir = h.project
 		out, err := cmd.Output()
 		if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
 			t.Fatal("startup failure exit", err)
+		}
+		if bytes.Contains(out, []byte("failed-start-private-canary")) {
+			t.Fatal("failed readiness disclosed secret")
 		}
 		var failed bool
 		for _, line := range bytes.Split(bytes.TrimSpace(out), []byte("\n")) {
@@ -211,7 +237,7 @@ func TestAttachedNativeCLI(t *testing.T) {
 			if err := json.Unmarshal(line, &record); err != nil {
 				t.Fatal(err)
 			}
-			if record.Type == "ready" {
+			if record.Type == "ready" || record.Result != nil && record.Result.StartupDetails != nil {
 				t.Fatal("alive process was reported ready")
 			}
 			if record.Type == "failure" {

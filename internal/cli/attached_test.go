@@ -21,13 +21,14 @@ import (
 	urfave "github.com/urfave/cli/v3"
 )
 
-func TestAttachedFailureReasonsHumanAndJSON(t *testing.T) {
+func TestAttachedRecordsHumanAndJSON(t *testing.T) {
 	result := &v1.ExecutionResult{Attempt: strings.Repeat("a", 64), Failure: "required service exited unexpectedly", CollectionFailure: "application output collection failed", CleanupFailure: "owned route cleanup uncertain"}
 	record := v1.AttachedRecord{APIVersion: v1.Version, Type: "failure", Result: &v1.InstanceResponse{APIVersion: v1.Version, Instance: v1.Instance{ID: strings.Repeat("b", 64), Status: v1.Failed, Execution: result}}}
 	for _, machine := range []bool{false, true} {
 		t.Run(map[bool]string{false: "human", true: "json"}[machine], func(t *testing.T) {
+			rendered := record
 			var out bytes.Buffer
-			command := &urfave.Command{Name: "renderer", Writer: &out, ErrWriter: &out, Flags: []urfave.Flag{&urfave.BoolFlag{Name: "json"}}, Action: func(_ context.Context, c *urfave.Command) error { return attachedRecord(c, record) }}
+			command := &urfave.Command{Name: "renderer", Writer: &out, ErrWriter: &out, Flags: []urfave.Flag{&urfave.BoolFlag{Name: "json"}}, Action: func(_ context.Context, c *urfave.Command) error { return attachedRecord(c, rendered) }}
 			args := []string{"renderer"}
 			if machine {
 				args = append(args, "--json")
@@ -48,6 +49,25 @@ func TestAttachedFailureReasonsHumanAndJSON(t *testing.T) {
 				}
 				if err := decoder.Decode(&decoded); err != io.EOF {
 					t.Fatal("extra JSON output", err)
+				}
+			}
+			for _, summary := range []*v1.StartupSummary{
+				{Details: []v1.StartupDetail{{StartupDetailSelection: v1.StartupDetailSelection{Label: "Password"}, Value: "selected-private-canary"}}},
+				{Warning: &v1.PlanError{Code: "startup_details_unavailable", Message: "Startup details unavailable"}},
+			} {
+				out.Reset()
+				rendered = v1.AttachedRecord{APIVersion: v1.Version, Type: "ready", Result: &v1.InstanceResponse{StartupDetails: summary}}
+				if err := command.Run(context.Background(), args); err != nil {
+					t.Fatal(err)
+				}
+				want := "Password: selected-private-canary"
+				if summary.Warning != nil {
+					want = summary.Warning.Message
+				} else if machine {
+					want = `"value":"selected-private-canary"`
+				}
+				if !strings.Contains(out.String(), want) {
+					t.Fatal("missing startup detail or warning", out.String())
 				}
 			}
 		})
@@ -71,6 +91,8 @@ func TestAttachedFaultsRetainDriftWithoutRetry(t *testing.T) {
 			}
 			id, attempt := strings.Repeat("a", 64), strings.Repeat("b", 64)
 			instance := v1.Instance{ID: id, Checkout: v1.CheckoutIdentity{ID: id, Path: root}, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Status: v1.Starting, Operation: v1.Operation{ID: id, Status: v1.Starting, Allocations: []v1.AllocationRecord{{ID: id, Kind: "private_snapshot", Phase: "effect"}}}, Plan: v1.PlanResponse{APIVersion: v1.Version, Project: "adapter", Scene: "dev", ManifestPath: filepath.Join(root, "backlot.json"), Checkout: root, Lifetime: v1.Persistent, Components: []v1.PlannedComponent{}}, Execution: &v1.ExecutionResult{Attempt: attempt, Components: []v1.ComponentResult{}}}
+			instance.Plan.StartupDetails = []v1.StartupDetailSelection{{Component: "seed", Fixture: "password", Label: "Password"}}
+			instance.Execution.Fixtures = []v1.FixtureRecord{{Component: "seed", Name: "password", Sensitive: true}}
 			accepted := v1.InstanceResponse{APIVersion: v1.Version, Instance: instance, ManifestDrift: true, ConfigDrift: true, Attachment: &v1.Attachment{Owner: v1.AttachedOwner{Attempt: attempt, DaemonGeneration: id, Token: "attachment-private-canary"}, LeaseDuration: "30s"}}
 			var stops, renewals, logs atomic.Int32
 			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +118,9 @@ func TestAttachedFaultsRetainDriftWithoutRetry(t *testing.T) {
 					}
 					// The daemon's matching attached snapshots carry no drift metadata.
 					_ = json.NewEncoder(w).Encode(v1.SceneResponse{APIVersion: v1.Version, DaemonGeneration: id, Outcome: v1.SceneFound, Result: &v1.InstanceResponse{APIVersion: v1.Version, Instance: next}})
+				case "/v1/fixtures/secret":
+					w.WriteHeader(http.StatusServiceUnavailable)
+					_ = json.NewEncoder(w).Encode(v1.ErrorResponse{APIVersion: v1.Version, Error: v1.PlanError{Code: "unavailable", Message: "raw-private-error-canary"}})
 				case "/v1/logs":
 					n := logs.Add(1)
 					if fault == "logs" || fault == "renewal" && n > 1 {
@@ -125,7 +150,7 @@ func TestAttachedFaultsRetainDriftWithoutRetry(t *testing.T) {
 				})
 			}}
 			err = command.Run(context.Background(), []string{"attached", "--json"})
-			if err == nil || stops.Load() != 1 || strings.Contains(out.String(), "attachment-private-canary") {
+			if err == nil || stops.Load() != 1 || strings.Contains(out.String(), "attachment-private-canary") || strings.Contains(out.String(), "raw-private-error-canary") {
 				t.Fatal("lost failure, authority leak or mutation retry", err, stops.Load(), out.String())
 			}
 			decoder := json.NewDecoder(&out)
@@ -139,6 +164,12 @@ func TestAttachedFaultsRetainDriftWithoutRetry(t *testing.T) {
 				}
 				if record.Result != nil && (!record.Result.ManifestDrift || !record.Result.ConfigDrift || record.Result.Instance.ID != id || startupAttempt(record.Result.Instance) != attempt || record.Result.Attachment != nil) {
 					t.Fatal("lost accepted drift/identity or authority leak", record)
+				}
+				if record.Type == "ready" && (record.Result.StartupDetails == nil || record.Result.StartupDetails.Warning == nil || len(record.Result.StartupDetails.Details) != 0) {
+					t.Fatal("missing all-or-unavailable warning")
+				}
+				if record.Type != "ready" && record.Result != nil && record.Result.StartupDetails != nil {
+					t.Fatal("summary escaped ready record")
 				}
 				final = record
 			}
@@ -160,7 +191,7 @@ func TestAttachedFaultsRetainDriftWithoutRetry(t *testing.T) {
 			} else if final.Result.Instance.Status != v1.Stopped {
 				t.Fatal("matching cleanup result not retained", final)
 			}
-			if fault == "renewal" && renewals.Load() != 1 || fault != "renewal" && renewals.Load() != 0 {
+			if fault == "renewal" && renewals.Load() != 2 || fault != "renewal" && renewals.Load() != 0 {
 				t.Fatal("wrong renewal path", renewals.Load())
 			}
 		})

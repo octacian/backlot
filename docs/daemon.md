@@ -174,7 +174,9 @@ its accepted attempt; cancelling observation leaves execution alone.
 new persistent execution attempt. They stay alive at readiness and show aggregate
 startup/service logs until the attempt ends. `--json` emits typed NDJSON lifecycle
 and log records (`starting`, `ready`, `stopping`, `stopped`, `failure`, `log`, and
-explicit gap/warning records); private attachment authority is never command output.
+explicit gap/warning records). The ready result includes declared
+[startup details](manifest.md#components-and-scenes); private attachment authority
+is never command output.
 Default starts still return at readiness and leave runtime running. Disposable
 scenes, terminal arguments, `--keep-on-failure`, restart and reset reject attached mode.
 

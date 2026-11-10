@@ -214,11 +214,12 @@ propagation; this introduces no expressions or duplicate value declarations.
 
 The selection authorizes automatic display of its sensitive values after successful
 `run`, `scene start`, `restart` and `reset`, including already-running starts.
-Human output prints labels/values after instance/URL information; JSON emits one
-result with a transient `startup_details` object containing `attempt`, ordered
-`details`, or a sanitized `warning`. No successful summary appears on failed
-readiness. If summary retrieval fails after readiness, startup still succeeds
-with its identity/URL and an unavailable warning; incomplete details are omitted.
+Human output prints labels/values after instance/URL information; JSON includes a
+transient `startup_details` object containing `attempt`, ordered `details`, or a
+sanitized `warning`. Attached starts emit it once, only in
+`ready.result.startup_details`. No successful summary appears on failed readiness.
+If summary retrieval fails after readiness, startup still succeeds with its
+identity/URL and an unavailable warning; incomplete details are omitted.
 
 Starting or already-ready scenes keep recorded selections/values and report
 configuration changes. New attempts use compatible current inputs and

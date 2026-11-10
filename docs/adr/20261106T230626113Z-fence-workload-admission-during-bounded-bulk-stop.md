@@ -12,7 +12,7 @@ supersedes: []
 superseded_by: []
 related: [/docs/adr/20261105T063300829Z-run-declared-native-tasks-against-accepted-ready-scenes.md, /docs/adr/20261028T234445000Z-release-stopped-instance-networks-while-retaining-application-data.md, /docs/adr/20261027T215913789Z-separate-declaration-discovery-from-bounded-recorded-inspection.md, /docs/adr/20261106T230242771Z-recover-device-only-bindings-after-verified-consumer-settlement.md]
 tracking: ["https://github.com/octacian/backlot/issues/98"]
-implemented_by: []
+implemented_by: ["https://github.com/octacian/backlot/pull/136"]
 ---
 
 # Fence workload admission during bounded bulk stop

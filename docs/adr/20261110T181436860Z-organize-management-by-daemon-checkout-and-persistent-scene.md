@@ -2,14 +2,14 @@
 title: "Organize management by daemon checkout and persistent scene"
 date: 2026-11-10
 status: accepted
-implementation: in-progress
+implementation: implemented
 summary: "Keep daemon-wide discovery and exact-ID operations while adding checkout discovery and recorded persistent-scene lifecycle wrappers."
 tags: [cli, lifecycle, identity, api]
 supersedes: []
 superseded_by: []
 related: [/docs/adr/20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md, /docs/adr/20261027T183153280Z-use-framework-parsing-and-preserve-truthful-cli-results.md, /docs/adr/20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md, /docs/adr/20261106T230242771Z-recover-device-only-bindings-after-verified-consumer-settlement.md, /docs/adr/20261106T230626113Z-fence-workload-admission-during-bounded-bulk-stop.md]
 tracking: [https://github.com/octacian/backlot/issues/131, https://github.com/octacian/backlot/issues/129]
-implemented_by: []
+implemented_by: [https://github.com/octacian/backlot/pull/137]
 ---
 
 # Organize management by daemon checkout and persistent scene

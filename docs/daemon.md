@@ -52,6 +52,10 @@ ambiguous. [Selection rules](#recorded-selection-and-stop) define the exact boun
 For the daily command sequence see [operations](operations.md#daily-loop); current
 flags/defaults and output framing live in the [CLI reference](cli.md).
 
+For a scope-wide recorded view and workload-only bulk stop, use
+[`activity` and `stop --all`](cli.md#scope-wide-activity-and-workload-stop).
+Their temporary admission fence leaves administration running and retains bulk-cancelled disposable data.
+
 ## Commands
 
 Use an [installed executable](operations.md) (or `make build` for `bin/backlot`):
@@ -314,6 +318,8 @@ format and rejection/cleanup rules.
 | `POST /v1/cancel` | `InstanceRequest` | `InstanceResponse` |
 | `POST /v1/renew` | `LeaseRequest` | `InstanceResponse` |
 | `POST /v1/run`, `/v1/restart`, `/v1/reset` | `RunRequest` | `InstanceResponse` |
+| `POST /v1/activity` | `ActivityRequest` | `ActivityResponse` (bounded recorded page, owner/settlement provenance) |
+| `POST /v1/runtime/stop-all` | `StopAllRequest` (`all: true`, no ID/force) | `StopAllResponse` (finite selection; partial error retains target results) |
 | `POST /v1/runtime/stop` | `StopRequest` (force requires selected `expected_attempt`) | `InstanceResponse` |
 | `POST /v1/destroy` | `DestroyRequest` (required `contract: "erase-attempt-history/v1"`) | `InstanceResponse` (execution-free destroyed identity) |
 | `POST /v1/attempts/list` | `HistoryRequest` | `HistoryResponse` (at most 100 summaries) |

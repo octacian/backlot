@@ -52,6 +52,15 @@ Keep each argv entry intact and credentials in sensitive environment assignments
    kept resources and any last-observed error. Status exit 0 can describe a failed
    execution. A missing mutation reply means unknown acceptance, not rejection or
    permission to retry. Investigate recorded identity/scope; keep uncertainty visible.
+   Use `activity --json` for one bounded scope-wide view only after checking
+   `activity/v1` in installed and daemon contracts. Follow `next_after` without
+   treating incomplete/changing pages as global absence. Ports/origins/server
+   status are recorded intent, not probes. `stop --all` requires explicit scope-wide
+   authorization: it reaches peer projects/worktrees and is not task-owned cleanup.
+   It retains bulk-cancelled disposable data and infrastructure, has no force mode,
+   and returns nonzero partial results with per-target settlement. Disconnect stops
+   waiting, not accepted cleanup; inspect activity/known IDs before explicit recovery.
+   See [bulk scope and limits](references/cli.md#scope-wide-activity-and-workload-stop).
 5. For edits, consult [identity/lifecycle](references/daemon.md#identity-and-lifecycle)
    and [drift](references/containers.md#generations-jobs-and-drift). Repeated start
    joins starting/ready work with unapplied drift, or requests one compatible new

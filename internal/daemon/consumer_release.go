@@ -42,12 +42,12 @@ func consumerGeneration(f consumerFacts) string {
 	return executionAttempt(f.record.Instance)
 }
 
-func consumerReleaseMatches(tx *bolt.Tx, f consumerFacts) bool {
+func consumerReleaseMatches(tx *bolt.Tx, f consumerFacts, budget ...*scanBudget) bool {
 	receipt := f.runtime.Release
 	if receipt == nil || !receipt.valid() || receipt.Attempt != executionAttempt(f.record.Instance) || receipt.Generation != consumerGeneration(f) {
 		return false
 	}
-	revision, err := consumerEffectRevision(tx, f.record)
+	revision, err := consumerEffectRevision(tx, f.record, budget...)
 	return err == nil && revision == receipt.EffectRevision
 }
 

@@ -30,8 +30,15 @@ func executionAttempt(i v1.Instance) string {
 }
 
 // consumerRecords reads only this transaction's authority; supplied summaries are not proof.
-func consumerRecords(tx *bolt.Tx, selected record) (f consumerFacts, err error) {
+func consumerRecords(tx *bolt.Tx, selected record, budget ...*scanBudget) (f consumerFacts, err error) {
 	id := selected.Instance.ID
+	if len(budget) > 0 {
+		for _, name := range []string{"instances", "runtime", "resources"} {
+			if err := chargeScan(budget, len(tx.Bucket([]byte(name)).Get([]byte(id)))); err != nil {
+				return f, err
+			}
+		}
+	}
 	if err = decodeRecord(tx.Bucket([]byte("instances")).Get([]byte(id)), id, &f.record); err != nil {
 		return f, err
 	}
@@ -119,7 +126,7 @@ func consumerRecords(tx *bolt.Tx, selected record) (f consumerFacts, err error) 
 
 // consumerErased recognizes completed scene/task erasure without assigning a
 // no-launch history. Pending deletion still fences the selected owner.
-func consumerErased(tx *bolt.Tx, r record) (bool, error) {
+func consumerErased(tx *bolt.Tx, r record, budget ...*scanBudget) (bool, error) {
 	i := r.Instance
 	if i.Status != v1.Destroyed || i.Execution != nil {
 		return false, nil
@@ -154,6 +161,9 @@ func consumerErased(tx *bolt.Tx, r record) (bool, error) {
 		}
 	}
 	if err := tx.Bucket([]byte("instances")).ForEach(func(key, raw []byte) error {
+		if err := chargeScan(budget, len(raw)); err != nil {
+			return err
+		}
 		var child record
 		if err := decodeRecord(raw, string(key), &child); err != nil {
 			return err
@@ -162,7 +172,7 @@ func consumerErased(tx *bolt.Tx, r record) (bool, error) {
 			if i.Task != nil {
 				return problem("state_corrupt", "erased task cannot retain dependent consumers")
 			}
-			erased, err := consumerErased(tx, child)
+			erased, err := consumerErased(tx, child, budget...)
 			if err != nil {
 				return err
 			}
@@ -228,7 +238,7 @@ func consumerPreviousBoot(j runtimeRecord, attempt, boot string) bool {
 }
 
 // consumerOwnEligibility evaluates actual journals; no cached settlement is consulted.
-func consumerOwnEligibility(tx *bolt.Tx, f consumerFacts, boot string) v1.ConsumerSettlement {
+func consumerOwnEligibility(tx *bolt.Tx, f consumerFacts, boot string, budget ...*scanBudget) v1.ConsumerSettlement {
 	i, j, g := f.record.Instance, f.runtime, f.resources
 	s := v1.ConsumerSettlement{InstanceID: i.ID, Attempt: executionAttempt(i), State: v1.ConsumerSettled, Cause: v1.SettlementVerifiedRelease, Blockers: []v1.ConsumerBlocker{}}
 	block := func(code, component string, active bool) {
@@ -276,7 +286,7 @@ func consumerOwnEligibility(tx *bolt.Tx, f consumerFacts, boot string) v1.Consum
 	} else if j.Attempt != s.Attempt || f.sequence == 0 {
 		block("attempt_mismatch", "", false)
 	}
-	released := consumerReleaseMatches(tx, f)
+	released := consumerReleaseMatches(tx, f, budget...)
 	if released && s.State == v1.ConsumerSettled {
 		s.Cause, s.ObservedAt = j.Release.Cause, j.Release.ObservedAt
 	}
@@ -328,16 +338,19 @@ func consumerOwnEligibility(tx *bolt.Tx, f consumerFacts, boot string) v1.Consum
 
 // consumerEligibility reads all independent obligations in one supplied transaction.
 // Actual mutation callers must separately join their in-memory owner under existing locks.
-func consumerEligibility(tx *bolt.Tx, r record, currentBoot string) (v1.ConsumerSettlement, error) {
-	f, err := consumerRecords(tx, r)
+func consumerEligibility(tx *bolt.Tx, r record, currentBoot string, budget ...*scanBudget) (v1.ConsumerSettlement, error) {
+	f, err := consumerRecords(tx, r, budget...)
 	if err != nil {
 		return v1.ConsumerSettlement{}, err
 	}
-	s := consumerOwnEligibility(tx, f, currentBoot)
+	s := consumerOwnEligibility(tx, f, currentBoot, budget...)
 	// Tasks borrow only a scene, never another task: reject nesting instead of traversing a graph.
 	var tasks []record
 	parents := map[string]bool{}
 	err = tx.Bucket([]byte("instances")).ForEach(func(key, raw []byte) error {
+		if err := chargeScan(budget, len(raw)); err != nil {
+			return err
+		}
 		var child record
 		if err := decodeRecord(raw, string(key), &child); err != nil {
 			return err
@@ -345,7 +358,7 @@ func consumerEligibility(tx *bolt.Tx, r record, currentBoot string) (v1.Consumer
 		if child.Instance.Task != nil {
 			parents[child.Instance.Task.InstanceID] = true
 			if child.Instance.Task.InstanceID == s.InstanceID {
-				erased, err := consumerErased(tx, child)
+				erased, err := consumerErased(tx, child, budget...)
 				if err != nil || erased {
 					return err
 				}
@@ -370,11 +383,11 @@ func consumerEligibility(tx *bolt.Tx, r record, currentBoot string) (v1.Consumer
 		if parents[child.Instance.ID] {
 			return s, problem("state_corrupt", "nested dependent consumer authority")
 		}
-		facts, err := consumerRecords(tx, child)
+		facts, err := consumerRecords(tx, child, budget...)
 		if err != nil {
 			return s, err
 		}
-		result := consumerOwnEligibility(tx, facts, currentBoot)
+		result := consumerOwnEligibility(tx, facts, currentBoot, budget...)
 		if result.State != v1.ConsumerSettled {
 			s.Blockers = append(s.Blockers, result.Blockers...)
 			s.Blockers = append(s.Blockers, v1.ConsumerBlocker{Code: "dependent_unsettled", InstanceID: child.Instance.ID})
@@ -401,13 +414,16 @@ func consumerEligibility(tx *bolt.Tx, r record, currentBoot string) (v1.Consumer
 	if s.State != v1.ConsumerSettled {
 		s.ObservedAt = ""
 	}
+	if err := chargeScan(budget, 0); err != nil {
+		return s, err
+	}
 	return s, s.Validate()
 }
 
 // consumerEffectRevision binds a producer's release fact to exact current effects.
 // It excludes outcomes, collection strings and all release/settlement summaries.
-func consumerEffectRevision(tx *bolt.Tx, r record) (string, error) {
-	f, err := consumerRecords(tx, r)
+func consumerEffectRevision(tx *bolt.Tx, r record, budget ...*scanBudget) (string, error) {
+	f, err := consumerRecords(tx, r, budget...)
 	if err != nil {
 		return "", err
 	}
@@ -442,16 +458,19 @@ func consumerEffectRevision(tx *bolt.Tx, r record) (string, error) {
 		effects.Abandoned = append(effects.Abandoned, abandoned{a.Attempt, a.Boot, a.PendingBoot, a.Pending, a.Groups})
 	}
 	err = tx.Bucket([]byte("instances")).ForEach(func(key, raw []byte) error {
+		if err := chargeScan(budget, len(raw)); err != nil {
+			return err
+		}
 		var child record
 		if err := decodeRecord(raw, string(key), &child); err != nil {
 			return err
 		}
 		if child.Instance.Task != nil && child.Instance.Task.InstanceID == effects.ID {
-			erased, err := consumerErased(tx, child)
+			erased, err := consumerErased(tx, child, budget...)
 			if err != nil || erased {
 				return err
 			}
-			if _, err := consumerRecords(tx, child); err != nil {
+			if _, err := consumerRecords(tx, child, budget...); err != nil {
 				return err
 			}
 			effects.Dependents = append(effects.Dependents, dependent{child.Instance.ID, executionAttempt(child.Instance), child.Instance.Task})

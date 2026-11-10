@@ -324,41 +324,23 @@ func (s *service) gatewayControl(ctx context.Context, action string, request v1.
 }
 
 func (s *store) publishedActive() error {
-	var routeOnly []string
-	err := s.db.View(func(tx *bolt.Tx) error {
+	boot, _ := native.CurrentBoot()
+	return s.db.View(func(tx *bolt.Tx) error {
 		return tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
 			var r record
 			if err := decodeRecord(data, string(key), &r); err != nil {
 				return err
 			}
-			i := r.Instance
-			if i.Plan.Publish != nil && i.Execution != nil && (active(i.Status) || i.Execution.Kept || i.Execution.CleanupFailure != "") {
-				if !active(i.Status) && !i.Execution.Kept {
-					if data := tx.Bucket([]byte("runtime")).Get(key); data != nil {
-						journal, err := decodeRuntime(data)
-						if err != nil {
-							return err
-						}
-						if journal.Attempt == i.Execution.Attempt && journal.Gateway != nil && journal.GatewayOnlyCleanup {
-							routeOnly = append(routeOnly, i.ID)
-							return nil
-						}
-					}
-				}
-				return problem("gateway_busy", "stop all active published scenes before gateway stop/restart")
+			blocked, err := gatewayConsumerBlocked(tx, r, boot)
+			if err != nil {
+				return err
+			}
+			if blocked {
+				return problem("gateway_busy", "stop all active published scenes and dependent tasks before gateway stop/restart")
 			}
 			return nil
 		})
 	})
-	if err != nil {
-		return err
-	}
-	for _, id := range routeOnly {
-		if err := s.guardDependentTasks(id); err != nil {
-			return problem("gateway_busy", "stop all dependent tasks before gateway stop/restart")
-		}
-	}
-	return nil
 }
 
 func (s *service) gatewayStatus(ctx context.Context, r managedRecord) v1.GatewayResponse {

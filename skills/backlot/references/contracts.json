@@ -9,6 +9,10 @@
   ],
   "contracts": [
     {
+      "id": "activity/v1",
+      "mode": "finite"
+    },
+    {
       "id": "task-executions/v1",
       "mode": "finite"
     },

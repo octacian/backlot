@@ -105,7 +105,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 	httpClient := *c.http
 	// Cleanup/restart can use a configured grace exceeding the transport default.
 	// The daemon bounds cleanup; callers retain context cancellation authority.
-	if path == "/v1/tasks/run" || path == "/v1/run" || path == "/v1/scenes/start" || path == "/v1/shared/start" || path == "/v1/shared/stop" || path == "/v1/shared/restart" || path == "/v1/shared/destroy" || path == "/v1/attached/cancel" || path == "/v1/scenes/stop" || path == "/v1/export" || path == "/v1/doctor" || path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
+	if path == "/v1/runtime/stop-all" || path == "/v1/tasks/run" || path == "/v1/run" || path == "/v1/scenes/start" || path == "/v1/shared/start" || path == "/v1/shared/stop" || path == "/v1/shared/restart" || path == "/v1/shared/destroy" || path == "/v1/attached/cancel" || path == "/v1/scenes/stop" || path == "/v1/export" || path == "/v1/doctor" || path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
 		httpClient.Timeout = 0
 	}
 	rejected := false
@@ -292,7 +292,7 @@ func (c *Client) Doctor(ctx context.Context, request v1.DoctorRequest) (v1.Docto
 
 func mutationPath(path string) bool {
 	switch path {
-	case "/v1/tasks/run", "/v1/projects/reassociate", "/v1/attempts/prune", "/v1/export", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/runtime/stop", "/v1/destroy", "/v1/stop", "/v1/cancel", "/v1/renew", "/v1/scenes/start", "/v1/scenes/stop", "/v1/attached/renew", "/v1/attached/cancel", "/v1/gateway/start", "/v1/gateway/stop", "/v1/gateway/restart", "/v1/shared/start", "/v1/shared/stop", "/v1/shared/restart", "/v1/shared/destroy":
+	case "/v1/runtime/stop-all", "/v1/tasks/run", "/v1/projects/reassociate", "/v1/attempts/prune", "/v1/export", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/runtime/stop", "/v1/destroy", "/v1/stop", "/v1/cancel", "/v1/renew", "/v1/scenes/start", "/v1/scenes/stop", "/v1/attached/renew", "/v1/attached/cancel", "/v1/gateway/start", "/v1/gateway/stop", "/v1/gateway/restart", "/v1/shared/start", "/v1/shared/stop", "/v1/shared/restart", "/v1/shared/destroy":
 		return true
 	}
 	return false
@@ -310,6 +310,9 @@ func mutationError(path string, request any, err error) error {
 	}
 	if detail != nil && (detail.Code == "daemon_unavailable" || detail.Code == "invalid_response" || detail.Code == "api_version") {
 		target := ""
+		if path == "/v1/runtime/stop-all" {
+			return &v1.PlanError{Code: detail.Code, Message: "bulk stop acceptance/result is unknown; inspect activity and known targets with the same --state-dir before explicit recovery; do not automatically retry"}
+		}
 		switch value := request.(type) {
 		case v1.ReassociationRequest:
 			if !value.Apply {

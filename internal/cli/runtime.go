@@ -34,9 +34,12 @@ func runtimeCommands() []*urfave.Command {
 		}
 		commands = append(commands, &urfave.Command{Name: name, Usage: usage, ArgsUsage: args, Description: map[string]string{"run": "Persistent runs return at readiness and remain running; disposable runs wait, collect evidence and clean up. --attached owns a persistent attempt and stops it on client loss.\nExample: backlot run test -- -run TestExample", "restart": "Example: backlot restart INSTANCE_ID", "reset": "Example: backlot reset INSTANCE_ID"}[name], Flags: flags, Action: runNative})
 	}
-	commands = append(commands, &urfave.Command{Name: "stop", ArgsUsage: "<instance-id>", Description: "Retain persistent data; release verified-unused instance networks, including already-stopped records. Cleanup failure retains unresolved networks; restore provider/ownership or remove foreign consumers and retry stop.\nExample: backlot stop INSTANCE_ID", Usage: "Stop runtime; --force acknowledges potentially live native survivors", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "force", Usage: "Relinquish unresolved native claims; survivors may still run/write"}), Action: func(ctx context.Context, c *urfave.Command) error {
+	commands = append(commands, &urfave.Command{Name: "stop", ArgsUsage: "<instance-id> | --all", Description: "With --all: no ID or force; bound complete selection, retain disposable and persistent data, leave infrastructure running. Disconnect ends waiting, not accepted cleanup. Partial failure returns nonzero with per-target results; inspect activity before explicit recovery.\nRetain persistent data; release verified-unused instance networks, including already-stopped records. Cleanup failure retains unresolved networks; restore provider/ownership or remove foreign consumers and retry stop.\nExample: backlot stop INSTANCE_ID", Usage: "Stop runtime; --force acknowledges potentially live native survivors", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "all", Usage: "Stop a bounded complete selection of workloads, retaining all data and infrastructure"}, &urfave.BoolFlag{Name: "force", Usage: "Relinquish unresolved native claims; survivors may still run/write"}), Action: func(ctx context.Context, c *urfave.Command) error {
+		if c.Bool("all") {
+			return stopAllAction(ctx, c)
+		}
 		if c.Args().Len() != 1 {
-			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "stop requires one recorded instance ID"})
+			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "stop requires one recorded instance ID or --all"})
 		}
 		cli, err := runtimeClient(c)
 		if err != nil {

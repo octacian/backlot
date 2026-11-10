@@ -8,29 +8,14 @@ import (
 // Accepted lifecycle mutations participate in daemon cancellation and storage ownership just
 // like executions. The closing fence and registration are atomic under service.mu.
 type mutationOwner struct {
-	cancel context.CancelFunc
-	done   chan struct{}
+	cancel     context.CancelFunc
+	done       chan struct{}
+	workload   bool
+	generation uint64
 }
 
 func (s *service) beginMutation(ctx context.Context) (context.Context, func(), error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closing {
-		return nil, nil, problem("shutting_down", "daemon is shutting down")
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	owner := &mutationOwner{cancel: cancel, done: make(chan struct{})}
-	if s.mutationOwners == nil {
-		s.mutationOwners = map[*mutationOwner]struct{}{}
-	}
-	s.mutationOwners[owner] = struct{}{}
-	return ctx, func() {
-		cancel()
-		s.mu.Lock()
-		delete(s.mutationOwners, owner)
-		close(owner.done)
-		s.mu.Unlock()
-	}, nil
+	return s.beginOwnedMutation(ctx, false)
 }
 
 func (s *service) stopMutations() error {
@@ -51,4 +36,59 @@ func (s *service) stopMutations() error {
 		}
 	}
 	return nil
+}
+
+// admissionKey carries revocable authority across input resolution and instance locks.
+type admissionKey struct{}
+
+func (s *service) beginWorkload(ctx context.Context) (context.Context, func(), error) {
+	return s.beginOwnedMutation(ctx, true)
+}
+
+func (s *service) beginOwnedMutation(ctx context.Context, workload bool) (context.Context, func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closing {
+		return nil, nil, problem("shutting_down", "daemon is shutting down")
+	}
+	if workload && s.bulkStopping {
+		return nil, nil, problem("admission_closed", "workload admission is closed; inspect activity before starting again")
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	owner := &mutationOwner{cancel: cancel, done: make(chan struct{}), workload: workload, generation: s.admissionGeneration}
+	if s.mutationOwners == nil {
+		s.mutationOwners = map[*mutationOwner]struct{}{}
+	}
+	s.mutationOwners[owner] = struct{}{}
+	if workload {
+		ctx = context.WithValue(ctx, admissionKey{}, owner)
+	}
+	return ctx, func() {
+		cancel()
+		s.mu.Lock()
+		delete(s.mutationOwners, owner)
+		close(owner.done)
+		s.mu.Unlock()
+	}, nil
+}
+
+// workloadAllowed requires service.mu; reopening never revives an earlier ticket.
+func (s *service) workloadAllowed(ctx context.Context) error {
+	owner, _ := ctx.Value(admissionKey{}).(*mutationOwner)
+	if s.closing {
+		return problem("shutting_down", "daemon is shutting down")
+	}
+	if s.bulkStopping || owner != nil && owner.generation != s.admissionGeneration {
+		return problem("admission_closed", "workload admission was invalidated; inspect activity before starting again")
+	}
+	if ctx.Err() != nil {
+		return problem("cancelled", "request cancelled before workload acceptance")
+	}
+	return nil
+}
+
+func (s *service) checkWorkload(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.workloadAllowed(ctx)
 }

@@ -24,7 +24,7 @@ func (s *service) runTask(ctx context.Context, q v1.TaskRunRequest) (v1.Instance
 	if _, err := executionDeadlines(q.Options); err != nil {
 		return out, err
 	}
-	_, finish, err := s.beginMutation(ctx)
+	ctx, finish, err := s.beginWorkload(ctx)
 	if err != nil {
 		return out, err
 	}
@@ -109,8 +109,8 @@ func (s *service) runTask(ctx context.Context, q v1.TaskRunRequest) (v1.Instance
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closing {
-		return out, problem("shutting_down", "daemon is shutting down")
+	if err := s.workloadAllowed(ctx); err != nil {
+		return out, err
 	}
 	parent, err = s.store.inspect(parent.ID)
 	if err != nil {

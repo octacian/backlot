@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -687,6 +688,42 @@ func TestNamedRestartRechecksSelectionAfterSourceResolution(t *testing.T) {
 		current, err := s.store.inspect(id)
 		if err != nil || current.Execution != nil || id == selected.Instance.ID && current.Status != v1.Prepared {
 			t.Fatal("ambiguous selection admitted runtime", id, current.Status, err)
+		}
+	}
+}
+
+func TestRestartResetRejectCurrentDisposableBeforePreparation(t *testing.T) {
+	for _, named := range []bool{true, false} {
+		for _, action := range []string{"restart", "reset"} {
+			t.Run(fmt.Sprintf("%s/named=%t", action, named), func(t *testing.T) {
+				s, root, config := sceneFixture(t)
+				selected := scenePrepare(t, s, root, config)
+				var manifest v1.Manifest
+				if err := json.Unmarshal([]byte(fixtureManifest), &manifest); err != nil {
+					t.Fatal(err)
+				}
+				dev := manifest.Scenes["dev"]
+				dev.Lifetime, dev.TerminalJob = v1.Disposable, "check"
+				manifest.Scenes["dev"] = dev
+				data, err := json.Marshal(manifest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, "backlot.json"), data, 0600); err != nil {
+					t.Fatal(err)
+				}
+				before := stateContents(t, s.store)
+				q := v1.RunRequest{APIVersion: v1.Version, InstanceID: selected.Instance.ID, Plan: request(root, config, "dev").Plan}
+				if named {
+					q.InstanceID, q.Plan = "", v1.PlanRequest{}
+					q.Target = &v1.SceneTarget{CWD: root, Scene: "dev"}
+				}
+				_, err = s.runMode(context.Background(), q, action == "reset")
+				code(t, err, "conflict")
+				if !reflect.DeepEqual(before, stateContents(t, s.store)) {
+					t.Fatal("rejected lifetime change added state or changed original instance/private snapshot")
+				}
+			})
 		}
 	}
 }

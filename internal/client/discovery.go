@@ -49,8 +49,9 @@ func (c *Client) FilteredList(ctx context.Context, request v1.FilteredListReques
 		if len(response.Instances) > limit {
 			return response, responseError()
 		}
+		// Summary checkout paths are launch provenance; current scope is resolved by the daemon.
 		for _, i := range response.Instances {
-			if response.Checkout != nil && i.Checkout != response.Checkout.Path || i.ID <= request.AfterID || request.ProjectID != "" && i.Project != request.ProjectID || request.Scene != "" && i.Scene != request.Scene || request.Lifetime != "" && i.Lifetime != request.Lifetime || request.State != "" && i.Status != request.State {
+			if i.ID <= request.AfterID || request.ProjectID != "" && i.Project != request.ProjectID || request.Scene != "" && i.Scene != request.Scene || request.Lifetime != "" && i.Lifetime != request.Lifetime || request.State != "" && i.Status != request.State {
 				return response, responseError()
 			}
 		}

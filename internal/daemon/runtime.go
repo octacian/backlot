@@ -189,7 +189,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		if previous.Status == v1.Destroyed {
 			return empty, problem("destroyed", "instance was destroyed; run the scene to create a fresh identity")
 		}
-		if previous.Plan.Project != snapshot.Plan.Project || previous.Plan.Scene != snapshot.Plan.Scene || previous.Plan.Lifetime != v1.Persistent || !sameCheckoutValue(associatedCheckout(previous), identity.checkout) {
+		if previous.Plan.Project != snapshot.Plan.Project || previous.Plan.Scene != snapshot.Plan.Scene || previous.Plan.Lifetime != v1.Persistent || snapshot.Plan.Lifetime != v1.Persistent || !sameCheckoutValue(associatedCheckout(previous), identity.checkout) {
 			return empty, problem("conflict", "restart must address the same persistent project, checkout and scene")
 		}
 	}

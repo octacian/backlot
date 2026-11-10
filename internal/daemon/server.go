@@ -242,6 +242,29 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/activity":
+			var q v1.ActivityRequest
+			if !decode(w, r, &q) || !compatible(w, q.APIVersion) {
+				return
+			}
+			response, err := s.activity(r.Context(), q)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+		case "/v1/runtime/stop-all":
+			var q v1.StopAllRequest
+			if !decode(w, r, &q) || !compatible(w, q.APIVersion) {
+				return
+			}
+			response, err := s.stopAll(r.Context(), q)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
+
 		case "/v1/scenes/start":
 			var request v1.SceneStartRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {

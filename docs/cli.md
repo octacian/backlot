@@ -32,6 +32,8 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `restart ID [--config PATH]` | Persistent only; read current recorded project/config sources and apply compatible drift, retaining data |
 | `reset ID [--config PATH]` | Persistent only; stop, remove old owned generation, then start fresh; destructive |
 | `stop ID` / `scene stop SCENE [--project PATH]` | Stop selected runtime/routes, release verified-unused instance networks and retain data; named stop uses recorded selection |
+| `activity [--limit 100] [--after CURSOR]` | One bounded scope-wide activity page, exact infrastructure blockers and recorded/observed provenance |
+| `stop --all` | Temporarily fence workload admission, select at most 25 targets completely, stop/join without deleting data or stopping infrastructure; no ID or force |
 | `destroy ID` | Remove owned runtime/data, then erase attempt results/logs/artifacts; export first |
 | `history ID [--limit 100] [--after CURSOR]` | Newest-first retained attempt summaries |
 | `inspect ID --attempt ATTEMPT` / `inspect ID --last-completed` | Exact retained result/provenance; mutually exclusive selectors |
@@ -63,6 +65,99 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 Stop retries network cleanup even for stopped records; named stop may report
 `already_stopped` after releasing networks. Consumer, provider or ownership failures
 require correction and retry; see [network cleanup](containers.md#ownership-and-recovery).
+
+### Scope-wide activity and workload stop
+
+Use the same `--state-dir` for every command; omission selects the default daemon.
+This scope includes recorded projects and worktrees, not every process or state
+root on the computer. Neither command reads current manifests, enrolls markers,
+repairs registration nor recomposes retained sources.
+
+```sh
+backlot activity --state-dir /private/backlot --json
+backlot activity --state-dir /private/backlot --limit 10 --after NEXT_AFTER --json
+backlot stop --state-dir /private/backlot --all --json
+```
+
+`activity` returns `ActivityResponse`: workload/shared entries, recorded managed
+gateway status, current preparing-admission count and admission-closed flag.
+Workload summaries include current consumer settlement, kept work, recorded
+ports/origin and an owner observation (`running`, `joined`, `absent`) in the
+reported daemon generation. A joined finite execution owner can still retain
+healthy kept services; `kept` and settlement describe those remaining obligations.
+Historical status and current settlement can differ:
+`interrupted` does not prevent verified release. Use `inspect ID` for historical
+outcome, collection gaps and worst native confidence. Recorded server status,
+ports and origins do not establish provider health or live listeners. No provider
+probe runs and no private capability, command, hydrated input or credential is
+included. Shared entries retain their actual `last_transition`; reads never
+refresh it.
+
+Each workload's `blockers` names the exact shared service ID or selected managed
+gateway guard. `stop` also means restart is blocked. Shared `destroy` means a
+retained allocation must first be explicitly released: an allocation can block
+destroy while allowing stop. Parent settlement includes dependent task identities.
+These diagnoses use the actual lifecycle predicates, including the exact-attempt
+route-only recovery exception. Ordinary output suggests `stop ID`, or explicit
+`destroy ID` for an idle retained allocation; destroy removes data and history.
+JSON callers can construct those commands from validated recorded IDs. Preserve
+this command's state directory when acting on them.
+
+Pages contain at most 100 entries and 512 KiB of encoded entries. Reads charge
+skipped records and dependent settlement/release-proof scans against 10,000 scans
+and 64 MiB per page. Owner observation also refuses more than 10,000
+current lifecycle owners. `next_after` resumes after the last fully evaluated record;
+`complete: false` means the observation is incomplete, even with no entries.
+An entry that cannot fit or be evaluated within a fresh page fails with
+`scope_too_large`; use known recorded IDs for diagnosis. Changing membership and
+pagination never prove global absence. A settled workload without a retained
+shared allocation is omitted; shared server intent remains visible.
+
+`stop --all` requires explicit all intent, no positional ID, and no `--force`
+option (including `--force=false`). It closes admission before selection and
+permanently invalidates earlier prepare/run/attached/scene/task/restart/reset
+tickets, including requests resolving inputs or waiting for a lifecycle lock.
+Reopening cannot revive an old ticket. Already-registered queued execution is
+selected too. Reads, renewal, ordinary cleanup and explicit infrastructure
+controls remain usable. Preceding admissions have a 20-second join budget within
+the two-minute coordination budget; an unjoined owner remains unresolved.
+
+Before acceptance, bulk stop refuses more than 10,000 current lifecycle owners.
+The complete selection must fit 25 targets, 10,000 charged scans and 64 MiB before
+any target stop is issued. Selection corruption/overflow refuses target stops;
+prior admission invalidation may already have effects. The target limit reserves
+space for worst-case settlement diagnostics under the existing 1 MiB wire limit.
+`selection_complete` and `selection_failure` distinguish refusal from an empty
+successful selection. Busy targets are unresolved without a new cleanup attempt.
+Dependent tasks join before parents; uncertain ownership is never a force bypass.
+
+The finite `StopAllResponse` contains a transient `operation_id`, daemon generation,
+complete selected target identities/attempts/generations, and each `completed`,
+`failed` or `unresolved` outcome. `settlement_observation` labels selection-time
+versus after-stop evidence. Collection failure is separate from surviving
+consumers: a failed target can be settled. Partial failure returns nonzero with
+this usable response and its `partial_failure` error, rather than replacing it
+with an error-only envelope. Uncertain targets and unjoined admissions preclude
+all-success. The temporary fence reopens when coordination settles unless daemon
+shutdown has permanently closed admission. Completion describes this finite
+selection; it does not promise that the daemon stays idle.
+
+Bulk cancellation suppresses investigation keep and retains persistent **and
+bulk-cancelled disposable** data, allocations, paired credentials, history and
+evidence. Only authenticated runtime resources are released after joining their
+consumers. Idle retained data, shared servers, gateway and daemon are left alone.
+Previously accepted destructive cleanup and application writes cannot be undone.
+Ordinary disposable completion/cancellation keeps its existing cleanup policy.
+
+SIGINT/SIGTERM, timeout or disconnect ends waiting, not accepted cleanup. Existing
+execution owners can continue after bounded joining. Started kept/recovery cleanup
+retains its registered shutdown-joined owner and exact-attempt serialization until
+it finishes, including after the fence reopens. There is no operation journal,
+replay, cancellation endpoint or automatic retry. After a missing reply, inspect
+activity and known targets in the same scope before explicit recovery; operation
+IDs cannot be replayed after a daemon restart.
+
+### Recorded list filters
 
 `list` filters intersect: `--project PATH` (exact recorded project directory) or
 `--checkout PATH` (verified checkout), plus `--project-id`, `--scene`,

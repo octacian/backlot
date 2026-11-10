@@ -782,7 +782,7 @@ func (s *store) sharedDependents(serviceID string, all bool) (int, error) {
 						return err
 					}
 					// Prepared allocations reserve their server for the accepted startup.
-					if r.Instance.Status == v1.Prepared || settlement.State != v1.ConsumerSettled {
+					if sharedConsumerBlocked(r.Instance, settlement) {
 						count++
 					}
 				}

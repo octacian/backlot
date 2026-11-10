@@ -21,6 +21,7 @@ import (
 )
 
 type execution struct {
+	bulkCancelled       bool // guarded by service.mu; retains data and suppresses investigation keep
 	taskAdmissionClosed bool // guarded by service.mu; teardown closes before joining dependents
 	borrowed            bool
 	referenceID         string
@@ -96,7 +97,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	if request.AllowImageChange && (request.InstanceID == "" || reset || request.Attached) {
 		return v1.InstanceResponse{}, problem("invalid_request", "allow_image_change is only supported by explicit restart")
 	}
-	ctx, finish, admissionErr := s.beginMutation(ctx)
+	ctx, finish, admissionErr := s.beginWorkload(ctx)
 	if admissionErr != nil {
 		return v1.InstanceResponse{}, admissionErr
 	}
@@ -202,6 +203,9 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		response.ManifestDrift = plan.ManifestDrift(current.Plan, snapshot.Plan)
 		response.ConfigDrift = plan.ConfigurationDrift(current.Plan, snapshot.Plan)
 		if bound {
+			if err := s.checkWorkload(ctx); err != nil {
+				return empty, err
+			}
 			if request.Attached {
 				return empty, problem("conflict", "attached start cannot adopt an existing execution; stop it first")
 			}
@@ -220,6 +224,9 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 			return empty, err
 		}
 		if err := identity.verify(); err != nil {
+			return empty, err
+		}
+		if err := s.checkWorkload(ctx); err != nil {
 			return empty, err
 		}
 		if _, err := s.stopExecution(id); err != nil {
@@ -274,6 +281,9 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		if err := identity.verify(); err != nil {
 			return empty, err
 		}
+		if err := s.checkWorkload(ctx); err != nil {
+			return empty, err
+		}
 		if _, err := s.stopExecution(id); err != nil {
 			var typed *v1.PlanError
 			if !errors.As(err, &typed) || typed.Code != "collection_failed" {
@@ -282,6 +292,9 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		}
 	}
 	if reset {
+		if err := s.checkWorkload(ctx); err != nil {
+			return empty, err
+		}
 		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		cleanupErr := s.store.removeResources(cleanup, id)
 		cancel()
@@ -291,8 +304,8 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closing {
-		return empty, problem("shutting_down", "daemon is shutting down")
+	if err := s.workloadAllowed(ctx); err != nil {
+		return empty, err
 	}
 	if snapshot.Plan.Publish != nil && snapshot.Caddy != nil {
 		if err := s.requireManaged(ctx, *snapshot.Caddy); err != nil {
@@ -636,7 +649,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		}
 		s.mu.Lock()
 		entry.taskAdmissionClosed = true
-		shuttingDown := s.closing
+		shuttingDown := s.closing || entry.bulkCancelled
 		s.mu.Unlock()
 		sanitizeResult(result, snapshot, entry)
 		_ = save(v1.Stopping)

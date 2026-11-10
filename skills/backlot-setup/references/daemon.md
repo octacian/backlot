@@ -45,6 +45,10 @@ ambiguous. [Selection rules](daemon.md#recorded-selection-and-stop) define the e
 For the daily command sequence see [operations](operations.md#daily-loop); current
 flags/defaults and output framing live in the [CLI reference](cli.md).
 
+For a scope-wide recorded view and workload-only bulk stop, use
+[`activity` and `stop --all`](cli.md#scope-wide-activity-and-workload-stop).
+Their temporary admission fence leaves administration running and retains bulk-cancelled disposable data.
+
 ## Tasks borrowing a ready parent
 
 [Declared tasks](manifest.md#declared-native-tasks) bind to an already-ready persistent

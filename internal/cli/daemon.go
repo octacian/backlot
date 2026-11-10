@@ -53,6 +53,10 @@ func output(c *urfave.Command, value any, err error) error {
 		return json.NewEncoder(c.Writer).Encode(value)
 	}
 	switch result := value.(type) {
+	case v1.ActivityResponse:
+		return activityOutput(c, result)
+	case v1.StopAllResponse:
+		return stopAllOutput(c, result)
 	case v1.GatewayResponse:
 		for _, warning := range result.NativeOwnershipWarnings {
 			if _, e := fmt.Fprintln(c.ErrWriter, "Warning:", warning.Message); e != nil {

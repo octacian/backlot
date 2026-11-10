@@ -32,6 +32,8 @@ type service struct {
 	lease                 time.Duration
 	mu                    sync.Mutex
 	closing               bool
+	bulkStopping          bool
+	admissionGeneration   uint64
 	directory             string
 	executions            map[string]*execution
 	outputs               map[string]chan struct{}
@@ -58,6 +60,11 @@ func validatePlanRequest(request v1.PlanRequest) error {
 }
 
 func (s *service) prepare(ctx context.Context, request v1.PrepareRequest) (v1.InstanceResponse, error) {
+	ctx, finish, err := s.beginWorkload(ctx)
+	if err != nil {
+		return v1.InstanceResponse{}, err
+	}
+	defer finish()
 	return s.prepareSelected(ctx, request, false)
 }
 
@@ -108,6 +115,9 @@ func (s *service) enrollSource(ctx context.Context, source plan.Source) error {
 
 // prepareCaptured accepts the exact generation resolved by preparation or launch.
 func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, original capturedSource, scene string, persistentOnly bool, observed *startObservation) (v1.InstanceResponse, error) {
+	if err := s.checkWorkload(ctx); err != nil {
+		return v1.InstanceResponse{}, err
+	}
 	unlockMarkers, err := registration.LockRead(ctx, original.registrationLocation)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -149,8 +159,8 @@ func (s *service) prepareCaptured(ctx context.Context, snapshot plan.Snapshot, o
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closing {
-		return v1.InstanceResponse{}, problem("shutting_down", "daemon is shutting down")
+	if err := s.workloadAllowed(ctx); err != nil {
+		return v1.InstanceResponse{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return v1.InstanceResponse{}, problem("cancelled", "request cancelled before acceptance")

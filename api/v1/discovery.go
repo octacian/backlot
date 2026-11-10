@@ -209,12 +209,12 @@ type ContractsResponse struct {
 
 // SupportedReadContracts returns the installed discovery and existing evidence modes.
 func SupportedReadContracts() []ReadContract {
-	return []ReadContract{{ID: "task-executions/v1", Mode: "finite"}, {ID: "scene-declarations/v1", Mode: "finite"}, {ID: "instance-filter/v1", Mode: "finite"}, {ID: "log-page/v1", Mode: "finite"}, {ID: "attempt-history/v1", Mode: "finite"}, {ID: "configuration/v1", Mode: "finite"}, {ID: "logs/v1", Mode: "ndjson"}, {ID: "backlot.export/v1", Mode: "finite"}}
+	return []ReadContract{{ID: "activity/v1", Mode: "finite"}, {ID: "task-executions/v1", Mode: "finite"}, {ID: "scene-declarations/v1", Mode: "finite"}, {ID: "instance-filter/v1", Mode: "finite"}, {ID: "log-page/v1", Mode: "finite"}, {ID: "attempt-history/v1", Mode: "finite"}, {ID: "configuration/v1", Mode: "finite"}, {ID: "logs/v1", Mode: "ndjson"}, {ID: "backlot.export/v1", Mode: "finite"}}
 }
 
 // SupportedDaemonReadContracts lists finite daemon reads, excluding local declarations.
 func SupportedDaemonReadContracts() []ReadContract {
-	return []ReadContract{{ID: "task-executions/v1", Mode: "finite"}, {ID: "instance-filter/v1", Mode: "finite"}, {ID: "log-page/v1", Mode: "finite"}, {ID: "attempt-history/v1", Mode: "finite"}, {ID: "configuration/v1", Mode: "finite"}, {ID: "logs/v1", Mode: "finite"}, {ID: "backlot.export/v1", Mode: "finite"}}
+	return []ReadContract{{ID: "activity/v1", Mode: "finite"}, {ID: "task-executions/v1", Mode: "finite"}, {ID: "instance-filter/v1", Mode: "finite"}, {ID: "log-page/v1", Mode: "finite"}, {ID: "attempt-history/v1", Mode: "finite"}, {ID: "configuration/v1", Mode: "finite"}, {ID: "logs/v1", Mode: "finite"}, {ID: "backlot.export/v1", Mode: "finite"}}
 }
 
 // LogPageRequest selects a bounded scan of retained output with transient continuation.

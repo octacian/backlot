@@ -172,6 +172,12 @@ and retry through the same daemon scope. See the
 [lifecycle decision table](daemon.md#identity-and-lifecycle).
 `daemon stop` is for deliberate daemon shutdown, not routine scene cleanup.
 
+For activity across projects/worktrees in the selected daemon, run
+`backlot activity --json`. Use `stop --all` only when the entire selected scope
+is authorized; it can stop peers belonging to other projects. It retains data
+and administrative services. Read [the scope, bounds and partial-result contract](cli.md#scope-wide-activity-and-workload-stop)
+before bulk cleanup; a lost reply never authorizes an automatic retry.
+
 ## Diagnosis and recovery
 
 | Symptom | Diagnosis and next action |

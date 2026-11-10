@@ -44,6 +44,8 @@ type ExecutionOptions struct {
 
 // RunRequest starts or explicitly restarts a validated scene.
 type RunRequest struct {
+	// Target selects a recorded named scene for restart/reset only.
+	Target           *SceneTarget     `json:"target,omitempty"`
 	AllowImageChange bool             `json:"allow_image_change,omitempty"`
 	Attached         bool             `json:"attached,omitempty"`
 	APIVersion       string           `json:"api_version"`

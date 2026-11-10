@@ -464,11 +464,11 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
 				return
 			}
-			if (r.URL.Path == "/v1/restart" || r.URL.Path == "/v1/reset") && !validID(request.InstanceID) {
+			if (r.URL.Path == "/v1/restart" || r.URL.Path == "/v1/reset") && v1.ValidateMutationTarget(request.InstanceID, request.Target) != nil {
 				writeError(w, problem("invalid_request", "restart requires recorded instance_id"))
 				return
 			}
-			if r.URL.Path == "/v1/run" && request.InstanceID != "" {
+			if r.URL.Path == "/v1/run" && (request.InstanceID != "" || request.Target != nil) {
 				writeError(w, problem("invalid_request", "run does not accept instance_id"))
 				return
 			}
@@ -513,7 +513,7 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
 				return
 			}
-			if !validID(request.InstanceID) {
+			if err := v1.ValidateMutationTarget(request.InstanceID, request.Target); err != nil {
 				writeError(w, problem("invalid_request", "recorded instance_id required"))
 				return
 			}
@@ -521,7 +521,7 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				writeError(w, problem("api_version", "destroy requires erase-attempt-history/v1; upgrade the client"))
 				return
 			}
-			instance, err := s.destroyWithForce(r.Context(), request.InstanceID, request.Force)
+			instance, err := s.destroySelected(r.Context(), request.InstanceID, request.Force, request.Target)
 			if err != nil {
 				writeError(w, err)
 				return

@@ -98,15 +98,19 @@ type SceneDescriptionResponse struct {
 
 // FilteredListRequest intersects recorded selectors before bounded pagination.
 type FilteredListRequest struct {
-	APIVersion   string         `json:"api_version"`
-	AfterID      string         `json:"after_id,omitempty"`
-	Limit        int            `json:"limit,omitempty"`
-	ProjectPath  string         `json:"project_path,omitempty"`
-	CheckoutPath string         `json:"checkout_path,omitempty"`
-	ProjectID    string         `json:"project_id,omitempty"`
-	Scene        string         `json:"scene,omitempty"`
-	Lifetime     Lifetime       `json:"lifetime,omitempty"`
-	State        InstanceStatus `json:"state,omitempty"`
+	// CWD selects its enclosing Git checkout only when CheckoutPath is omitted.
+	CWD string `json:"cwd,omitempty"`
+	// IncludeCheckout requests daemon-resolved scope independently of page rows.
+	IncludeCheckout bool           `json:"include_checkout,omitempty"`
+	APIVersion      string         `json:"api_version"`
+	AfterID         string         `json:"after_id,omitempty"`
+	Limit           int            `json:"limit,omitempty"`
+	ProjectPath     string         `json:"project_path,omitempty"`
+	CheckoutPath    string         `json:"checkout_path,omitempty"`
+	ProjectID       string         `json:"project_id,omitempty"`
+	Scene           string         `json:"scene,omitempty"`
+	Lifetime        Lifetime       `json:"lifetime,omitempty"`
+	State           InstanceStatus `json:"state,omitempty"`
 }
 
 // Validate rejects mixed locations, invalid selectors and unbounded pages.
@@ -114,10 +118,13 @@ func (r FilteredListRequest) Validate() error {
 	invalid := func() error {
 		return &PlanError{Code: "invalid_request", Message: "use one absolute project/checkout location, declared selectors and limit 0 through 100"}
 	}
+	if r.CWD != "" && (r.CheckoutPath != "" || r.ProjectPath != "" || !r.IncludeCheckout) || r.IncludeCheckout && r.CWD == "" && r.CheckoutPath == "" && r.ProjectPath == "" {
+		return invalid()
+	}
 	if r.APIVersion != Version || r.Limit < 0 || r.Limit > 100 || r.AfterID != "" && !buildImageHex(r.AfterID) || r.ProjectPath != "" && r.CheckoutPath != "" {
 		return invalid()
 	}
-	for _, p := range []string{r.ProjectPath, r.CheckoutPath} {
+	for _, p := range []string{r.ProjectPath, r.CheckoutPath, r.CWD} {
 		if p != "" && (!filepath.IsAbs(p) || strings.ContainsRune(p, 0)) {
 			return invalid()
 		}

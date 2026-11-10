@@ -29,19 +29,20 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `run SCENE [--project PATH] [--config PATH] [-- ARGS...]` | Execute; persistent returns at readiness, disposable after collection/cleanup |
 | `task run TASK --scene SCENE [--project PATH] [-- ARGS...]` / `task run TASK --instance ID [-- ARGS...]` | Explicit finite native task against an already-ready persistent parent; returns its independent leased execution result |
 | `scene start SCENE [--project PATH] [--config PATH]` | Ensure a named persistent scene is running in the selected checkout |
-| `restart ID [--config PATH]` | Persistent only; read current recorded project/config sources and apply compatible drift, retaining data |
-| `reset ID [--config PATH]` | Persistent only; stop, remove old owned generation, then start fresh; destructive |
+| `restart ID [--config PATH]` / `scene restart SCENE [--project PATH] [--config PATH]` | Persistent only; read current recorded project/config sources and apply compatible drift, retaining data |
+| `reset ID [--config PATH]` / `scene reset SCENE [--project PATH] [--config PATH]` | Persistent only; stop, remove old owned generation, then start fresh; destructive |
 | `stop ID` / `scene stop SCENE [--project PATH]` | Stop selected runtime/routes, release verified-unused instance networks and retain data; named stop uses recorded selection |
 | `activity [--limit 100] [--after CURSOR]` | One bounded scope-wide activity page, exact infrastructure blockers and recorded/observed provenance |
 | `stop --all` | Temporarily fence workload admission, select at most 25 targets completely, stop/join without deleting data or stopping infrastructure; no ID or force |
-| `destroy ID` | Remove owned runtime/data, then erase attempt results/logs/artifacts; export first |
+| `destroy ID` / `scene destroy SCENE [--project PATH]` | Remove owned runtime/data, then erase attempt results/logs/artifacts; export first |
 | `history ID [--limit 100] [--after CURSOR]` | Newest-first retained attempt summaries |
 | `inspect ID --attempt ATTEMPT` / `inspect ID --last-completed` | Exact retained result/provenance; mutually exclusive selectors |
 | `history prune ID [--older-than D] [--keep N] [--dry-run]` | Union selection; requires age and/or count; protects runtime/cleanup obligations |
 | `inspect ID` / `status ID` | Current redacted instance; destroyed identities omit execution; no manifest needed |
 | `scene status SCENE [--project PATH]` | Recorded persistent selection; successful `not_found` has no result |
 | `status ID --follow` / `scene status SCENE --follow` | Sample without owning runtime; `--interval 1s` (100ms–1m), `--duration 30m` (1s–24h) |
-| `list` | One page of recorded history, including destroyed records; `--limit 100` (1–100), `--after NEXT_AFTER_ID` |
+| `checkout list [--checkout PATH]` | One checkout, default enclosing Git checkout; same recorded filters/pagination as list, without --project |
+| `list` | Daemon-wide by default; one page of recorded history, including destroyed records; `--limit 100` (1–100), `--after NEXT_AFTER_ID` |
 | `logs ID [--component NAME] [--follow]` | Retained log chunks; follow observes until runtime settles/interruption |
 | `logs ID --page` | Finite page; `--component`, `--attempt`, `--stream stdout\|stderr`, `--after`, `--limit 100` (1–1000) |
 | `fixtures ID [--component NAME]` | Discover fixture names with sensitive values redacted |
@@ -157,11 +158,46 @@ replay, cancellation endpoint or automatic retry. After a missing reply, inspect
 activity and known targets in the same scope before explicit recovery; operation
 IDs cannot be replayed after a daemon restart.
 
+### Named lifecycle mutations
+
+`scene restart`, `scene reset` and `scene destroy` select exactly one recorded
+persistent scene in the nearest recorded project, or the exact `--project` location.
+Missing, disposable-only and ambiguous selections fail nonzero; candidate ID
+samples are bounded, with `list --scene SCENE` guidance for further discovery.
+Use recorded IDs when checkout paths are unavailable. Names never select a newest
+disposable run or fall back to an outer project.
+
+Restart/reset accept the same config, startup/job timeout and stop-grace options
+as their ID counterparts; restart alone accepts `--allow-image-change`. Attached
+mode remains unsupported. Destroy accepts the existing `--force`, with unchanged
+ownership limits. Export first, using `--allow-partial` when needed. Restart
+retains data; reset replaces the owned data generation under the same ID; destroy
+erases data and retained evidence. Neither destructive command is a rollback.
+The daemon revalidates selection under lifecycle serialization before effects;
+selection changes conflict. Results use the same `InstanceResponse`, waiting,
+cancellation and success-only startup-details disclosure as ID commands. A missing
+mutation reply means unknown completion: inspect before explicit recovery and
+never automatically retry by dropping the named selector.
+
 ### Recorded list filters
 
 `list` filters intersect: `--project PATH` (exact recorded project directory) or
 `--checkout PATH` (verified checkout), plus `--project-id`, `--scene`,
 `--lifetime persistent|disposable`, and `--state` (exact instance status).
+`checkout list` defaults to the enclosing Git checkout of the canonical working
+directory, including subdirectories and linked worktrees. Outside Git, supply
+`--checkout PATH` or use recorded IDs. Explicit `--checkout PATH` on either list
+command names the exact checkout root, including non-Git roots; it does not search
+upward. Missing/replaced locations fail rather than enrolling or repairing them.
+Checkout filters intersect the whole checkout, across recorded projects;
+`checkout list` has no `--project` replacement. Root `list` stays daemon-wide by
+default and retains exact-project filtering.
+
+Location-scoped human lists print `Checkout: PATH`; JSON includes daemon-resolved
+`checkout` metadata alongside `instances`, even for empty pages. This scope does
+not establish global absence. Old daemons require an upgrade for scoped output;
+there is no fallback that drops the scope contract.
+
 These location selectors do not parse current manifest contents; neither pages
 nor filters authorize cleanup. See [recorded discovery](daemon.md#bounded-recorded-discovery-and-active-policy).
 

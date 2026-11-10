@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/native"
@@ -162,6 +164,7 @@ func (s *service) resolveScene(target v1.SceneTarget, persistentOnly bool) (v1.S
 			return err
 		}
 		selected := ""
+		candidates := []string{}
 		for _, instance := range instances {
 			project := instance.project
 			if project != nearest {
@@ -173,11 +176,22 @@ func (s *service) resolveScene(target v1.SceneTarget, persistentOnly bool) (v1.S
 			if instance.lifetime != v1.Persistent || instance.status == v1.Destroyed || instance.scene != target.Scene {
 				continue
 			}
-			if selected != "" {
-				return problem("ambiguous_target", "multiple recorded persistent instances match; use backlot status ID or backlot stop ID")
-			}
-			selected = instance.id
+			candidates = append(candidates, instance.id)
 		}
+		sort.Strings(candidates)
+		if len(candidates) > 1 {
+			sample := candidates
+			suffix := ""
+			if len(sample) > 5 {
+				sample = sample[:5]
+				suffix = " (incomplete sample)"
+			}
+			return problem("ambiguous_target", "multiple recorded persistent instances match; candidate IDs: "+strings.Join(sample, ", ")+suffix+"; use list --scene "+target.Scene+" and an exact-ID command")
+		}
+		if len(candidates) == 1 {
+			selected = candidates[0]
+		}
+
 		if selected != "" {
 			r, err := load(tx, selected)
 			if err != nil {
@@ -346,3 +360,66 @@ func verifyRecordedCheckout(tx *bolt.Tx, checkout v1.CheckoutIdentity) error {
 	return err
 }
 func sameCheckoutValue(a, b v1.CheckoutIdentity) bool { return sameCheckout(&a, &b) }
+
+// selectMutation freezes canonical locations before waiting for lifecycle serialization.
+func (s *service) selectMutation(target v1.SceneTarget) (v1.SceneResponse, error) {
+	response, err := s.resolveScene(target, true)
+	if err != nil {
+		return response, err
+	}
+	if response.Result == nil {
+		return response, s.missingMutationTarget(target, response)
+	}
+	return response, nil
+}
+
+func (s *service) missingMutationTarget(target v1.SceneTarget, response v1.SceneResponse) error {
+	ids := []string{}
+	err := s.store.db.View(func(tx *bolt.Tx) error {
+		instances, err := storedSceneInstances(tx)
+		if err != nil {
+			return err
+		}
+		nearest := ""
+		anchor := response.CanonicalTarget
+		if anchor == nil || response.Checkout == nil {
+			return nil
+		}
+		for _, i := range instances {
+			if sameCheckoutValue(i.Checkout, *response.Checkout) && within(i.project, anchor.CWD) && (anchor.ProjectPath == "" || i.project == anchor.ProjectPath) && len(i.project) > len(nearest) {
+				nearest = i.project
+			}
+		}
+		for _, i := range instances {
+			if i.project == nearest && i.scene == target.Scene && i.status != v1.Destroyed {
+				ids = append(ids, i.id)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	sort.Strings(ids)
+	message := "no recorded persistent scene; use scene start for a new persistent scene, or list --scene " + target.Scene + " and an exact-ID command"
+	if len(ids) > 0 {
+		suffix := ""
+		if len(ids) > 5 {
+			ids = ids[:5]
+			suffix = " (incomplete sample; use list --scene " + target.Scene + ")"
+		}
+		message += "; candidate IDs: " + strings.Join(ids, ", ") + suffix
+	}
+	return problem("not_found", message)
+}
+
+func (s *service) revalidateMutation(selected v1.SceneResponse) error {
+	current, err := s.resolveScene(*selected.CanonicalTarget, true)
+	if err != nil {
+		return err
+	}
+	if current.Result == nil || current.Result.Instance.ID != selected.Result.Instance.ID || !sameCheckout(selected.Checkout, current.Checkout) {
+		return problem("conflict", "scene selection changed while awaiting mutation lock; inspect or use explicit recorded ID")
+	}
+	return nil
+}

@@ -113,3 +113,17 @@ var sceneIdentifier = regexp.MustCompile(schemaIdentifier)
 func scenePath(value string) bool {
 	return filepath.IsAbs(value) && filepath.Clean(value) == value && !strings.ContainsRune(value, 0)
 }
+
+// ValidateMutationTarget requires exactly one recorded ID or named selector.
+func ValidateMutationTarget(id string, target *SceneTarget) error {
+	if target == nil {
+		if !buildImageHex(id) {
+			return &PlanError{Code: "invalid_request", Message: "recorded instance_id required"}
+		}
+		return nil
+	}
+	if id != "" || target.InstanceID != "" {
+		return &PlanError{Code: "invalid_request", Message: "select one named scene or recorded instance_id"}
+	}
+	return target.Validate()
+}

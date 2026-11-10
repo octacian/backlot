@@ -120,6 +120,8 @@ type InstanceSummary struct {
 
 // ListResponse is one bounded page; NextAfterID is empty on the last page.
 type ListResponse struct {
+	// Checkout is opt-in daemon-resolved scope, including empty pages.
+	Checkout    *CheckoutIdentity `json:"checkout,omitempty"`
 	APIVersion  string            `json:"api_version"`
 	Instances   []InstanceSummary `json:"instances"`
 	NextAfterID string            `json:"next_after_id,omitempty"`
@@ -140,8 +142,10 @@ const DestroyContract = "erase-attempt-history/v1"
 // DestroyRequest acknowledges erasure and authorizes explicit cleanup.
 // Force waives shared-resource ownership proof only for this invocation.
 type DestroyRequest struct {
-	Contract   string `json:"contract"`
-	APIVersion string `json:"api_version"`
-	InstanceID string `json:"instance_id"`
-	Force      bool   `json:"force,omitempty"`
+	// Target selects a recorded named scene instead of InstanceID.
+	Target     *SceneTarget `json:"target,omitempty"`
+	Contract   string       `json:"contract"`
+	APIVersion string       `json:"api_version"`
+	InstanceID string       `json:"instance_id"`
+	Force      bool         `json:"force,omitempty"`
 }

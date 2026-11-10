@@ -189,6 +189,11 @@ func output(c *urfave.Command, value any, err error) error {
 			_, err = fmt.Fprintf(c.Writer, "Disposable lease expires %s; renew using the private token returned by JSON preparation.\n", result.Instance.LeaseExpiresAt)
 		}
 	case v1.ListResponse:
+		if result.Checkout != nil {
+			if _, err = fmt.Fprintln(c.Writer, "Checkout:", result.Checkout.Path); err != nil {
+				return err
+			}
+		}
 		for _, instance := range result.Instances {
 			if _, err = fmt.Fprintf(c.Writer, "%s  %s/%s  %s  %s\n", instance.ID, instance.Project, instance.Scene, instance.Status, instance.Origin); err != nil {
 				break

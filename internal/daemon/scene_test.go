@@ -595,3 +595,98 @@ func TestSceneExactIDDisposableStatusKeepsStopRestriction(t *testing.T) {
 		t.Fatal(current, err)
 	}
 }
+
+func TestNamedLifecycleSelectionRaceBeforePreparation(t *testing.T) {
+	for _, action := range []string{"restart", "reset", "destroy"} {
+		t.Run(action, func(t *testing.T) {
+			s, root, config := sceneFixture(t)
+			selected := scenePrepare(t, s, root, config)
+			reached, proceed := make(chan struct{}), make(chan struct{})
+			s.beforeSceneMutation = func(string) { close(reached); <-proceed }
+			result := make(chan error, 1)
+			target := &v1.SceneTarget{CWD: root, Scene: "dev"}
+			go func() {
+				var err error
+				if action == "destroy" {
+					_, err = s.destroySelected(context.Background(), "", false, target)
+				} else {
+					_, err = s.runMode(context.Background(), v1.RunRequest{APIVersion: v1.Version, Target: target}, action == "reset")
+				}
+				result <- err
+			}()
+			<-reached
+			if _, err := s.destroy(context.Background(), selected.Instance.ID); err != nil {
+				close(proceed)
+				t.Fatal(err)
+			}
+			replacement := scenePrepare(t, s, root, config)
+			close(proceed)
+			code(t, <-result, "conflict")
+			current, err := s.store.inspect(replacement.Instance.ID)
+			if err != nil || current.Status != v1.Prepared || current.Execution != nil {
+				t.Fatal("replacement touched", current, err)
+			}
+			all, err := s.store.list(v1.ListRequest{APIVersion: v1.Version})
+			if err != nil || len(all.Instances) != 2 {
+				t.Fatal("stale request created replacement", all, err)
+			}
+		})
+	}
+}
+
+func TestNamedMutationCandidateDiagnosticsAreBounded(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	_, err := s.selectMutation(v1.SceneTarget{CWD: root, Scene: "unknown"})
+	code(t, err, "not_found")
+	first, err := s.prepare(context.Background(), request(root, config, "test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 7 {
+		if _, _, err := s.store.begin(plan.Snapshot{Plan: first.Instance.Plan}, first.Instance.Checkout, time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err = s.selectMutation(v1.SceneTarget{CWD: root, Scene: "test"})
+	code(t, err, "not_found")
+	if !strings.Contains(err.Error(), "incomplete sample") || !strings.Contains(err.Error(), "list --scene test") || strings.Count(strings.Split(err.Error(), "candidate IDs: ")[1], ", ") != 4 {
+		t.Fatal("unbounded or unactionable diagnostic", err)
+	}
+	// Persistent ambiguity remains fail-closed and gives exact candidates too.
+	scenePrepare(t, s, root, config)
+	if err := os.WriteFile(filepath.Join(root, "backlot.json"), []byte(strings.Replace(fixtureManifest, `"project":"fixture"`, `"project":"changed"`, 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	scenePrepare(t, s, root, config)
+	_, err = s.selectMutation(v1.SceneTarget{CWD: root, Scene: "dev"})
+	code(t, err, "ambiguous_target")
+	if !strings.Contains(err.Error(), "candidate IDs:") {
+		t.Fatal(err)
+	}
+}
+
+func TestNamedRestartRechecksSelectionAfterSourceResolution(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	selected := scenePrepare(t, s, root, config)
+	var replacement v1.InstanceResponse
+	s.resolve = func(source plan.Source, q v1.PlanRequest) (plan.Snapshot, error) {
+		snapshot, err := plan.Prepare(source, q)
+		if err != nil {
+			return snapshot, err
+		}
+		// A parallel prepare can add another logical project at this recorded location
+		// without taking the selected instance's mutation lock.
+		p := selected.Instance.Plan
+		p.Project = "other"
+		replacement, _, err = s.store.begin(plan.Snapshot{Plan: p}, selected.Instance.Checkout, time.Minute)
+		return snapshot, err
+	}
+	_, err := s.runMode(context.Background(), v1.RunRequest{APIVersion: v1.Version, Target: &v1.SceneTarget{CWD: root, Scene: "dev"}}, false)
+	code(t, err, "ambiguous_target")
+	for _, id := range []string{selected.Instance.ID, replacement.Instance.ID} {
+		current, err := s.store.inspect(id)
+		if err != nil || current.Execution != nil || id == selected.Instance.ID && current.Status != v1.Prepared {
+			t.Fatal("ambiguous selection admitted runtime", id, current.Status, err)
+		}
+	}
+}

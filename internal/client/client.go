@@ -146,6 +146,16 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 			return &v1.PlanError{Code: "invalid_response", Message: "invalid daemon error envelope"}
 		}
 		rejected = true
+		named := false
+		switch value := request.(type) {
+		case v1.RunRequest:
+			named = value.Target != nil
+		case v1.DestroyRequest:
+			named = value.Target != nil
+		}
+		if named && envelope.Error.Code == "invalid_document" && strings.Contains(envelope.Error.Message, "unknown field") {
+			return &v1.PlanError{Code: "unsupported_feature", Message: "daemon does not support fenced named lifecycle; upgrade the daemon; no mutation was accepted"}
+		}
 		return &envelope.Error
 	}
 	if err := manifest.Decode(data, ".json", response); err != nil {
@@ -225,6 +235,16 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 		if value.APIVersion != v1.Version {
 			return &v1.PlanError{Code: "api_version", Message: "incompatible daemon response version"}
 		}
+		var target *v1.SceneTarget
+		switch q := request.(type) {
+		case v1.RunRequest:
+			target = q.Target
+		case v1.DestroyRequest:
+			target = q.Target
+		}
+		if target != nil && (value.Instance.Plan.Scene != target.Scene || value.Instance.Plan.Lifetime != v1.Persistent) {
+			return responseError()
+		}
 		return validateInstance(*value)
 	}
 	return nil
@@ -234,6 +254,9 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 func (c *Client) List(ctx context.Context, request v1.ListRequest) (v1.ListResponse, error) {
 	var response v1.ListResponse
 	err := c.call(ctx, http.MethodPost, "/v1/instances", request, &response)
+	if err == nil && response.Checkout != nil {
+		err = responseError()
+	}
 	return response, err
 }
 

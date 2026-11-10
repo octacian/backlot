@@ -20,6 +20,9 @@ func (c *Client) Run(ctx context.Context, request v1.RunRequest) (v1.InstanceRes
 // Restart reconciles compatible drift after verified persistent runtime stop.
 func (c *Client) Restart(ctx context.Context, request v1.RunRequest) (v1.InstanceResponse, error) {
 	var response v1.InstanceResponse
+	if err := v1.ValidateMutationTarget(request.InstanceID, request.Target); request.Target != nil && err != nil {
+		return response, err
+	}
 	err := c.call(ctx, http.MethodPost, "/v1/restart", request, &response)
 	return response, err
 }
@@ -57,6 +60,9 @@ func (c *Client) Logs(ctx context.Context, request v1.LogsRequest) (v1.LogsRespo
 // Reset replaces retained state after stopping all verified owned consumers.
 func (c *Client) Reset(ctx context.Context, request v1.RunRequest) (v1.InstanceResponse, error) {
 	var response v1.InstanceResponse
+	if err := v1.ValidateMutationTarget(request.InstanceID, request.Target); request.Target != nil && err != nil {
+		return response, err
+	}
 	err := c.call(ctx, http.MethodPost, "/v1/reset", request, &response)
 	return response, err
 }
@@ -69,7 +75,11 @@ func (c *Client) Destroy(ctx context.Context, id string) (v1.InstanceResponse, e
 // DestroyWithRequest removes a recorded instance with explicit invocation authority.
 func (c *Client) DestroyWithRequest(ctx context.Context, request v1.DestroyRequest) (v1.InstanceResponse, error) {
 	var response v1.InstanceResponse
-	if request.APIVersion != v1.Version || !validID(request.InstanceID) || request.Contract != "" && request.Contract != v1.DestroyContract {
+	invalidTarget := !validID(request.InstanceID)
+	if request.Target != nil {
+		invalidTarget = v1.ValidateMutationTarget(request.InstanceID, request.Target) != nil
+	}
+	if request.APIVersion != v1.Version || invalidTarget || request.Contract != "" && request.Contract != v1.DestroyContract {
 		return response, &v1.PlanError{Code: "invalid_request", Message: "recorded instance_id and compatible API version required"}
 	}
 	request.Contract = v1.DestroyContract

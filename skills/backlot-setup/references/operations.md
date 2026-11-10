@@ -139,7 +139,7 @@ Record the returned instance ID and original CLI exit. Named startup nests the
 instance under `result`; ordinary `run` uses `instance`. To investigate:
 
 ```sh
-backlot list --project . --limit 10 --json
+backlot checkout list --limit 10 --json
 backlot status INSTANCE_ID --json
 backlot doctor --instance INSTANCE_ID --json
 backlot logs INSTANCE_ID --page --limit 100 --json

@@ -23,10 +23,10 @@ See [private configuration](manifest.md#registered-private-project-configuration
 | First persistent start | `scene start SCENE` or `run SCENE` | Accept snapshot/attempt, allocate selected resources, await readiness |
 | Join starting/ready scene | Repeat start/run | Same attempt and recorded configuration; report unapplied changes |
 | Start prepared/stopped/failed/cancelled/interrupted scene | Repeat start/run after diagnosis/repair | One new attempt using compatible current configuration after cleanup; retain identity/data/paired credentials |
-| Apply command, probe or non-sensitive environment edits to healthy work | `restart ID` | Capture current sources and apply compatible drift; retain identity/data/paired credentials |
-| Changed protected resource/initialization/sensitive contract | `reset ID`, or `destroy ID` then start | Explicit destructive replacement required; reset keeps logical ID but replaces generation; later start after destroy gets a new ID |
+| Apply command, probe or non-sensitive environment edits to healthy work | `scene restart SCENE` or `restart ID` | Capture current sources and apply compatible drift; retain identity/data/paired credentials |
+| Changed protected resource/initialization/sensitive contract | `scene reset SCENE` / `reset ID`, or destroy then start | Explicit destructive replacement required; reset keeps logical ID but replaces generation; later start after destroy gets a new ID |
 | Stop development runtime | `scene stop SCENE` or `stop ID` | Stop owned consumers/routes, release verified-unused instance networks, retain data, credentials, history and evidence |
-| Remove this instance's owned data | `destroy ID` | Stop/join and remove data, then erase attempt results/logs/artifacts; export first |
+| Remove this instance's owned data | `scene destroy SCENE` or `destroy ID` | Stop/join and remove data, then erase attempt results/logs/artifacts; export first |
 | Change daemon PATH/environment or policy | Explicit daemon stop/start in same state directory | Future daemon context changes; retained data/CA remain; no automatic scene restart |
 | Inspect or follow | `status`, `logs`, `export` | Observation only; no attachment, lease renewal or lifecycle ownership |
 | Own one new persistent attempt until client ends | `scene start --attached SCENE` or `run --attached SCENE` | Refuse existing runtime; signal/loss stops only the accepted attempt and retains data |
@@ -155,7 +155,7 @@ uses their recorded canonical location. Non-Git projects use the recorded projec
 root as checkout identity; before any record exists, supply `--project` explicitly.
 See the [selection rationale and stored-state boundaries](https://github.com/octacian/backlot/blob/6177c64f60654657a914857edbffb69b8316a41b/docs/adr/20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md).
 
-Finite named results are `SceneResponse`: API/daemon generation, outcome, optional
+Finite named start/status/stop results are `SceneResponse`: API/daemon generation, outcome, optional
 `result: InstanceResponse`, and canonical checkout/selector metadata. `not_found`
 omits `result` but includes checkout identity. Runtime failures are snapshot data
 and status exits zero; selection, validation and transport errors are nonzero.
@@ -167,6 +167,15 @@ conflict rather than redirecting cleanup. Successful outcomes are `stopped`,
 failed records retain truthful status; cleanup/collection uncertainty stays
 nonzero. Stop shares mutation serialization with restart/reset/destroy and has no
 attempt-specific attachment authority.
+
+Named restart/reset/destroy use the same recorded selection, but missing or
+non-persistent targets fail nonzero with bounded candidate-ID guidance. They
+return the root lifecycle `InstanceResponse`, including success-only startup
+summaries for restart/reset. Restart retains data, reset replaces its generation,
+and destroy erases owned data and evidence; export first. Selectors are frozen to
+canonical locations and revalidated under existing lifecycle locks before effects,
+including preparation. Workload admission and destroy's evidence-before-instance
+lock ordering remain unchanged. See [named lifecycle options](cli.md#named-lifecycle-mutations).
 
 ### Sampled status follow
 

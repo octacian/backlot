@@ -62,3 +62,39 @@ func TestDiscoveryStrictWireValidation(t *testing.T) {
 		t.Fatal("invented completeness accepted")
 	}
 }
+
+func TestCheckoutScopeWireValidation(t *testing.T) {
+	c := New("unused")
+	defer c.Close()
+	response := `{"api_version":"v1","instances":[],"checkout":{"id":"` + strings.Repeat("a", 64) + `","path":"/checkout"}}`
+	calls := 0
+	c.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		var q v1.FilteredListRequest
+		if json.NewDecoder(r.Body).Decode(&q) != nil || !q.IncludeCheckout || q.CWD != "/checkout/sub" {
+			t.Fatal("scope request", q)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}, "X-Backlot-Api-Version": []string{v1.Version}}, Body: io.NopCloser(strings.NewReader(response))}, nil
+	})
+	q := v1.FilteredListRequest{APIVersion: v1.Version, CWD: "/checkout/sub", IncludeCheckout: true}
+	if _, err := c.FilteredList(context.Background(), q); err != nil {
+		t.Fatal(err)
+	}
+	foreign := v1.InstanceSummary{ID: strings.Repeat("b", 64), Project: "fixture", Scene: "dev", Checkout: "/other", Lifetime: v1.Persistent, Status: v1.Prepared, CreatedAt: "2026-10-07T12:00:00Z"}
+	row, _ := json.Marshal(foreign)
+	for _, bad := range []string{
+		strings.Replace(response, `"instances":[]`, `"instances":[`+string(row)+`]`, 1),
+		`{"api_version":"v1","instances":[]}`,
+		strings.Replace(response, `"path":"/checkout"`, `"path":"relative"`, 1),
+		strings.Replace(response, `"path":"/checkout"`, `"path":"/checkout/../other"`, 1),
+		strings.Replace(response, `"path":"/checkout"`, `"path":"/checkout","git_directory":"relative"`, 1),
+	} {
+		response = bad
+		if _, err := c.FilteredList(context.Background(), q); err == nil {
+			t.Fatal("accepted", bad)
+		}
+	}
+	if calls != 6 {
+		t.Fatal("unexpected retry", calls)
+	}
+}

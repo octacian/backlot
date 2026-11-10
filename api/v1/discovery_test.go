@@ -47,3 +47,32 @@ func TestDiscoveryTrustBoundaries(t *testing.T) {
 		t.Fatal("state fence bypassed")
 	}
 }
+
+func TestCheckoutScopeAndMutationSelectors(t *testing.T) {
+	for _, q := range []FilteredListRequest{
+		{APIVersion: Version, CWD: "/checkout/sub", IncludeCheckout: true},
+		{APIVersion: Version, CheckoutPath: "/non-git", IncludeCheckout: true},
+	} {
+		if err := q.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, q := range []FilteredListRequest{
+		{APIVersion: Version, CWD: "/checkout"},
+		{APIVersion: Version, IncludeCheckout: true},
+		{APIVersion: Version, CWD: "relative", IncludeCheckout: true},
+		{APIVersion: Version, CWD: "/checkout", CheckoutPath: "/other", IncludeCheckout: true},
+		{APIVersion: Version, CWD: "/checkout", ProjectPath: "/other", IncludeCheckout: true},
+	} {
+		if q.Validate() == nil {
+			t.Fatal("accepted scope", q)
+		}
+	}
+	target := &SceneTarget{CWD: "/checkout", Scene: "dev"}
+	if err := ValidateMutationTarget("", target); err != nil {
+		t.Fatal(err)
+	}
+	if ValidateMutationTarget("", nil) == nil || ValidateMutationTarget("invalid", target) == nil || ValidateMutationTarget("", &SceneTarget{InstanceID: "invalid"}) == nil {
+		t.Fatal("accepted invalid mutation selector")
+	}
+}

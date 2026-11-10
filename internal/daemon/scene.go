@@ -21,6 +21,14 @@ func (s *service) startScene(ctx context.Context, request v1.SceneStartRequest) 
 	if len(request.Plan.TerminalArgs) > 0 {
 		return result, problem("invalid_request", "persistent scene start does not accept terminal arguments")
 	}
+	ctx, finish, err := s.beginWorkload(ctx)
+	if err != nil {
+		return result, err
+	}
+	defer finish()
+	if s.beforeSceneDiscovery != nil {
+		s.beforeSceneDiscovery()
+	}
 	_, project, err := plan.Discover(request.CWD, request.Plan.ProjectPath)
 	if err != nil {
 		return result, err
@@ -36,6 +44,9 @@ func (s *service) startScene(ctx context.Context, request v1.SceneStartRequest) 
 	}
 	result.CanonicalTarget = &canonicalTarget
 	request.Plan.ProjectPath = project
+	if err := s.checkWorkload(ctx); err != nil {
+		return result, err
+	}
 	response, err := s.runSelected(ctx, v1.RunRequest{Attached: request.Attached, APIVersion: v1.Version, Plan: request.Plan, Options: request.Options}, false, true)
 	if err != nil {
 		return result, err

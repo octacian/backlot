@@ -109,7 +109,18 @@ func (s *service) stopAll(ctx context.Context, q v1.StopAllRequest) (v1.StopAllR
 			}
 		}
 		joinCancel()
+		// Protect the complete selected set before any target join. The same mutex
+		// serializes disposable teardown's final decision to destroy data.
+		s.mu.Lock()
 		selected, selectionErr := s.selectBulk(bounded)
+		if selectionErr == nil {
+			for _, chosen := range selected {
+				if entry := s.executions[chosen.target.ID]; entry != nil && entry.attempt == chosen.target.Attempt {
+					entry.bulkCancelled = true
+				}
+			}
+		}
+		s.mu.Unlock()
 		if selectionErr != nil {
 			// No target stop has been issued; admission invalidation may already have effects.
 			out.Error = &v1.PlanError{Code: "partial_failure", Message: "bulk stop incomplete; inspect activity and selected targets before explicit recovery"}

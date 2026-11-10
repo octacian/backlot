@@ -608,3 +608,173 @@ func TestBulkInvalidatesInstanceLockWaiterAfterReopen(t *testing.T) {
 		t.Fatal("old waiter affected current runtime", err)
 	}
 }
+
+func TestBulkSceneDiscoveryAdmissionSurvivesReopen(t *testing.T) {
+	for _, attached := range []bool{false, true} {
+		t.Run(map[bool]string{false: "named", true: "attached"}[attached], func(t *testing.T) {
+			s, q := attachedCoordinator(t)
+			reached, release, joined := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			s.beforeSceneDiscovery = func() { close(reached); <-release }
+			s.resolve = func(plan.Source, v1.PlanRequest) (plan.Snapshot, error) {
+				t.Error("revoked scene reached execution input resolution")
+				return plan.Snapshot{}, nil
+			}
+			var writerErr error
+			go func() {
+				defer close(joined)
+				_, writerErr = s.startScene(context.Background(), v1.SceneStartRequest{APIVersion: v1.Version, Attached: attached, CWD: q.Plan.ProjectPath, Plan: q.Plan})
+			}()
+			t.Cleanup(func() { once.Do(func() { close(release) }); awaitControlled(t, joined, "scene start not joined") })
+			awaitControlled(t, reached, "scene start did not reach discovery")
+			s.mu.Lock()
+			owners := len(s.mutationOwners)
+			s.mu.Unlock()
+			if owners != 1 {
+				t.Fatal("scene discovery lacks its single admission owner", owners)
+			}
+			// Exercise the real bounded join timeout: the request resumes only after reopen.
+			out, err := s.stopAll(context.Background(), bulkRequest())
+			checkBulk(t, out, err)
+			if out.AdmissionsJoined || out.Error == nil || !out.SelectionComplete {
+				t.Fatal("unjoined discovery was not reported", out)
+			}
+			once.Do(func() { close(release) })
+			awaitControlled(t, joined, "scene start not rejected")
+			code(t, writerErr, "admission_closed")
+			s.mu.Lock()
+			launched, owners := len(s.executions), len(s.mutationOwners)
+			s.mu.Unlock()
+			if launched != 0 || owners != 0 {
+				t.Fatal("revoked discovery launched or retained an owner", launched, owners)
+			}
+		})
+	}
+}
+
+func TestBulkRetainsLaterDisposableBeforeTargetJoin(t *testing.T) {
+	for _, bulk := range []bool{true, false} {
+		t.Run(map[bool]string{true: "selected", false: "ordinary"}[bulk], func(t *testing.T) {
+			s, q := attachedCoordinator(t)
+			q.Attached = false
+			q.Plan.Scene = "test"
+			path := filepath.Join(q.Plan.ProjectPath, "backlot.json")
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m v1.Manifest
+			if err := json.Unmarshal(raw, &m); err != nil {
+				t.Fatal(err)
+			}
+			m.Resources = map[string]v1.Resource{"data": {Kind: "directory"}, "password": {Kind: "secret"}}
+			scene := m.Scenes["test"]
+			scene.Resources = []string{"data", "password"}
+			m.Scenes["test"] = scene
+			raw, err = json.Marshal(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			type boundary struct {
+				id      string
+				release chan struct{}
+			}
+			reached := make(chan boundary, 2)
+			s.beforeDisposableCleanup = func(id string) {
+				gate := boundary{id: id, release: make(chan struct{})}
+				reached <- gate
+				<-gate.release
+			}
+			var gates []boundary
+			var once sync.Once
+			t.Cleanup(func() {
+				once.Do(func() {
+					for _, gate := range gates {
+						close(gate.release)
+					}
+				})
+				s.waitOwners()
+			})
+			for range 2 {
+				if _, err := s.run(context.Background(), q); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case gate := <-reached:
+					gates = append(gates, gate)
+				case <-time.After(10 * time.Second):
+					t.Fatal("disposable did not reach destructive boundary")
+				}
+			}
+			if gates[0].id > gates[1].id {
+				gates[0], gates[1] = gates[1], gates[0]
+			}
+			first, later := gates[0], gates[1]
+			before, err := s.store.resources(later.id)
+			if err != nil || before.Resources["password"].Value == "" {
+				t.Fatal("missing paired resources", err)
+			}
+			marker := filepath.Join(before.Resources["data"].Name, "marker")
+			if err := os.WriteFile(marker, []byte("retained"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			s.mu.Lock()
+			a, b := s.executions[first.id], s.executions[later.id]
+			s.mu.Unlock()
+			stopping := make(chan struct{})
+			a.mu.Lock()
+			original := a.cancel
+			var stoppingOnce sync.Once
+			a.cancel = func() { original(); stoppingOnce.Do(func() { close(stopping) }) }
+			a.mu.Unlock()
+			done := make(chan v1.StopAllResponse, 1)
+			if bulk {
+				go func() {
+					out, err := s.stopAll(context.Background(), bulkRequest())
+					if err != nil {
+						t.Error(err)
+					}
+					done <- out
+				}()
+				awaitControlled(t, stopping, "earlier target not joining")
+			}
+			// The later target finishes naturally while the earlier selected owner is blocked.
+			close(later.release)
+			gates = []boundary{first}
+			awaitControlled(t, b.done, "later disposable did not complete")
+			observed, err := s.store.inspect(later.id)
+			if err != nil || observed.Execution.Cancelled || observed.Execution.Outcome != v1.Succeeded {
+				t.Fatal("later target did not finish naturally", err)
+			}
+			after, err := s.store.resources(later.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bulk {
+				data, err := os.ReadFile(marker)
+				if err != nil || string(data) != "retained" || !reflect.DeepEqual(before, after) {
+					t.Fatal("selected disposable data or credentials lost", err)
+				}
+			} else if _, err := os.Stat(marker); !os.IsNotExist(err) || after.ID != "" {
+				t.Fatal("ordinary disposable cleanup changed", err)
+			}
+			once.Do(func() { close(first.release) })
+			awaitControlled(t, a.done, "earlier disposable did not join")
+			if bulk {
+				out := <-done
+				checkBulk(t, out, nil)
+				if out.Error != nil || len(out.Targets) != 2 || out.Targets[1].ID != later.id {
+					t.Fatal(out)
+				}
+			}
+			for _, id := range []string{first.id, later.id} {
+				if _, err := s.destroy(context.Background(), id); err != nil {
+					t.Fatal("owned fixture destroy", err)
+				}
+			}
+		})
+	}
+}

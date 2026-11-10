@@ -90,10 +90,6 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 	return s.runMode(ctx, request, false)
 }
 func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool) (v1.InstanceResponse, error) {
-	return s.runSelected(ctx, request, reset, false)
-}
-
-func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset, persistentOnly bool) (v1.InstanceResponse, error) {
 	if request.AllowImageChange && (request.InstanceID == "" || reset || request.Attached) {
 		return v1.InstanceResponse{}, problem("invalid_request", "allow_image_change is only supported by explicit restart")
 	}
@@ -102,6 +98,11 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		return v1.InstanceResponse{}, admissionErr
 	}
 	defer finish()
+	return s.runSelected(ctx, request, reset, false)
+}
+
+// runSelected carries the caller's workload admission through discovery and acceptance.
+func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset, persistentOnly bool) (v1.InstanceResponse, error) {
 	var empty v1.InstanceResponse
 	if request.Attached && (request.InstanceID != "" || reset || request.Options.KeepOnFailure || len(request.Plan.TerminalArgs) > 0) {
 		return empty, problem("invalid_request", "attached mode requires a persistent start without terminal arguments or keep-on-failure")
@@ -764,7 +765,15 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		if entry.docker != nil && !keep {
 			_ = entry.docker.Close()
 		}
-		if snapshot.Plan.Lifetime == v1.Disposable && !entry.borrowed && cleanup == nil && !keep && !shuttingDown {
+		if s.beforeDisposableCleanup != nil && snapshot.Plan.Lifetime == v1.Disposable {
+			s.beforeDisposableCleanup(id)
+		}
+		// invariant: selection/retention and commitment to destructive teardown share
+		// service.mu. A cause applied after teardown began cannot undo deletion.
+		s.mu.Lock()
+		removeData := snapshot.Plan.Lifetime == v1.Disposable && !entry.borrowed && cleanup == nil && !keep && !s.closing && !entry.bulkCancelled
+		s.mu.Unlock()
+		if removeData {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			cleanup = s.store.removeResources(cleanupCtx, id)
 			cancel()

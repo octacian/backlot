@@ -44,6 +44,10 @@ type service struct {
 	checkpoint func(string) error
 	// resolve lets tests control the input-read boundary while using the real planner.
 	resolve func(plan.Source, v1.PlanRequest) (plan.Snapshot, error)
+	// beforeSceneDiscovery gates tests after admission and before scene input discovery.
+	beforeSceneDiscovery func()
+	// beforeDisposableCleanup gates tests before the destructive retention boundary.
+	beforeDisposableCleanup func(string)
 	// beforeExecution gates tests between prepare and serialized acceptance.
 	beforeExecution func(string)
 	// beforeSceneMutation is a test seam between recorded resolution and its mutation lock.

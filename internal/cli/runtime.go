@@ -63,12 +63,20 @@ func runtimeCommands() []*urfave.Command {
 		if c.Args().Len() != 1 {
 			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "destroy requires one recorded instance ID"})
 		}
+		target, err := namedLifecycleTarget(c)
+		if err != nil {
+			return output(c, nil, err)
+		}
 		cli, err := runtimeClient(c)
 		if err != nil {
 			return output(c, nil, err)
 		}
 		defer cli.Close()
-		response, err := cli.DestroyWithRequest(ctx, v1.DestroyRequest{Contract: v1.DestroyContract, APIVersion: v1.Version, InstanceID: c.Args().First(), Force: c.Bool("force")})
+		request := v1.DestroyRequest{Contract: v1.DestroyContract, APIVersion: v1.Version, InstanceID: c.Args().First(), Target: target, Force: c.Bool("force")}
+		if target != nil {
+			request.InstanceID = ""
+		}
+		response, err := cli.DestroyWithRequest(ctx, request)
 		return output(c, response, err)
 	}})
 	commands = append(commands, &urfave.Command{Name: "logs", ArgsUsage: "<instance-id>", Description: "Reads retained logs after teardown too; follow interruption stops observation without stopping runtime. JSON emits log NDJSON.\nExample: backlot logs --follow --component app INSTANCE_ID", Usage: "Read retained component logs", Flags: append(daemonFlags(false), &urfave.BoolFlag{Name: "page", Usage: "Emit one finite bounded log page"}, &urfave.StringFlag{Name: "attempt", Usage: "Page attempt ID"}, &urfave.StringFlag{Name: "stream", Usage: "Page stream stdout or stderr"}, &urfave.StringFlag{Name: "after", Usage: "Transient page continuation"}, &urfave.IntFlag{Name: "limit", Value: 100, Usage: "Page records, 1 through 1000"}, &urfave.BoolFlag{Name: "follow", Usage: "Stream new logs until runtime settles or observation is interrupted"}, &urfave.StringFlag{Name: "component", Usage: "Filter logs by component name (default: all components)"}), Action: func(ctx context.Context, c *urfave.Command) error {
@@ -151,13 +159,18 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 		return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "--attached cannot combine with terminal arguments or --keep-on-failure"})
 	}
 	args := c.Args().Slice()
+	target, err := namedLifecycleTarget(c)
+	if err != nil {
+		return output(c, nil, err)
+	}
 	cli, err := runtimeClient(c)
 	if err != nil {
 		return output(c, nil, err)
 	}
 	defer cli.Close()
 	request := v1.RunRequest{AllowImageChange: c.Bool("allow-image-change"), Attached: c.Bool("attached"), APIVersion: v1.Version, Options: v1.ExecutionOptions{StartupTimeout: c.String("startup-timeout"), JobTimeout: c.String("job-timeout"), StopGrace: c.String("stop-grace"), KeepOnFailure: c.Bool("keep-on-failure")}}
-	if c.Name == "restart" || c.Name == "reset" {
+	request.Target = target
+	if target == nil && (c.Name == "restart" || c.Name == "reset") {
 		previous, err := cli.Inspect(ctx, args[0])
 		if err != nil {
 			return output(c, nil, err)
@@ -168,7 +181,7 @@ func runNative(ctx context.Context, c *urfave.Command) error {
 			projectPath = previous.Instance.Association.ProjectPath
 		}
 		request.Plan = v1.PlanRequest{Scene: previous.Instance.Plan.Scene, ProjectPath: projectPath}
-	} else {
+	} else if target == nil {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return output(c, nil, err)

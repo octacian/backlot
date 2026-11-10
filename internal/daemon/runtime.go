@@ -90,7 +90,7 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 	return s.runMode(ctx, request, false)
 }
 func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool) (v1.InstanceResponse, error) {
-	if request.AllowImageChange && (request.InstanceID == "" || reset || request.Attached) {
+	if request.AllowImageChange && (request.InstanceID == "" && request.Target == nil || reset || request.Attached) {
 		return v1.InstanceResponse{}, problem("invalid_request", "allow_image_change is only supported by explicit restart")
 	}
 	ctx, finish, admissionErr := s.beginWorkload(ctx)
@@ -104,6 +104,33 @@ func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool
 // runSelected carries the caller's workload admission through discovery and acceptance.
 func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset, persistentOnly bool) (v1.InstanceResponse, error) {
 	var empty v1.InstanceResponse
+	var selected v1.SceneResponse
+	if request.Target != nil {
+		if err := v1.ValidateMutationTarget(request.InstanceID, request.Target); err != nil {
+			return empty, err
+		}
+		if request.Attached || request.Options.KeepOnFailure || request.Plan.Scene != "" || request.Plan.ProjectPath != "" || len(request.Plan.TerminalArgs) != 0 {
+			return empty, problem("invalid_request", "named restart/reset accepts only config and execution options alongside target")
+		}
+		var err error
+		selected, err = s.selectMutation(*request.Target)
+		if err != nil {
+			return empty, err
+		}
+		request.InstanceID = selected.Result.Instance.ID
+		if s.beforeSceneMutation != nil {
+			s.beforeSceneMutation(request.InstanceID)
+		}
+		// Fence preparation as well as teardown: stale names must not enroll or create a replacement slot.
+		unlock := s.lockMutation(request.InstanceID)
+		defer unlock()
+		if err := s.revalidateMutation(selected); err != nil {
+			return empty, err
+		}
+		previous := selected.Result.Instance
+		request.Plan.Scene = previous.Plan.Scene
+		request.Plan.ProjectPath = associatedProject(previous)
+	}
 	if request.Attached && (request.InstanceID != "" || reset || request.Options.KeepOnFailure || len(request.Plan.TerminalArgs) > 0) {
 		return empty, problem("invalid_request", "attached mode requires a persistent start without terminal arguments or keep-on-failure")
 	}
@@ -162,8 +189,13 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		if previous.Status == v1.Destroyed {
 			return empty, problem("destroyed", "instance was destroyed; run the scene to create a fresh identity")
 		}
-		if previous.Plan.Project != snapshot.Plan.Project || previous.Plan.Scene != snapshot.Plan.Scene || previous.Plan.Lifetime != v1.Persistent || !sameCheckoutValue(associatedCheckout(previous), identity.checkout) {
+		if previous.Plan.Project != snapshot.Plan.Project || previous.Plan.Scene != snapshot.Plan.Scene || previous.Plan.Lifetime != v1.Persistent || snapshot.Plan.Lifetime != v1.Persistent || !sameCheckoutValue(associatedCheckout(previous), identity.checkout) {
 			return empty, problem("conflict", "restart must address the same persistent project, checkout and scene")
+		}
+	}
+	if request.Target != nil {
+		if err := s.revalidateMutation(selected); err != nil {
+			return empty, err
 		}
 	}
 	var observed startObservation
@@ -175,8 +207,10 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	if s.beforeExecution != nil {
 		s.beforeExecution(id)
 	}
-	unlock := s.lockMutation(id)
-	defer unlock()
+	if request.Target == nil {
+		unlock := s.lockMutation(id)
+		defer unlock()
+	}
 	response.Instance, err = s.store.inspect(id)
 	if err != nil {
 		return empty, err
@@ -193,6 +227,11 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		}
 	}
 
+	if request.Target != nil {
+		if err := s.revalidateMutation(selected); err != nil {
+			return empty, err
+		}
+	}
 	var acceptanceSnapshot *plan.Snapshot
 	ordinaryPersistent := request.InstanceID == "" && snapshot.Plan.Lifetime == v1.Persistent
 	if ordinaryPersistent {

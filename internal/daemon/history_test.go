@@ -410,27 +410,34 @@ func TestDestroyContractRejectsBeforeAllEffects(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := handler(s, v1.DaemonStatusResponse{}, func() {})
-	for _, force := range []bool{false, true} {
-		for _, marker := range []string{"", "unknown"} {
-			q := v1.DestroyRequest{APIVersion: v1.Version, InstanceID: id, Force: force, Contract: marker}
-			body, _ := json.Marshal(q)
-			if marker == "" {
-				body = bytes.Replace(body, []byte(`"contract":"",`), nil, 1)
-			}
-			request := httptest.NewRequest(http.MethodPost, "/v1/destroy", bytes.NewReader(body))
-			request.Header.Set("X-Backlot-API-Version", v1.Version)
-			request.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
-			server.ServeHTTP(recorder, request)
-			if recorder.Code != http.StatusUpgradeRequired {
-				t.Fatal("incompatible destroy admitted", recorder.Code)
-			}
-			if !reflect.DeepEqual(before, stateContents(t, s.store)) {
-				t.Fatal("rejected marker changed durable state")
-			}
-			data, err := os.ReadFile(logPath)
-			if err != nil || !bytes.Equal(logBefore, data) {
-				t.Fatal("rejected marker changed evidence", err)
+	for _, named := range []bool{false, true} {
+		for _, force := range []bool{false, true} {
+			for _, marker := range []string{"", "unknown"} {
+				q := v1.DestroyRequest{APIVersion: v1.Version, InstanceID: id, Force: force, Contract: marker}
+				if named {
+					i, _ := s.store.inspect(id)
+					q.InstanceID = ""
+					q.Target = &v1.SceneTarget{CWD: i.Checkout.Path, Scene: i.Plan.Scene}
+				}
+				body, _ := json.Marshal(q)
+				if marker == "" {
+					body = bytes.Replace(body, []byte(`"contract":"",`), nil, 1)
+				}
+				request := httptest.NewRequest(http.MethodPost, "/v1/destroy", bytes.NewReader(body))
+				request.Header.Set("X-Backlot-API-Version", v1.Version)
+				request.Header.Set("Content-Type", "application/json")
+				recorder := httptest.NewRecorder()
+				server.ServeHTTP(recorder, request)
+				if recorder.Code != http.StatusUpgradeRequired {
+					t.Fatal("incompatible destroy admitted", recorder.Code)
+				}
+				if !reflect.DeepEqual(before, stateContents(t, s.store)) {
+					t.Fatal("rejected marker changed durable state")
+				}
+				data, err := os.ReadFile(logPath)
+				if err != nil || !bytes.Equal(logBefore, data) {
+					t.Fatal("rejected marker changed evidence", err)
+				}
 			}
 		}
 	}
@@ -871,4 +878,68 @@ func TestLegacyDestroyedResultRemainsUntilMarkedDestroy(t *testing.T) {
 	if err != nil || erased.Execution != nil {
 		t.Fatal("explicit matching destroy retained legacy result", err)
 	}
+}
+
+func TestNamedDestroyRetryPreservesExportsAndPeer(t *testing.T) {
+	s, id := historyFixture(t)
+	original, err := s.store.inspect(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := &v1.SceneTarget{CWD: original.Checkout.Path, Scene: original.Plan.Scene}
+	a := acceptHistory(t, s, id, v1.Stopped, 0)
+	writeAttemptLog(t, s, a, false)
+	data := shortTemp(t)
+	token := newID()
+	sentinel := filepath.Join(data, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("owned data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	g := resourceGeneration{ID: newID(), Resources: map[string]ownedResource{"data": {Kind: "directory", Name: data, Token: token}}, Initialized: map[string]bool{}}
+	if err := s.store.saveResources(id, g); err != nil {
+		t.Fatal(err)
+	}
+	releaseZeroLaunchTaskFixture(t, s.store, id)
+	peerRoot := shortTemp(t)
+	peerConfig := writeFixture(t, peerRoot)
+	peer := scenePrepare(t, s, peerRoot, peerConfig)
+	// Caller export is outside the daemon's erasure authority.
+	saved := filepath.Join(shortTemp(t), "export")
+	if err := os.WriteFile(saved, []byte("caller bundle"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.destroySelected(context.Background(), "", true, target)
+	code(t, err, "cleanup_failed")
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatal("uncertain data lost", err)
+	}
+	if _, err := s.store.attempt(v1.AttemptRequest{InstanceID: id, Attempt: a.Result.Attempt}); err != nil {
+		t.Fatal("retry history lost", err)
+	}
+	// Restoring this fixture's actual ownership proof permits the same named retry.
+	if err := os.WriteFile(filepath.Join(data, ".backlot-owner"), []byte(token), 0600); err != nil {
+		t.Fatal(err)
+	}
+	destroyed, err := s.destroySelected(context.Background(), "", false, target)
+	if err != nil || destroyed.ID != id || destroyed.Status != v1.Destroyed || destroyed.Execution != nil {
+		t.Fatal(destroyed, err)
+	}
+	if _, err := os.Stat(data); !os.IsNotExist(err) {
+		t.Fatal("owned data retained", err)
+	}
+	if attempts, err := s.store.attempts(id); err != nil || len(attempts) != 0 {
+		t.Fatal("history retained", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.directory, "logs", id+"-"+a.Result.Attempt+"-output.ndjson")); !os.IsNotExist(err) {
+		t.Fatal("logs retained", err)
+	}
+	if b, err := os.ReadFile(saved); err != nil || string(b) != "caller bundle" {
+		t.Fatal("caller export modified", err)
+	}
+	other, err := s.store.inspect(peer.Instance.ID)
+	if err != nil || other.Status != v1.Prepared {
+		t.Fatal("peer modified", other, err)
+	}
+	_, err = s.destroySelected(context.Background(), "", false, target)
+	code(t, err, "not_found")
 }

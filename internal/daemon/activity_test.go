@@ -60,17 +60,22 @@ func TestBulkAdmissionGeneration(t *testing.T) {
 }
 
 func TestBulkRejectsWaitingWriters(t *testing.T) {
-	for _, action := range []string{"prepare", "run", "attached", "scene", "restart", "reset"} {
+	for _, action := range []string{"prepare", "run", "attached", "scene", "restart", "reset", "named-restart", "named-reset"} {
 		t.Run(action, func(t *testing.T) {
 			s, q := attachedCoordinator(t)
 			q.Attached = false
-			if action == "restart" || action == "reset" {
+			if action == "restart" || action == "reset" || strings.HasPrefix(action, "named-") {
 				r, err := s.run(context.Background(), q)
 				if err != nil {
 					t.Fatal(err)
 				}
 				taskAdmissionReady(t, s, r.Instance.ID)
 				q.InstanceID = r.Instance.ID
+				if strings.HasPrefix(action, "named-") {
+					q.Target = &v1.SceneTarget{CWD: q.Plan.ProjectPath, Scene: q.Plan.Scene}
+					q.InstanceID = ""
+					q.Plan = v1.PlanRequest{ConfigPath: q.Plan.ConfigPath}
+				}
 			}
 			reached, release, joined := make(chan struct{}), make(chan struct{}), make(chan struct{})
 			var once sync.Once
@@ -93,7 +98,7 @@ func TestBulkRejectsWaitingWriters(t *testing.T) {
 				case "scene":
 					_, writerErr = s.startScene(context.Background(), v1.SceneStartRequest{APIVersion: v1.Version, CWD: q.Plan.ProjectPath, Plan: q.Plan})
 				default:
-					_, writerErr = s.runMode(context.Background(), q, action == "reset")
+					_, writerErr = s.runMode(context.Background(), q, action == "reset" || action == "named-reset")
 				}
 			}()
 			t.Cleanup(func() { once.Do(func() { close(release) }); awaitControlled(t, joined, "writer not joined") })

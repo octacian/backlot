@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -336,5 +337,84 @@ func TestSceneFollowErrorRetainsLastValidatedSnapshot(t *testing.T) {
 	err := c.FollowScene(context.Background(), sceneRequest(), SceneFollowOptions{Interval: 100 * time.Millisecond, Duration: time.Second}, func(r v1.SceneFollowRecord) error { records = append(records, r); return nil })
 	if err == nil || len(records) != 2 || records[1].Type != "error" || records[1].Error == nil || records[1].Snapshot == nil || records[1].Snapshot.Result.Instance.ID != strings.Repeat("e", 64) {
 		t.Fatal(err, records)
+	}
+}
+
+func TestNamedLifecycleNeverDropsFenceAfterRejectionOrLostReply(t *testing.T) {
+	for _, action := range []string{"restart", "reset", "destroy"} {
+		t.Run(action, func(t *testing.T) {
+			c := New("unused")
+			defer c.Close()
+			calls := 0
+			lost := false
+			c.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/v1/status" {
+					data, _ := json.Marshal(v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, Status: "running", PID: 10, LeaseDuration: "30s"})
+					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}, "X-Backlot-Api-Version": []string{v1.Version}}, Body: io.NopCloser(bytes.NewReader(data))}, nil
+				}
+				calls++
+				if r.URL.Path != "/v1/"+action {
+					t.Fatal("changed endpoint", r.URL.Path)
+				}
+				if action == "destroy" {
+					var q v1.DestroyRequest
+					if json.NewDecoder(r.Body).Decode(&q) != nil || q.Target == nil || q.Target.Scene != "dev" || q.InstanceID != "" || q.Contract != v1.DestroyContract || !q.Force {
+						t.Fatal("lost selector/authority", q)
+					}
+				} else {
+					var q v1.RunRequest
+					if json.NewDecoder(r.Body).Decode(&q) != nil || q.Target == nil || q.Target.Scene != "dev" || q.InstanceID != "" {
+						t.Fatal("lost selector", q)
+					}
+				}
+				if lost {
+					return nil, io.ErrUnexpectedEOF
+				}
+				return &http.Response{StatusCode: 400, Header: http.Header{"Content-Type": []string{"application/json"}, "X-Backlot-Api-Version": []string{v1.Version}}, Body: io.NopCloser(strings.NewReader(`{"api_version":"v1","error":{"code":"invalid_document","message":"unknown field (field names are case-sensitive)"}}`))}, nil
+			})
+			target := &v1.SceneTarget{CWD: "/checkout", Scene: "dev"}
+			invoke := func() error {
+				q := v1.RunRequest{APIVersion: v1.Version, Target: target}
+				switch action {
+				case "restart":
+					_, err := c.Restart(context.Background(), q)
+					return err
+				case "reset":
+					_, err := c.Reset(context.Background(), q)
+					return err
+				default:
+					_, err := c.DestroyWithRequest(context.Background(), v1.DestroyRequest{APIVersion: v1.Version, Target: target, Force: true})
+					return err
+				}
+			}
+			err := invoke()
+			var detail *v1.PlanError
+			if !errors.As(err, &detail) || detail.Code != "unsupported_feature" || calls != 1 {
+				t.Fatal("unsupported named mutation retried", err, calls)
+			}
+			lost = true
+			err = invoke()
+			if err == nil || !strings.Contains(err.Error(), "unknown") || !strings.Contains(err.Error(), "do not automatically retry") || calls != 2 {
+				t.Fatal("lost mutation reply retried", err, calls)
+			}
+		})
+	}
+}
+
+func TestNamedLifecycleRejectsUnrelatedResponse(t *testing.T) {
+	c := New("unused")
+	defer c.Close()
+	c.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var response any = sceneInstance("e")
+		if r.URL.Path == "/v1/status" {
+			response = v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, Status: "running", PID: 10, LeaseDuration: "30s"}
+		}
+		data, _ := json.Marshal(response)
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}, "X-Backlot-Api-Version": []string{v1.Version}}, Body: io.NopCloser(bytes.NewReader(data))}, nil
+	})
+	q := v1.RunRequest{APIVersion: v1.Version, Target: &v1.SceneTarget{CWD: "/tmp/scene", Scene: "other"}}
+	_, err := c.Restart(context.Background(), q)
+	if err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Fatal("unrelated mutation result accepted", err)
 	}
 }

@@ -30,10 +30,10 @@ See [private configuration](manifest.md#registered-private-project-configuration
 | First persistent start | `scene start SCENE` or `run SCENE` | Accept snapshot/attempt, allocate selected resources, await readiness |
 | Join starting/ready scene | Repeat start/run | Same attempt and recorded configuration; report unapplied changes |
 | Start prepared/stopped/failed/cancelled/interrupted scene | Repeat start/run after diagnosis/repair | One new attempt using compatible current configuration after cleanup; retain identity/data/paired credentials |
-| Apply command, probe or non-sensitive environment edits to healthy work | `restart ID` | Capture current sources and apply compatible drift; retain identity/data/paired credentials |
-| Changed protected resource/initialization/sensitive contract | `reset ID`, or `destroy ID` then start | Explicit destructive replacement required; reset keeps logical ID but replaces generation; later start after destroy gets a new ID |
+| Apply command, probe or non-sensitive environment edits to healthy work | `scene restart SCENE` or `restart ID` | Capture current sources and apply compatible drift; retain identity/data/paired credentials |
+| Changed protected resource/initialization/sensitive contract | `scene reset SCENE` / `reset ID`, or destroy then start | Explicit destructive replacement required; reset keeps logical ID but replaces generation; later start after destroy gets a new ID |
 | Stop development runtime | `scene stop SCENE` or `stop ID` | Stop owned consumers/routes, release verified-unused instance networks, retain data, credentials, history and evidence |
-| Remove this instance's owned data | `destroy ID` | Stop/join and remove data, then erase attempt results/logs/artifacts; export first |
+| Remove this instance's owned data | `scene destroy SCENE` or `destroy ID` | Stop/join and remove data, then erase attempt results/logs/artifacts; export first |
 | Change daemon PATH/environment or policy | Explicit daemon stop/start in same state directory | Future daemon context changes; retained data/CA remain; no automatic scene restart |
 | Inspect or follow | `status`, `logs`, `export` | Observation only; no attachment, lease renewal or lifecycle ownership |
 | Own one new persistent attempt until client ends | `scene start --attached SCENE` or `run --attached SCENE` | Refuse existing runtime; signal/loss stops only the accepted attempt and retains data |
@@ -224,7 +224,7 @@ uses their recorded canonical location. Non-Git projects use the recorded projec
 root as checkout identity; before any record exists, supply `--project` explicitly.
 See the [selection rationale and stored-state boundaries](adr/20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md).
 
-Finite named results are `SceneResponse`: API/daemon generation, outcome, optional
+Finite named start/status/stop results are `SceneResponse`: API/daemon generation, outcome, optional
 `result: InstanceResponse`, and canonical checkout/selector metadata. `not_found`
 omits `result` but includes checkout identity. Runtime failures are snapshot data
 and status exits zero; selection, validation and transport errors are nonzero.
@@ -236,6 +236,15 @@ conflict rather than redirecting cleanup. Successful outcomes are `stopped`,
 failed records retain truthful status; cleanup/collection uncertainty stays
 nonzero. Stop shares mutation serialization with restart/reset/destroy and has no
 attempt-specific attachment authority.
+
+Named restart/reset/destroy use the same recorded selection, but missing or
+non-persistent targets fail nonzero with bounded candidate-ID guidance. They
+return the root lifecycle `InstanceResponse`, including success-only startup
+summaries for restart/reset. Restart retains data, reset replaces its generation,
+and destroy erases owned data and evidence; export first. Selectors are frozen to
+canonical locations and revalidated under existing lifecycle locks before effects,
+including preparation. Workload admission and destroy's evidence-before-instance
+lock ordering remain unchanged. See [named lifecycle options](cli.md#named-lifecycle-mutations).
 
 ### Sampled status follow
 
@@ -329,13 +338,22 @@ format and rejection/cleanup rules.
 | `POST /v1/attached/renew`, `/v1/attached/cancel` | `AttachedRequest` | `SceneResponse` |
 | `POST /v1/logs` | `LogsRequest` | `LogsResponse` |
 
-Restart/reset require a recorded `instance_id`; run does not accept one.
+Restart/reset and destroy require either a recorded `instance_id` or a named
+`target: SceneTarget`, never both. Named targets cannot contain an instance ID.
+Named restart/reset take only config in `plan`; the daemon derives scene/project
+from the selected record and retains its recorded config default. Run accepts
+neither selector. Older strict peers reject the new selector before effects;
+upgrade rather than retrying without the fence.
 Destroy force uses command-specific destroy requests; native stop force retains its
 independent attempt-bound `StopRequest` contract.
 
 `list` uses `ListRequest` (`after_id`, `limit`; zero means default 100, maximum
 100) and returns identity-ordered summaries with a `next_after_id` continuation.
 Empty lists contain an empty array. Historical/destroyed targets remain discoverable.
+Filtered list requests may opt into `include_checkout` with an absolute location
+or `cwd` (enclosing Git checkout). The response then includes resolved `checkout`
+metadata independently of rows; legacy requests retain their old shape. Reads do
+not enroll or repair checkout registration. See [list scope](cli.md#recorded-list-filters).
 `status` is a CLI alias for `inspect`. Every instance response removes snapshot
 ownership tokens while preserving the private durable recovery authority. Stop
 the old daemon before upgrading; use its matching binary for an incompatible

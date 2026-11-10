@@ -999,3 +999,34 @@ func TestReassociationWorkingDirectoryIntegration(t *testing.T) {
 		})
 	}
 }
+
+func TestReassociationScopedListsKeepLaunchProvenance(t *testing.T) {
+	f := newRepairFixture(t)
+	f.move(t, "moved")
+	if err := f.apply(t, f.preview(t)); err != nil {
+		t.Fatal(err)
+	}
+	cli := historyClient(t, f.s)
+	before := stateContents(t, f.s.store)
+	for _, q := range []v1.FilteredListRequest{
+		{CWD: f.project},
+		{CheckoutPath: f.project},
+		{ProjectPath: f.project},
+	} {
+		q.APIVersion, q.IncludeCheckout = v1.Version, true
+		got, err := cli.FilteredList(context.Background(), q)
+		if err != nil {
+			t.Fatal(q, err)
+		}
+		if got.Checkout == nil || got.Checkout.Path != f.project || got.Checkout.Path == f.instance.Checkout.Path || len(got.Instances) != 1 || got.Instances[0].ID != f.instance.ID || got.Instances[0].Checkout != f.instance.Checkout.Path {
+			t.Fatal("current scope mixed with launch provenance", got)
+		}
+	}
+	legacy, err := cli.List(context.Background(), v1.ListRequest{APIVersion: v1.Version})
+	if err != nil || legacy.Checkout != nil || len(legacy.Instances) != 1 || legacy.Instances[0].Checkout != f.instance.Checkout.Path {
+		t.Fatal("legacy list changed", legacy, err)
+	}
+	if !reflect.DeepEqual(before, stateContents(t, f.s.store)) {
+		t.Fatal("scoped discovery mutated state")
+	}
+}

@@ -65,7 +65,7 @@ Keep each argv entry intact and credentials in sensitive environment assignments
    and [drift](references/containers.md#generations-jobs-and-drift). Repeated start
    joins starting/ready work with unapplied drift, or requests one compatible new
    attempt after eligible stopped/failed work and cleanup. New starts use current
-   explicit/default config; `restart ID` deliberately replaces healthy work.
+   explicit/default config; `scene restart NAME` (or `restart ID`) deliberately replaces healthy work.
    Native cwd changes keep the other project path anchors; consult
    [working directories](references/manifest.md#native-working-directories) before
    adjusting relative arguments or interpreting symlink drift.
@@ -81,8 +81,8 @@ Keep each argv entry intact and credentials in sensitive environment assignments
    retains healthy dependencies; stop its authorized runtime before export to a new
    destination under a private parent, outside daemon state. Keep the original
    failure and evidence; do not claim successful tests from successful export.
-7. End only authorized task-owned work in the same daemon scope, using the recorded
-   ID: stop preserves data/history; destroy removes owned data after stop and erases
+7. End only authorized task-owned work in the same daemon scope, using a recorded
+   ID or an explicitly selected persistent scene: stop preserves data/history; destroy removes owned data after stop and erases
    attempts/logs/artifacts. Export needed exact-attempt evidence before destroy;
    caller-owned bundles survive. History prune removes selected evidence, never data.
    Preserve uncertain resources/journals and report residuals. Do not prune by name,

@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/plan"
@@ -20,8 +21,18 @@ func (s *store) filteredList(request v1.FilteredListRequest) (v1.ListResponse, e
 	}
 	var checkout *v1.CheckoutIdentity
 	project := ""
-	if request.ProjectPath != "" || request.CheckoutPath != "" {
+	if request.ProjectPath != "" || request.CheckoutPath != "" || request.CWD != "" {
 		path := request.CheckoutPath
+		if request.CWD != "" {
+			anchor, err := sceneDirectory(request.CWD)
+			if err != nil {
+				return result, err
+			}
+			path = plan.CheckoutRoot(anchor)
+			if _, err := os.Lstat(filepath.Join(path, ".git")); err != nil {
+				return result, problem("checkout_identity", "working directory is outside a Git checkout; use --checkout PATH for an exact checkout root or recorded instance IDs")
+			}
+		}
 		if request.ProjectPath != "" {
 			var err error
 			project, err = sceneDirectory(request.ProjectPath)
@@ -106,6 +117,9 @@ func (s *store) filteredList(request v1.FilteredListRequest) (v1.ListResponse, e
 		}
 		return nil
 	})
+	if err == nil && request.IncludeCheckout {
+		result.Checkout = checkout
+	}
 	return result, err
 }
 

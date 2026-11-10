@@ -575,15 +575,36 @@ func (s *service) destroy(ctx context.Context, id string) (v1.Instance, error) {
 	return s.destroyWithForce(ctx, id, false)
 }
 func (s *service) destroyWithForce(ctx context.Context, id string, force bool) (v1.Instance, error) {
+	return s.destroySelected(ctx, id, force, nil)
+}
+
+func (s *service) destroySelected(ctx context.Context, id string, force bool, target *v1.SceneTarget) (v1.Instance, error) {
 	ctx, finish, admissionErr := s.beginMutation(ctx)
 	if admissionErr != nil {
 		return v1.Instance{}, admissionErr
 	}
 	defer finish()
+	var selected v1.SceneResponse
+	if target != nil {
+		var err error
+		selected, err = s.selectMutation(*target)
+		if err != nil {
+			return v1.Instance{}, err
+		}
+		id = selected.Result.Instance.ID
+		if s.beforeSceneMutation != nil {
+			s.beforeSceneMutation(id)
+		}
+	}
 	s.evidence.mu.Lock()
 	defer s.evidence.mu.Unlock()
 	unlock := s.lockMutation(id)
 	defer unlock()
+	if target != nil {
+		if err := s.revalidateMutation(selected); err != nil {
+			return v1.Instance{}, err
+		}
+	}
 	instance, err := s.stopExecution(id)
 	// Cancellation may create a kept owner while the finite executor joins.
 	// Destroy must join that retained owner before removing its consumers' data.

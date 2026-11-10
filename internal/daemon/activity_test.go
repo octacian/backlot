@@ -5,9 +5,11 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -408,6 +410,177 @@ func TestActivityReadOnlyRecordedScopeAndPagination(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// activityCancelContext cancels at an observation boundary without a timing race.
+type activityCancelContext struct {
+	context.Context
+	cancel context.CancelFunc
+	checks int
+}
+
+func (c *activityCancelContext) Err() error {
+	c.checks++
+	if c.checks == 4 {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+
+func TestActivityContinuationSeeksAndCancels(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	prepared := scenePrepare(t, s, root, config)
+	id := func(n int) string { return fmt.Sprintf("%064x", n*2) }
+	const count = 10002
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		r, err := load(tx, prepared.Instance.ID)
+		if err != nil {
+			return err
+		}
+		if err := tx.Bucket([]byte("instances")).Delete([]byte(r.Instance.ID)); err != nil {
+			return err
+		}
+		shared := sharedLockRecord(id(0))
+		for n := range count {
+			shared.ID = id(n)
+			if err := put(tx, "shared_services", shared.ID, shared); err != nil {
+				return err
+			}
+			r.Instance.ID = id(n)
+			r.Instance.Status = v1.Preparing
+			r.Instance.Operation.Status = v1.Preparing
+			if err := put(tx, "instances", r.Instance.ID, r); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"shared", "workload"} {
+		t.Run(kind+"-prefix", func(t *testing.T) {
+			after := kind + "/" + id(count-1)
+			if kind == "shared" {
+				after = kind + "/" + id(count-2)
+			}
+			q := v1.ActivityRequest{APIVersion: v1.Version, After: after, Limit: 1}
+			var page v1.ActivityResponse
+			var err error
+			// Rewalking the prefix allocates one page key per record, even if uncharged.
+			allocs := testing.AllocsPerRun(3, func() { page, err = s.activity(context.Background(), q) })
+			if err != nil || page.Validate() != nil || kind == "shared" && (len(page.Entries) != 1 || page.Entries[0].Key != kind+"/"+id(count-1) || page.Complete || page.NextAfter != page.Entries[0].Key) || kind == "workload" && (!page.Complete || len(page.Entries) != 0) {
+				t.Fatal(page, err)
+			}
+			if allocs > 1000 {
+				t.Errorf("continuation walked the >10000-record prefix: %.0f allocations", allocs)
+			}
+			t.Logf("continuation after >10000 records: %.0f allocations", allocs)
+			for _, after := range []string{q.After, kind + "/" + strings.Repeat("f", 64)} {
+				q.After = after
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				_, err = s.activity(ctx, q)
+				code(t, err, "cancelled")
+				ctx, cancel = context.WithCancel(context.Background())
+				defer cancel()
+				_, err = s.activity(&activityCancelContext{Context: ctx, cancel: cancel}, q)
+				code(t, err, "cancelled")
+			}
+		})
+	}
+	// Keep dependent settlement scans within their existing budget for cursor semantics.
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		for n := range count - 2 {
+			for _, bucket := range []string{"shared_services", "instances"} {
+				if err := tx.Bucket([]byte(bucket)).Delete([]byte(id(n))); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		after string
+		want  []string
+	}{
+		{"", []string{"shared/" + id(count-2), "shared/" + id(count-1), "workload/" + id(count-2), "workload/" + id(count-1)}},
+		{"shared/" + id(count-2), []string{"shared/" + id(count-1), "workload/" + id(count-2), "workload/" + id(count-1)}},
+		{"shared/" + fmt.Sprintf("%064x", (count-2)*2+1), []string{"shared/" + id(count-1), "workload/" + id(count-2), "workload/" + id(count-1)}},
+		{"shared/" + strings.Repeat("f", 64), []string{"workload/" + id(count-2), "workload/" + id(count-1)}},
+		{"workload/" + id(count-2), []string{"workload/" + id(count-1)}},
+		{"workload/" + fmt.Sprintf("%064x", (count-2)*2+1), []string{"workload/" + id(count-1)}},
+		{"workload/" + strings.Repeat("f", 64), []string{}},
+	} {
+		page, err := s.activity(context.Background(), v1.ActivityRequest{APIVersion: v1.Version, After: tc.after})
+		got := []string{}
+		for _, e := range page.Entries {
+			got = append(got, e.Key)
+		}
+		if err != nil || page.Validate() != nil || !page.Complete || !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("after %q: keys %v, want %v; page %v, error %v", tc.after, got, tc.want, page, err)
+		}
+	}
+}
+
+func TestActivityContinuationByteBudget(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	prepared := scenePrepare(t, s, root, config)
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		r, err := load(tx, prepared.Instance.ID)
+		if err != nil {
+			return err
+		}
+		if err := tx.Bucket([]byte("instances")).Delete([]byte(r.Instance.ID)); err != nil {
+			return err
+		}
+		// JSON escaping fills the byte budget before the entry limit.
+		r.Instance.Plan.Project = strings.Repeat("\x00", 4096)
+		r.Instance.Status = v1.Preparing
+		r.Instance.Operation.Status = v1.Preparing
+		for n := range 30 {
+			r.Instance.ID = fmt.Sprintf("%064x", n)
+			if err := put(tx, "instances", r.Instance.ID, r); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after, seen := "", 0
+	for range 3 {
+		page, err := s.activity(context.Background(), v1.ActivityRequest{APIVersion: v1.Version, After: after})
+		if err != nil || page.Validate() != nil || len(page.Entries) == 0 {
+			t.Fatal(page, err)
+		}
+		bytes := 0
+		for _, e := range page.Entries {
+			if e.Key != "workload/"+fmt.Sprintf("%064x", seen) {
+				t.Fatal("byte-budget continuation skipped or repeated a record", e.Key, seen)
+			}
+			encoded, err := json.Marshal(e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bytes += len(encoded)
+			seen++
+		}
+		if bytes > 512<<10 {
+			t.Fatal("response exceeded byte budget", bytes)
+		}
+		if page.Complete {
+			break
+		}
+		if page.NextAfter <= after || page.NextAfter != page.Entries[len(page.Entries)-1].Key || len(page.Entries) >= 30 {
+			t.Fatal("byte-budget pagination did not advance", page)
+		}
+		after = page.NextAfter
+	}
+	if seen != 30 || after == "" {
+		t.Fatal("byte budget did not paginate all records", seen, after)
 	}
 }
 

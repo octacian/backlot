@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -171,6 +172,9 @@ func (s *service) activity(ctx context.Context, q v1.ActivityRequest) (v1.Activi
 	if err := q.Validate(); err != nil {
 		return out, err
 	}
+	if ctx.Err() != nil {
+		return out, problem("cancelled", "recorded observation cancelled")
+	}
 	limit := q.Limit
 	if limit == 0 {
 		limit = 100
@@ -185,17 +189,33 @@ func (s *service) activity(ctx context.Context, q v1.ActivityRequest) (v1.Activi
 			return err
 		}
 		out.GatewayStatus = g.Status
+		afterKind, afterID, _ := strings.Cut(q.After, "/")
 		for _, kind := range []string{"shared", "workload"} {
+			if ctx.Err() != nil {
+				return problem("cancelled", "recorded observation cancelled")
+			}
+			if kind < afterKind {
+				continue
+			}
 			bucket := "shared_services"
 			if kind == "workload" {
 				bucket = "instances"
 			}
 			cursor := tx.Bucket([]byte(bucket)).Cursor()
-			for key, raw := cursor.First(); key != nil; key, raw = cursor.Next() {
-				pageKey := kind + "/" + string(key)
-				if pageKey <= q.After {
-					continue
+			var key, raw []byte
+			if kind == afterKind {
+				key, raw = cursor.Seek([]byte(afterID))
+				if bytes.Equal(key, []byte(afterID)) {
+					key, raw = cursor.Next()
 				}
+			} else {
+				key, raw = cursor.First()
+			}
+			for ; key != nil; key, raw = cursor.Next() {
+				if ctx.Err() != nil {
+					return problem("cancelled", "recorded observation cancelled")
+				}
+				pageKey := kind + "/" + string(key)
 				if len(out.Entries) == limit {
 					out.Complete = false
 					out.NextAfter = last
@@ -260,6 +280,9 @@ func (s *service) activity(ctx context.Context, q v1.ActivityRequest) (v1.Activi
 		} else {
 			return out, err
 		}
+	}
+	if ctx.Err() != nil {
+		return out, problem("cancelled", "recorded observation cancelled")
 	}
 	// Observe owners separately; no claim that recorded ports correspond to listeners.
 	s.mu.Lock()

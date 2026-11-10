@@ -26,41 +26,57 @@ func TestNativeRecoveryRetainsObservations(t *testing.T) {
 			h := newNativeHarness(t, binary)
 			h.manifest.Resources["data"] = v1.Resource{Kind: "directory"}
 			h.manifest.Outputs = map[string]v1.Output{"build": {Path: "build", ConcurrencyGroup: "build"}}
-			server := h.manifest.Components["server"]
-			server.Resources = append(server.Resources, "data")
-			server.Outputs = []string{"build"}
-			server.Fixtures = map[string]v1.Fixture{"data": {Value: fixtureRef("resource", "data", "path")}}
-			server.Readiness = &v1.Probe{Kind: "command", Timeout: "2s", Command: &v1.Command{Tool: "fixture", Args: v1.StringArguments("-test.run=TestNativeFixtureProcess", "--", "probe")}}
-			h.manifest.Components["server"] = server
-			dev := h.manifest.Scenes["dev"]
-			dev.Resources = append(dev.Resources, "data")
-			h.manifest.Scenes["dev"] = dev
-			testScene := h.manifest.Scenes["test"]
-			testScene.Resources = append(testScene.Resources, "data")
-			h.manifest.Scenes["test"] = testScene
-			h.manifest.Scenes["peer"] = dev
-			h.write()
-			r := h.run("dev")
-			ready := h.state(r.Instance.ID, v1.RuntimeReady).Instance
-			id := ready.ID
-			h.retainGuardianCleanup(id) // Both readiness and workload owners, before fault.
-			original := h.guardianCapabilities(id)
-			if len(original) < 2 {
-				t.Fatal("readiness/workload authorities not exercised")
+			component := h.manifest.Components["server"]
+			component.Resources = append(component.Resources, "data")
+			component.Outputs = []string{"build"}
+			component.Fixtures = map[string]v1.Fixture{"data": {Value: fixtureRef("resource", "data", "path")}}
+			component.Readiness = &v1.Probe{Kind: "command", Timeout: "2s", Command: &v1.Command{Tool: "fixture", Args: v1.StringArguments("-test.run=TestNativeFixtureProcess", "--", "probe")}}
+			h.manifest.Components["server"] = component
+			for name, scene := range h.manifest.Scenes {
+				scene.Resources = append(scene.Resources, "data")
+				h.manifest.Scenes[name] = scene
 			}
-			for _, authority := range original {
-				if authority.Component != "server" || authority.Attempt != ready.Execution.Attempt {
-					t.Fatal("fixture binding")
-				}
+			h.write()
+			ready := h.state(h.run("dev").Instance.ID, v1.RuntimeReady).Instance
+			id := ready.ID
+			h.retainGuardianCleanup(id)
+			authorities := h.guardianCapabilities(id)
+			if len(authorities) < 2 {
+				t.Fatal("readiness and application authorities not exercised")
 			}
 			fixtures, err := h.cli.Fixtures(context.Background(), v1.FixturesRequest{APIVersion: v1.Version, InstanceID: id})
 			if err != nil || len(fixtures.Fixtures) != 1 {
-				t.Fatal("data fixture", err, fixtures)
+				t.Fatal("data fixture", err)
 			}
 			marker := filepath.Join(fixtures.Fixtures[0].Value, "retained")
 			if err := os.WriteFile(marker, []byte("owned data"), 0600); err != nil {
 				t.Fatal(err)
 			}
+			// Withhold an ACTUAL completed readiness receipt before faulting the daemon.
+			// The application's later successful receipt must not prove this sibling empty.
+			receipt := ""
+			for _, authority := range authorities {
+				path := filepath.Join(filepath.Dir(authority.Control), "receipt.json")
+				if _, err := os.Stat(path); err == nil {
+					receipt = path
+					break
+				}
+			}
+			if receipt == "" {
+				t.Fatal("completed readiness receipt missing")
+			}
+			held := receipt + ".fixture-held"
+			if err := os.Rename(receipt, held); err != nil {
+				t.Fatal(err)
+			}
+			restored := false
+			defer func() {
+				if !restored {
+					if err := os.Rename(held, receipt); err != nil {
+						t.Error("owned readiness receipt restore failed", err)
+					}
+				}
+			}()
 			if err := h.process.Process.Kill(); err != nil {
 				t.Fatal(err)
 			}
@@ -71,131 +87,84 @@ func TestNativeRecoveryRetainsObservations(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = state.db.Close() }()
-			// Artificial persisted observation for a real unchanged attempt. The exact
-			// original public fixture result and authenticated authorities are retained
-			// solely for post-assertion teardown; production has no such bypass.
 			prior := *ready.Execution
-			observation := v1.NativeCleanupResult{Component: "server", Attempt: prior.Attempt, Confidence: confidence, Reason: "cleanup_incomplete", Detail: "Session cleanup or required collection/join could not be verified; lifecycle fences remain."}
+			observation := v1.NativeCleanupResult{Component: "server", Attempt: prior.Attempt, Confidence: confidence, Reason: "cleanup_incomplete", Detail: "Historical session cleanup uncertainty."}
 			if confidence == v1.CleanupAuthorityLost {
 				observation.Reason = "guardian_authority_lost"
-				observation.Detail = "Original guardian authority or bound cleanup receipt unavailable; lifecycle fences remain."
 			}
 			prior.NativeCleanup = []v1.NativeCleanupResult{observation}
-			prior.CleanupFailure = observation.Detail + "\nfixture transient non-native cleanup failure"
-			prior.CleanupDetails = []v1.PlanError{{Code: "cleanup_failed", Message: observation.Detail}, {Code: "gateway_ownership", Message: "fixture transient non-native cleanup failure"}}
+			prior.CleanupFailure = observation.Detail
 			if _, err := state.execution(id, ready.Status, &prior); err != nil {
-				t.Fatal(err)
-			}
-			assertResult := func(result *v1.ExecutionResult) {
-				t.Helper()
-				if result.Attempt != prior.Attempt || len(result.NativeCleanup) != 1 || result.NativeCleanup[0] != observation || result.CleanupFailure == "" {
-					t.Fatal("earlier native uncertainty lost", result)
-				}
-				if len(result.CleanupDetails) != 1 || result.CleanupDetails[0].Code != "cleanup_failed" || result.CleanupDetails[0].Message != observation.Detail || strings.Contains(result.CleanupFailure, "transient") {
-					t.Fatal("native fence or transient retry semantics lost", result)
-				}
-			}
-			for range 2 {
-				if err := state.recoverExecution(id); err != nil {
-					t.Fatal(err)
-				}
-				current, err := state.inspect(id)
-				if err != nil {
-					t.Fatal(err)
-				}
-				assertResult(current.Execution)
-				if err := state.outputConflict(current.Plan); err == nil {
-					t.Fatal("output fence released")
-				}
-			}
-			for _, authority := range original {
-				observed, err := native.StopResult(authority, 0)
-				if err != nil || observed == nil || observed.Confidence != v1.ObservedEmpty {
-					t.Fatal("later bound successful sibling receipt not exercised", observed, err)
-				}
-			}
-			h.absent()
-			_ = state.db.Close()
-			h.start() // Third recovery through a real daemon restart and validated client.
-			current, err := h.cli.Inspect(context.Background(), id)
-			if err != nil {
-				t.Fatal("inspect/client validation", err)
-			}
-			assertResult(current.Instance.Execution)
-			doctor, err := h.cli.Doctor(context.Background(), v1.DoctorRequest{APIVersion: v1.Version, InstanceID: id})
-			if err != nil || doctor.Healthy {
-				t.Fatal("doctor uncertainty", err, doctor)
-			}
-			assertDoctorCheck(t, doctor, "native_cleanup", v1.DoctorFailed)
-			destination := filepath.Join(t.TempDir(), "bundle")
-			exported, err := h.cli.Export(context.Background(), v1.ExportRequest{APIVersion: v1.Version, InstanceID: id, Output: destination, AllowPartial: true})
-			var exportError *v1.PlanError
-			if !errors.As(err, &exportError) || exportError.Code != "export_active" || exported.Published {
-				t.Fatal("uncertain recovered evidence escaped export fence", err, exported)
-			}
-			if _, err := os.Stat(destination); !os.IsNotExist(err) {
-				t.Fatal("fenced export published output", err)
-			}
-			requireFence := func(err error) {
-				t.Helper()
-				var detail *v1.PlanError
-				if !errors.As(err, &detail) || detail.Code != "cleanup_failed" {
-					t.Fatal("expected lifecycle cleanup fence", err)
-				}
-			}
-			_, err = h.cli.StopExecution(context.Background(), id)
-			requireFence(err)
-			request := h.request("dev")
-			request.InstanceID = id
-			_, err = h.cli.Restart(context.Background(), request)
-			requireFence(err)
-			_, err = h.cli.Reset(context.Background(), request)
-			requireFence(err)
-			_, err = h.cli.Destroy(context.Background(), id)
-			requireFence(err)
-			peer, err := h.cli.Run(context.Background(), h.request("peer"))
-			if err != nil {
-				requireFence(err)
-			} else {
-				failed := h.state(peer.Instance.ID, v1.Failed)
-				if failed.Instance.Execution.FailureDetail == nil || failed.Instance.Execution.FailureDetail.Code != "cleanup_failed" {
-					t.Fatal("output consumer launched through fence", failed)
-				}
-			}
-			if data, err := os.ReadFile(marker); err != nil || string(data) != "owned data" {
-				t.Fatal("fenced data changed", err)
-			}
-			current, err = h.cli.Inspect(context.Background(), id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertResult(current.Instance.Execution)
-			// The known artificial fixture state may be restored only after all policy
-			// assertions and bound successful cleanup of every exact retained authority.
-			for _, authority := range original {
-				if err := native.Stop(authority, 0); err != nil {
-					t.Fatal(err)
-				}
-			}
-			h.expectShutdownFailureAfterCleanup("cleanup_failed", original)
-			h.close()
-			state, err = openStore(h.dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := state.execution(id, v1.Interrupted, ready.Execution); err != nil {
 				t.Fatal(err)
 			}
 			if err := state.recoverExecution(id); err != nil {
 				t.Fatal(err)
 			}
-			_ = state.db.Close()
+			partial, err := state.inspect(id)
+			if err != nil || partial.Execution.CleanupFailure == "" || partial.Execution.Settlement == nil || partial.Execution.Settlement.State == v1.ConsumerSettled || len(partial.Execution.NativeCleanup) != 1 || partial.Execution.NativeCleanup[0] != observation {
+				t.Fatal("one successful sibling masked missing readiness authority", err)
+			}
+			if err := state.outputConflict(partial.Plan); err == nil {
+				t.Fatal("partial native release cleared output fence")
+			}
+			completion, gap := partial.Execution.CompletedAt, partial.Execution.CollectionFailure
+			if completion == "" || gap == "" {
+				t.Fatal("interruption outcome/collection gap missing")
+			}
+			if err := state.db.Close(); err != nil {
+				t.Fatal(err)
+			}
 			h.start()
+			_, err = h.cli.StopExecution(context.Background(), id)
+			var detail *v1.PlanError
+			if !errors.As(err, &detail) || detail.Code != "cleanup_failed" {
+				t.Fatal("explicit stop bypassed withheld sibling receipt", err)
+			}
+			request := h.request("dev")
+			request.InstanceID = id
+			if _, err = h.cli.Restart(context.Background(), request); err == nil {
+				t.Fatal("restart bypassed partial consumer fence")
+			}
+			if _, err = h.cli.Destroy(context.Background(), id); err == nil {
+				t.Fatal("destroy bypassed partial consumer fence")
+			}
+			if data, err := os.ReadFile(marker); err != nil || string(data) != "owned data" {
+				t.Fatal("partial cleanup changed data", err)
+			}
+			if err := os.Rename(held, receipt); err != nil {
+				t.Fatal(err)
+			}
+			restored = true
+			released, err := h.cli.StopExecution(context.Background(), id)
+			if err != nil {
+				t.Fatal("independent all-launch proof did not release", err)
+			}
+			current := released.Instance.Execution
+			if current == nil || current.Settlement == nil || current.Settlement.State != v1.ConsumerSettled || current.Settlement.Cause != v1.SettlementExplicitStop || current.Settlement.ObservedAt == "" || current.CleanupFailure != "" || len(current.NativeCleanup) != 1 || current.NativeCleanup[0] != observation || current.CompletedAt != completion || current.CollectionFailure != gap || released.Instance.Status != v1.Interrupted || current.Outcome != v1.Interrupted || len(released.Instance.NativeOwnershipWarnings) != 0 {
+				t.Fatal("verified current release rewrote history or required force")
+			}
+			for _, authority := range authorities {
+				observed, err := native.StopResult(authority, 0)
+				if err != nil || observed == nil || observed.Confidence != v1.ObservedEmpty {
+					t.Fatal("exact launch receipt not independently verified", err)
+				}
+			}
+			h.absent()
+			doctor, err := h.cli.Doctor(context.Background(), v1.DoctorRequest{APIVersion: v1.Version, InstanceID: id})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertDoctorCheck(t, doctor, "consumer_settlement", v1.DoctorOK)
+			assertDoctorCheck(t, doctor, "native_cleanup", v1.DoctorFailed)
+			exported, err := h.cli.Export(context.Background(), v1.ExportRequest{APIVersion: v1.Version, InstanceID: id, Output: filepath.Join(t.TempDir(), "bundle"), AllowPartial: true})
+			if err != nil || !exported.Published || exported.Result.Settlement == nil || exported.Result.Settlement.State != v1.ConsumerSettled || len(exported.Result.NativeCleanup) != 1 || exported.Result.NativeCleanup[0] != observation {
+				t.Fatal("strict export lost independent release/history", err)
+			}
 			if _, err := h.cli.Destroy(context.Background(), id); err != nil {
-				t.Fatal("authenticated fixture teardown", err)
+				t.Fatal("verified fixture destroy", err)
 			}
 			if _, err := os.Stat(marker); !os.IsNotExist(err) {
-				t.Fatal("fixture data removal", err)
+				t.Fatal("explicit destruction did not erase owned data", err)
 			}
 		})
 	}

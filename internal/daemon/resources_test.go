@@ -21,6 +21,7 @@ import (
 
 	"github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 )
 
@@ -120,6 +121,8 @@ func TestInstanceNetworkLifecycle(t *testing.T) {
 					} else {
 						_, _ = w.Write([]byte(`[]`))
 					}
+				case r.URL.Path == "/containers/owned/json":
+					w.WriteHeader(http.StatusServiceUnavailable)
 				case r.URL.Path == "/containers/foreign/json":
 					_ = json.NewEncoder(w).Encode(map[string]any{"NetworkSettings": map[string]any{"Networks": map[string]any{n.Name: map[string]string{"NetworkID": n.ID}}}})
 				case r.URL.Path == "/networks/create":
@@ -179,11 +182,18 @@ func TestInstanceNetworkLifecycle(t *testing.T) {
 			if err := state.saveResources(id, g); err != nil {
 				t.Fatal(err)
 			}
-			result := &v1.ExecutionResult{Attempt: attempt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano), Outcome: v1.Stopped}
+			result := &v1.ExecutionResult{Attempt: attempt, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano), Outcome: v1.Stopped, Components: []v1.ComponentResult{{Name: "check", Status: "stopped"}}}
 			if _, err := state.execution(id, v1.Stopped, result); err != nil {
 				t.Fatal(err)
 			}
-			if err := state.saveRuntime(id, runtimeRecord{Attempt: attempt}); err != nil {
+			// This network-boundary unit fixture includes explicit earlier-boot native
+			// authority; an empty legacy journal is intentionally not release proof.
+			oldBoot := settlementOldBoot
+			if boot, _ := native.CurrentBoot(); boot == oldBoot {
+				oldBoot = settlementBoot
+			}
+			journal := runtimeRecord{Attempt: attempt, Groups: []native.Identity{{Protocol: 1, Purpose: "application", Component: "check", Attempt: attempt, PID: os.Getpid(), Birth: "unit-earlier-boot", Boot: oldBoot, Token: newID(), Control: filepath.Join(shortTemp(t), "control.sock")}}}
+			if err := state.saveRuntime(id, journal); err != nil {
 				t.Fatal(err)
 			}
 			if mode == "remove-gap" {
@@ -220,7 +230,7 @@ func TestInstanceNetworkLifecycle(t *testing.T) {
 				}
 				if mode == "provider" || deleteDenied || mode == "ownership" || mode == "consumer" {
 					if mode == "native-waiver" {
-						stopped.Execution.NativeCleanup = []v1.NativeCleanupResult{{Component: "test", Attempt: attempt, Confidence: v1.CleanupAuthorityLost, Detail: "guardian authority lost"}}
+						stopped.Execution.NativeCleanup = []v1.NativeCleanupResult{{Component: "check", Attempt: attempt, Confidence: v1.CleanupAuthorityLost, Reason: "guardian_authority_lost", Detail: "guardian authority lost"}}
 						if _, err := state.execution(id, v1.Stopped, stopped.Execution); err != nil {
 							t.Fatal(err)
 						}
@@ -299,7 +309,7 @@ func TestInstanceNetworkLifecycle(t *testing.T) {
 						}
 						return
 					}
-					if err := state.saveRuntime(id, runtimeRecord{Attempt: attempt}); err != nil {
+					if err := state.saveRuntime(id, journal); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -313,9 +323,7 @@ func TestInstanceNetworkLifecycle(t *testing.T) {
 				}
 				state.sharedCheckpoint = nil
 				wantStatus := v1.Stopped
-				if mode == "delete-denied" {
-					wantStatus = v1.Interrupted
-				}
+
 				if retried, err := svc.stopExecution(id); err != nil || retried.Status != wantStatus || (retried.Execution.CollectionFailure != "") != (mode == "delete-denied") {
 					t.Fatal("explicit retry", err)
 				}

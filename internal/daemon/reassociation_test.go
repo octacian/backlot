@@ -493,7 +493,7 @@ func TestReassociationUnavailablePeerDifferentDeclaration(t *testing.T) {
 	}
 	record := sharedServiceRecord{ID: hash(origin.ID + "/peer-only"), Project: origin, Name: "peer-only", Declaration: document.SharedServices["peer-only"], Endpoint: "unix:///owned-unavailable-fixture.sock", AdminPassword: newID(), Status: "stopped", Server: ownedResource{Kind: "container", Name: "fixture-server", Token: newID()}, Network: ownedResource{Kind: "network", Name: "fixture-network", Token: newID()}, Volume: ownedResource{Kind: "volume", Name: "fixture-volume", Token: newID()}}
 	record.Configuration = sharedDigest(record.Declaration, record.Endpoint)
-	if err := f.s.store.saveShared(record); err != nil {
+	if err := f.s.store.saveSharedFixture(record); err != nil {
 		t.Fatal(err)
 	}
 	allocation := sharedAllocation{ServiceID: record.ID, Request: v1.ManagerRequest{Version: v1.ManagerProtocolVersion, Operation: "allocate", AllocationID: newID(), Ownership: newID(), Database: "bl" + newID()[:32], Username: "bl" + newID()[:32], Password: newID()}}
@@ -740,7 +740,7 @@ func TestReassociationR1MismatchedRetainedSelectors(t *testing.T) {
 	}
 	record := sharedServiceRecord{ID: hash(origin.ID + "/sql"), Project: origin, Name: "sql", Declaration: f.manifest.SharedServices["sql"], Endpoint: "unix:///owned-unavailable-fixture.sock", AdminPassword: newID(), Status: "stopped", Server: ownedResource{Kind: "container", Name: "fixture-server", Token: newID()}, Network: ownedResource{Kind: "network", Name: "fixture-network", Token: newID()}, Volume: ownedResource{Kind: "volume", Name: "fixture-volume", Token: newID()}}
 	record.Configuration = sharedDigest(record.Declaration, record.Endpoint)
-	if err := f.s.store.saveShared(record); err != nil {
+	if err := f.s.store.saveSharedFixture(record); err != nil {
 		t.Fatal(err)
 	}
 	allocation := sharedAllocation{ServiceID: record.ID, Request: v1.ManagerRequest{Version: v1.ManagerProtocolVersion, Operation: "allocate", AllocationID: newID(), Ownership: newID(), Database: "bl" + newID()[:32], Username: "bl" + newID()[:32], Password: newID()}}

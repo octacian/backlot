@@ -350,9 +350,18 @@ of completed work. Preserve these independent observations:
 | `terminal_exit_code`, component `exit_code` | Original observed application exit; absent if unknown |
 | `failure`, `failure_detail` | Orchestration/runtime failure and safe detail |
 | `collection_failure` | Evidence collection failed, independently of test exit |
-| `cleanup_failure`, `native_cleanup` | Cleanup error and native observation confidence |
+| `cleanup_failure`, `native_cleanup` | Current cleanup error and retained native observation confidence |
+| `execution.settlement` | Current attempt/generation consumer release, operation cause, observed time and bounded blockers |
 | `cancelled` | Cancellation was requested/recorded, independently of original exit |
 | Export `published`, `complete`; report `omissions` | Publication and evidence availability, independently of test success |
+
+A settled consumer does not turn an interrupted or failed execution into success.
+Stop/status report current release separately from original exits, native confidence
+and collection gaps. `settlement.state` is `settled`, `unsettled` or `unknown`;
+missing legacy proof remains unknown. Its observation time comes from verification,
+never from reading status. An unknown or incomplete stop returns nonzero and
+preserves ownership; inspect its blockers before retrying. These diagnostics confer
+no cleanup authority on clients. Selected-attempt exports retain the same separation.
 
 These execution fields live under `instance.execution` (or
 `result.instance.execution` for named results). A zero test exit with failed

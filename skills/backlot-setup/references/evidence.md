@@ -259,8 +259,9 @@ logs and artifacts follow the existing outcome and sensitivity contracts; ordina
 results never reveal accepted environment credentials.
 
 Completed task outcomes share their parent's completed-attempt retention count,
-including parent-scoped manual pruning. Active and cleanup-uncertain tasks remain
-protected. Settled tasks retire private launch snapshots and inputs. Restart/reset
+including parent-scoped manual pruning. Active tasks and tasks without verified
+current consumer release remain protected, including terminal tasks with no
+cleanup error. Settled tasks retire private launch snapshots and inputs. Restart/reset
 preserves bounded diagnosis. Successful parent destroy erases dependent results,
 logs, artifacts and private material too;
 failed filesystem erasure retains durable deletion intent and must be retried.

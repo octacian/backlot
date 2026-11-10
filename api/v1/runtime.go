@@ -103,6 +103,8 @@ type ImageChangeWarning struct {
 
 // ExecutionResult is the durable redacted runtime view.
 type ExecutionResult struct {
+	// Settlement is an optional current-attempt diagnostic, never release authority.
+	Settlement          *ConsumerSettlement  `json:"settlement,omitempty"`
 	BuildImages         []BuildImageResult   `json:"build_images,omitempty"`
 	ImageChangeWarnings []ImageChangeWarning `json:"image_change_warnings,omitempty"`
 	// Outcome preserves the terminal execution status across later stop/destroy operations.
@@ -219,9 +221,9 @@ func (r NativeCleanupResult) Validate() error {
 	return nil
 }
 
-// FencesResources reports the active native obligation, separately from historical
-// confidence and collection. Only an exact-attempt committed waiver or persisted
-// previous-boot release can explain an incomplete observation without that fence.
+// FencesResources reports this observation's default native fence. An enclosing
+// attempt-bound settlement can report independently verified current release while
+// this observation retains its historical confidence and collection outcome.
 func (r NativeCleanupResult) FencesResources(warnings []NativeOwnershipWarning) bool {
 	if r.Confidence == ObservedEmpty || r.ResourceRelease == "previous_boot" {
 		return false

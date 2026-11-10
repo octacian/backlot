@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/octacian/backlot/internal/plan"
@@ -39,6 +40,9 @@ func TestSharedSaveRejectsHandlesBeforeCommit(t *testing.T) {
 		}
 		return out
 	}
+	if err = state.saveSharedFixture(record); err != nil {
+		t.Fatal(err)
+	}
 	// Empty handles remain pending intents; full provider IDs/coherent volumes work.
 	for _, acknowledged := range []bool{false, true} {
 		if acknowledged {
@@ -46,7 +50,7 @@ func TestSharedSaveRejectsHandlesBeforeCommit(t *testing.T) {
 			record.Network.ID = newID()
 			record.Volume.ID = record.Volume.Name
 		}
-		if err = state.saveShared(record); err != nil {
+		if err = state.saveShared(&record, "consumer_start"); err != nil {
 			t.Fatal(err)
 		}
 		previous := raw()
@@ -60,7 +64,7 @@ func TestSharedSaveRejectsHandlesBeforeCommit(t *testing.T) {
 			case "volume":
 				changed.Volume.ID = "different-volume"
 			}
-			code(t, state.saveShared(changed), "state_corrupt")
+			code(t, state.saveShared(&changed, "consumer_start"), "state_corrupt")
 			if !bytes.Equal(raw(), previous) {
 				t.Fatal("rejected save changed valid intent/capability", kind)
 			}
@@ -75,5 +79,67 @@ func TestSharedSaveRejectsHandlesBeforeCommit(t *testing.T) {
 		if !bytes.Equal(raw(), previous) {
 			t.Fatal("reopen changed record")
 		}
+	}
+}
+
+// saveSharedFixture seeds legacy observations without inventing transition provenance.
+func (s *store) saveSharedFixture(record sharedServiceRecord) error {
+	for _, resource := range []ownedResource{record.Server, record.Network, record.Volume} {
+		if err := validateSharedResourceHandle(resource); err != nil {
+			return err
+		}
+	}
+	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, "shared_services", record.ID, record) })
+}
+
+func TestSharedTransitionPersistence(t *testing.T) {
+	state, err := openStore(shortTemp(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = state.db.Close() }()
+	record := sharedLockRecord(newID())
+	record.Status = "intent"
+	if err := state.saveShared(&record, "consumer_start"); err != nil {
+		t.Fatal(err)
+	}
+	if record.LastTransition == nil || record.LastTransition.From != "" || record.LastTransition.To != "intent" {
+		t.Fatal("initial intent not recorded")
+	}
+	stale := record
+	record.Status = "running"
+	if err := state.saveShared(&record, "consumer_start"); err != nil {
+		t.Fatal(err)
+	}
+	transition := *record.LastTransition
+	stale.Status = "running"
+	stale.Failure = "controlled observation"
+	if err := state.saveShared(&stale, "allocation_release"); err != nil {
+		t.Fatal(err)
+	}
+	if stale.LastTransition == nil || *stale.LastTransition != transition {
+		t.Fatal("nonstatus writer replaced committed transition")
+	}
+	for _, cause := range []string{"", "private-provider-detail"} {
+		invalid := stale
+		invalid.Status = "uncertain"
+		code(t, state.saveShared(&invalid, cause), "state_corrupt")
+	}
+	retained, err := state.sharedService(record.ID)
+	if err != nil || retained.Status != "running" || retained.LastTransition == nil || *retained.LastTransition != transition {
+		t.Fatal("rejected writer mutated retained status", err)
+	}
+	record.Destroying, record.Status = true, "destroying"
+	record.Server.Removed = false
+	if err := state.saveShared(&record, "explicit_shared_destroy"); err != nil {
+		t.Fatal(err)
+	}
+	transition = *record.LastTransition
+	if err := state.stopSharedService(context.Background(), record.ID, "daemon_recovery"); err == nil {
+		t.Fatal("missing fixture provider unexpectedly succeeded")
+	}
+	retained, err = state.sharedService(record.ID)
+	if err != nil || retained.Status != "destroying" || !retained.Destroying || retained.LastTransition == nil || *retained.LastTransition != transition {
+		t.Fatal("recovery failure erased destruction intent or created no-op transition", err)
 	}
 }

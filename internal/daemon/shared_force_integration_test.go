@@ -179,7 +179,7 @@ func TestSharedMariaDBForceLabels(t *testing.T) {
 		record.Server.Token = original.Server.Token
 		record.Volume.Token = original.Volume.Token
 		record.Network.Token = original.Network.Token
-		if err = state.saveShared(record); err != nil {
+		if err = state.saveSharedFixture(record); err != nil {
 			t.Error(err)
 		}
 	})
@@ -191,7 +191,7 @@ func TestSharedMariaDBForceLabels(t *testing.T) {
 	drift.Server.Token = newID()
 	drift.Volume.Token = newID()
 	drift.Network.Token = newID()
-	err = state.saveShared(drift)
+	err = state.saveSharedFixture(drift)
 	_ = state.db.Close()
 	if err != nil {
 		t.Fatal(err)
@@ -302,7 +302,7 @@ func TestSharedMariaDBForceCrash(t *testing.T) {
 				t.Error(repairErr)
 				return
 			}
-			if repairErr = state.startShared(context.Background(), &record); repairErr != nil {
+			if repairErr = state.startShared(context.Background(), &record, "explicit_shared_start"); repairErr != nil {
 				t.Error(repairErr)
 				return
 			}

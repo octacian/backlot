@@ -154,6 +154,9 @@ func verifyDockerResource(ctx context.Context, d *dockerEngine, r ownedResource)
 		if err != nil {
 			return err
 		}
+		if r.ID != "" && out.Container.ID != r.ID {
+			return problem("cleanup_failed", "container immutable identity changed; preserved")
+		}
 		if out.Container.Config == nil {
 			return problem("cleanup_failed", "container configuration missing; preserved")
 		}
@@ -692,6 +695,17 @@ func contains(values []string, value string) bool {
 	return false
 }
 func removeContainer(ctx context.Context, d *dockerEngine, r ownedResource) error {
+	// Pin pending names before effects; later name reuse never authorizes a target.
+	if r.ID == "" {
+		var err error
+		r.ID, err = recoverResourceEffect(ctx, d, r)
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
 	if err := verifyDockerResource(ctx, d, r); err != nil {
 		if errdefs.IsNotFound(err) {
 			return nil
@@ -699,18 +713,26 @@ func removeContainer(ctx context.Context, d *dockerEngine, r ownedResource) erro
 		return err
 	}
 	zero := 0
-	if _, err := d.ContainerStop(ctx, resourceHandle(r), client.ContainerStopOptions{Timeout: &zero}); err != nil {
+	if _, err := d.ContainerStop(ctx, r.ID, client.ContainerStopOptions{Timeout: &zero}); err != nil {
 		return err
 	}
-	out, err := d.ContainerInspect(ctx, resourceHandle(r), client.ContainerInspectOptions{})
+	out, err := d.ContainerInspect(ctx, r.ID, client.ContainerInspectOptions{})
 	if err != nil {
 		return err
 	}
-	if out.Container.State == nil || out.Container.State.Running {
-		return problem("cleanup_failed", "owned container remains live; resources preserved")
+	if out.Container.ID != r.ID || out.Container.State == nil || out.Container.State.Running {
+		return problem("cleanup_failed", "owned container remains live or changed; resources preserved")
 	}
-	_, err = d.ContainerRemove(ctx, resourceHandle(r), client.ContainerRemoveOptions{RemoveVolumes: true})
-	return err
+	if _, err := d.ContainerRemove(ctx, r.ID, client.ContainerRemoveOptions{RemoveVolumes: true}); err != nil && !errdefs.IsNotFound(err) {
+		return err
+	}
+	if _, err := d.ContainerInspect(ctx, r.ID, client.ContainerInspectOptions{}); !errdefs.IsNotFound(err) {
+		if err != nil {
+			return err
+		}
+		return problem("cleanup_failed", "owned container absence unverified; obligation retained")
+	}
+	return nil
 }
 func (s *store) containerRemoved(id string, g *resourceGeneration, i int) error {
 	g.Containers[i].Removed = true
@@ -929,53 +951,74 @@ func mappedAddress(config *v1.DockerConfig) netip.Addr {
 
 // Recovery stops only containers bearing the recorded capability; output gaps
 // remain explicit. It never resumes jobs or silently recreates retained state.
-func (s *store) recoverContainers(id string, g *resourceGeneration) error {
+// recoverContainers keeps historical collection gaps independent of verified cleanup.
+func (s *store) recoverContainers(id string, g *resourceGeneration) (collection, cleanup error) {
 	if g.ID == "" || len(g.Containers) == 0 {
-		return nil
+		return nil, nil
 	}
 	d, err := newDocker(g.Endpoint)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = d.Close() }()
-	var failures error
 	for i, r := range g.Containers {
 		if r.Removed {
 			continue
 		}
-		// Give each independent capability its own budget so a failed consumer
-		// cannot exhaust the recovery budget of later verifiably owned work.
+		// Each capability gets its own budget; one survivor cannot hide other releases.
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		err := s.recoverContainer(ctx, id, d, r)
+		if r.ID == "" {
+			r.ID, err = recoverResourceEffect(ctx, d, r)
+			if err == nil {
+				g.Containers[i] = r
+				err = s.saveResources(id, *g)
+			}
+			if err != nil {
+				cancel()
+				if errdefs.IsNotFound(err) {
+					cleanup = errors.Join(cleanup, s.containerRemoved(id, g, i))
+				} else {
+					cleanup = errors.Join(cleanup, err)
+				}
+				continue
+			}
+		}
+		collected, removed := s.recoverContainer(ctx, id, d, r)
 		cancel()
-		if err != nil {
-			failures = errors.Join(failures, err)
+		if collection == nil {
+			collection = collected
+		}
+		if removed != nil {
+			cleanup = errors.Join(cleanup, removed)
 			continue
 		}
-		failures = errors.Join(failures, s.containerRemoved(id, g, i))
+		cleanup = errors.Join(cleanup, s.containerRemoved(id, g, i))
 	}
-	return failures
+	return collection, cleanup
 }
-func (s *store) recoverContainer(ctx context.Context, id string, d *dockerEngine, r ownedResource) error {
+
+func (s *store) recoverContainer(ctx context.Context, id string, d *dockerEngine, r ownedResource) (collection, cleanup error) {
 	if err := verifyDockerResource(ctx, d, r); err != nil {
 		if errdefs.IsNotFound(err) {
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
 	zero := 0
 	if _, err := d.ContainerStop(ctx, resourceHandle(r), client.ContainerStopOptions{Timeout: &zero}); err != nil {
-		return err
+		return nil, err
 	}
 	_, done, w, err := s.captureContainer(ctx, id, d, r, false)
+	if err == nil {
+		<-done
+		err = w.logErr
+	}
 	if err != nil {
-		return err
+		collection = problem("collection_failed", "recovery container logs could not be retained")
 	}
-	<-done
-	if w.logErr != nil {
-		return problem("collection_failed", "recovery container logs could not be retained; container preserved")
-	}
-	return removeContainer(ctx, d, r)
+	// Lost output does not authorize deletion; removeContainer independently
+	// authenticates the exact effect and verifies its final absence.
+	return collection, removeContainer(ctx, d, r)
 }
 
 // providerFailure retains its cause for classification without publishing engine

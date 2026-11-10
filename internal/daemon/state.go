@@ -14,6 +14,7 @@ import (
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/localipc"
+	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 	bolt "go.etcd.io/bbolt"
 )
@@ -331,9 +332,33 @@ func (s *store) complete(id string) (v1.Instance, error) {
 }
 func (s *store) inspect(id string) (v1.Instance, error) {
 	var instance v1.Instance
-	err := s.db.View(func(tx *bolt.Tx) error { r, err := load(tx, id); instance = r.Instance; return err })
+	boot, _ := native.CurrentBoot()
+	err := s.db.View(func(tx *bolt.Tx) error {
+		r, err := load(tx, id)
+		if err != nil {
+			return err
+		}
+		instance, err = inspectRecord(tx, r, boot)
+		return err
+	})
 	return instance, err
 }
+
+// inspectRecord projects current diagnostics from the caller's selection transaction.
+func inspectRecord(tx *bolt.Tx, r record, boot string) (v1.Instance, error) {
+	instance := r.Instance
+	if instance.Execution != nil {
+		result := *instance.Execution
+		settlement, err := consumerEligibility(tx, r, boot)
+		if err != nil {
+			return v1.Instance{}, err
+		}
+		result.Settlement = &settlement
+		instance.Execution = &result
+	}
+	return instance, nil
+}
+
 func terminal(r *record, status v1.InstanceStatus, reason string) {
 	r.Instance.Status = status
 	r.Instance.Operation.Status = status

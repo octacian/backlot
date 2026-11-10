@@ -48,6 +48,10 @@ func TestRetainedStateFourteen(t *testing.T) {
 	testRetainedState(t, copyStateFixture(t, "testdata/state/v14/state.db"), 14)
 }
 
+func TestRetainedStateFifteen(t *testing.T) {
+	testRetainedState(t, copyStateFixture(t, "testdata/state/v15/state.db"), 15)
+}
+
 func TestRetainedStateTwelve(t *testing.T) {
 	testRetainedState(t, copyStateFixture(t, "testdata/state/v12/state.db"), 12)
 }
@@ -79,7 +83,7 @@ func testRetainedState(t *testing.T, dir string, version int) {
 		wantInstances = 3
 	}
 	wantSlots := 1
-	if version == 12 || version == 13 || version == 14 {
+	if version == 12 || version == 13 || version == 14 || version == 15 {
 		wantSlots = 2
 	}
 	if before["meta"]["version"] != strconv.Itoa(version) || len(before["instances"]) != wantInstances || len(before["checkouts"]) != 1 || len(before["persistent"]) != wantSlots || len(before["snapshots"]) != wantInstances || len(before["secrets"]) != wantInstances {
@@ -123,7 +127,8 @@ func testRetainedState(t *testing.T, dir string, version int) {
 					if err != nil {
 						return err
 					}
-					if b.Current != expected || b.Revision != "" || b.Acknowledgement != "" {
+					// v15 already enrolled logical mappings; full source bytes are checked below.
+					if version < 15 && (b.Current != expected || b.Revision != "" || b.Acknowledgement != "") {
 						t.Fatal("migration invented binding provenance")
 					}
 				}
@@ -161,7 +166,7 @@ func testRetainedState(t *testing.T, dir string, version int) {
 				if i.Plan.Lifetime == v1.Persistent && i.Status == v1.Prepared {
 					prepared = true
 				}
-				if ((i.Plan.Lifetime == v1.Disposable && i.Status == v1.Succeeded) || ((version == 12 || version == 13 || version == 14) && i.Status == v1.Stopped)) && i.Execution != nil && len(i.Execution.NativeCleanup) == 1 && i.Execution.NativeCleanup[0].Confidence == v1.ObservedEmpty {
+				if ((i.Plan.Lifetime == v1.Disposable && i.Status == v1.Succeeded) || ((version == 12 || version == 13 || version == 14 || version == 15) && i.Status == v1.Stopped)) && i.Execution != nil && len(i.Execution.NativeCleanup) == 1 && i.Execution.NativeCleanup[0].Confidence == v1.ObservedEmpty {
 					completed = true
 				}
 			}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 	bolt "go.etcd.io/bbolt"
 )
@@ -163,9 +164,10 @@ func (s *service) runTask(ctx context.Context, q v1.TaskRunRequest) (v1.Instance
 	snapshot.Plan.BuildImages = nil
 	result := &v1.ExecutionResult{Attempt: attempt, Components: []v1.ComponentResult{}, Ports: maps.Clone(parent.Execution.Ports), Origin: parent.Execution.Origin}
 	now := time.Now().UTC()
-	runtime := runtimeRecord{Attempt: attempt, Options: q.Options, StartedAt: now.Format(time.RFC3339Nano), OutputPaths: capture.Paths}
+	runtime := runtimeRecord{NativeNotStarted: true, Attempt: attempt, Options: q.Options, StartedAt: now.Format(time.RFC3339Nano), OutputPaths: capture.Paths}
 	out.LeaseToken = newID()
 	instance := v1.Instance{ID: id, Task: binding, CheckoutParent: checkoutParent(parent), Checkout: parent.Checkout, Plan: snapshot.Plan, Status: v1.Starting, Execution: result, CreatedAt: now.Format(time.RFC3339Nano), LeaseExpiresAt: now.Add(s.lease).Format(time.RFC3339Nano), Operation: v1.Operation{ID: newID(), Status: v1.Starting, Allocations: []v1.AllocationRecord{{ID: newID(), Kind: "private_snapshot", OwnershipToken: newID(), Phase: "effect"}}}}
+	boot, _ := native.CurrentBoot()
 	err = s.store.db.Update(func(tx *bolt.Tx) error {
 		current, err := load(tx, parent.ID)
 		if err != nil {
@@ -177,7 +179,7 @@ func (s *service) runTask(ctx context.Context, q v1.TaskRunRequest) (v1.Instance
 		if err := taskWriterParent(tx, instance); err != nil {
 			return err
 		}
-		if err := outputConflictTx(tx, snapshot.Plan, capture.Paths, "", true); err != nil {
+		if err := outputConflictTx(tx, snapshot.Plan, capture.Paths, "", true, boot); err != nil {
 			return err
 		}
 		if err := put(tx, "runtime", id, runtime); err != nil {
@@ -270,7 +272,12 @@ func overlaps(a, b string) bool {
 
 // outputConflictTx checks both accepted reservations and current canonical aliases.
 // Task admission is immediate; ordinary parent group queuing remains unchanged.
-func outputConflictTx(tx *bolt.Tx, p v1.PlanResponse, paths map[string]string, self string, immediate bool) error {
+func outputConflictTx(tx *bolt.Tx, p v1.PlanResponse, paths map[string]string, self string, immediate bool, currentBoot ...string) error {
+	// Without a supplied current boot, earlier-boot release cannot be established.
+	boot := ""
+	if len(currentBoot) > 0 {
+		boot = currentBoot[0]
+	}
 	return tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
 		if string(key) == self {
 			return nil
@@ -283,7 +290,7 @@ func outputConflictTx(tx *bolt.Tx, p v1.PlanResponse, paths map[string]string, s
 		if self != "" && !immediate && i.Task == nil {
 			return nil
 		}
-		if i.Execution == nil || associatedCheckout(i).Path != p.Checkout || !active(i.Status) && i.Execution.CleanupFailure == "" && !i.Execution.Kept {
+		if i.Execution == nil || len(i.Plan.Outputs) == 0 || associatedCheckout(i).Path != p.Checkout {
 			return nil
 		}
 		var journal runtimeRecord
@@ -296,39 +303,51 @@ func outputConflictTx(tx *bolt.Tx, p v1.PlanResponse, paths map[string]string, s
 		}
 		for oldName, old := range i.Plan.Outputs {
 			for name, next := range p.Outputs {
-				if old.ConcurrencyGroup == next.ConcurrencyGroup {
-					if !immediate && i.Task == nil && i.Execution.CleanupFailure != "" {
-						return problem("cleanup_failed", "uncertain owned consumer blocks checkout output group; resolve cleanup before launching")
+				sameGroup := old.ConcurrencyGroup == next.ConcurrencyGroup
+				overlap := false
+				if !sameGroup {
+					oldCurrent, err := plan.OutputPath(associatedProject(i), old.Path)
+					if err != nil {
+						return problem("output_conflict", "held output path is unavailable; stop its owner before launching")
 					}
-					if immediate || i.Task != nil || i.Execution.CleanupFailure != "" {
-						return problem("output_conflict", "checkout output group is held by an active or uncertain execution; stop it before invoking the task")
-					}
-					continue
-				}
-				oldCurrent, err := plan.OutputPath(associatedProject(i), old.Path)
-				if err != nil {
-					return problem("output_conflict", "held output path is unavailable; stop its owner before launching")
-				}
-				for _, a := range []string{journal.OutputPaths[oldName], oldCurrent} {
-					for _, b := range []string{paths[name]} {
+					for _, a := range []string{journal.OutputPaths[oldName], oldCurrent} {
+						b := paths[name]
 						if a == "" || b == "" {
 							continue
 						}
-						overlap := overlaps(a, b)
+						intersects := overlaps(a, b)
 						if old.EmptyBeforeExecution || next.EmptyBeforeExecution {
-							_, overlap, err = plan.OutputOverlap(a, b)
+							_, intersects, err = plan.OutputOverlap(a, b)
 							if err != nil {
 								return err
 							}
 						}
-						if overlap {
-							if !immediate && i.Task == nil {
-								return problem("unsafe_drift", "overlapping checkout output declarations changed groups while another consumer is active or uncertain; stop it before launching")
-							}
-							return problem("output_conflict", "checkout output paths overlap an active or uncertain owner; stop it before launching")
-						}
+						overlap = overlap || intersects
 					}
 				}
+				if !sameGroup && !overlap {
+					continue
+				}
+				settlement, err := consumerEligibility(tx, r, boot)
+				if err != nil {
+					return err
+				}
+				if settlement.State == v1.ConsumerSettled {
+					return nil
+				}
+				if sameGroup {
+					if !immediate && i.Task == nil {
+						if (active(i.Status) || i.Execution.Kept) && i.Execution.CleanupFailure == "" {
+							continue
+						}
+						return problem("cleanup_failed", "uncertain owned consumer blocks checkout output group; resolve cleanup before launching")
+					}
+					return problem("output_conflict", "checkout output group is held by an active or uncertain execution; stop it before invoking the task")
+				}
+				if !immediate && i.Task == nil {
+					return problem("unsafe_drift", "overlapping checkout output declarations changed groups while another consumer is active or uncertain; stop it before launching")
+				}
+				return problem("output_conflict", "checkout output paths overlap an active or uncertain owner; stop it before launching")
 			}
 		}
 		return nil
@@ -352,12 +371,20 @@ func (s *store) fenceTaskAdmission(id string) error {
 }
 
 func (s *store) retireTaskInputs(id string) error {
+	boot, _ := native.CurrentBoot()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		r, err := load(tx, id)
 		if err != nil {
 			return err
 		}
 		if active(r.Instance.Status) || r.Instance.Execution == nil || r.Instance.Execution.CleanupFailure != "" {
+			return nil
+		}
+		settlement, err := consumerEligibility(tx, r, boot)
+		if err != nil {
+			return err
+		}
+		if settlement.State != v1.ConsumerSettled {
 			return nil
 		}
 		if r.Instance.Task == nil {
@@ -385,20 +412,30 @@ func (s *store) retireTaskInputs(id string) error {
 }
 
 func (s *store) guardDependentTasks(id string) error {
-	ids, err := s.dependentTasks(id)
-	if err != nil {
-		return err
-	}
-	for _, child := range ids {
-		i, err := s.inspect(child)
-		if err != nil {
-			return err
-		}
-		if active(i.Status) || i.Execution != nil && i.Execution.CleanupFailure != "" {
-			return problem("cleanup_failed", "dependent task still holds parent resources")
-		}
-	}
-	return nil
+	boot, _ := native.CurrentBoot()
+	return s.db.View(func(tx *bolt.Tx) error {
+		return tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
+			var child record
+			if err := decodeRecord(data, string(key), &child); err != nil {
+				return err
+			}
+			if child.Instance.Task == nil || child.Instance.Task.InstanceID != id {
+				return nil
+			}
+			erased, err := consumerErased(tx, child)
+			if err != nil || erased {
+				return err
+			}
+			settlement, err := consumerEligibility(tx, child, boot)
+			if err != nil {
+				return err
+			}
+			if settlement.State != v1.ConsumerSettled {
+				return problem("cleanup_failed", "dependent task still holds parent resources")
+			}
+			return nil
+		})
+	})
 }
 
 func taskWriterParent(tx *bolt.Tx, i v1.Instance) error {

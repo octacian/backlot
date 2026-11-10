@@ -40,6 +40,19 @@ func exportFixture(t *testing.T) (*service, v1.Instance, v1.ExportRequest) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// This evidence-format fixture launches no external work. Record that known
+	// current-owner fact through the real producer; empty legacy state is unknown.
+	journal := runtimeRecord{Attempt: result.Attempt}
+	if err := s.store.saveRuntime(instance.ID, journal); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.recordConsumerRelease(context.Background(), instance.ID, journal, v1.SettlementExecutionCleanup, true); err != nil {
+		t.Fatal(err)
+	}
+	instance, err = s.store.execution(instance.ID, instance.Status, result)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(s.directory, "logs"), 0700); err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/native"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -166,6 +167,38 @@ func attemptProtection(a v1.Attempt) string {
 }
 func attemptProtected(a v1.Attempt) bool { return attemptProtection(a) != "" }
 
+// Task history deletion also retires private launch authority; terminal status
+// alone cannot authorize that erasure when current effects remain unverified.
+func taskAttemptProtection(tx *bolt.Tx, a v1.Attempt, boot string) (string, error) {
+	if reason := attemptProtection(a); reason != "" {
+		return reason, nil
+	}
+	r, err := load(tx, a.InstanceID)
+	if err != nil {
+		return "", err
+	}
+	if r.Instance.Task == nil || r.Instance.Execution != nil && executionAttempt(r.Instance) != a.Result.Attempt {
+		return "", nil
+	}
+	settlement, err := consumerEligibility(tx, r, boot)
+	if err != nil {
+		return "", err
+	}
+	if settlement.State != v1.ConsumerSettled {
+		return "cleanup_unresolved", nil
+	}
+	return "", nil
+}
+
+func (s *store) attemptProtection(a v1.Attempt) (reason string, err error) {
+	boot, _ := native.CurrentBoot()
+	err = s.db.View(func(tx *bolt.Tx) error {
+		reason, err = taskAttemptProtection(tx, a, boot)
+		return err
+	})
+	return reason, err
+}
+
 func (s *store) attempt(q v1.AttemptRequest) (v1.AttemptResponse, error) {
 	r := v1.AttemptResponse{APIVersion: v1.Version}
 	if !validID(q.InstanceID) || q.Attempt != "" && !validID(q.Attempt) || (q.Attempt == "") == !q.LastCompleted {
@@ -217,7 +250,11 @@ func (s *store) history(q v1.HistoryRequest) (v1.HistoryResponse, error) {
 			r.Continuation = base64.RawURLEncoding.EncodeToString([]byte(q.InstanceID + "/" + strconv.FormatInt(last.Sequence, 10)))
 			break
 		}
-		r.Attempts = append(r.Attempts, v1.AttemptSummary{Provenance: a.Provenance, Attempt: a.Result.Attempt, Sequence: a.Sequence, Status: a.Status, CompletedAt: a.Result.CompletedAt, EvidenceExpired: a.Result.EvidenceExpired, Protected: attemptProtected(a)})
+		protection, err := s.attemptProtection(a)
+		if err != nil {
+			return r, err
+		}
+		r.Attempts = append(r.Attempts, v1.AttemptSummary{Provenance: a.Provenance, Attempt: a.Result.Attempt, Sequence: a.Sequence, Status: a.Status, CompletedAt: a.Result.CompletedAt, EvidenceExpired: a.Result.EvidenceExpired, Protected: protection != ""})
 	}
 	return r, nil
 }
@@ -269,6 +306,9 @@ func validateAttemptState(tx *bolt.Tx) error {
 		}
 		if _, err := load(tx, a.InstanceID); err != nil {
 			return err
+		}
+		if s := a.Result.Settlement; s != nil && (s.Validate() != nil || s.InstanceID != a.InstanceID || s.Attempt != a.Result.Attempt) {
+			return problem("state_corrupt", "invalid historical consumer settlement diagnostic")
 		}
 		n, err := strconv.ParseInt(string(tx.Bucket([]byte("attempt_sequences")).Get([]byte(a.InstanceID))), 10, 64)
 		if err != nil || n < a.Sequence {

@@ -18,6 +18,7 @@ import (
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/localipc"
 	"github.com/octacian/backlot/internal/manifest"
+	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 	"github.com/octacian/backlot/internal/projectconfig"
 	"github.com/octacian/backlot/internal/registration"
@@ -44,6 +45,7 @@ func observation(path string) v1.FilesystemObservation {
 }
 func (s *service) projectPreview(request v1.ReassociationRequest) (result v1.ReassociationResponse, previewErr error) {
 	key := s.repairKeyBytes()
+	currentBoot, _ := native.CurrentBoot()
 	unjoined := s.repairUnjoinedOwners()
 	result = v1.ReassociationResponse{APIVersion: v1.Version, DaemonGeneration: s.generation, Request: request, Projects: []v1.ProjectRegistration{}, Instances: []v1.ReassociationInstance{}, Services: []v1.SharedStatus{}, Allocations: []v1.ReassociationAllocation{}, Changes: []string{}, Preserved: []string{"service and instance IDs", "allocations and paired credentials", "data and resource capabilities", "recorded launch and cleanup authority"}, Blockers: []string{}}
 	result.Request.Apply = false
@@ -206,7 +208,7 @@ func (s *service) projectPreview(request v1.ReassociationRequest) (result v1.Rea
 				return e
 			}
 			if serviceOwners[r.Project.ID] || request.ProjectID == "" && request.CheckoutID == "" {
-				result.Services = append(result.Services, v1.SharedStatus{ID: r.ID, ProjectID: r.Project.ID, Name: r.Name, Configuration: r.Configuration, Status: r.Status})
+				result.Services = append(result.Services, v1.SharedStatus{ID: r.ID, ProjectID: r.Project.ID, Name: r.Name, Configuration: r.Configuration, Status: r.Status, LastTransition: r.LastTransition})
 				_, _ = freshness.Write(d)
 			}
 			return nil
@@ -263,7 +265,7 @@ func (s *service) projectPreview(request v1.ReassociationRequest) (result v1.Rea
 			if unjoined[i.ID] {
 				block("affected consumer " + i.ID + " must be stopped/joined with verified cleanup")
 			}
-			blockers, e := repairConsumerBlockers(tx, r)
+			blockers, e := repairConsumerBlockers(tx, r, currentBoot)
 			if e != nil {
 				return e
 			}
@@ -544,36 +546,22 @@ func repairDBRevision(tx *bolt.Tx, key []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// repairConsumerBlockers retains established repair policy; callers separately join owners.
-func repairConsumerBlockers(tx *bolt.Tx, r record) ([]string, error) {
-	i := r.Instance
+// repairConsumerBlockers checks exact current release; callers separately join owners.
+func repairConsumerBlockers(tx *bolt.Tx, r record, boot string) ([]string, error) {
+	erased, err := consumerErased(tx, r)
+	if err != nil || erased {
+		return nil, err
+	}
+	settlement, err := consumerEligibility(tx, r, boot)
+	if err != nil {
+		return nil, err
+	}
 	var blockers []string
-	if i.Status == v1.Preparing || i.Status == v1.Starting || i.Status == v1.RuntimeReady || i.Status == v1.Stopping || i.Execution != nil && (i.Execution.Kept || i.Execution.CleanupFailure != "") {
-		blockers = append(blockers, "affected consumer "+i.ID+" must be stopped/joined with verified cleanup")
-	}
-	var previousBootWarnings []v1.NativeOwnershipWarning
-	for _, abandoned := range r.NativeAbandonments {
-		if !abandoned.previousBoot() {
-			blockers = append(blockers, "affected relinquished native consumer lacks independent earlier-boot absence proof: "+i.ID)
+	for _, b := range settlement.Blockers {
+		if strings.HasPrefix(b.Code, "native_") {
+			blockers = append(blockers, "affected native consumer cleanup remains uncertain: "+b.InstanceID)
 		} else {
-			previousBootWarnings = append(previousBootWarnings, abandoned.warning())
-		}
-	}
-	if i.Execution != nil {
-		for _, cleanup := range i.Execution.NativeCleanup {
-			// Only independently proven earlier-boot warnings may discharge an exact-attempt fence.
-			if cleanup.Validate() != nil || cleanup.FencesResources(previousBootWarnings) {
-				blockers = append(blockers, "affected native consumer cleanup remains uncertain: "+i.ID)
-			}
-		}
-	}
-	if raw := tx.Bucket([]byte("runtime")).Get([]byte(i.ID)); raw != nil {
-		journal, err := decodeRuntime(raw)
-		if err != nil {
-			return nil, err
-		}
-		if journal.LaunchPending {
-			blockers = append(blockers, "affected consumer has pending launch: "+i.ID)
+			blockers = append(blockers, "affected consumer "+b.InstanceID+" requires verified cleanup: "+b.Code)
 		}
 	}
 	return blockers, nil

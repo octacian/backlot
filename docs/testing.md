@@ -118,7 +118,7 @@ provider suites below for those boundaries. Runtime integration tests must use
 owned resources and must never modify an operator's unrelated containers, routes,
 files, or databases.
 
-The race gate disables Go test result caching with `-count=1` and allows 15 minutes
+The race gate disables Go test result caching with `-count=1` and allows 20 minutes
 for each complete package suite. This whole-suite runner budget leaves application,
 fixture, lease and cleanup deadlines unchanged. Native integration
 builds and executes a separate CLI/guardian binary; changes to that subprocess's

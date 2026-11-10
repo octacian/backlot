@@ -160,8 +160,17 @@ func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Insta
 	if err != nil {
 		return instance, err
 	}
-	if err := s.recoverContainers(id, &resources); err != nil {
-		return instance, err
+	collection, containerCleanup := s.recoverContainers(id, &resources)
+	if collection != nil && instance.Execution.CollectionFailure == "" {
+		result := *instance.Execution
+		result.CollectionFailure = collection.Error()
+		instance, err = s.execution(id, instance.Status, &result)
+		if err != nil {
+			return instance, err
+		}
+	}
+	if containerCleanup != nil {
+		return instance, containerCleanup
 	}
 	// A native waiver cannot erase an independent network cleanup failure.
 	networks := resourceGeneration{Resources: map[string]ownedResource{}}
@@ -276,6 +285,14 @@ func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Insta
 		if err := put(tx, "runtime", id, current); err != nil {
 			return err
 		}
+		if err := put(tx, "instances", id, r); err != nil {
+			return err
+		}
+		settlement, err := consumerEligibility(tx, r, boot)
+		if err != nil {
+			return err
+		}
+		result.Settlement = &settlement
 		if err := put(tx, "instances", id, r); err != nil {
 			return err
 		}

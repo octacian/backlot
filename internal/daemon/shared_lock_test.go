@@ -55,7 +55,7 @@ func TestSharedWaitingCancellation(t *testing.T) {
 				}
 				record := sharedLockRecord(serviceID)
 				record.Project = project
-				if err = state.saveShared(record); err != nil {
+				if err = state.saveSharedFixture(record); err != nil {
 					t.Fatal(err)
 				}
 				unlock, err := state.lockShared(context.Background(), serviceID)
@@ -83,7 +83,7 @@ func TestSharedWaitingCancellation(t *testing.T) {
 						snap := plan.Snapshot{Plan: v1.PlanResponse{Project: "fixture", SharedServices: map[string]v1.SharedService{"sql": {}}, Resources: map[string]v1.Resource{"db": {Kind: "allocation", SharedService: "sql"}}}}
 						done <- svc.ensureSharedAllocations(ctx, id, snap, &execution{source: capturedSource{source: plan.Source{ProjectPath: root, CheckoutPath: root}, checkout: checkout}})
 					case "shutdown":
-						done <- state.stopSharedServices(ctx)
+						done <- state.stopSharedServices(ctx, "daemon_shutdown")
 					case "release":
 						done <- state.releaseSharedAllocations(ctx, id)
 					default:
@@ -137,7 +137,7 @@ func TestSharedSerializationAndPrivateCleanup(t *testing.T) {
 	svc := &service{store: state}
 	id := newID()
 	record := sharedLockRecord(id)
-	if err = state.saveShared(record); err != nil {
+	if err = state.saveSharedFixture(record); err != nil {
 		t.Fatal(err)
 	}
 	unlock, err := state.lockShared(context.Background(), id)
@@ -160,7 +160,7 @@ func TestSharedSerializationAndPrivateCleanup(t *testing.T) {
 	}
 	// An unrelated service and private instance cleanup complete while held.
 	peer := sharedLockRecord(newID())
-	if err = state.saveShared(peer); err != nil {
+	if err = state.saveSharedFixture(peer); err != nil {
 		t.Fatal(err)
 	}
 	root := shortTemp(t)
@@ -202,7 +202,7 @@ func TestSharedSerializationAndPrivateCleanup(t *testing.T) {
 	if err != nil || len(response.Services) != 1 {
 		t.Fatal("operation failed after owner release", err)
 	}
-	if err = state.stopSharedServices(context.Background()); err != nil {
+	if err = state.stopSharedServices(context.Background(), "daemon_recovery"); err != nil {
 		t.Fatal("settled shutdown failed", err)
 	}
 }

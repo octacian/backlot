@@ -228,6 +228,19 @@ func TestSceneStopRechecksSelectionAndReportsCollectionFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// This collection-only fixture never launched work. Publish that known
+	// current-owner fact; missing legacy runtime bytes cannot prove cleanup.
+	current, err = s.store.inspect(replacement.Instance.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := runtimeRecord{Attempt: current.Execution.Attempt}
+	if err := s.store.saveRuntime(current.ID, journal); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.recordConsumerRelease(context.Background(), current.ID, journal, v1.SettlementExecutionCleanup, true); err != nil {
+		t.Fatal(err)
+	}
 	_, err = s.scene(v1.SceneTarget{InstanceID: replacement.Instance.ID}, true)
 	code(t, err, "collection_failed")
 }

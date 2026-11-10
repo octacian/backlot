@@ -21,9 +21,11 @@ func TestBootRecoveryPreservesUnrelatedProcess(t *testing.T) {
 	if err != nil || !validBootIdentity(boot) {
 		t.Fatal("kernel boot identity unavailable", err)
 	}
-	id.Boot = boot
-	if err := Stop(id, 0); err == nil {
-		t.Fatal("same-boot live guardian bypassed")
+	for _, same := range []string{boot, strings.ToUpper(boot), strings.ToLower(boot)} {
+		id.Boot = same
+		if err := Stop(id, 0); err == nil {
+			t.Fatal("same-boot live guardian bypassed, including UUID case variant")
+		}
 	}
 	id.Boot = "00000000-0000-0000-0000-000000000001"
 	if id.Boot == boot {

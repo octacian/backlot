@@ -10,6 +10,7 @@ import (
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/manifest"
+	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 	"github.com/octacian/backlot/internal/projectconfig"
 	"github.com/octacian/backlot/internal/registration"
@@ -122,6 +123,7 @@ func (s *service) rotationPreview(request v1.ReassociationRequest) (p registrati
 	}
 	unjoined := s.repairUnjoinedOwners()
 	key := s.repairKeyBytes()
+	boot, _ := native.CurrentBoot()
 	err = s.store.db.View(func(tx *bolt.Tx) error {
 		if err := tx.Bucket([]byte("checkout_bindings")).ForEach(func(k, _ []byte) error {
 			b, err := readCheckoutBinding(tx, string(k))
@@ -198,7 +200,7 @@ func (s *service) rotationPreview(request v1.ReassociationRequest) (p registrati
 				if unjoined[i.Instance.ID] {
 					r.Blockers = append(r.Blockers, "affected consumer must be joined: "+i.Instance.ID)
 				}
-				blockers, err := repairConsumerBlockers(tx, i)
+				blockers, err := repairConsumerBlockers(tx, i, boot)
 				if err != nil {
 					return err
 				}
@@ -248,7 +250,7 @@ func (s *service) rotationPreview(request v1.ReassociationRequest) (p registrati
 				return err
 			}
 			if serviceOwners[service.Project.ID] {
-				r.Services = append(r.Services, v1.SharedStatus{ID: service.ID, ProjectID: service.Project.ID, Name: service.Name, Configuration: service.Configuration, Status: service.Status})
+				r.Services = append(r.Services, v1.SharedStatus{ID: service.ID, ProjectID: service.Project.ID, Name: service.Name, Configuration: service.Configuration, Status: service.Status, LastTransition: service.LastTransition})
 			}
 			return nil
 		}); err != nil {

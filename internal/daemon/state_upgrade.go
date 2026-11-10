@@ -15,7 +15,53 @@ type stateMigration struct {
 
 // Retain each real step from v9 onward. Source checks belong to the step,
 // before conversion; current layout/authority checks run only after the chain.
-var stateMigrations = []stateMigration{{9, 10, migrateStateNine}, {10, 11, migrateStateTen}, {11, 12, migrateStateEleven}, {12, 13, migrateStateTwelve}, {13, 14, migrateStateThirteen}, {14, 15, migrateStateFourteen}}
+var stateMigrations = []stateMigration{{9, 10, migrateStateNine}, {10, 11, migrateStateTen}, {11, 12, migrateStateEleven}, {12, 13, migrateStateTwelve}, {13, 14, migrateStateThirteen}, {14, 15, migrateStateFourteen}, {15, 16, migrateStateFifteen}}
+
+// migrateStateFifteen fences new release/diagnostic semantics without inventing
+// historical proof. Validate the real predecessor before accepting current readers.
+func migrateStateFifteen(tx *bolt.Tx) error {
+	type oldResult struct {
+		Settlement json.RawMessage `json:"settlement"`
+	}
+	for _, name := range []string{"instances", "runtime", "attempts", "shared_services", "meta"} {
+		if err := tx.Bucket([]byte(name)).ForEach(func(key, raw []byte) error {
+			if name == "meta" && string(key) != "managed_gateway" {
+				return nil
+			}
+			var source struct {
+				Release    json.RawMessage `json:"consumer_release"`
+				PreNative  json.RawMessage `json:"native_not_started"`
+				Transition json.RawMessage `json:"last_transition"`
+				Result     *oldResult      `json:"result"`
+				Instance   struct {
+					Execution *oldResult `json:"execution"`
+				} `json:"instance"`
+				Abandonments []struct {
+					Result *oldResult `json:"original_result"`
+				} `json:"native_abandonments"`
+			}
+			if json.Unmarshal(raw, &source) != nil {
+				return problem("state_corrupt", "invalid version 15 source record")
+			}
+			present := func(r *oldResult) bool { return r != nil && r.Settlement != nil }
+			if source.PreNative != nil || source.Release != nil || source.Transition != nil || present(source.Result) || present(source.Instance.Execution) {
+				return problem("state_corrupt", "version 15 source contains version 16 consumer evidence")
+			}
+			for _, a := range source.Abandonments {
+				if present(a.Result) {
+					return problem("state_corrupt", "version 15 source contains version 16 consumer evidence")
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	if err := validateStateAuthority(tx); err != nil {
+		return err
+	}
+	return validateBindings(tx)
+}
 
 func migrateStateFourteen(tx *bolt.Tx) error {
 	if err := validateStateAuthority(tx); err != nil {

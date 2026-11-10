@@ -276,7 +276,7 @@ func TestForceSharedTopology(t *testing.T) {
 				t.Fatal("default accepted label mismatch")
 			}
 			record.Endpoint = d.DaemonHost()
-			err = state.startSharedMode(context.Background(), &record, true)
+			err = state.startSharedMode(context.Background(), &record, true, "explicit_shared_start")
 			if err == nil {
 				t.Fatal("fixture has no SQL server; readiness must fail")
 			}
@@ -443,7 +443,7 @@ func TestForceSharedDestroyRecoversPendingContainer(t *testing.T) {
 			})
 			record.Endpoint = d.DaemonHost()
 			record.Configuration = sharedDigest(record.Declaration, record.Endpoint)
-			if err = state.saveShared(record); err != nil {
+			if err = state.saveSharedFixture(record); err != nil {
 				t.Fatal(err)
 			}
 			svc := &service{store: state}

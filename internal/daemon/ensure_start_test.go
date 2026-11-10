@@ -33,6 +33,8 @@ func TestEnsureStartQueuedAcceptance(t *testing.T) {
 			}
 			id := prepared.Instance.ID
 			a := acceptHistory(t, s, id, v1.Failed, time.Second)
+			// This synthetic accepted owner has joined without launching work.
+			releaseZeroLaunchTaskFixture(t, s.store, id)
 			// An overlapping output owned by another scene makes the real executor fail
 			// before any native launch. The existing coordinator fixture owns cleanup.
 			blocker := prepared.Instance
@@ -99,6 +101,7 @@ func TestEnsureStartQueuedAcceptance(t *testing.T) {
 			if _, err := s.store.execution(blocker.ID, v1.Stopped, blocker.Execution); err != nil {
 				t.Fatal(err)
 			}
+			releaseZeroLaunchTaskFixture(t, s.store, blocker.ID)
 			if mode == "pruned-current" {
 				keep := 0
 				_, err := s.pruneHistory(context.Background(), v1.HistoryPruneRequest{APIVersion: v1.Version, InstanceID: id, Keep: &keep})
@@ -222,6 +225,7 @@ func TestEnsureStartObservedBindingAndAtomicRejection(t *testing.T) {
 			response := scenePrepare(t, s, root, config)
 			id := response.Instance.ID
 			b := acceptHistory(t, s, id, v1.Failed, time.Second)
+			releaseZeroLaunchTaskFixture(t, s.store, id)
 			if strings.HasPrefix(mode, "starting-") {
 				if _, err := s.store.execution(id, v1.Starting, &b.Result); err != nil {
 					t.Fatal(err)
@@ -348,6 +352,7 @@ func TestEnsureStartEligibleRecoveryAndFences(t *testing.T) {
 				status = v1.Interrupted
 			}
 			a := acceptHistory(t, s, id, status, time.Second)
+			releaseZeroLaunchTaskFixture(t, s.store, id)
 			if condition == "collection-only" {
 				a.Result.CollectionFailure = "fixture collection gap"
 				if _, err := s.store.execution(id, v1.Failed, &a.Result); err != nil {
@@ -414,7 +419,22 @@ func TestEnsureStartJoinsStoppingBeforeCurrentConfiguration(t *testing.T) {
 	var cancelledOnce, releaseOnce sync.Once
 	entry := &execution{attempt: a.Result.Attempt, done: done, cancel: func() { cancelledOnce.Do(func() { close(cancelled) }) }}
 	s.executions = map[string]*execution{id: entry}
-	go func() { defer close(done); <-release; _, _ = s.store.execution(id, v1.Stopped, &a.Result) }()
+	go func() {
+		defer close(done)
+		<-release
+		a.Result.CompletedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		if _, err := s.store.execution(id, v1.Stopped, &a.Result); err != nil {
+			panic(err)
+		}
+		// The selected synthetic owner joins with no launched work.
+		journal, err := s.store.runtime(id)
+		if err != nil {
+			panic(err)
+		}
+		if err := s.store.recordConsumerRelease(context.Background(), id, journal, v1.SettlementExecutionCleanup, true); err != nil {
+			panic(err)
+		}
+	}()
 	t.Cleanup(func() {
 		releaseOnce.Do(func() { close(release) })
 		awaitControlled(t, done, "old stopping owner unfinished")

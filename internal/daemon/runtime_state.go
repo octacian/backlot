@@ -17,6 +17,7 @@ import (
 )
 
 type runtimeRecord struct {
+	Release       *consumerRelease    `json:"consumer_release,omitempty"`
 	OutputPaths   map[string]string   `json:"output_paths,omitempty"`
 	ExportSource  *v1.ExportSource    `json:"export_source,omitempty"`
 	StartedAt     string              `json:"started_at,omitempty"`
@@ -28,6 +29,10 @@ type runtimeRecord struct {
 	Attempt       string              `json:"attempt"`
 	Groups        []native.Identity   `json:"groups"`
 	Options       v1.ExecutionOptions `json:"options"`
+
+	// NativeNotStarted is accepted with the attempt and consumed before native intent.
+	// Its absence in older journals is unknown, never proof of zero launches.
+	NativeNotStarted bool `json:"native_not_started,omitempty"`
 
 	// GatewayOnlyCleanup records joined consumer cleanup for this attempt, never route removal.
 	GatewayOnlyCleanup bool `json:"gateway_only_cleanup,omitempty"`
@@ -67,8 +72,14 @@ func decodeRuntime(data []byte) (r runtimeRecord, err error) {
 	if !jsonObject(data) || json.Unmarshal(data, &r) != nil {
 		return r, problem("state_corrupt", "invalid runtime record shape; preserved")
 	}
+	if r.Release != nil && !r.Release.valid() {
+		return r, problem("state_corrupt", "invalid consumer release fact; preserved")
+	}
 	if r.Attempt != "" && !validID(r.Attempt) {
 		return r, problem("state_corrupt", "invalid runtime attempt; preserved")
+	}
+	if r.NativeNotStarted && (!validID(r.Attempt) || r.LaunchPending || r.PendingBoot != "" || r.LaunchPurpose != "" || len(r.Groups) != 0) {
+		return r, problem("state_corrupt", "invalid pre-native launch boundary; preserved")
 	}
 	return r, nil
 }
@@ -89,10 +100,21 @@ func (s *store) saveRuntime(id string, r runtimeRecord) error {
 				return err
 			}
 		}
+		if r.NativeNotStarted {
+			current, err := decodeRuntime(tx.Bucket([]byte("runtime")).Get([]byte(id)))
+			if err != nil {
+				return err
+			}
+			// Only acceptance creates this witness; stale writers cannot restore it.
+			if !current.NativeNotStarted || current.Attempt != r.Attempt {
+				return problem("conflict", "native launch boundary was already consumed; preserved")
+			}
+		}
 		return put(tx, "runtime", id, r)
 	})
 }
 func (s *store) execution(id string, status v1.InstanceStatus, result *v1.ExecutionResult) (v1.Instance, error) {
+	boot, _ := native.CurrentBoot()
 	var out v1.Instance
 	err := s.db.Update(func(tx *bolt.Tx) error {
 		r, err := load(tx, id)
@@ -119,6 +141,16 @@ func (s *store) execution(id string, status v1.InstanceStatus, result *v1.Execut
 		if status != v1.Starting && status != v1.RuntimeReady && status != v1.Stopping {
 			r.LeaseHash = ""
 			r.Instance.LeaseExpiresAt = ""
+		}
+		if err := put(tx, "instances", id, r); err != nil {
+			return err
+		}
+		if result != nil {
+			settlement, err := consumerEligibility(tx, r, boot)
+			if err != nil {
+				return err
+			}
+			result.Settlement = &settlement
 		}
 		out = r.Instance
 		return put(tx, "instances", id, r)
@@ -154,7 +186,11 @@ func (s *store) recoverRuntime() error {
 	}
 	for _, id := range ids {
 		if err := s.recoverExecution(id); err != nil {
-			return err
+			var detail *v1.PlanError
+			if !errors.As(err, &detail) || detail.Code != "cleanup_failed" {
+				return err
+			}
+			// Unsettled consumers stay fenced and inspectable; corruption still aborts startup.
 		}
 	}
 	return nil
@@ -170,7 +206,11 @@ func (s *store) runtimeRecoveryIDs() ([]string, error) {
 			if err := decodeRecord(data, string(key), &r); err != nil {
 				return err
 			}
-			if r.Instance.Execution != nil && (active(r.Instance.Status) || r.Instance.Execution.Kept || r.Instance.Execution.CleanupFailure != "") {
+			needed, err := runtimeRecoveryRequired(tx, r)
+			if err != nil {
+				return err
+			}
+			if needed {
 				ids = append(ids, string(key))
 			}
 			return nil
@@ -178,22 +218,96 @@ func (s *store) runtimeRecoveryIDs() ([]string, error) {
 	})
 	return ids, err
 }
+
+// runtimeRecoveryRequired selects interrupted journals with actual remaining effects.
+// This is a cleanup selector, never proof that an empty legacy journal is settled.
+func runtimeRecoveryRequired(tx *bolt.Tx, r record) (bool, error) {
+	i := r.Instance
+	if i.Execution == nil {
+		return false, nil
+	}
+	if active(i.Status) || i.Execution.Kept || i.Execution.CleanupFailure != "" {
+		return true, nil
+	}
+	if i.Status != v1.Interrupted {
+		return false, nil
+	}
+	return runtimeEffectsPending(tx, r)
+}
+
+// runtimeEffectsPending also serves exact-ID explicit stop, without a startup sweep
+// of ordinary stopped history.
+func runtimeEffectsPending(tx *bolt.Tx, r record) (bool, error) {
+	i := r.Instance
+	if data := tx.Bucket([]byte("runtime")).Get([]byte(i.ID)); data != nil {
+		journal, err := decodeRuntime(data)
+		if err != nil {
+			return false, err
+		}
+		if journal.LaunchPending || journal.Gateway != nil || len(journal.Groups) > 0 {
+			return true, nil
+		}
+	}
+	if data := tx.Bucket([]byte("resources")).Get([]byte(i.ID)); data != nil {
+		g, err := decodeResources(data)
+		if err != nil {
+			return false, err
+		}
+		for _, effect := range g.Containers {
+			if !effect.Removed {
+				return true, nil
+			}
+		}
+		for _, effect := range g.Resources {
+			if effect.Kind == "network" && !effect.Removed {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func (s *store) recoverExecution(id string) error {
+	return s.recoverExecutionCause(id, v1.SettlementDaemonRecovery, false)
+}
+
+func (s *store) recoverExecutionCause(id string, cause v1.ConsumerSettlementCause, emptyVerified bool) error {
 	ids, err := s.dependentTasks(id)
 	if err != nil {
 		return err
 	}
 	for _, child := range ids {
-		if err := s.recoverExecution(child); err != nil {
+		if err := s.recoverExecutionCause(child, cause, false); err != nil {
 			return err
 		}
-		i, err := s.inspect(child)
+	}
+	if dependentErr := s.guardDependentTasks(id); dependentErr != nil {
+		var detail *v1.PlanError
+		if !errors.As(dependentErr, &detail) || detail.Code != "cleanup_failed" {
+			return dependentErr
+		}
+		parent, err := s.inspect(id)
 		if err != nil {
 			return err
 		}
-		if i.Execution != nil && i.Execution.CleanupFailure != "" {
-			return problem("cleanup_failed", "dependent task cleanup incomplete; parent resources preserved")
+		if parent.Execution != nil {
+			result := *parent.Execution
+			result.CleanupFailure = "dependent task cleanup remains unverified; parent resources preserved"
+			status := parent.Status
+			if active(status) {
+				status = v1.Interrupted
+				if result.CompletedAt == "" {
+					result.CompletedAt = time.Now().UTC().Format(time.RFC3339Nano)
+				}
+				if result.CollectionFailure == "" {
+					result.CollectionFailure = "daemon interruption; output/status collection may contain gaps"
+				}
+			}
+			if _, err := s.execution(id, status, &result); err != nil {
+				return err
+			}
 		}
+		return dependentErr
 	}
 	r, err := s.runtime(id)
 	if err != nil {
@@ -203,7 +317,40 @@ func (s *store) recoverExecution(id string) error {
 	if err != nil {
 		return err
 	}
-	if instance.Execution == nil || (!active(instance.Status) && !instance.Execution.Kept && instance.Execution.CleanupFailure == "") {
+	boot, _ := native.CurrentBoot()
+	var needed, released bool
+	if err := s.db.View(func(tx *bolt.Tx) error {
+		current, err := load(tx, id)
+		if err != nil {
+			return err
+		}
+		erased, err := consumerErased(tx, current)
+		if err != nil || erased {
+			return err
+		}
+		facts, err := consumerRecords(tx, current)
+		if err != nil {
+			return err
+		}
+		released = consumerReleaseMatches(tx, facts)
+		if released {
+			settlement, err := consumerEligibility(tx, current, boot)
+			if err != nil {
+				return err
+			}
+			if settlement.State == v1.ConsumerSettled {
+				return nil
+			}
+		}
+		needed, err = runtimeRecoveryRequired(tx, current)
+		if err == nil && !needed && cause == v1.SettlementExplicitStop && current.Instance.Execution != nil {
+			needed, err = runtimeEffectsPending(tx, current)
+		}
+		return err
+	}); err != nil {
+		return err
+	}
+	if !needed {
 		return nil
 	}
 	result := *instance.Execution
@@ -227,37 +374,50 @@ func (s *store) recoverExecution(id string) error {
 			}
 		}
 	}
-	proofMissing := r.Attempt != result.Attempt || (!pendingAbsent && instance.Status == v1.RuntimeReady && len(r.Groups) == 0 && len(g.Containers) == 0)
+	currentContainers := slices.ContainsFunc(g.Containers, func(c ownedResource) bool { return c.Attempt == result.Attempt })
+	proofMissing := r.Attempt != result.Attempt || (!released && !emptyVerified && !r.NativeNotStarted && !pendingAbsent && !r.GatewayOnlyCleanup && len(r.Groups) == 0 && !currentContainers)
 	if proofMissing {
 		cleanup = errors.Join(cleanup, problem("cleanup_failed", "native guardian ownership effect is absent or mismatched; preserve uncertain processes and inspect private state"))
 	}
 	if r.LaunchPending {
 		cleanup = errors.Join(cleanup, problem("cleanup_failed", "native guardian launch intent lacks its ownership effect; an inactive helper may remain; preserve and diagnose this instance"))
+		if result.CollectionFailure == "" {
+			result.CollectionFailure = "native output/status collection could not be verified"
+		}
 	}
 	// Native observations belong to this attempt, including earlier failed
 	// readiness/workload stops. A later bound receipt cannot erase uncertainty.
+	nativeReleased := !proofMissing && !r.LaunchPending
 	var mu sync.Mutex
 	var joined sync.WaitGroup
 	for _, group := range r.Groups {
 		if group.Protocol != 0 && (group.Purpose != "application" || group.Attempt != r.Attempt || !hasComponent(result.Components, group.Component)) {
 			mu.Lock()
+			nativeReleased = false
 			cleanup = errors.Join(cleanup, problem("cleanup_failed", "native application authority purpose/attempt/component mismatch; preserve uncertain processes"))
 			mu.Unlock()
 			continue
 		}
-		if proofMissing {
+		if proofMissing || released {
 			continue
 		}
 		joined.Go(func() {
 			observed, err := native.StopResult(group, 0)
 			mu.Lock()
 			cleanup = errors.Join(cleanup, err)
+			if err != nil {
+				nativeReleased = false
+			}
 			mergeNativeCleanup(&result, observed)
 			mu.Unlock()
 		})
 	}
 	joined.Wait()
-	cleanup = errors.Join(cleanup, s.recoverContainers(id, &g))
+	collection, containerCleanup := s.recoverContainers(id, &g)
+	if collection != nil && result.CollectionFailure == "" {
+		result.CollectionFailure = collection.Error()
+	}
+	cleanup = errors.Join(cleanup, containerCleanup)
 	if previousBoot {
 		for i := range result.NativeCleanup {
 			if result.NativeCleanup[i].Confidence != v1.ObservedEmpty {
@@ -266,14 +426,14 @@ func (s *store) recoverExecution(id string) error {
 		}
 	}
 	for _, observed := range result.NativeCleanup {
-		if observed.FencesResources(instance.NativeOwnershipWarnings) {
+		if !nativeReleased && observed.FencesResources(instance.NativeOwnershipWarnings) {
 			cleanup = errors.Join(cleanup, problem("cleanup_failed", observed.Detail))
 		}
 	}
 	// Route unavailability must not hide successful authenticated consumer cleanup.
 	// Keep its intent and failure, allowing explicit gateway recovery to retry it.
 	// An empty legacy journal alone cannot establish consumer absence.
-	consumerProof := r.GatewayOnlyCleanup || pendingAbsent || len(r.Groups) > 0 || len(g.Containers) > 0
+	consumerProof := released || emptyVerified || r.NativeNotStarted || r.GatewayOnlyCleanup || pendingAbsent || len(r.Groups) > 0 || currentContainers
 	r.GatewayOnlyCleanup = gatewayCleanup != nil && cleanup == nil && consumerProof
 	cleanup = errors.Join(gatewayCleanup, cleanup)
 	consumersStopped := cleanup == nil
@@ -294,6 +454,11 @@ func (s *store) recoverExecution(id string) error {
 	if err := s.saveRuntime(id, r); err != nil {
 		return err
 	}
+	if cleanup == nil && nativeReleased && consumerProof && !released {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		cleanup = s.recordConsumerRelease(ctx, id, r, cause, pendingAbsent || emptyVerified)
+		cancel()
+	}
 	// Reassess transient non-native failures; retain native fences through their
 	// typed observations rather than making an old mixed error string sticky.
 	result.CleanupFailure = ""
@@ -307,7 +472,7 @@ func (s *store) recoverExecution(id string) error {
 	if completedStatus == v1.Stopping && result.CompletedAt != "" && result.Outcome != "" {
 		completedStatus = result.Outcome
 	}
-	if consumersStopped && result.CompletedAt != "" && !active(completedStatus) && !result.Kept {
+	if result.CompletedAt != "" && !active(completedStatus) && !result.Kept {
 		_, err := s.execution(id, completedStatus, &result)
 		if err == nil {
 			err = s.retireTaskInputs(id)
@@ -351,7 +516,8 @@ func (s *store) outputConflict(requestedPlan v1.PlanResponse) error {
 	if err != nil {
 		return err
 	}
-	return s.db.View(func(tx *bolt.Tx) error { return outputConflictTx(tx, requestedPlan, paths, "", false) })
+	boot, _ := native.CurrentBoot()
+	return s.db.View(func(tx *bolt.Tx) error { return outputConflictTx(tx, requestedPlan, paths, "", false, boot) })
 }
 
 func (s *store) cleanupFailures() error {
@@ -381,6 +547,7 @@ func (s *store) acceptExecution(id string, journal runtimeRecord, result *v1.Exe
 // in the same transaction as execution acceptance. Rejection retains launch facts.
 func (s *store) acceptExecutionSnapshot(id string, journal runtimeRecord, result *v1.ExecutionResult, restart bool, snapshot *plan.Snapshot, expected *startObservation) (v1.Instance, error) {
 	var instance v1.Instance
+	boot, _ := native.CurrentBoot()
 	err := s.db.Update(func(tx *bolt.Tx) error {
 		r, err := load(tx, id)
 		if err != nil {
@@ -390,7 +557,7 @@ func (s *store) acceptExecutionSnapshot(id string, journal runtimeRecord, result
 		if snapshot != nil {
 			requested = snapshot.Plan
 		}
-		if err := outputConflictTx(tx, requested, journal.OutputPaths, id, false); err != nil {
+		if err := outputConflictTx(tx, requested, journal.OutputPaths, id, false, boot); err != nil {
 			return err
 		}
 		if expected != nil {

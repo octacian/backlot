@@ -108,12 +108,12 @@ func TestReassociationH1AbandonmentBootProof(t *testing.T) {
 					return err
 				}
 				attempt := newID()
-				original := &v1.ExecutionResult{Attempt: attempt, CollectionFailure: "historical collection gap", CleanupFailure: "original cleanup uncertainty", NativeCleanup: []v1.NativeCleanupResult{{Component: "job", Attempt: attempt, Confidence: v1.CleanupIncomplete, Reason: "cleanup_incomplete", Detail: "Original waived observation."}}}
+				original := &v1.ExecutionResult{Attempt: attempt, Components: []v1.ComponentResult{{Name: "job", Status: "unknown"}}, CollectionFailure: "historical collection gap", CleanupFailure: "original cleanup uncertainty", NativeCleanup: []v1.NativeCleanupResult{{Component: "job", Attempt: attempt, Confidence: v1.CleanupIncomplete, Reason: "cleanup_incomplete", Detail: "Original waived observation."}}}
 				latest := *original
 				latest.CleanupFailure = ""
 				r.Instance.Execution = &latest
 				r.Instance.Status, r.Instance.Operation.Status = v1.Stopped, v1.Stopped
-				r.NativeAbandonments = []nativeAbandonment{{Attempt: attempt, RecordedAt: time.Now().UTC().Format(time.RFC3339Nano), Reason: nativeWaiverWarning, Boot: scenario.boot, Pending: true, Result: original}}
+				r.NativeAbandonments = []nativeAbandonment{{Attempt: attempt, RecordedAt: time.Now().UTC().Format(time.RFC3339Nano), Reason: nativeWaiverWarning, Boot: scenario.boot, Pending: true, PendingBoot: scenario.boot, Result: original}}
 				if scenario.mixed {
 					a := r.NativeAbandonments[0]
 					a.Boot = boot
@@ -124,6 +124,11 @@ func TestReassociationH1AbandonmentBootProof(t *testing.T) {
 				t.Fatal(err)
 			}
 			allowed := scenario.boot == old && !scenario.mixed
+			if allowed {
+				// The waived historical attempt is earlier-boot; this fixture owns
+				// the selected current zero-launch attempt independently.
+				releaseZeroLaunchTaskFixture(t, f.s.store, target.ID)
+			}
 			f.move(t, "moved")
 			before := stateContents(t, f.s.store)
 			p := f.preview(t)
@@ -162,9 +167,9 @@ func TestReassociationH1UncertainCleanupNotWaived(t *testing.T) {
 			}
 			observation := v1.NativeCleanupResult{Component: "job", Attempt: attempt, Confidence: v1.CleanupIncomplete, Reason: "cleanup_incomplete", Detail: "Unresolved observation."}
 			if kind == "invalid-release" {
-				observation.Confidence, observation.Reason, observation.ResourceRelease = v1.ObservedEmpty, "session_observed_empty", "previous_boot"
+				observation.Confidence, observation.Reason, observation.ResourceRelease = v1.CleanupAuthorityLost, "guardian_authority_lost", "previous_boot"
 			}
-			if _, err := f.s.store.execution(f.instance.ID, v1.Stopped, &v1.ExecutionResult{Attempt: attempt, NativeCleanup: []v1.NativeCleanupResult{observation}}); err != nil {
+			if _, err := f.s.store.execution(f.instance.ID, v1.Stopped, &v1.ExecutionResult{Attempt: attempt, Components: []v1.ComponentResult{{Name: "job", Status: "unknown"}}, NativeCleanup: []v1.NativeCleanupResult{observation}}); err != nil {
 				t.Fatal(err)
 			}
 			if err := f.s.store.saveRuntime(f.instance.ID, runtimeRecord{Attempt: attempt, Groups: []native.Identity{{Boot: boot}}}); err != nil {

@@ -387,8 +387,14 @@ func TestHistoryMigrationRollbackAndOriginalFixture(t *testing.T) {
 			}
 			continue
 		}
-		if len(rows) != 1 || !reflect.DeepEqual(rows[0].Result, publicAttemptResult(*i.Execution)) {
-			t.Fatal("migration rewrote known current result")
+		var persisted record
+		if err := db.View(func(tx *bolt.Tx) error { var err error; persisted, err = load(tx, i.ID); return err }); err != nil {
+			t.Fatal(err)
+		}
+		// Inspection adds a current diagnostic; migration must preserve the stored
+		// result and historical row without fabricating an observation in either.
+		if len(rows) != 1 || !reflect.DeepEqual(rows[0].Result, publicAttemptResult(*persisted.Instance.Execution)) || rows[0].Result.Settlement != nil || persisted.Instance.Execution.Settlement != nil || i.Execution.Settlement == nil {
+			t.Fatal("migration rewrote known current result or inspection persisted a diagnostic")
 		}
 	}
 }
@@ -446,6 +452,9 @@ func TestFailedDestroyRetainsDiagnosticsAndData(t *testing.T) {
 	if err := s.store.saveResources(id, g); err != nil {
 		t.Fatal(err)
 	}
+	// No process was launched by this history fixture. Publish its exact current
+	// release after resource allocation so destroy reaches directory authentication.
+	releaseZeroLaunchTaskFixture(t, s.store, id)
 	_, err := s.destroyWithForce(context.Background(), id, true)
 	code(t, err, "cleanup_failed")
 	retained, err := s.store.attempt(v1.AttemptRequest{InstanceID: id, Attempt: a.Result.Attempt})

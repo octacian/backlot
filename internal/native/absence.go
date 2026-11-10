@@ -3,6 +3,7 @@ package native
 import (
 	"encoding/hex"
 	"errors"
+	"strings"
 )
 
 func validBootIdentity(value string) bool {
@@ -30,5 +31,5 @@ func PreviousBoot(recorded string) (bool, error) {
 	if err != nil || !validBootIdentity(recorded) {
 		return false, errors.New("native boot identity unavailable or invalid")
 	}
-	return boot != recorded, nil
+	return !strings.EqualFold(boot, recorded), nil
 }

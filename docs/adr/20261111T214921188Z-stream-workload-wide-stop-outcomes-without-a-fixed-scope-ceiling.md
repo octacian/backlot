@@ -2,14 +2,14 @@
 title: "Stream workload-wide stop outcomes without a fixed scope ceiling"
 date: 2026-11-11
 status: accepted
-implementation: in-progress
+implementation: implemented
 summary: "Attempt every safely identifiable workload with individual stop deadlines and live compact outcomes, allowing total work and output to grow with scope."
 tags: [lifecycle, admission, api, cli]
 supersedes: [/docs/adr/20261106T230626113Z-fence-workload-admission-during-bounded-bulk-stop.md]
 superseded_by: []
 related: [/docs/adr/20261106T230626113Z-fence-workload-admission-during-bounded-bulk-stop.md]
 tracking: [https://github.com/octacian/backlot/issues/140]
-implemented_by: []
+implemented_by: [https://github.com/octacian/backlot/pull/141]
 ---
 
 # Stream workload-wide stop outcomes without a fixed scope ceiling

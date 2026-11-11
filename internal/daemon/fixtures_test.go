@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -25,7 +26,7 @@ func TestStartupRefreshInvalidatesUnresolvableCapture(t *testing.T) {
 	id := newID()
 	selection := v1.StartupDetailSelection{Component: "server", Fixture: "port", Label: "Port"}
 	snapshot := plan.Snapshot{Plan: v1.PlanResponse{StartupDetails: []v1.StartupDetailSelection{selection}, Components: []v1.PlannedComponent{{Name: "server", Fixtures: map[string]v1.PlannedFixture{"port": {Value: v1.PlannedValue{Redacted: true}}}}}}, Secrets: map[string]v1.PlannedValue{
-		"server/fixture/port":          {Symbolic: &v1.Reference{Kind: "resource", Name: "absent", Field: "value"}},
+		"server/fixture/port":          plannedValue(composeFormat("private-%s", fixtureRef("resource", "absent", "value"))),
 		"server/fixture/port/resolved": {Literal: ptr("stale-private-value")},
 	}}
 	result := &v1.ExecutionResult{Fixtures: []v1.FixtureRecord{{Component: "server", Name: "port", Sensitive: true}, {Component: "server", Name: "unselected", Value: "keep"}}}
@@ -115,5 +116,34 @@ func TestPinnedFixtureReadsOneAttempt(t *testing.T) {
 	request.ExpectedAttempt = ""
 	if _, err := s.fixtures(request, true); err != nil {
 		t.Fatal("explicit historical retrieval lost", err)
+	}
+}
+
+func TestComposedFixtureHydrationAndBounds(t *testing.T) {
+	origin := fixtureRef("resource", "origin", "url")
+	password := fixtureRef("resource", "db", "password")
+	value := v1.Value{URLPath: &v1.URLPathValue{Base: origin, Parts: []v1.Value{fixtureLiteral("api/dev/direct-login"), composeFormat("%s", password)}}}
+	key := "server/fixture/login"
+	snapshot := plan.Snapshot{Plan: v1.PlanResponse{Resources: map[string]v1.Resource{"origin": {Kind: "origin"}, "db": {Kind: "allocation"}}, Publish: &v1.Publication{Resource: "origin"}}, Secrets: map[string]v1.PlannedValue{key: plannedValue(value)}}
+	entry := &execution{shared: map[string]sharedConnection{"db": {Request: v1.ManagerRequest{Password: "hydrated-private-canary"}}}}
+	result := &v1.ExecutionResult{Origin: "https://scene.example.test"}
+	fixture := v1.PlannedFixture{Value: v1.PlannedValue{Redacted: true}}
+	record, err := resolveFixture("id", "server", "login", fixture, snapshot, result, entry)
+	if err != nil || !record.Sensitive || record.Value != "" || snapshot.Secrets[key+"/resolved"].Literal == nil || *snapshot.Secrets[key+"/resolved"].Literal != result.Origin+"/api/dev/direct-login/hydrated-private-canary" {
+		t.Fatal("published origin fixture hydration or private capture failed", err)
+	}
+	for _, n := range []int{(1 << 20) - 1, 1 << 20} {
+		entry.shared["db"] = sharedConnection{Request: v1.ManagerRequest{Password: "hydrated-private-canary" + strings.Repeat("x", n-len("hydrated-private-canary"))}}
+		snapshot.Secrets[key] = plannedValue(composeFormat("x%s", password))
+		_, err := resolveFixture("id", "server", "login", fixture, snapshot, result, entry)
+		if (err == nil) != (n < 1<<20) || err != nil && (strings.Contains(err.Error(), "hydrated-private-canary") || err.Error() != "declared fixture could not be resolved") {
+			t.Fatal("hydrated fixture bounds or sanitized failure", n, err)
+		}
+	}
+	// Invalid secret-bearing URL parts must also fail without including the value.
+	entry.shared["db"] = sharedConnection{Request: v1.ManagerRequest{Password: "hydrated-private-canary/../escape"}}
+	snapshot.Secrets[key] = plannedValue(value)
+	if _, err := resolveFixture("id", "server", "login", fixture, snapshot, result, entry); err == nil || strings.Contains(err.Error(), "hydrated-private-canary") {
+		t.Fatal("invalid private fixture exposed", err)
 	}
 }

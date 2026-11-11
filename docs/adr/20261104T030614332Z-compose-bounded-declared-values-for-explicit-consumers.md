@@ -1,7 +1,7 @@
 ---
 title: "Compose bounded declared values for explicit consumers"
 date: 2026-11-04
-status: accepted
+status: superseded
 implementation: implemented
 summary: "Compose explicit values without shell evaluation, losing allocation provenance or widening secret disclosure."
 tags:
@@ -10,7 +10,7 @@ tags:
   - security
   - compatibility
 supersedes: []
-superseded_by: []
+superseded_by: [/docs/adr/20261111T202028571Z-allow-bounded-declared-value-composition-in-fixtures.md]
 related: [/docs/adr/20261007T055849866Z-define-versioned-offline-scene-planning-contracts.md, /docs/adr/20261103T174849392Z-select-bounded-working-directories-for-native-commands.md, /docs/adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md]
 tracking: ["https://github.com/octacian/backlot/issues/109"]
 implemented_by: ["https://github.com/octacian/backlot/pull/122"]
@@ -147,3 +147,6 @@ The scalar/object argv union also reaches strict decoding, editor schemas and
 private snapshot readers. This adds no endpoint, store, dependency, background work,
 runtime detection, image-building behavior or task execution engine. When unused,
 existing lifecycle work and literal behavior remain unchanged.
+
+The [fixture composition decision](/docs/adr/20261111T202028571Z-allow-bounded-declared-value-composition-in-fixtures.md)
+replaces only the fixture composition exclusion. All other choices remain in force.

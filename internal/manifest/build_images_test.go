@@ -42,6 +42,11 @@ func TestBuildImageValidation(t *testing.T) {
 			c.Fixtures = map[string]v1.Fixture{"bad": {Value: *c.Image}}
 			m.Components["test"] = c
 		},
+		"nested fixture context": func(m *v1.Manifest) {
+			c := m.Components["test"]
+			c.Fixtures = map[string]v1.Fixture{"bad": {Value: composed(filesystem(*c.Image))}}
+			m.Components["test"] = c
+		},
 		"cycle": func(m *v1.Manifest) {
 			c := m.Components["build"]
 			c.DependsOn = []v1.Dependency{{Component: "test", Condition: v1.Completed}}

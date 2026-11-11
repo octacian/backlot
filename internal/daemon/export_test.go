@@ -14,6 +14,7 @@ import (
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/plan"
 )
 
 func exportFixture(t *testing.T) (*service, v1.Instance, v1.ExportRequest) {
@@ -796,7 +797,13 @@ func TestExportRejectsUnsafeLogSources(t *testing.T) {
 func TestExportExcludesStartupFixtures(t *testing.T) {
 	s, instance, request := exportFixture(t)
 	result := *instance.Execution
-	result.Fixtures = []v1.FixtureRecord{{Component: "test", Name: "account", Value: "fixture-export-canary"}, {Component: "test", Name: "password", Sensitive: true}}
+	result.Fixtures = []v1.FixtureRecord{{Component: "test", Name: "account", Value: "fixture-export-canary"}}
+	snapshot := plan.Snapshot{Plan: v1.PlanResponse{Components: []v1.PlannedComponent{{Name: "test", Fixtures: map[string]v1.PlannedFixture{"login": {Value: v1.PlannedValue{Redacted: true}}}}}}, Secrets: map[string]v1.PlannedValue{
+		"test/fixture/login": plannedValue(composeURL(fixtureLiteral("https://scene.example.test"), "api/dev/direct-login", "fixture-export-canary")),
+	}}
+	if err := s.captureFixtures(instance.ID, snapshot, &result, &execution{}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.store.execution(instance.ID, instance.Status, &result); err != nil {
 		t.Fatal(err)
 	}

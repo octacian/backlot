@@ -226,3 +226,95 @@ func TestSharedConsumerKnownBoundsBeforePreparation(t *testing.T) {
 		})
 	}
 }
+
+func TestFixtureCompositionsPlanning(t *testing.T) {
+	for _, runtime := range []v1.Runtime{v1.Native, v1.Container} {
+		t.Run(string(runtime), func(t *testing.T) {
+			project, machine := setupFixture(t)
+			lit := func(s string) v1.Value { return v1.Value{Literal: &s} }
+			id := v1.Value{Ref: &v1.Reference{Kind: "instance", Field: "id"}}
+			path := v1.Value{FilePath: &v1.FilePathValue{Base: lit("/base"), Parts: []v1.Value{lit(".."), lit("login")}}}
+			endpoint := v1.Value{HostPort: &v1.HostPortValue{Host: lit("::1"), Port: lit("8443")}}
+			url := v1.Value{URLPath: &v1.URLPathValue{Base: compositionFormat("https://%s", endpoint), Parts: []v1.Value{path, id}}}
+			c := v1.Component{Kind: v1.Job, Runtime: runtime, Policy: v1.EachStart, Command: &v1.Command{Tool: "shell"}, Fixtures: map[string]v1.Fixture{
+				"endpoint": {Value: endpoint}, "path": {Value: path}, "login": {Value: url},
+			}}
+			if runtime == v1.Container {
+				image := lit("alpine:3.21")
+				c.Command = nil
+				c.Image = &image
+			}
+			m := v1.Manifest{Version: v1.ManifestVersion, Project: "setup-test", Tools: map[string]string{"shell": "sh"}, Inputs: map[string]v1.Input{"token": {Secret: true}}, Components: map[string]v1.Component{"web": c}, Scenes: map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"web"}}}}
+			for name, secret := range map[string]v1.Value{
+				"input":   {Ref: &v1.Reference{Kind: "input", Name: "token"}},
+				"literal": {Literal: func() *string { s := "fixture-private-canary"; return &s }(), Secret: true},
+				"outer":   {Secret: true, Format: &v1.FormatValue{Template: "%s", Values: []v1.Value{id}}},
+			} {
+				c.Fixtures[name] = v1.Fixture{Value: compositionFormat("%s/%s", url, secret)}
+			}
+			data, err := json.Marshal(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeSetup(t, filepath.Join(project, "backlot.yaml"), string(data))
+			writeSetup(t, machine, `{"version":"backlot/v1","docker":{"endpoint":"unix:///absent.sock"}}`)
+			setup := openSetup(t, v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine, Edit: true})
+			saveSetup(t, setup, map[string]string{"token": "fixture-private-canary"}, nil)
+			source, err := Locate(project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := v1.PlanRequest{ProjectPath: project, ConfigPath: machine, Scene: "dev"}
+			snapshot, err := Prepare(source, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			public, err := Resolve(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixtures := public.Components[0].Fixtures
+			if fixtures["endpoint"].Value.Literal == nil || *fixtures["endpoint"].Value.Literal != "[::1]:8443" || fixtures["path"].Value.Literal == nil || *fixtures["path"].Value.Literal != filepath.Join("/base", "..", "login") {
+				t.Fatal("known fixture or native path semantics lost")
+			}
+			pending := fixtures["login"].Value.Composition
+			if pending == nil || pending.URLPath.Parts[1].Ref == nil || pending.URLPath.Parts[1].Ref.Kind != "instance" {
+				t.Fatal("unresolved fixture provenance lost")
+			}
+			for _, name := range []string{"input", "literal", "outer"} {
+				value, err := json.Marshal(fixtures[name].Value)
+				if err != nil || string(value) != `{"redacted":true}` || snapshot.Secrets["web/fixture/"+name].Composition == nil {
+					t.Fatal("whole fixture privacy or private operands lost", name, err)
+				}
+			}
+		})
+	}
+}
+
+func TestFixtureKnownCompositionBounds(t *testing.T) {
+	project, machine := setupFixture(t)
+	writeSetup(t, filepath.Join(project, "backlot.yaml"), `version: backlot/v1
+project: setup-test
+tools: {shell: sh}
+inputs: {token: {secret: true}}
+components:
+  web:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: shell}
+    fixtures:
+      login:
+        value: {format: {template: '%s%s', values: [{ref: {kind: input, name: token}}, {ref: {kind: input, name: token}}]}}
+scenes:
+  dev: {lifetime: persistent, components: [web]}
+`)
+	for _, n := range []int{composition.MaxBytes / 2, composition.MaxBytes/2 + 1} {
+		setup := openSetup(t, v1.ProjectSetupRequest{ProjectPath: project, ConfigPath: machine, Edit: true})
+		saveSetup(t, setup, map[string]string{"token": "private-canary" + strings.Repeat("x", n-len("private-canary"))}, nil)
+		_, err := Resolve(v1.PlanRequest{ProjectPath: project, ConfigPath: machine, Scene: "dev"})
+		if (err == nil) != (n == composition.MaxBytes/2) || err != nil && strings.Contains(err.Error(), "private-canary") {
+			t.Fatal("known fixture bound or sanitized error", n, err)
+		}
+	}
+}

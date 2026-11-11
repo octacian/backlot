@@ -155,6 +155,10 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 		h.manifest.Scenes[mode] = scene
 	}
 	nodeModes := addManagedNodeClients(t, &h.manifest, buildDir)
+	web.Fixtures["login"] = v1.Fixture{Value: v1.Value{URLPath: &v1.URLPathValue{Base: originRef, Parts: []v1.Value{fixtureLiteral("api/dev/direct-login"), {Literal: ptr("managed-private-login-canary"), Secret: true}}}}}
+	scene := h.manifest.Scenes["dev"]
+	scene.StartupDetails = []v1.StartupDetailSelection{{Component: "web", Fixture: "login", Label: "Login link"}}
+	h.manifest.Scenes["dev"] = scene
 	h.write()
 	git := func(args ...string) {
 		t.Helper()
@@ -182,9 +186,18 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	if first.Instance.Status != v1.RuntimeReady || !strings.HasSuffix(origin, ".backlot.localhost:"+strconv.Itoa(port)) {
 		t.Fatal(first)
 	}
-	if len(first.Instance.Execution.Fixtures) != 1 {
+	if len(first.Instance.Execution.Fixtures) != 2 {
 		t.Fatal("retained data fixture missing")
 	}
+	if first.StartupDetails == nil || first.StartupDetails.Attempt != first.Instance.Execution.Attempt || len(first.StartupDetails.Details) != 1 || first.StartupDetails.Details[0].Value != origin+"/api/dev/direct-login/managed-private-login-canary" || !first.StartupDetails.Details[0].Sensitive {
+		t.Fatal("published HTTPS startup fixture did not use accepted origin/attempt")
+	}
+	for _, action := range []string{"inspect", "status", "fixtures"} {
+		if strings.Contains(string(command(true, action, id)), "managed-private-login-canary") {
+			t.Fatal("ordinary output exposed HTTPS login", action)
+		}
+	}
+	t.Log("real managed HTTPS startup composed the published scene origin and secret under the accepted ready attempt")
 	dataPath := filepath.Join(first.Instance.Execution.Fixtures[0].Value, "retained-marker")
 	if err := os.WriteFile(dataPath, []byte("preserve"), 0600); err != nil {
 		t.Fatal(err)

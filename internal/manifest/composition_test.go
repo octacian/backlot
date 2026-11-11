@@ -186,3 +186,59 @@ func TestDeferredURLIdentityManifestBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestFixtureCompositionReferenceBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		ref    v1.Reference
+		mutate func(*v1.Manifest)
+		want   string
+	}{
+		{"CA", v1.Reference{Kind: "resource", Name: "origin", Field: "ca_cert_path"}, nil, "ca_cert_path"},
+		{"unattached resource", v1.Reference{Kind: "resource", Name: "hidden", Field: "path"}, func(m *v1.Manifest) {
+			m.Resources["hidden"] = v1.Resource{Kind: "directory"}
+			s := m.Scenes["dev"]
+			s.Resources = append(s.Resources, "hidden")
+			m.Scenes["dev"] = s
+		}, "attachment"},
+		{"unselected resource", v1.Reference{Kind: "resource", Name: "hidden", Field: "path"}, func(m *v1.Manifest) {
+			m.Resources["hidden"] = v1.Resource{Kind: "directory"}
+			c := m.Components["web"]
+			c.Resources = append(c.Resources, "hidden")
+			m.Components["web"] = c
+		}, "not selected"},
+		{"unattached output", v1.Reference{Kind: "output", Name: "hidden", Field: "path"}, func(m *v1.Manifest) {
+			m.Outputs = map[string]v1.Output{"hidden": {Path: "dist", ConcurrencyGroup: "build"}}
+		}, "attachment"},
+		{"unselected service", v1.Reference{Kind: "service", Name: "hidden", Field: "host"}, func(m *v1.Manifest) {
+			m.Components["hidden"] = m.Components["web"]
+		}, "not selected"},
+		{"unpublished origin", v1.Reference{Kind: "resource", Name: "origin", Field: "url"}, func(m *v1.Manifest) {
+			s := m.Scenes["dev"]
+			s.Publish = nil
+			m.Scenes["dev"] = s
+		}, "publication"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var m v1.Manifest
+			if err := Decode([]byte(caProject), ".yaml", &m); err != nil {
+				t.Fatal(err)
+			}
+			// Remove unrelated CA assignments so the fixture owns the rejection.
+			m.Environments = nil
+			c := m.Components["web"]
+			c.EnvironmentSets = nil
+			m.Components["web"] = c
+			if tc.mutate != nil {
+				tc.mutate(&m)
+			}
+			c = m.Components["web"]
+			c.Fixtures = map[string]v1.Fixture{"bad": {Value: composed(filesystem(v1.Value{Ref: &tc.ref}))}}
+			m.Components["web"] = c
+			err := Validate(m)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %s: %v", tc.want, err)
+			}
+		})
+	}
+}

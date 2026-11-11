@@ -139,9 +139,6 @@ func Validate(m v1.Manifest) error {
 			if caCertPath(fixture.Value) {
 				return invalid("components."+name+".fixtures."+key, "ca_cert_path is only supported in explicit environment assignments")
 			}
-			if fixture.Value.Literal == nil && fixture.Value.Ref == nil {
-				return invalid("components."+name+".fixtures."+key, "fixtures require a literal or supported reference")
-			}
 			if err := value(m, fixture.Value, "components."+name+".fixtures."+key); err != nil {
 				return err
 			}

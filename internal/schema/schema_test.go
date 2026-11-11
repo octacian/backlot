@@ -406,6 +406,7 @@ scenes:
 		{"{literal: 'a b'}", true},
 		{"{format: {template: '%s%%', values: [{literal: 'a b'}]}}", true},
 		{"{host_port: {host: {literal: '::1'}, port: {literal: '8080'}}}", true},
+		{"{url_path: {base: {format: {template: 'https://%s', values: [{host_port: {host: {literal: localhost}, port: {literal: '8443'}}}]}}, parts: [{file_path: {base: {literal: api}, parts: [{literal: login}]}}]}}", true},
 		{"{url_path: {base: {literal: 'https://example.test/base'}, parts: [{literal: api}, {literal: '/v1/'}]}}", true},
 		{"{url_path: {base: {literal: 'https://example.test'}, parts: []}}", true},
 		{"{file_path: {base: {literal: /base}, parts: [{literal: '..'}, {literal: out}]}}", true},
@@ -423,6 +424,11 @@ scenes:
 	} {
 		if err := schema.Validate(yamlValue(t, []byte(strings.Replace(minimal, "ARG", tc.arg, 1)))); (err == nil) != tc.valid {
 			t.Fatalf("%s valid=%v: %v", tc.arg, tc.valid, err)
+		}
+		fixture := strings.Replace(minimal, "command: {tool: go, args: [ARG]}", "command: {tool: go}, fixtures: {value: {value: ARG}}", 1)
+		valid := tc.valid && tc.arg != "'a b %s'"
+		if err := schema.Validate(yamlValue(t, []byte(strings.Replace(fixture, "ARG", tc.arg, 1)))); (err == nil) != valid {
+			t.Fatalf("fixture %s valid=%v: %v", tc.arg, valid, err)
 		}
 	}
 }

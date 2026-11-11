@@ -98,8 +98,11 @@ overall execution. Successful copies appear in `execution.artifacts` with
 component, name, attempt and local path.
 Partial copies are subject to the same evidence retention policy.
 
-Fixture values use the existing literal/reference contract and component attachment
-rules. Values marked `secret`, secret inputs, and generated secret resources stay
+Fixture values support literals, references and all four [value compositions](manifest.md#compose-explicit-values),
+with native consumer semantics and recursive attachment, selection and publication
+rules. CA paths and build-image references remain forbidden. Sensitivity includes
+the outer value and every operand: redact the whole sensitive fixture.
+Values marked `secret`, secret inputs, and generated secret resources stay
 redacted in plans, results and ordinary fixture discovery. Resolved named fixture
 values are captured for subsequent inspection, including after teardown:
 
@@ -115,6 +118,31 @@ endpoint for [declared selections](manifest.md#components-and-scenes), without
 adding their values to execution results, status, diagnostics or exports. The
 permissioned local socket is the authorization boundary; protect sensitive output
 and private daemon state.
+
+To declare a complete login link, attach the published `public` origin and
+generated `credential` secret to the component, select both resources in the
+persistent scene, and select the fixture in `startup_details`:
+
+```yaml
+# On the component:
+resources: [public, credential]
+fixtures:
+  login:
+    value:
+      url_path:
+        base: {ref: {kind: resource, name: public, field: url}}
+        parts:
+          - {literal: api/dev/direct-login}
+          - {ref: {kind: resource, name: credential, field: value}}
+# On the persistent scene (with public configured in publish):
+startup_details:
+  - {component: app, fixture: login, label: Login link}
+```
+
+The accepted ready attempt's human and JSON startup output contains the full
+`https://<scene-host>/api/dev/direct-login/<secret>` link. Ordinary output redacts
+the entire value; `backlot secret --component app INSTANCE_ID login` explicitly
+retrieves it. The application owns the endpoint and its authentication behavior.
 
 ## Investigation and destruction
 

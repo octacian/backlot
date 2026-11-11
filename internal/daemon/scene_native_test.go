@@ -373,12 +373,16 @@ func TestStartupDetailsCLI(t *testing.T) {
 		"input":      {Value: v1.Value{Ref: &v1.Reference{Kind: "input", Name: "token"}}},
 		"generated":  {Value: v1.Value{Ref: &v1.Reference{Kind: "resource", Name: "password", Field: "value"}}},
 		"literal":    {Value: v1.Value{Literal: ptr("literal-private-canary"), Secret: true}},
-		"unselected": {Value: v1.Value{Literal: ptr("never-selected-canary"), Secret: true}},
+		"unselected": {Value: composeFormat("unselected-%s", v1.Value{Literal: ptr("never-selected-canary"), Secret: true})},
+		"login": {Value: v1.Value{URLPath: &v1.URLPathValue{
+			Base:  fixtureLiteral("https://scene.example.test"),
+			Parts: []v1.Value{fixtureLiteral("api/dev/direct-login"), composeFormat("%s", fixtureRef("resource", "password", "value"))},
+		}}},
 	}
 	h.manifest.Components["server"] = server
 	scene := h.manifest.Scenes["dev"]
 	scene.Resources = append(scene.Resources, "password")
-	for _, name := range []string{"reminder", "input", "generated", "literal"} {
+	for _, name := range []string{"reminder", "input", "generated", "literal", "login"} {
 		scene.StartupDetails = append(scene.StartupDetails, v1.StartupDetailSelection{Component: "server", Fixture: name, Label: name})
 	}
 	h.manifest.Scenes["dev"] = scene
@@ -429,7 +433,7 @@ func TestStartupDetailsCLI(t *testing.T) {
 		} else if err := json.Unmarshal(out, &response); err != nil {
 			t.Fatal("finite JSON envelope", err)
 		}
-		if response.StartupDetails == nil || response.StartupDetails.Warning != nil || len(response.StartupDetails.Details) != 4 {
+		if response.StartupDetails == nil || response.StartupDetails.Warning != nil || len(response.StartupDetails.Details) != 5 {
 			t.Fatal("missing authorized summary")
 		}
 		if strings.Contains(string(out), "never-selected-canary") {
@@ -443,6 +447,23 @@ func TestStartupDetailsCLI(t *testing.T) {
 	generated := first.StartupDetails.Details[2].Value
 	if first.StartupDetails.Details[0].Value != "original reminder" || first.StartupDetails.Details[1].Value != "input-private-canary" || generated == "" || !first.StartupDetails.Details[2].Sensitive || first.StartupDetails.Details[3].Value != "literal-private-canary" {
 		t.Fatal("fixture resolution or order changed")
+	}
+	login := "https://scene.example.test/api/dev/direct-login/" + generated
+	if first.StartupDetails.Details[4].Value != login || !first.StartupDetails.Details[4].Sensitive {
+		t.Fatal("composed startup login missing or not sensitive")
+	}
+	human, err := execute("scene", "start", "--config", config, "--state-dir", h.dir, "dev")
+	if err != nil || !strings.Contains(string(human), login) || strings.Contains(string(human), "never-selected-canary") {
+		t.Fatal("human startup login missing or unselected secret exposed", err)
+	}
+	secret, err := execute("secret", "--state-dir", h.dir, "--component", "server", "--json", id, "login")
+	var revealed v1.FixturesResponse
+	if err != nil || json.Unmarshal(secret, &revealed) != nil || len(revealed.Fixtures) != 1 || revealed.Fixtures[0].Value != login {
+		t.Fatal("explicit composed secret retrieval failed", err)
+	}
+	planned, err := execute("plan", "dev", "--config", config, "--json")
+	if err != nil || strings.Contains(string(planned), "literal-private-canary") || strings.Contains(string(planned), "api/dev/direct-login") {
+		t.Fatal("ordinary plan exposed whole sensitive composition", err)
 	}
 	// Changing current selection/value must not silently adopt it on repeated start.
 	scene.StartupDetails[0].Label = "changed label"
@@ -473,11 +494,11 @@ func TestStartupDetailsCLI(t *testing.T) {
 			t.Fatal("startup-only result persisted")
 		}
 	}
-	if _, err := execute("scene", "restart", "dev", "--state-dir", h.dir, "--json"); err == nil {
+	if _, err := execute("scene", "restart", "dev", "--config", config, "--state-dir", h.dir, "--json"); err == nil {
 		t.Fatal("restart accepted changed sensitive input")
 	}
 	configure("input-private-canary")
-	restarted := read("scene", "restart", "dev", "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
+	restarted := read("scene", "restart", "dev", "--config", config, "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
 	if restarted.StartupDetails.Details[2].Value != generated || restarted.StartupDetails.Details[0].Value != "changed reminder" {
 		t.Fatal("restart did not preserve generation/adopt ordinary drift")
 	}
@@ -485,7 +506,7 @@ func TestStartupDetailsCLI(t *testing.T) {
 	if _, err := h.cli.FixtureSecret(context.Background(), stale); err == nil {
 		t.Fatal("replaced attempt retrieved current secret")
 	}
-	reset := read("scene", "reset", "dev", "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
+	reset := read("scene", "reset", "dev", "--config", config, "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
 	if reset.StartupDetails.Details[2].Value == generated {
 		t.Fatal("reset retained generated credential")
 	}
@@ -503,11 +524,17 @@ func TestStartupDetailsCLI(t *testing.T) {
 	server.Command.Args = v1.StringArguments("-test.run=TestNativeFixtureProcess", "--", "fail")
 	h.manifest.Components["server"] = server
 	h.write()
-	out, err := execute("scene", "restart", "dev", "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
+	out, err := execute("scene", "restart", "dev", "--config", config, "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
 	var failed v1.InstanceResponse
 	if err == nil || json.Unmarshal(out, &failed) != nil || failed.Instance.ID != id || failed.Instance.Status != v1.Failed || failed.Instance.Execution == nil || failed.Instance.Execution.Failure == "" || failed.StartupDetails != nil {
 		t.Fatal("failed readiness emitted startup summary")
 	}
+	for _, secret := range []string{generated, "literal-private-canary", "input-private-canary", "never-selected-canary", "api/dev/direct-login"} {
+		if strings.Contains(string(out), secret) {
+			t.Fatal("failed startup exposed a sensitive fixture")
+		}
+	}
+	t.Log("real CLI/daemon: human and JSON composed login, explicit secret, ordinary redaction, retained attempts, failed readiness and owned destruction")
 	out, err = execute("scene", "destroy", "dev", "--project", h.project, "--state-dir", h.dir, "--json")
 	var destroyed v1.InstanceResponse
 	if err != nil || json.Unmarshal(out, &destroyed) != nil || destroyed.Instance.ID != id || destroyed.Instance.Status != v1.Destroyed || destroyed.Instance.Execution != nil {

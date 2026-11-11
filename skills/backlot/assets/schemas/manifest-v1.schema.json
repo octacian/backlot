@@ -647,41 +647,7 @@
           "type": "string"
         },
         "value": {
-          "$ref": "#/$defs/Value",
-          "allOf": [
-            {
-              "allOf": [
-                {
-                  "not": {
-                    "required": [
-                      "format"
-                    ]
-                  }
-                },
-                {
-                  "not": {
-                    "required": [
-                      "host_port"
-                    ]
-                  }
-                },
-                {
-                  "not": {
-                    "required": [
-                      "url_path"
-                    ]
-                  }
-                },
-                {
-                  "not": {
-                    "required": [
-                      "file_path"
-                    ]
-                  }
-                }
-              ]
-            }
-          ]
+          "$ref": "#/$defs/Value"
         }
       },
       "additionalProperties": false,

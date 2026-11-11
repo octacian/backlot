@@ -53,8 +53,10 @@ func validateBuildImages(m v1.Manifest) error {
 			}
 		}
 		for _, fixture := range c.Fixtures {
-			if buildImageRef(fixture.Value) != nil {
-				return invalid("components."+name+".fixtures", "build_image references are only for producer environment and container image")
+			for _, v := range flattenedValues(fixture.Value) {
+				if buildImageRef(v) != nil {
+					return invalid("components."+name+".fixtures", "build_image references are only for producer environment and container image")
+				}
 			}
 		}
 		if c.Readiness != nil && c.Readiness.Target != nil && buildImageRef(*c.Readiness.Target) != nil {

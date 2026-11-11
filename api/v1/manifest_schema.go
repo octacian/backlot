@@ -349,8 +349,3 @@ func (Value) JSONSchemaExtend(s *jsonschema.Schema) {
 		s.OneOf = append(s.OneOf, branch)
 	}
 }
-
-// JSONSchemaExtend retains the literal/reference fixture contract.
-func (Fixture) JSONSchemaExtend(s *jsonschema.Schema) {
-	schemaProperty(s, "value").AllOf = append(schemaProperty(s, "value").AllOf, schemaForbid("format", "host_port", "url_path", "file_path"))
-}

@@ -272,9 +272,11 @@ attachment, selection and publication requirements as `origin.url`.
 ### Compose explicit values
 
 Use compositions in explicit environment assignments, native/container argv
-entries and TCP/HTTP readiness targets. Operands are recursive values, with the
-same reference and context checks at every level. Images and fixtures keep their
-existing literal/reference forms. Each composition has a 1 MiB **rendered byte**
+entries, component fixtures and TCP/HTTP readiness targets. Operands are recursive
+values, with the same reference and context checks at every level. Images keep
+their existing literal/reference forms. Fixtures use native consumer semantics,
+including on container components; CA paths and build-image references remain
+forbidden in every fixture operand. Each composition has a 1 MiB **rendered byte**
 limit, checked before rendering known offline output and final hydrated output,
 including URL escaping and filesystem cleaning; raw operand length is not the
 rendered size when later cleaning can shorten it. Existing literals, references and scalar argv keep their
@@ -330,7 +332,7 @@ command:
 Each argv entry resolves to exactly one argument: spaces, percent signs and
 special characters are retained without splitting or quoting. Forwarded CLI
 arguments remain literal strings. Sensitive argv, including nested secret
-references, is rejected before effects. Environment sensitivity includes the
+references, is rejected before effects. Environment and fixture sensitivity includes the
 outer value and every operand; redact the whole sensitive composition.
 
 Offline plans partially resolve known operands while preserving typed unresolved

@@ -5,7 +5,7 @@
 [install.sh](https://github.com/octacian/backlot/blob/main/install.sh) installs macOS
 ARM64/Linux amd64 releases using stock `sh`, `curl`, `tar` and SHA-256 tools; Go is
 not required. The target release must contain `backlot install-replace`. A running
-daemon also requires an old CLI/daemon supporting `activity` and `stop --all`;
+daemon also requires an old CLI/daemon supporting `activity`;
 unsupported or incompatible peers fail before replacement. Use
 [Go installation](operations.md#go-installation) or [manual archives](operations.md#release-archive-installation)
 for older helperless releases or peers without these contracts.
@@ -31,20 +31,19 @@ pins are unchanged.
 Only the default state root or explicit `--state-dir /absolute/private/state` is
 checked. With a running daemon, the installer reports observed running/kept and
 unsettled/unknown workload counts and preparing admissions from bounded `activity`
-pages, then asks `y`/`n`/`l`: `y` authorizes bulk stop and shutdown,
+pages, then asks `y`/`n`/`l`: `y` authorizes shutdown,
 `n` cancels, and `l` displays the recorded activity pages before asking `y`/`n`
 again. Settled workloads retaining allocations and shared server intent can also
 appear. Consent
 uses the controlling terminal even with `curl ... | sh -s -- ...`; no terminal
 means cancellation when consent is required. Counts are changing observations, including overlapping categories.
 
-The old compatible CLI performs `stop --all`, requiring a complete successful
-result from the observed daemon generation, then `daemon stop` before lock-held
-atomic replacement. Bulk stop retains data and leaves infrastructure running;
-daemon shutdown fences and joins work admitted after bulk stop and stops
-administrative services. No per-target stop loop or automatic retry is added.
+The old compatible CLI performs `daemon stop` before lock-held atomic
+replacement. Daemon shutdown fences new admissions, joins owned workloads and
+stops administrative services while retaining application data. No preparatory
+bulk stop, per-target stop loop or automatic retry is added.
 Failed/uncertain cleanup, validation or replacement errors preserve the old binary.
-Interruption cancels replacement, though accepted bulk cleanup or shutdown may finish. Owned
+Interruption cancels replacement, though accepted shutdown may finish. Owned
 temporary files are cleaned after children settle; SIGKILL/power loss may leave
 them for inspection. After replacement, explicitly start the installed binary
 in the same state root; the daemon remains stopped. State, data, evidence and CA

@@ -16,23 +16,24 @@ superseded_by: []
 
 Use a stock-shell downloader and a temporary foreground helper in the verified
 target executable. The shell verifies and stages the release; the helper obtains
-consent, reuses the compatible old CLI's activity and bulk-stop contracts before
-daemon shutdown, and holds selected-state ownership through atomic replacement. Preserve retained state and leave the daemon
-stopped for explicit startup with the new binary.
+consent, reuses the compatible old CLI's activity and daemon-shutdown contracts,
+and holds selected-state ownership through atomic replacement. Preserve retained
+state and leave the daemon stopped for explicit startup with the new binary.
 
 ## Context and Problem Statement
 
 [Issue #101](https://github.com/octacian/backlot/issues/101) needs installation and
 updates without Go or a package manager, including an instance count, listing and
-consent before stopping a running daemon. Workload activity and bulk stop now
-provide the reusable observation and cleanup contracts; daemon shutdown still supplies the permanent admission fence and
-administrative-service cleanup needed for replacement.
+consent before stopping a running daemon. Activity supplies the reusable
+observation contract; existing daemon shutdown supplies the permanent admission
+fence, workload joining and administrative-service cleanup needed for replacement.
 
 Existing cleanup joins resources before acknowledging `stopping`, but final
 socket/database/lock teardown follows. Failed status cannot distinguish absence
 from unsafe access, and stock shell tools cannot portably hold the existing lock
 on both supported platforms. The verified target consumes typed activity and
-stop-all results and supplies locking without another cleanup engine or an installed JSON parser.
+daemon-status results and supplies locking without another cleanup engine or an
+installed JSON parser.
 
 ## Considered Options
 
@@ -63,7 +64,7 @@ stop-all results and supplies locking without another cleanup engine or an insta
 - The helper performs bounded, validated inspection and cleanup through the
   retained old executable's compatible CLI, not the new client's state-specific
   wire contract. Compatibility does not establish the daemon's exact release.
-  Require old CLI/daemon support for `activity` and `stop --all`; unsupported peers
+  Require old CLI/daemon support for `activity`; unsupported peers
   require manual matching-binary installation, without an inspection fallback.
   Keep the old executable at its original path until handoff completes; decoded
   observations are informational, never cleanup authority.
@@ -71,22 +72,21 @@ stop-all results and supplies locking without another cleanup engine or an insta
   consent; a running daemon requires terminal consent with observed running/kept
   and unsettled/unknown workload counts plus preparing admissions from bounded
   activity pages. Counts can overlap and changing pages never prove absence.
-  `y` attempts bulk stop then shutdown, `n` cancels, and `l` displays activity
+  `y` attempts shutdown, `n` cancels, and `l` displays activity
   using the existing renderer before asking `y`/`n` again. Read the controlling
   terminal for piped installs too; refuse required consent without one.
-- Require a validated complete successful `stop --all` result from the observed
-  daemon generation before `daemon stop`. Partial, missing or uncertain results
-  abort replacement without retry. Bulk stop reopens admission and leaves
-  administrative services running, so daemon shutdown must still fence and join
-  subsequent work. Require successful old-CLI shutdown, then acquire its existing
+- Reuse `daemon stop` directly: it fences new admissions, joins owned workloads
+  and stops administrative services while retaining data. A preparatory bulk
+  stop adds a second coordination pass and its selection limits without replacing
+  shutdown. Require successful old-CLI shutdown, then acquire its existing
   state lock under a finite budget. Hold that lock through file/ownership checks
   and rename on both running and absent paths; preserve its inode. Creating the
   standard missing private root/lock is allowed to exclude concurrent startup.
   Do not open or migrate the database.
 - Failed or uncertain cleanup, lost replies, timeout or pre-rename cancellation
   preserves the old executable and diagnostic state. Forward cancellation and
-  join owned children before temporary cleanup; already accepted bulk cleanup or
-  shutdown may finish. Preserve data, inputs, CA identity, evidence and project pins. Leave the
+  join owned children before temporary cleanup; already accepted shutdown may
+  finish. Preserve data, inputs, CA identity, evidence and project pins. Leave the
   daemon stopped without force or automatic recovery/restart.
 
 Successful cleanup plus held ownership is the handoff guarantee. Neither a stop
@@ -108,8 +108,10 @@ A verified same-version rerun may no-op without daemon maintenance.
 ## Revisit when
 
 Observed failures require additional recovery or distribution/signing requirements
-change. Activity and bulk stop are reused under their existing bounds without
-adding another cleanup engine or operation journal.
+change. Revisit shutdown-specific glue when
+[#97](https://github.com/octacian/backlot/issues/97) supplies bounded, verifiable
+infrastructure completion. Completion alone does not replace holding state
+ownership through executable replacement.
 
 ## References
 

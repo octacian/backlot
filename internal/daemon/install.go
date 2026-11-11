@@ -142,17 +142,6 @@ func Install(ctx context.Context, o InstallOptions) (result error) {
 		if err := installUnchanged(o.Destination, old, oldHash); err != nil {
 			return err
 		}
-		var stopped v1.StopAllResponse
-		if err := installCLI(ctx, o.Destination, &stopped, "stop", "--all", "--state-dir", o.Directory); err != nil {
-			return err
-		}
-		if err := stopped.Validate(); err != nil {
-			return err
-		}
-		if stopped.Error != nil || stopped.DaemonGeneration != pages[0].DaemonGeneration {
-			return fmt.Errorf("bulk stop incomplete or daemon changed; inspect activity with the old executable before recovery")
-		}
-		// Bulk stop reopens admission; daemon shutdown must still fence and join later work.
 		runningPID := status.PID
 		status = v1.DaemonStatusResponse{}
 		if err := installCLI(ctx, o.Destination, &status, append([]string{"daemon", "stop"}, args...)...); err != nil {
@@ -276,11 +265,7 @@ func (b *installOutput) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 func installCLI(ctx context.Context, binary string, result any, args ...string) error {
-	budget := 45 * time.Second
-	if args[0] == "stop" {
-		budget = 2*time.Minute + 15*time.Second
-	}
-	ctx, cancel := context.WithTimeout(ctx, budget)
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, binary, append(args, "--json")...)
 	var data installOutput

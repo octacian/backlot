@@ -76,13 +76,12 @@ command runner. It requires distinct absolute stage/destination executable paths
 a private stage directory directly beneath the safe destination parent, and a
 matching stable release identity. It opens no database. The default or explicit
 selected state root may be created with its standard private lock if missing.
-It runs only the recognized old executable's compatible `activity`, `stop --all`
-and daemon status/stop commands, requires tty `y`/`n`/`l` consent for a running daemon, and holds state ownership
-through fixed rename. Success leaves the daemon stopped; cancellation, unknown
+It runs only the recognized old executable's compatible `activity` and daemon
+status/stop commands, requires tty `y`/`n`/`l` consent for a running daemon, and
+holds state ownership through fixed rename. Success leaves the daemon stopped; cancellation, unknown
 cleanup or pre-rename failure preserves the old executable. Inspection is bounded
 by one minute and 100 activity pages; changing membership never proves absence.
-Bulk stop has a 135-second client budget for its two-minute coordination; other
-old commands have 45 seconds, and shutdown lock waiting has 30 seconds.
+Individual old commands have 45 seconds, and shutdown lock waiting has 30 seconds.
 Interrupt cancels subprocesses and joins them. Human consent waits
 until answered, EOF or interruption. `--json` is rejected with `invalid_arguments`;
 there is no successful JSON result. Shell installation options/policy and

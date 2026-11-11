@@ -372,7 +372,7 @@ func TestInstaller(t *testing.T) {
 }
 
 func testInstallHandoff(t *testing.T, fixture func(*testing.T) *installFixture) {
-	for _, mode := range []string{"success", "cancel", "activity-unsupported", "bulk-failed", "bulk-partial", "bulk-invalid", "bulk-lost", "bulk-generation", "status-invalid", "stop-failed", "stop-lost", "lock-retained", "stage-changed", "destination-changed", "rename-denied", "downgrade", "context-cancel", "no-socket", "socket-without-lock", "lock-changed"} {
+	for _, mode := range []string{"success", "many-workloads", "cancel", "activity-unsupported", "status-invalid", "stop-failed", "stop-lost", "lock-retained", "stage-changed", "destination-changed", "rename-denied", "downgrade", "context-cancel", "no-socket", "socket-without-lock", "lock-changed"} {
 		t.Run(mode, func(t *testing.T) {
 			f := fixture(t)
 			f.installOld()
@@ -412,7 +412,7 @@ func testInstallHandoff(t *testing.T, fixture func(*testing.T) *installFixture) 
 				t.Fatal(err)
 			}
 			stop := make(chan struct{}, 1)
-			var bulkCalls, shutdownCalls atomic.Int32
+			var shutdownCalls atomic.Int32
 			server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("X-Backlot-API-Version", v1.Version)
@@ -429,43 +429,16 @@ func testInstallHandoff(t *testing.T, fixture func(*testing.T) *installFixture) 
 						w.WriteHeader(404)
 						return
 					}
-					result = v1.ActivityResponse{APIVersion: v1.Version, DaemonGeneration: strings.Repeat("a", 64), GatewayStatus: "unconfigured", Entries: []v1.ActivityEntry{}, Complete: true}
-				case "/v1/runtime/stop-all":
-					bulkCalls.Add(1)
-					var q v1.StopAllRequest
-					if json.NewDecoder(r.Body).Decode(&q) != nil || q.Validate() != nil {
-						t.Error("invalid bulk intent")
+					page := v1.ActivityResponse{APIVersion: v1.Version, DaemonGeneration: strings.Repeat("a", 64), GatewayStatus: "unconfigured", Entries: []v1.ActivityEntry{}, Complete: true}
+					if mode == "many-workloads" {
+						for n := range 26 {
+							id := fmt.Sprintf("%064x", n+1)
+							page.Entries = append(page.Entries, v1.ActivityEntry{Key: "workload/" + id, ID: id, Project: "fixture", Checkout: f.root, Scene: "dev", Status: "interrupted", Owner: "absent", Settlement: &v1.ConsumerSettlement{InstanceID: id, State: v1.ConsumerUnknown, Cause: v1.SettlementUnproven, Blockers: []v1.ConsumerBlocker{{Code: "metadata_unproven", InstanceID: id}}}, Blockers: []v1.ActivityBlocker{}})
+						}
 					}
-					bulk := v1.StopAllResponse{APIVersion: v1.Version, DaemonGeneration: strings.Repeat("a", 64), OperationID: strings.Repeat("b", 64), Targets: []v1.StopAllTarget{}, SelectionComplete: true, AdmissionsJoined: true}
-					switch mode {
-					case "bulk-failed":
-						w.WriteHeader(500)
-						result = v1.ErrorResponse{APIVersion: v1.Version, Error: v1.PlanError{Code: "cleanup_failed", Message: "owned fixture refusal"}}
-					case "bulk-lost":
-						connection, _, err := w.(http.Hijacker).Hijack()
-						if err == nil {
-							_ = connection.Close()
-						}
-						return
-					default:
-						if mode == "bulk-partial" {
-							bulk.SelectionComplete = false
-							bulk.SelectionFailure = "scope_too_large"
-							bulk.Error = &v1.PlanError{Code: "partial_failure", Message: "bulk stop incomplete; inspect activity and selected targets before explicit recovery"}
-						}
-						if mode == "bulk-invalid" {
-							bulk.AdmissionsJoined = false
-						}
-						if mode == "bulk-generation" {
-							bulk.DaemonGeneration = strings.Repeat("c", 64)
-						}
-						result = bulk
-					}
+					result = page
 				case "/v1/stop":
 					shutdownCalls.Add(1)
-					if bulkCalls.Load() != 1 {
-						t.Error("shutdown without exactly one bulk stop")
-					}
 					switch mode {
 					case "stop-failed":
 						w.WriteHeader(500)
@@ -560,7 +533,8 @@ func testInstallHandoff(t *testing.T, fixture func(*testing.T) *installFixture) 
 				}
 				return nil
 			}})
-			if (err == nil) != (mode == "success") {
+			success := mode == "success" || mode == "many-workloads"
+			if (err == nil) != success {
 				t.Fatalf("handoff %s: %v", mode, err)
 			}
 			if mode == "activity-unsupported" || mode == "status-invalid" || mode == "downgrade" || mode == "no-socket" || mode == "socket-without-lock" {
@@ -568,10 +542,10 @@ func testInstallHandoff(t *testing.T, fixture func(*testing.T) *installFixture) 
 					t.Fatal("consent reached before valid identity/status")
 				}
 			}
-			if strings.HasPrefix(mode, "bulk-") && (bulkCalls.Load() != 1 || shutdownCalls.Load() != 0) {
-				t.Fatal("bulk failure retried or reached shutdown", bulkCalls.Load(), shutdownCalls.Load())
+			if shutdownCalls.Load() > 1 || success && shutdownCalls.Load() != 1 {
+				t.Fatal("unexpected shutdown request count", shutdownCalls.Load())
 			}
-			if mode == "success" {
+			if success {
 				if !bytes.Equal(mustInstallRead(t, f.root+"/bin/backlot"), mustInstallRead(t, f.target)) {
 					t.Fatal("target not replaced")
 				}

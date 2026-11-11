@@ -6,8 +6,8 @@ Chromium job. [The automatic workflow](../../.github/workflows/scenes.yml) runs
 two independent shards on relevant PRs and `main` pushes. It adds no Backlot
 scheduler and does not repeat the existing Linux installation/Docker/provider suites.
 
-The bounded combination is Ubuntu 24.04 **amd64**, Go 1.27.1, Node 26.8.1,
-Caddy 2.11.6, and `@playwright/test` 1.64.1's Chromium headless shell
+The bounded combination is Ubuntu 24.04 **amd64**, Go 1.27.3, Node 26.8.1,
+Caddy 2.11.7, and `@playwright/test` 1.64.1's Chromium headless shell
 156.0.8078.4 (revision 1248). The lockfile pins the browser driver/download
 revision. Both shards passed the initial real Ubuntu checkpoint at `1fef82b`
 ([run 38982798894](https://github.com/octacian/backlot/actions/runs/38982798894));

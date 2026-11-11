@@ -3,7 +3,7 @@
 For macOS/Linux targets, prerequisites and WSL guidance,
 see [platforms](platforms.md). Git is needed for worktrees and `lsof`
 for runtime diagnostics (included with macOS). Go/source installations need Go
-1.27.1 or a compatible newer patch; Make is needed only for source builds. Native commands must stay in their supervised process group.
+1.27.3 or a compatible newer patch; Make is needed only for source builds. Native commands must stay in their supervised process group.
 
 Install Docker only for container scenes. Published scenes require
 [managed local HTTPS or external Caddy](https.md). Trust, external DNS/public
@@ -14,9 +14,11 @@ Backlot never installs system/browser trust.
 
 [install.sh](https://github.com/octacian/backlot/blob/main/install.sh) installs macOS
 ARM64/Linux amd64 releases using stock `sh`, `curl`, `tar` and SHA-256 tools; Go is
-not required. The target release must contain `backlot install-replace`. Use
+not required. The target release must contain `backlot install-replace`. A running
+daemon also requires an old CLI/daemon supporting `activity` and `stop --all`;
+unsupported or incompatible peers fail before replacement. Use
 [Go installation](#go-installation) or [manual archives](#release-archive-installation)
-for older helperless releases.
+for older helperless releases or peers without these contracts.
 
 Download the script from a reviewed repository/ref, inspect it, then run:
 
@@ -38,14 +40,21 @@ pins are unchanged.
 
 Only the default state root or explicit `--state-dir /absolute/private/state` is
 checked. With a running daemon, the installer reports observed running/kept and
-separate unresolved-cleanup counts, then asks `y`/`n`/`l`: `y` authorizes shutdown,
-`n` cancels, and `l` lists affected instances before asking `y`/`n` again. Consent
+unsettled/unknown workload counts and preparing admissions from bounded `activity`
+pages, then asks `y`/`n`/`l`: `y` authorizes bulk stop and shutdown,
+`n` cancels, and `l` displays the recorded activity pages before asking `y`/`n`
+again. Settled workloads retaining allocations and shared server intent can also
+appear. Consent
 uses the controlling terminal even with `curl ... | sh -s -- ...`; no terminal
-means cancellation when consent is required. Counts are live observations.
+means cancellation when consent is required. Counts are changing observations, including overlapping categories.
 
-The old compatible CLI performs cleanup before lock-held atomic replacement.
+The old compatible CLI performs `stop --all`, requiring a complete successful
+result from the observed daemon generation, then `daemon stop` before lock-held
+atomic replacement. Bulk stop retains data and leaves infrastructure running;
+daemon shutdown fences and joins work admitted after bulk stop and stops
+administrative services. No per-target stop loop or automatic retry is added.
 Failed/uncertain cleanup, validation or replacement errors preserve the old binary.
-Interruption cancels replacement, though accepted shutdown may finish. Owned
+Interruption cancels replacement, though accepted bulk cleanup or shutdown may finish. Owned
 temporary files are cleaned after children settle; SIGKILL/power loss may leave
 them for inspection. After replacement, explicitly start the installed binary
 in the same state root; the daemon remains stopped. State, data, evidence and CA
@@ -247,8 +256,10 @@ and inherited environment; changing your shell does not update it. See
 [tool selection](daemon.md#scoped-provider-diagnostics).
 
 For a persistent scene use `scene start dev` instead of the disposable run above.
-It returns at readiness and leaves accepted startup/runtime daemon-owned. To own
-one persistent attempt until your client ends, use `scene start dev --attached`;
+It returns at readiness and leaves accepted startup/runtime daemon-owned. After
+repairing a failed scene, start again for one new attempt; starting or ready work
+stays running. See [configuration and overlapping starts](cli.md#commands-and-defaults).
+To own one persistent attempt until your client ends, use `scene start dev --attached`;
 this refuses existing runtime rather than adopting it. Status/follow/logs and
 export only observe: disconnecting them does not stop work or renew its lease.
 
@@ -256,7 +267,7 @@ Record the returned instance ID and original CLI exit. Named startup nests the
 instance under `result`; ordinary `run` uses `instance`. To investigate:
 
 ```sh
-backlot list --project . --limit 10 --json
+backlot checkout list --limit 10 --json
 backlot status INSTANCE_ID --json
 backlot doctor --instance INSTANCE_ID --json
 backlot logs INSTANCE_ID --page --limit 100 --json
@@ -280,7 +291,8 @@ backlot destroy INSTANCE_ID --json
 ```
 
 Stop preserves persistent data; destroy removes that instance's owned data and
-keeps historical evidence subject to retention. Use destroy only when the data
+erases attempt results/logs/artifacts. Export needed diagnostics before destroy;
+caller-owned bundles survive. Use destroy only when the data
 is no longer needed. Named stop still works with a broken/deleted manifest;
 recorded IDs are the fallback when checkout identity is unavailable. Never prune
 by resource name, hostname or observed PID. Preserve state on uncertain cleanup
@@ -288,26 +300,32 @@ and retry through the same daemon scope. See the
 [lifecycle decision table](daemon.md#identity-and-lifecycle).
 `daemon stop` is for deliberate daemon shutdown, not routine scene cleanup.
 
+For activity across projects/worktrees in the selected daemon, run
+`backlot activity --json`. Use `stop --all` only when the entire selected scope
+is authorized; it can stop peers belonging to other projects. It retains data
+and administrative services. Read [the scope, bounds and partial-result contract](cli.md#scope-wide-activity-and-workload-stop)
+before bulk cleanup; a lost reply never authorizes an automatic retry.
+
 ## Diagnosis and recovery
 
 | Symptom | Diagnosis and next action |
 | --- | --- |
 | Cannot contact daemon | Use the same `--state-dir`; run `daemon status`/`doctor`, inspect the private startup log, then explicitly start. Never delete a live or uncertain socket/lock. |
 | Missing tool/input/seed | Compare offline `plan` paths with `doctor --project PATH --scene NAME` in the daemon context; errors show the attempted tool and declaration source. For a local tool override use `project setup --edit`; configure required inputs/seeds explicitly. |
-| Image unavailable | Explicitly pull/build the declared image with Docker tooling, then restart the failed instance. Backlot never pulls implicitly. |
+| Image unavailable | Explicitly pull/build the declared image with Docker tooling, then start the failed persistent scene again. For a pinned build image, restore it or follow its restart guidance. Backlot never pulls implicitly. |
 | Database TCP ready but application unavailable | Use application preparation or a command probe that verifies credentials/schema; do not equate an open port with application readiness. |
-| Probe or preparation failed | Inspect component logs and failure detail; correct the application, then explicitly restart. Failed fresh-only initialization is not recorded as successful. |
-| Scene failed after readiness | Read the required-service exit/supervision diagnostic and historical logs. No automatic restart; fix the cause before explicit restart. |
+| Probe or preparation failed | Inspect component logs and failure detail; correct the application, then start the persistent scene again once cleanup finishes. Failed fresh-only initialization is not recorded as successful. |
+| Scene failed after readiness | Read the required-service exit/supervision diagnostic and historical logs. No automatic retry; fix the cause before another explicit persistent start. |
 | Need machine/project/public CA paths | Use scoped doctor; distinguish effective scene inputs, recorded launch files and current file drift. `public_ca_certificate` locates the actual public root for explicit manual trust; no key is printed or trust installed. |
 | Container origin fails while host succeeds | Use explicit `--instance ID --container-probe-image ALREADY_PRESENT_IMAGE`; compare default image trust against optional `--probe-public-ca`, DNS, TCP and normally verified TLS. Follow the documented image contract; no implicit pull/workload/resolver override occurs. |
 | Public origin unavailable | Verify selected gateway status, normal DNS and TLS trust, and exact owned scope first. Check host and container consumers separately. Keep unrelated routes intact; never reload a stale bootstrap. |
-| Manifest drift | Repeated run reports preserved snapshot drift. Restart applies compatible changes; retained storage/initialization/sensitive contract changes require explicit reset/destroy. |
-| Kept disposable failure | Inspect status/logs/artifacts/fixtures, then explicitly destroy by ID. Successful runs still clean up. |
+| Manifest drift | Start reports unapplied changes for running work. New attempts use compatible current configuration and startup-details selections; restart applies changes to running work. Retained storage/initialization/sensitive contract changes require explicit reset/destroy. |
+| Kept disposable failure | Inspect results/logs/fixtures; stop runtime and export needed diagnostics before destroy by ID. Successful runs still clean up. |
 | Cleanup uncertain or foreign consumer present | Preserve journal/resources; restore provider access or remove only your verified consumer, then retry stop/destroy. Never prune by name, PID or hostname. |
-| Daemon crash | Start the same binary/state directory; recovery stops verifiably owned survivors and marks interrupted, retains data/managed CA and reports evidence gaps. Inspect, explicitly start the managed gateway, then restart scenes. Unavailable gateway retains exact route cleanup uncertainty for retry. |
+| Daemon crash | Start the same binary/state directory; recovery stops verifiably owned survivors and marks interrupted, retains data/managed CA and reports evidence gaps. Inspect, explicitly start the managed gateway, then start scenes again after diagnosis and cleanup. Unavailable gateway retains exact route cleanup uncertainty for retry. |
 | Managed gateway uncertain after temporary control loss | Retry `gateway stop` in the same state directory. If still fenced, choose restored authority, controlled reboot or explicit survivor-risk acknowledgement with force; follow [managed recovery](https.md#managed-gateway-recovery). Retain configuration and CA. |
 | State upgrade or unsupported version | Follow [state compatibility](containers.md#state-compatibility): stop the old daemon with its matching binary before upgrading, wait for exit/lock release, then explicitly start the newest binary in the same directory. Version 9 is the minimum supported baseline; retained steps from v9 support skipped releases without reset. Pre-v9 and other unsupported formats are rejected unchanged; preserve them for matching-binary diagnosis and lifecycle. |
-| Evidence expired | Status retains `evidence_expired`; expired logs/artifacts cannot be recovered from deleted containers. Configure daemon age/size retention before runs. |
+| Evidence expired | Status retains `evidence_expired`; expired logs/artifacts cannot be recovered from deleted containers. Configure daemon age/size/count retention before runs; see [history and pruning](evidence.md#retained-attempt-history). |
 
 To refresh the daemon's startup PATH after changing shell/tool setup, stop it
 normally, wait for exit/lock release, then explicitly start it from the intended

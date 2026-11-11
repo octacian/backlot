@@ -1,0 +1,958 @@
+//go:build !windows
+
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/plan"
+	bolt "go.etcd.io/bbolt"
+)
+
+func bulkRequest() v1.StopAllRequest { return v1.StopAllRequest{APIVersion: v1.Version, All: true} }
+func checkBulk(t *testing.T, r v1.StopAllResponse, err error) {
+	t.Helper()
+	if err != nil || r.Validate() != nil {
+		t.Fatal("invalid bulk result", r, err, r.Validate())
+	}
+}
+
+func TestBulkAdmissionGeneration(t *testing.T) {
+	s, _, _ := sceneFixture(t)
+	ctx, finish, err := s.beginWorkload(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := make(chan struct{})
+	go func() { defer close(joined); <-ctx.Done(); finish() }()
+	out, err := s.stopAll(context.Background(), bulkRequest())
+	checkBulk(t, out, err)
+	awaitControlled(t, joined, "admission owner not joined")
+	if !out.AdmissionsJoined || !out.SelectionComplete || out.Error != nil {
+		t.Fatal(out)
+	}
+	// Strip cancellation to prove that generation, independently of ctx.Err, is permanent.
+	code(t, s.checkWorkload(context.WithoutCancel(ctx)), "admission_closed")
+	next, done, err := s.beginWorkload(context.Background())
+	if err != nil {
+		t.Fatal("fence did not reopen", err)
+	}
+	defer done()
+	if err := s.checkWorkload(next); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	s.closing = true
+	s.mu.Unlock()
+	if _, _, err := s.beginWorkload(context.Background()); err == nil {
+		t.Fatal("permanent shutdown reopened")
+	}
+}
+
+func TestBulkRejectsWaitingWriters(t *testing.T) {
+	for _, action := range []string{"prepare", "run", "attached", "scene", "restart", "reset", "named-restart", "named-reset"} {
+		t.Run(action, func(t *testing.T) {
+			s, q := attachedCoordinator(t)
+			q.Attached = false
+			if action == "restart" || action == "reset" || strings.HasPrefix(action, "named-") {
+				r, err := s.run(context.Background(), q)
+				if err != nil {
+					t.Fatal(err)
+				}
+				taskAdmissionReady(t, s, r.Instance.ID)
+				q.InstanceID = r.Instance.ID
+				if strings.HasPrefix(action, "named-") {
+					q.Target = &v1.SceneTarget{CWD: q.Plan.ProjectPath, Scene: q.Plan.Scene}
+					q.InstanceID = ""
+					q.Plan = v1.PlanRequest{ConfigPath: q.Plan.ConfigPath}
+				}
+			}
+			reached, release, joined := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			s.resolve = func(source plan.Source, q v1.PlanRequest) (plan.Snapshot, error) {
+				close(reached)
+				<-release
+				p, e := plan.Prepare(source, q)
+				p.Plan.Components = nil
+				return p, e
+			}
+			var writerErr error
+			go func() {
+				defer close(joined)
+				switch action {
+				case "prepare":
+					_, writerErr = s.prepare(context.Background(), v1.PrepareRequest{APIVersion: v1.Version, Plan: q.Plan})
+				case "attached":
+					q.Attached = true
+					_, writerErr = s.run(context.Background(), q)
+				case "scene":
+					_, writerErr = s.startScene(context.Background(), v1.SceneStartRequest{APIVersion: v1.Version, CWD: q.Plan.ProjectPath, Plan: q.Plan})
+				default:
+					_, writerErr = s.runMode(context.Background(), q, action == "reset" || action == "named-reset")
+				}
+			}()
+			t.Cleanup(func() { once.Do(func() { close(release) }); awaitControlled(t, joined, "writer not joined") })
+			awaitControlled(t, reached, "writer did not resolve")
+			// The owner callback releases input resolution only when the actual fence cancels it.
+			s.mu.Lock()
+			for owner := range s.mutationOwners {
+				if owner.workload {
+					original := owner.cancel
+					owner.cancel = func() { original(); once.Do(func() { close(release) }) }
+				}
+			}
+			s.mu.Unlock()
+			out, err := s.stopAll(context.Background(), bulkRequest())
+			checkBulk(t, out, err)
+			awaitControlled(t, joined, "writer not joined")
+			if writerErr == nil {
+				t.Fatal("invalidated writer accepted")
+			}
+			code(t, writerErr, "admission_closed")
+			if out.Error != nil {
+				t.Fatal(out)
+			}
+		})
+	}
+}
+
+func TestBulkBusyAndStaleTargets(t *testing.T) {
+	s, q := attachedCoordinator(t)
+	q.Attached = false
+	first, err := s.run(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskAdmissionReady(t, s, first.Instance.ID)
+	selected, err := s.selectBulk(context.Background())
+	if err != nil || len(selected) != 1 {
+		t.Fatal(selected, err)
+	}
+	lock := s.mutationLock(first.Instance.ID)
+	lock.Lock()
+	out, err := s.stopAll(context.Background(), bulkRequest())
+	lock.Unlock()
+	checkBulk(t, out, err)
+	if out.Error == nil || out.Targets[0].Outcome != "unresolved" {
+		t.Fatal("busy target claimed completed", out)
+	}
+	current, err := s.store.inspect(first.Instance.ID)
+	if err != nil || current.Status != v1.RuntimeReady {
+		t.Fatal("busy target mutated", err)
+	}
+	q.InstanceID = first.Instance.ID
+	replacement, err := s.run(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskAdmissionReady(t, s, replacement.Instance.ID)
+	old, budget := s.stopBulkTarget(context.Background(), selected[0].target)
+	if budget || old.Outcome != "unresolved" {
+		t.Fatal(old, budget)
+	}
+	current, err = s.store.inspect(first.Instance.ID)
+	if err != nil || current.Execution.Attempt != replacement.Instance.Execution.Attempt || current.Status != v1.RuntimeReady {
+		t.Fatal("stale cleanup touched successor", err)
+	}
+}
+
+func TestBulkContinuingCleanupRetainsOwnerAndSerialization(t *testing.T) {
+	s, q := attachedCoordinator(t)
+	q.Attached = false
+	r, err := s.run(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskAdmissionReady(t, s, r.Instance.ID)
+	selected, err := s.selectBulk(context.Background())
+	if err != nil || len(selected) != 1 {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	entry := s.executions[r.Instance.ID]
+	s.mu.Unlock()
+	entry.mu.Lock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	out, exhausted := s.stopBulkTarget(ctx, selected[0].target)
+	cancel()
+	if !exhausted || out.Outcome != "unresolved" {
+		entry.mu.Unlock()
+		t.Fatal(out, exhausted)
+	}
+	lock := s.mutationLock(r.Instance.ID)
+	if lock.TryLock() {
+		lock.Unlock()
+		entry.mu.Unlock()
+		t.Fatal("cleanup lost serialization")
+	}
+	s.mu.Lock()
+	owners := len(s.mutationOwners)
+	s.mu.Unlock()
+	if owners != 1 {
+		entry.mu.Unlock()
+		t.Fatal("cleanup not registered", owners)
+	}
+	entry.mu.Unlock()
+	s.waitOwners()
+	if !lock.TryLock() {
+		t.Fatal("completed cleanup retained lock")
+	}
+	lock.Unlock()
+	final, err := s.store.inspect(r.Instance.ID)
+	if err != nil || final.Execution.Settlement.State != v1.ConsumerSettled {
+		t.Fatal(final, err)
+	}
+}
+
+func TestBulkDisconnectedWaitingAndFence(t *testing.T) {
+	s, q := attachedCoordinator(t)
+	q.Attached = false
+	r, err := s.run(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskAdmissionReady(t, s, r.Instance.ID)
+	ctx, cancel := context.WithCancel(context.Background())
+	// An admission owner retains coordination so client cancellation is deterministic.
+	admission, finish, err := s.beginWorkload(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() { _, err := s.stopAll(ctx, bulkRequest()); result <- err }()
+	<-admission.Done()
+	s.mu.Lock()
+	closed := s.bulkStopping
+	s.mu.Unlock()
+	if !closed {
+		t.Fatal("missing fence")
+	}
+	if _, _, err := s.beginWorkload(context.Background()); err == nil {
+		t.Fatal("new admission crossed fence")
+	}
+	if _, err := s.stopAll(context.Background(), bulkRequest()); err == nil {
+		t.Fatal("overlapping bulk accepted")
+	}
+	cancel()
+	code(t, <-result, "result_unknown")
+	finish()
+	s.waitOwners()
+	final, err := s.store.inspect(r.Instance.ID)
+	if err != nil || final.Execution.Settlement.State != v1.ConsumerSettled {
+		t.Fatal("disconnect cancelled accepted cleanup", err)
+	}
+	s.mu.Lock()
+	closed = s.bulkStopping
+	s.mu.Unlock()
+	if closed {
+		t.Fatal("fence not released")
+	}
+}
+
+func TestBulkCompleteSelectionBeforeStops(t *testing.T) {
+	for _, failure := range []string{"overflow", "corrupt", "scan"} {
+		t.Run(failure, func(t *testing.T) {
+			s, q := attachedCoordinator(t)
+			q.Attached = false
+			r, err := s.run(context.Background(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			taskAdmissionReady(t, s, r.Instance.ID)
+			var added []string
+			err = s.store.db.Update(func(tx *bolt.Tx) error {
+				original, e := load(tx, r.Instance.ID)
+				if e != nil {
+					return e
+				}
+				count := v1.BulkStopTargetLimit
+				if failure == "scan" {
+					count = 10001
+				}
+				if failure == "corrupt" {
+					count = 1
+				}
+				for range count {
+					id := newID()
+					added = append(added, id)
+					if failure == "corrupt" {
+						if err := tx.Bucket([]byte("instances")).Put([]byte(id), []byte("broken")); err != nil {
+							return err
+						}
+						continue
+					}
+					clone := original
+					clone.Instance.ID = id
+					clone.Instance.Execution = nil
+					clone.Instance.Status = v1.Preparing
+					clone.Instance.Operation.Status = v1.Preparing
+					if err := put(tx, "instances", id, clone); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Fixture-only records authorize no external effects and are removed before ordinary shutdown.
+			t.Cleanup(func() {
+				if err := s.store.db.Update(func(tx *bolt.Tx) error {
+					for _, id := range added {
+						if err := tx.Bucket([]byte("instances")).Delete([]byte(id)); err != nil {
+							return err
+						}
+					}
+					return nil
+				}); err != nil {
+					t.Error(err)
+				}
+			})
+			out, err := s.stopAll(context.Background(), bulkRequest())
+			checkBulk(t, out, err)
+			if out.SelectionComplete || len(out.Targets) != 0 || out.Error == nil {
+				t.Fatal("partial-page all success", out)
+			}
+			current, err := s.store.inspect(r.Instance.ID)
+			if failure == "corrupt" || failure == "scan" { // inspect itself scans all records; inspect after removing only fixture records.
+				if err = s.store.db.Update(func(tx *bolt.Tx) error {
+					for _, id := range added {
+						if err := tx.Bucket([]byte("instances")).Delete([]byte(id)); err != nil {
+							return err
+						}
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				current, err = s.store.inspect(r.Instance.ID)
+			}
+			if err != nil || current.Status != v1.RuntimeReady {
+				t.Fatal("selection refusal stopped earlier target", err)
+			}
+		})
+	}
+}
+
+func TestActivityReadOnlyRecordedScopeAndPagination(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	// Preparation without an execution is settled and skipped, but counts toward scans.
+	for range 3 {
+		if _, err := s.prepare(context.Background(), request(root, config, "test")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var ids []string
+	for range 3 {
+		r, err := s.prepare(context.Background(), request(root, config, "test"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, r.Instance.ID)
+		if err := s.store.db.Update(func(tx *bolt.Tx) error {
+			r, e := load(tx, r.Instance.ID)
+			if e != nil {
+				return e
+			}
+			r.Instance.Status = v1.Preparing
+			r.Instance.Operation.Status = v1.Preparing
+			return put(tx, "instances", r.Instance.ID, r)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := stateContents(t, s.store)
+	if err := os.WriteFile(filepath.Join(root, "backlot.json"), []byte("broken manifest"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	after := ""
+	for range 5 {
+		page, err := s.activity(context.Background(), v1.ActivityRequest{APIVersion: v1.Version, After: after, Limit: 1})
+		if err != nil || page.Validate() != nil {
+			t.Fatal(page, err)
+		}
+		for _, e := range page.Entries {
+			if seen[e.ID] || e.Owner != "absent" || e.Settlement.State != v1.ConsumerUnsettled {
+				t.Fatal(e)
+			}
+			seen[e.ID] = true
+		}
+		if page.Complete {
+			break
+		}
+		if page.NextAfter <= after {
+			t.Fatal("pagination stalled")
+		}
+		after = page.NextAfter
+	}
+	if len(seen) != len(ids) || !reflect.DeepEqual(before, stateContents(t, s.store)) {
+		t.Fatal("read skipped work or mutated state")
+	}
+	// Restore intentionally incomplete metadata, with no authority to launch or clean external work.
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		for _, id := range ids {
+			r, e := load(tx, id)
+			if e != nil {
+				return e
+			}
+			r.Instance.Status = v1.Prepared
+			r.Instance.Operation.Status = v1.Prepared
+			if e := put(tx, "instances", id, r); e != nil {
+				return e
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// activityCancelContext cancels at an observation boundary without a timing race.
+type activityCancelContext struct {
+	context.Context
+	cancel context.CancelFunc
+	checks int
+}
+
+func (c *activityCancelContext) Err() error {
+	c.checks++
+	if c.checks == 4 {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+
+func TestActivityContinuationSeeksAndCancels(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	prepared := scenePrepare(t, s, root, config)
+	id := func(n int) string { return fmt.Sprintf("%064x", n*2) }
+	const count = 10002
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		r, err := load(tx, prepared.Instance.ID)
+		if err != nil {
+			return err
+		}
+		if err := tx.Bucket([]byte("instances")).Delete([]byte(r.Instance.ID)); err != nil {
+			return err
+		}
+		shared := sharedLockRecord(id(0))
+		for n := range count {
+			shared.ID = id(n)
+			if err := put(tx, "shared_services", shared.ID, shared); err != nil {
+				return err
+			}
+			r.Instance.ID = id(n)
+			r.Instance.Status = v1.Preparing
+			r.Instance.Operation.Status = v1.Preparing
+			if err := put(tx, "instances", r.Instance.ID, r); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"shared", "workload"} {
+		t.Run(kind+"-prefix", func(t *testing.T) {
+			after := kind + "/" + id(count-1)
+			if kind == "shared" {
+				after = kind + "/" + id(count-2)
+			}
+			q := v1.ActivityRequest{APIVersion: v1.Version, After: after, Limit: 1}
+			var page v1.ActivityResponse
+			var err error
+			// Rewalking the prefix allocates one page key per record, even if uncharged.
+			allocs := testing.AllocsPerRun(3, func() { page, err = s.activity(context.Background(), q) })
+			if err != nil || page.Validate() != nil || kind == "shared" && (len(page.Entries) != 1 || page.Entries[0].Key != kind+"/"+id(count-1) || page.Complete || page.NextAfter != page.Entries[0].Key) || kind == "workload" && (!page.Complete || len(page.Entries) != 0) {
+				t.Fatal(page, err)
+			}
+			if allocs > 1000 {
+				t.Errorf("continuation walked the >10000-record prefix: %.0f allocations", allocs)
+			}
+			t.Logf("continuation after >10000 records: %.0f allocations", allocs)
+			for _, after := range []string{q.After, kind + "/" + strings.Repeat("f", 64)} {
+				q.After = after
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				_, err = s.activity(ctx, q)
+				code(t, err, "cancelled")
+				ctx, cancel = context.WithCancel(context.Background())
+				defer cancel()
+				_, err = s.activity(&activityCancelContext{Context: ctx, cancel: cancel}, q)
+				code(t, err, "cancelled")
+			}
+		})
+	}
+	// Keep dependent settlement scans within their existing budget for cursor semantics.
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		for n := range count - 2 {
+			for _, bucket := range []string{"shared_services", "instances"} {
+				if err := tx.Bucket([]byte(bucket)).Delete([]byte(id(n))); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		after string
+		want  []string
+	}{
+		{"", []string{"shared/" + id(count-2), "shared/" + id(count-1), "workload/" + id(count-2), "workload/" + id(count-1)}},
+		{"shared/" + id(count-2), []string{"shared/" + id(count-1), "workload/" + id(count-2), "workload/" + id(count-1)}},
+		{"shared/" + fmt.Sprintf("%064x", (count-2)*2+1), []string{"shared/" + id(count-1), "workload/" + id(count-2), "workload/" + id(count-1)}},
+		{"shared/" + strings.Repeat("f", 64), []string{"workload/" + id(count-2), "workload/" + id(count-1)}},
+		{"workload/" + id(count-2), []string{"workload/" + id(count-1)}},
+		{"workload/" + fmt.Sprintf("%064x", (count-2)*2+1), []string{"workload/" + id(count-1)}},
+		{"workload/" + strings.Repeat("f", 64), []string{}},
+	} {
+		page, err := s.activity(context.Background(), v1.ActivityRequest{APIVersion: v1.Version, After: tc.after})
+		got := []string{}
+		for _, e := range page.Entries {
+			got = append(got, e.Key)
+		}
+		if err != nil || page.Validate() != nil || !page.Complete || !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("after %q: keys %v, want %v; page %v, error %v", tc.after, got, tc.want, page, err)
+		}
+	}
+}
+
+func TestActivityContinuationByteBudget(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	prepared := scenePrepare(t, s, root, config)
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		r, err := load(tx, prepared.Instance.ID)
+		if err != nil {
+			return err
+		}
+		if err := tx.Bucket([]byte("instances")).Delete([]byte(r.Instance.ID)); err != nil {
+			return err
+		}
+		// JSON escaping fills the byte budget before the entry limit.
+		r.Instance.Plan.Project = strings.Repeat("\x00", 4096)
+		r.Instance.Status = v1.Preparing
+		r.Instance.Operation.Status = v1.Preparing
+		for n := range 30 {
+			r.Instance.ID = fmt.Sprintf("%064x", n)
+			if err := put(tx, "instances", r.Instance.ID, r); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after, seen := "", 0
+	for range 3 {
+		page, err := s.activity(context.Background(), v1.ActivityRequest{APIVersion: v1.Version, After: after})
+		if err != nil || page.Validate() != nil || len(page.Entries) == 0 {
+			t.Fatal(page, err)
+		}
+		bytes := 0
+		for _, e := range page.Entries {
+			if e.Key != "workload/"+fmt.Sprintf("%064x", seen) {
+				t.Fatal("byte-budget continuation skipped or repeated a record", e.Key, seen)
+			}
+			encoded, err := json.Marshal(e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bytes += len(encoded)
+			seen++
+		}
+		if bytes > 512<<10 {
+			t.Fatal("response exceeded byte budget", bytes)
+		}
+		if page.Complete {
+			break
+		}
+		if page.NextAfter <= after || page.NextAfter != page.Entries[len(page.Entries)-1].Key || len(page.Entries) >= 30 {
+			t.Fatal("byte-budget pagination did not advance", page)
+		}
+		after = page.NextAfter
+	}
+	if seen != 30 || after == "" {
+		t.Fatal("byte budget did not paginate all records", seen, after)
+	}
+}
+
+func TestActivityBudgetIncludesDependentScans(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	prepared := scenePrepare(t, s, root, config)
+	err := s.store.db.View(func(tx *bolt.Tx) error {
+		r, err := load(tx, prepared.Instance.ID)
+		if err != nil {
+			return err
+		}
+		b := &scanBudget{ctx: context.Background(), scans: 9999}
+		_, err = consumerEligibility(tx, r, "", b)
+		if err == nil || b.err == nil {
+			t.Fatal("dependent read escaped budget")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &scanBudget{ctx: context.Background()}
+	code(t, chargeScan([]*scanBudget{b}, 64<<20+1), "scope_too_large")
+}
+
+func TestBulkTaskAdmissionInvalidated(t *testing.T) {
+	s, q, marker := taskAdmissionFixture(t)
+	r, err := s.run(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskAdmissionReady(t, s, r.Instance.ID)
+	reached, release, joined := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	s.beforeTaskMutation = func(string) { close(reached); <-release }
+	var taskErr error
+	go func() {
+		defer close(joined)
+		_, taskErr = s.runTask(context.Background(), v1.TaskRunRequest{APIVersion: v1.Version, Target: v1.SceneTarget{InstanceID: r.Instance.ID}, Task: "check"})
+	}()
+	awaitControlled(t, reached, "task not waiting")
+	var once sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }); awaitControlled(t, joined, "task not joined") })
+	s.mu.Lock()
+	for owner := range s.mutationOwners {
+		if owner.workload {
+			original := owner.cancel
+			owner.cancel = func() { original(); once.Do(func() { close(release) }) }
+		}
+	}
+	s.mu.Unlock()
+	out, err := s.stopAll(context.Background(), bulkRequest())
+	checkBulk(t, out, err)
+	awaitControlled(t, joined, "task not joined")
+	if taskErr == nil {
+		t.Fatal("task crossed bulk fence")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("task launched", err)
+	}
+	tasks, err := s.store.dependentTasks(r.Instance.ID)
+	if err != nil || len(tasks) != 0 {
+		data, _ := json.Marshal(tasks)
+		t.Fatal("task admitted", string(data), err)
+	}
+}
+
+func TestBulkRegisteredOutputWaiterAndCrossProject(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	t.Cleanup(func() {
+		if err := s.stop(); err != nil {
+			t.Error(err)
+		}
+	})
+	// Hold an actual output admission lock before the registered execution can launch.
+	path := filepath.Join(root, "backlot.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m v1.Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	m.Outputs = map[string]v1.Output{"report": {Path: "report", ConcurrencyGroup: "reports"}}
+	for name, c := range m.Components {
+		c.Outputs = []string{"report"}
+		m.Components[name] = c
+	}
+	raw, err = json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	prepared := scenePrepare(t, s, root, config)
+	held := make(chan struct{}, 1)
+	held <- struct{}{}
+	s.outputs = map[string]chan struct{}{prepared.Instance.Plan.Checkout + "/reports": held}
+	first, err := s.run(context.Background(), v1.RunRequest{APIVersion: v1.Version, Plan: request(root, config, "dev").Plan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Another recorded project is selected without rediscovering either source.
+	other := shortTemp(t)
+	git(t, other, "init", "-q")
+	otherConfig := writeFixture(t, other)
+	s.resolve = func(source plan.Source, q v1.PlanRequest) (plan.Snapshot, error) {
+		p, e := plan.Prepare(source, q)
+		p.Plan.Components = nil
+		return p, e
+	}
+	second, err := s.run(context.Background(), v1.RunRequest{APIVersion: v1.Version, Plan: request(other, otherConfig, "dev").Plan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskAdmissionReady(t, s, second.Instance.ID)
+	activity, err := s.activity(context.Background(), v1.ActivityRequest{APIVersion: v1.Version})
+	if err != nil || len(activity.Entries) != 2 {
+		t.Fatal(activity, err)
+	}
+	out, err := s.stopAll(context.Background(), bulkRequest())
+	checkBulk(t, out, err)
+	if out.Error != nil || len(out.Targets) != 2 {
+		t.Fatal(out)
+	}
+	queued, err := s.store.inspect(first.Instance.ID)
+	if err != nil || queued.Status != v1.Stopped || !queued.Execution.Cancelled || len(queued.Execution.Components) != 0 || queued.Execution.TerminalExitCode != nil || queued.Execution.Settlement.State != v1.ConsumerSettled {
+		t.Fatal("queued execution launched or lost cancellation", err)
+	}
+	if len(held) != 1 {
+		t.Fatal("bulk released a peer's output lock")
+	}
+	<-held
+	// Admission is open for a new attempt after this finite selection.
+	q := v1.RunRequest{APIVersion: v1.Version, Plan: request(other, otherConfig, "dev").Plan}
+	replacement, err := s.run(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskAdmissionReady(t, s, replacement.Instance.ID)
+	if replacement.Instance.Execution.Attempt == second.Instance.Execution.Attempt {
+		t.Fatal("old attempt revived")
+	}
+}
+
+func TestActivityBulkBoundsAdmissionOwners(t *testing.T) {
+	s, _, _ := sceneFixture(t)
+	s.mutationOwners = map[*mutationOwner]struct{}{}
+	// No goroutines or effects: these fixture registrations only exercise the acceptance cap.
+	for range 10001 {
+		s.mutationOwners[&mutationOwner{cancel: func() {}, done: make(chan struct{})}] = struct{}{}
+	}
+	before := s.admissionGeneration
+	_, err := s.stopAll(context.Background(), bulkRequest())
+	code(t, err, "scope_too_large")
+	if s.bulkStopping || s.admissionGeneration != before || len(s.mutationOwners) != 10001 {
+		t.Fatal("rejected bulk changed admission")
+	}
+	_, err = s.activity(context.Background(), v1.ActivityRequest{APIVersion: v1.Version})
+	code(t, err, "scope_too_large")
+	s.mutationOwners = nil
+}
+
+func TestBulkInvalidatesInstanceLockWaiterAfterReopen(t *testing.T) {
+	s, q := attachedCoordinator(t)
+	q.Attached = false
+	first, err := s.run(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskAdmissionReady(t, s, first.Instance.ID)
+	lock := s.mutationLock(first.Instance.ID)
+	lock.Lock()
+	var unlock sync.Once
+	reached, joined := make(chan struct{}), make(chan struct{})
+	s.beforeExecution = func(string) { close(reached) }
+	var oldErr error
+	t.Cleanup(func() { unlock.Do(lock.Unlock); awaitControlled(t, joined, "old admission caller not joined") })
+	go func() { defer close(joined); _, oldErr = s.run(context.Background(), q) }()
+	awaitControlled(t, reached, "old caller did not reach instance serialization")
+	out, err := s.stopAll(context.Background(), bulkRequest())
+	checkBulk(t, out, err)
+	if out.AdmissionsJoined || out.Error == nil || len(out.Targets) != 1 || out.Targets[0].Outcome != "unresolved" {
+		t.Fatal("busy admission was claimed joined", out)
+	}
+	s.mu.Lock()
+	reopened := !s.bulkStopping
+	s.mu.Unlock()
+	if !reopened {
+		t.Fatal("fence did not settle")
+	}
+	unlock.Do(lock.Unlock)
+	awaitControlled(t, joined, "old caller revived or remained blocked")
+	code(t, oldErr, "admission_closed")
+	current, err := s.store.inspect(first.Instance.ID)
+	if err != nil || current.Status != v1.RuntimeReady || current.Execution.Attempt != first.Instance.Execution.Attempt {
+		t.Fatal("old waiter affected current runtime", err)
+	}
+}
+
+func TestBulkSceneDiscoveryAdmissionSurvivesReopen(t *testing.T) {
+	for _, attached := range []bool{false, true} {
+		t.Run(map[bool]string{false: "named", true: "attached"}[attached], func(t *testing.T) {
+			s, q := attachedCoordinator(t)
+			reached, release, joined := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			s.beforeSceneDiscovery = func() { close(reached); <-release }
+			s.resolve = func(plan.Source, v1.PlanRequest) (plan.Snapshot, error) {
+				t.Error("revoked scene reached execution input resolution")
+				return plan.Snapshot{}, nil
+			}
+			var writerErr error
+			go func() {
+				defer close(joined)
+				_, writerErr = s.startScene(context.Background(), v1.SceneStartRequest{APIVersion: v1.Version, Attached: attached, CWD: q.Plan.ProjectPath, Plan: q.Plan})
+			}()
+			t.Cleanup(func() { once.Do(func() { close(release) }); awaitControlled(t, joined, "scene start not joined") })
+			awaitControlled(t, reached, "scene start did not reach discovery")
+			s.mu.Lock()
+			owners := len(s.mutationOwners)
+			s.mu.Unlock()
+			if owners != 1 {
+				t.Fatal("scene discovery lacks its single admission owner", owners)
+			}
+			// Exercise the real bounded join timeout: the request resumes only after reopen.
+			out, err := s.stopAll(context.Background(), bulkRequest())
+			checkBulk(t, out, err)
+			if out.AdmissionsJoined || out.Error == nil || !out.SelectionComplete {
+				t.Fatal("unjoined discovery was not reported", out)
+			}
+			once.Do(func() { close(release) })
+			awaitControlled(t, joined, "scene start not rejected")
+			code(t, writerErr, "admission_closed")
+			s.mu.Lock()
+			launched, owners := len(s.executions), len(s.mutationOwners)
+			s.mu.Unlock()
+			if launched != 0 || owners != 0 {
+				t.Fatal("revoked discovery launched or retained an owner", launched, owners)
+			}
+		})
+	}
+}
+
+func TestBulkRetainsLaterDisposableBeforeTargetJoin(t *testing.T) {
+	for _, bulk := range []bool{true, false} {
+		t.Run(map[bool]string{true: "selected", false: "ordinary"}[bulk], func(t *testing.T) {
+			s, q := attachedCoordinator(t)
+			q.Attached = false
+			q.Plan.Scene = "test"
+			path := filepath.Join(q.Plan.ProjectPath, "backlot.json")
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m v1.Manifest
+			if err := json.Unmarshal(raw, &m); err != nil {
+				t.Fatal(err)
+			}
+			m.Resources = map[string]v1.Resource{"data": {Kind: "directory"}, "password": {Kind: "secret"}}
+			scene := m.Scenes["test"]
+			scene.Resources = []string{"data", "password"}
+			m.Scenes["test"] = scene
+			raw, err = json.Marshal(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			type boundary struct {
+				id      string
+				release chan struct{}
+			}
+			reached := make(chan boundary, 2)
+			s.beforeDisposableCleanup = func(id string) {
+				gate := boundary{id: id, release: make(chan struct{})}
+				reached <- gate
+				<-gate.release
+			}
+			var gates []boundary
+			var once sync.Once
+			t.Cleanup(func() {
+				once.Do(func() {
+					for _, gate := range gates {
+						close(gate.release)
+					}
+				})
+				s.waitOwners()
+			})
+			for range 2 {
+				if _, err := s.run(context.Background(), q); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case gate := <-reached:
+					gates = append(gates, gate)
+				case <-time.After(10 * time.Second):
+					t.Fatal("disposable did not reach destructive boundary")
+				}
+			}
+			if gates[0].id > gates[1].id {
+				gates[0], gates[1] = gates[1], gates[0]
+			}
+			first, later := gates[0], gates[1]
+			before, err := s.store.resources(later.id)
+			if err != nil || before.Resources["password"].Value == "" {
+				t.Fatal("missing paired resources", err)
+			}
+			marker := filepath.Join(before.Resources["data"].Name, "marker")
+			if err := os.WriteFile(marker, []byte("retained"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			s.mu.Lock()
+			a, b := s.executions[first.id], s.executions[later.id]
+			s.mu.Unlock()
+			stopping := make(chan struct{})
+			a.mu.Lock()
+			original := a.cancel
+			var stoppingOnce sync.Once
+			a.cancel = func() { original(); stoppingOnce.Do(func() { close(stopping) }) }
+			a.mu.Unlock()
+			done := make(chan v1.StopAllResponse, 1)
+			if bulk {
+				go func() {
+					out, err := s.stopAll(context.Background(), bulkRequest())
+					if err != nil {
+						t.Error(err)
+					}
+					done <- out
+				}()
+				awaitControlled(t, stopping, "earlier target not joining")
+			}
+			// The later target finishes naturally while the earlier selected owner is blocked.
+			close(later.release)
+			gates = []boundary{first}
+			awaitControlled(t, b.done, "later disposable did not complete")
+			observed, err := s.store.inspect(later.id)
+			if err != nil || observed.Execution.Cancelled || observed.Execution.Outcome != v1.Succeeded {
+				t.Fatal("later target did not finish naturally", err)
+			}
+			after, err := s.store.resources(later.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bulk {
+				data, err := os.ReadFile(marker)
+				if err != nil || string(data) != "retained" || !reflect.DeepEqual(before, after) {
+					t.Fatal("selected disposable data or credentials lost", err)
+				}
+			} else if _, err := os.Stat(marker); !os.IsNotExist(err) || after.ID != "" {
+				t.Fatal("ordinary disposable cleanup changed", err)
+			}
+			once.Do(func() { close(first.release) })
+			awaitControlled(t, a.done, "earlier disposable did not join")
+			if bulk {
+				out := <-done
+				checkBulk(t, out, nil)
+				if out.Error != nil || len(out.Targets) != 2 || out.Targets[1].ID != later.id {
+					t.Fatal(out)
+				}
+			}
+			for _, id := range []string{first.id, later.id} {
+				if _, err := s.destroy(context.Background(), id); err != nil {
+					t.Fatal("owned fixture destroy", err)
+				}
+			}
+		})
+	}
+}

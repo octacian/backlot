@@ -68,7 +68,7 @@ func historyRecord(t *testing.T, s *store, id string) record {
 	return r
 }
 
-func TestNativeWaiverRestoredReceiptRetainsStickyHistory(t *testing.T) {
+func TestNativeRestoredReceiptRetainsHistory(t *testing.T) {
 	for _, confidence := range []v1.NativeCleanupConfidence{v1.CleanupIncomplete, v1.CleanupAuthorityLost} {
 		t.Run(string(confidence), func(t *testing.T) {
 			s, instance, request := exportFixture(t)
@@ -79,6 +79,9 @@ func TestNativeWaiverRestoredReceiptRetainsStickyHistory(t *testing.T) {
 					return err
 				}
 				r.Instance.Plan.Lifetime = v1.Persistent
+				if err := tx.Bucket([]byte("persistent")).Put([]byte(sceneSlot(r.Instance)), []byte(instance.ID)); err != nil {
+					return err
+				}
 				return put(tx, "instances", instance.ID, r)
 			}); err != nil {
 				t.Fatal(err)
@@ -126,15 +129,15 @@ func TestNativeWaiverRestoredReceiptRetainsStickyHistory(t *testing.T) {
 			if err != nil {
 				t.Fatal("force response rejected by strict client", err)
 			}
-			if len(forced.Instance.NativeOwnershipWarnings) != 1 || forced.Instance.NativeOwnershipWarnings[0].Attempt != original.Attempt {
-				t.Fatal("missing exact-attempt acknowledgement")
+			if len(forced.Instance.NativeOwnershipWarnings) != 0 || forced.Instance.Execution.Settlement == nil || forced.Instance.Execution.Settlement.State != v1.ConsumerSettled {
+				t.Fatal("verified receipt incorrectly required force acknowledgement")
 			}
 			if forced.Instance.Execution.CollectionFailure != original.CollectionFailure || !reflect.DeepEqual(forced.Instance.Execution.NativeCleanup, original.NativeCleanup) || *forced.Instance.Execution.TerminalExitCode != 17 {
 				t.Fatal("force rewrote original facts")
 			}
 			audit := historyRecord(t, s.store, instance.ID).NativeAbandonments
-			if len(audit) != 1 || audit[0].Result.CleanupFailure == "" || audit[0].Result.CollectionFailure != original.CollectionFailure || *audit[0].Result.TerminalExitCode != 17 || !reflect.DeepEqual(audit[0].Result.NativeCleanup, original.NativeCleanup) || audit[0].Pending || !reflect.DeepEqual(audit[0].Groups, []native.Identity{identity}) {
-				t.Fatal("original result or independent receipt proof lost")
+			if len(audit) != 0 {
+				t.Fatal("independently verified absence fabricated abandonment history")
 			}
 			if _, err := cli.StopExecutionWithRequest(context.Background(), force); err != nil {
 				t.Fatal(err)
@@ -157,7 +160,9 @@ func TestNativeWaiverRestoredReceiptRetainsStickyHistory(t *testing.T) {
 			if err := os.Rename(receiptPath, receiptPath+".retained"); err != nil {
 				t.Fatal(err)
 			}
-			code(t, s.store.guardAbandonedData(instance.ID), "native_ownership_relinquished")
+			if err := s.store.guardAbandonedData(instance.ID); err != nil {
+				t.Fatal("removing a receipt resurrected a verified-empty exact process", err)
+			}
 			if err := os.Rename(receiptPath+".retained", receiptPath); err != nil {
 				t.Fatal(err)
 			}
@@ -237,6 +242,7 @@ func TestPersistedPreviousBootSessionRecovery(t *testing.T) {
 			}
 			prior := original
 			prior.Attempt = newID()
+			prior.Settlement = nil // The synthetic predecessor has no current-attempt diagnostic.
 			prior.NativeCleanup = append([]v1.NativeCleanupResult(nil), original.NativeCleanup...)
 			prior.NativeCleanup[0].Attempt = prior.Attempt
 			audit := []nativeAbandonment{{Attempt: prior.Attempt, RecordedAt: time.Now().UTC().Format(time.RFC3339Nano), Reason: nativeWaiverWarning, Boot: old, Result: &prior}}

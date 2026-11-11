@@ -117,7 +117,7 @@ func (Reference) JSONSchemaExtend(s *jsonschema.Schema) {
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "build_image"}, "field": schemaEnum("tag", "id")}), named("field"), schemaEmpty("port")}},
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "input"}}), named(), schemaEmpty("field", "port")}},
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "instance"}, "field": schemaEnum("id", "checkout", "project", "scene")}), schemaRequire("field"), schemaEmpty("name", "port")}},
-		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "resource"}, "field": schemaEnum("port", "path", "name", "value", "url", "ca_cert_path", "host", "database", "username", "password")}), named("field"), schemaEmpty("port")}},
+		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "resource"}, "field": schemaEnum("port", "path", "name", "value", "url", "hostname", "ca_cert_path", "host", "database", "username", "password")}), named("field"), schemaEmpty("port")}},
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "output"}, "field": {Const: "path"}}), named("field"), schemaEmpty("port")}},
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "service"}, "field": {Const: "host"}}), named("field"), schemaEmpty("port")}},
 		{AllOf: []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{"kind": {Const: "service"}, "field": {Const: "port"}, "port": {Pattern: schemaIdentifier}}), named("field", "port")}},
@@ -174,6 +174,7 @@ func (HostMapping) JSONSchemaExtend(s *jsonschema.Schema) {
 
 // JSONSchemaExtend adds native/container and service/job conditional constraints.
 func (Component) JSONSchemaExtend(s *jsonschema.Schema) {
+	schemaProperty(s, "image").AllOf = append(schemaProperty(s, "image").AllOf, schemaForbid("format", "host_port", "url_path", "file_path"))
 	schemaProperty(s, "kind").Enum = schemaEnum(string(Service), string(Job)).Enum
 	schemaProperty(s, "runtime").Enum = schemaEnum(string(Native), string(Container)).Enum
 	schemaProperty(s, "policy").Enum = schemaEnum("", string(FreshOnly), string(EachStart)).Enum
@@ -239,7 +240,10 @@ func (Scene) JSONSchemaExtend(s *jsonschema.Schema) {
 	p.UniqueItems = true
 	p.Items.MinLength = schemaOne()
 	schemaProperty(s, "resources").UniqueItems = true
-	s.AllOf = []*jsonschema.Schema{schemaWhen("lifetime", string(Disposable), &jsonschema.Schema{AllOf: []*jsonschema.Schema{schemaRequire("terminal_job"), schemaProperties(map[string]*jsonschema.Schema{"startup_details": {MaxItems: schemaZero()}}), schemaProperties(map[string]*jsonschema.Schema{"terminal_job": {MinLength: schemaOne()}})}}), schemaWhen("lifetime", string(Persistent), schemaProperties(map[string]*jsonschema.Schema{"terminal_job": {Const: ""}}))}
+	schemaProperty(s, "tasks").UniqueItems = true
+	schemaProperty(s, "tasks").Items.Pattern = schemaIdentifier
+	s.AllOf = append(s.AllOf, schemaWhen("lifetime", string(Disposable), schemaProperties(map[string]*jsonschema.Schema{"tasks": {MaxItems: schemaZero()}})))
+	s.AllOf = append(s.AllOf, []*jsonschema.Schema{schemaWhen("lifetime", string(Disposable), &jsonschema.Schema{AllOf: []*jsonschema.Schema{schemaRequire("terminal_job"), schemaProperties(map[string]*jsonschema.Schema{"startup_details": {MaxItems: schemaZero()}}), schemaProperties(map[string]*jsonschema.Schema{"terminal_job": {MinLength: schemaOne()}})}}), schemaWhen("lifetime", string(Persistent), schemaProperties(map[string]*jsonschema.Schema{"terminal_job": {Const: ""}}))}...)
 }
 
 // JSONSchemaExtend constrains dependency gates.
@@ -257,7 +261,7 @@ func (Publication) JSONSchemaExtend(s *jsonschema.Schema) {
 	schemaProperty(s, "routes").MinItems = schemaOne()
 	s.AllOf = []*jsonschema.Schema{schemaProperties(map[string]*jsonschema.Schema{
 		"probe": schemaProperties(map[string]*jsonschema.Schema{
-			"kind": {Const: "http"}, "target": schemaRequire("ref"),
+			"kind": {Const: "http"}, "target": {AnyOf: []*jsonschema.Schema{schemaRequire("ref"), schemaRequire("format"), schemaRequire("url_path")}},
 		}),
 	})}
 }
@@ -322,4 +326,31 @@ func (SharedService) JSONSchemaExtend(s *jsonschema.Schema) {
 	s.AllOf = append(s.AllOf,
 		schemaWhen("manager", "mariadb", schemaProperties(map[string]*jsonschema.Schema{"port": {Const: 3306}})),
 		schemaWhen("manager", "postgresql", schemaProperties(map[string]*jsonschema.Schema{"port": {Const: 5432}})))
+}
+
+// JSONSchemaExtend bounds command directories while retaining omitted defaults.
+func (Command) JSONSchemaExtend(s *jsonschema.Schema) {
+	schemaProperty(s, "working_directory").AnyOf = []*jsonschema.Schema{
+		schemaEnum("", "."),
+		{Pattern: `^[^/\\:\x00]+(/[^/\\:\x00]+)*$`, Not: &jsonschema.Schema{Pattern: `(^|/)\.\.?(/|$)`}},
+	}
+}
+
+// JSONSchemaExtend requires exactly one declared value payload.
+func (Value) JSONSchemaExtend(s *jsonschema.Schema) {
+	fields := []string{"literal", "ref", "format", "host_port", "url_path", "file_path"}
+	for _, field := range fields {
+		branch := schemaRequire(field)
+		for _, other := range fields {
+			if field != other {
+				branch.AllOf = append(branch.AllOf, schemaForbid(other))
+			}
+		}
+		s.OneOf = append(s.OneOf, branch)
+	}
+}
+
+// JSONSchemaExtend retains the literal/reference fixture contract.
+func (Fixture) JSONSchemaExtend(s *jsonschema.Schema) {
+	schemaProperty(s, "value").AllOf = append(schemaProperty(s, "value").AllOf, schemaForbid("format", "host_port", "url_path", "file_path"))
 }

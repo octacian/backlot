@@ -1,69 +1,67 @@
 # Architecture decision records
 
-ADRs preserve consequential choices and rationale: system boundaries, data
-contracts, dependencies, security, and durable conventions. Routine implementation
-details belong in code or PR descriptions. Acceptance of a decision does not mean
-its implementation is complete; track scope and progress in issues/epics and
-execution evidence in PRs.
+ADRs preserve consequential choices among real alternatives: boundaries, contracts,
+dependencies, security and durable conventions. Routine details already governed by
+an accepted decision or practice guide need no new record.
+
+## Keep decisions short
+
+Record one decision, its context, credible options, reason and consequences.
+Keep only implementation detail needed to understand an architectural commitment
+or tradeoff. Put API field inventories and current behavior in reference guides,
+algorithms and invariants beside code, scope and steps in issues/epics, and test
+commands, rollout checklists and execution evidence in PRs. Link rather than copy.
+Do not require a separate overview, revisit section or references section when
+that would repeat information. Optional sections must earn their space. Review
+for repeated explanations and delivery details before adding more prose.
+
+This follows the concise, single-decision approach in
+[Nygard's ADR guidance](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions)
+and [MADR](https://adr.github.io/madr/). Brevity is a review responsibility, not a
+word-count gate; retain material rationale and security/ownership constraints.
 
 ## Consult decisions
 
-Before architectural or cross-cutting work, search filenames and frontmatter:
+Search filenames and frontmatter before architectural or cross-cutting work:
 
 ```sh
-rg -n '^(title|summary|tags|status):' docs/adr
+rg -n '^(title|summary|tags|status|implementation):' docs/adr
 ```
 
-Read relevant records' opening overviews, then supporting sections as needed.
-Apply accepted decisions. Proposed and rejected records are context, not mandates;
-deprecated records no longer apply. Follow `superseded_by` to the current decision.
-Check code and implementation tracking rather than treating metadata as evidence
-that work has shipped.
+Apply relevant accepted decisions after checking their claims against current code.
+Proposals and rejected records are context, not authority. Deprecated records no
+longer apply; follow supersession links to the current decision. Acceptance and
+implementation are independent; metadata alone is not proof of shipped behavior.
 
-## Create and verify
+## Create and check
 
-Use the ADR commands in [Testing and tooling](../testing.md#commands). Tooling is
-implemented in Go and uses this directory's [template](template.md). Commands run
-from the repository root; the tool's `--dir` option supports another explicit
-directory. Creation reads that directory's template and never overwrites a file.
+The [Corestack docs-format specification](https://gitea.auvem.com/corestack/go/src/tag/v0.2.0/docs/docs-format.md)
+owns record format, templates and validation. Generate records with
+`go run go.auvem.com/corestack/cmd/corestack-docs@v0.2.0 new adr "Decision title"`
+from the repository root. Replace all generated prompts; maintain no local template.
+Run the pinned documentation command in [AGENTS.md](/AGENTS.md) or `make check-docs`.
+The repository owns its version pin; upgrades must update the documented commands,
+Makefile and both forge workflows together and verify existing records.
 
-Records live directly here and use `YYYYMMDDTHHmmssSSSZ-short-title.md` filenames
-(UTC milliseconds). There is no shared sequence or manually maintained index.
-Timestamp collisions retry with the next millisecond. Keep referenced filenames
-stable. Complete all template prompts before committing, even for proposals.
+The documentation tier is ADRs only: issues/epics are sufficient delivery context.
+Use a separate plan only when cross-area or multi-session work needs durable
+execution context, enabling that tier deliberately rather than adding empty files.
 
-Keep the overview immediately after the title sufficient to communicate the
-choice, scope, reason, and practical instruction. Supporting sections remain
-required even when their answer is explicitly "None".
+## Lifecycle and reconciliation
 
-## Metadata and lifecycle
+Create proposals for independent review and owner acceptance; an agent or a clean
+check cannot accept a decision. Revise records introduced in the same unmerged PR
+in place. For material changes to merged accepted choices, create a replacement;
+while proposed, link the old record through `related`. On owner acceptance, update
+reciprocal supersession links together. Preserve filenames and historical rationale.
 
-| Field | Contract |
-| --- | --- |
-| `title` | Nonempty single-line string matching the Markdown heading |
-| `date` | UTC creation date matching the filename, `YYYY-MM-DD` |
-| `status` | `proposed`, `accepted`, `rejected`, `deprecated`, or `superseded` |
-| `summary` | One sentence naming the choice and primary reason |
-| `tags` | Nonempty YAML list of searchable areas |
-| `supersedes` | List of older ADR filenames, or `[]` |
-| `superseded_by` | List of replacements, or `[]` |
+Before final review and merge, compare the latest target branch plus the change
+with affected decisions. Update implementation state and `implemented_by` only
+with real delivery evidence, using the PR URL when available. Do not invent
+tracking, acceptance or completion; leave unfinished scope visible in issues/epics.
+Run the pinned checker after reconciliation. It checks records and local file
+links, not decision quality, link fragments, owner approval or runtime correctness.
 
-Create as proposed; accept when the decision is agreed through review. Reject a
-declined proposal. Deprecate a decision that ceases to apply without a replacement.
-Revise an ADR introduced in the same unmerged PR in place as the design evolves;
-replace redundant draft records and update their references rather than preserving
-a supersession chain for PR iterations. For a material change to an accepted
-choice already merged into the target branch, create a superseding ADR and
-preserve the old rationale. Once the replacement is accepted, mark the old record
-superseded and update reciprocal links in the same change. Only superseded records have
-nonempty `superseded_by`; a proposal cannot supersede an existing decision.
-
-Validation checks filenames/timestamps, typed frontmatter, required prose sections,
-unfinished prompts, reciprocal existing references, and supersession cycles.
-Markdown examples cannot satisfy required headings. Validation cannot determine
-decision quality, approval, or implementation completion; those require review.
-
-GitHub Actions runs ADR tests and verification for Markdown and ADR tooling
-changes, including record deletions, in the dedicated Docs workflow on PRs and
-pushes to `main`. It runs independently of implementation checks. See
-[CI selection](../testing.md#ci-and-platform-evidence) for the shared path filters.
+The Docs workflow runs on every PR and push to main, including code-only changes
+that can break record links. Validation requires no credentials for the public
+BSD-licensed checker; network/module-cache access is needed on a cold installation.

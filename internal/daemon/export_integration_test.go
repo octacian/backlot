@@ -26,7 +26,7 @@ func TestExportNativeFlow(t *testing.T) {
 	h := newNativeHarness(t, binary, "3s")
 	h.manifest.Tools["sh"] = "/bin/sh"
 	job := h.manifest.Components["job"]
-	job.Command = &v1.Command{Tool: "sh", Args: []string{"-c", "mkdir -p evidence; echo '<script>alert(1)</script>' > evidence/report.txt; echo retained-output; exit 23"}}
+	job.Command = &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "mkdir -p evidence; echo '<script>alert(1)</script>' > evidence/report.txt; echo retained-output; exit 23")}
 	job.Artifacts = map[string]v1.ArtifactSource{"report": {Path: "evidence/report.txt"}}
 	h.manifest.Components["job"] = job
 	h.write()

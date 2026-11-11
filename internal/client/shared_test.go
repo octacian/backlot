@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -41,6 +42,23 @@ func TestSharedNamedWireContract(t *testing.T) {
 	if _, err := c.Shared(context.Background(), "inspect", request); err != nil {
 		t.Fatal(err)
 	}
+	response.Services[0].LastTransition = &v1.SharedTransition{From: "stopped", To: "running", Cause: "explicit_shared_start", At: "2026-11-06T23:00:00Z"}
+	if _, err := c.Shared(context.Background(), "inspect", request); err != nil {
+		t.Fatal(err)
+	}
+	for _, transition := range []v1.SharedTransition{
+		{From: "running", To: "running", Cause: "consumer_start", At: "2026-11-06T23:00:00Z"},
+		{From: "", To: "running", Cause: "consumer_start", At: "2026-11-06T23:00:00Z"},
+		{From: "stopped", To: "running", Cause: "private-detail", At: "2026-11-06T23:00:00Z"},
+		{From: "stopped", To: "running", Cause: "consumer_start", At: "unknown"},
+		{From: "running", To: "stopped", Cause: "explicit_shared_stop", At: "2026-11-06T23:00:00Z"},
+	} {
+		response.Services[0].LastTransition = &transition
+		if _, err := c.Shared(context.Background(), "inspect", request); err == nil {
+			t.Fatal("invalid/mismatched transition accepted")
+		}
+	}
+	response.Services[0].LastTransition = nil
 	response.Services[0].Status = "guessing"
 	if _, err := c.Shared(context.Background(), "inspect", request); err == nil {
 		t.Fatal("unvalidated shared state")
@@ -98,5 +116,78 @@ func TestSharedLifecycleTransportBudget(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOrdinaryStartTransportBudget(t *testing.T) {
+	for _, path := range []string{"/v1/run", "/v1/scenes/start"} {
+		for _, mode := range []string{"conflict", "cancel", "incompatible"} {
+			t.Run(path+"/"+mode, func(t *testing.T) {
+				c := New("unused")
+				defer c.Close()
+				// Inspect deadlines directly instead of racing localhost against 5ms.
+				c.http.Timeout = time.Hour
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+				defer cancel()
+				callerDeadline, _ := ctx.Deadline()
+				started := time.Now()
+				statusCalls, mutationCalls := 0, 0
+				conflict := v1.PlanError{Code: "startup_conflict", Message: "bound attempt was replaced; inspect history"}
+				c.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					code := http.StatusOK
+					var payload any
+					if r.URL.Path == "/v1/status" {
+						statusCalls++
+						deadline, ok := r.Context().Deadline()
+						if r.Method != http.MethodGet || !ok || deadline.Before(started.Add(c.http.Timeout)) || deadline.After(time.Now().Add(c.http.Timeout)) {
+							t.Fatal("compatibility preflight lost its transport budget")
+						}
+						status := v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, Status: "running", PID: 1, LeaseDuration: "1m"}
+						if mode == "incompatible" {
+							status.StateVersion--
+						}
+						payload = status
+					} else {
+						mutationCalls++
+						deadline, ok := r.Context().Deadline()
+						if statusCalls != 1 || r.Method != http.MethodPost || r.URL.Path != path || r.Context() != ctx || !ok || !deadline.Equal(callerDeadline) {
+							t.Fatal("start lost compatibility preflight or caller context/budget")
+						}
+						if mode == "cancel" {
+							cancel()
+							<-r.Context().Done()
+							return nil, r.Context().Err()
+						}
+						code = http.StatusConflict
+						payload = v1.ErrorResponse{APIVersion: v1.Version, Error: conflict}
+					}
+					data, err := json.Marshal(payload)
+					if err != nil {
+						t.Fatal(err)
+					}
+					return &http.Response{StatusCode: code, Header: http.Header{"Content-Type": []string{"application/json"}, "X-Backlot-Api-Version": []string{v1.Version}}, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
+				})
+				var response v1.InstanceResponse
+				err := c.call(ctx, http.MethodPost, path, v1.RunRequest{}, &response)
+				var detail *v1.PlanError
+				if statusCalls != 1 {
+					t.Fatal("compatibility preflight bypassed", statusCalls)
+				}
+				switch mode {
+				case "conflict":
+					if mutationCalls != 1 || !errors.As(err, &detail) || *detail != conflict {
+						t.Fatal("start lost cleanup budget or typed conflict", err)
+					}
+				case "cancel":
+					if mutationCalls != 1 || err == nil || ctx.Err() != context.Canceled {
+						t.Fatal("caller cancellation ignored", err)
+					}
+				case "incompatible":
+					if mutationCalls != 0 || !errors.As(err, &detail) || detail.Code != "api_version" {
+						t.Fatal("incompatible status reached mutation", err)
+					}
+				}
+			})
+		}
 	}
 }

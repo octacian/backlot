@@ -20,9 +20,11 @@ func validateBuildImages(m v1.Manifest) error {
 		}
 	}
 	for name, environment := range m.Environments {
-		for _, v := range environment.Assign {
-			if r := buildImageRef(v); r != nil && r.Field != "tag" {
-				return invalid("environments."+name, "build_image environment references require tag")
+		for _, root := range environment.Assign {
+			for _, v := range flattenedValues(root) {
+				if r := buildImageRef(v); r != nil && r.Field != "tag" {
+					return invalid("environments."+name, "build_image environment references require tag")
+				}
 			}
 		}
 	}
@@ -42,9 +44,11 @@ func validateBuildImages(m v1.Manifest) error {
 			environments = append(environments, m.Environments[set])
 		}
 		for _, environment := range environments {
-			for _, v := range environment.Assign {
-				if r := buildImageRef(v); r != nil && (r.Field != "tag" || m.BuildImages[r.Name].Producer != name) {
-					return invalid("components."+name+".environment", "build_image tag is only available to its producer")
+			for _, root := range environment.Assign {
+				for _, v := range flattenedValues(root) {
+					if r := buildImageRef(v); r != nil && (r.Field != "tag" || m.BuildImages[r.Name].Producer != name) {
+						return invalid("components."+name+".environment", "build_image tag is only available to its producer")
+					}
 				}
 			}
 		}
@@ -61,9 +65,11 @@ func validateBuildImages(m v1.Manifest) error {
 				continue
 			}
 			found := false
-			for _, v := range effective {
-				if r := buildImageRef(v); r != nil && r.Name == image {
-					found = true
+			for _, root := range effective {
+				for _, v := range flattenedValues(root) {
+					if r := buildImageRef(v); r != nil && r.Name == image {
+						found = true
+					}
 				}
 			}
 			if !found {
@@ -98,12 +104,20 @@ func selectedBuildImages(m v1.Manifest, scene v1.Scene) error {
 			environments = append(environments, m.Environments[set])
 		}
 		for _, environment := range environments {
-			for _, v := range environment.Assign {
-				if r := buildImageRef(v); r != nil && !selected[r.Name] {
-					return invalid("components."+name+".environment", "build_image tag requires a selected image consumer")
+			for _, root := range environment.Assign {
+				for _, v := range flattenedValues(root) {
+					if r := buildImageRef(v); r != nil && !selected[r.Name] {
+						return invalid("components."+name+".environment", "build_image tag requires a selected image consumer")
+					}
 				}
 			}
 		}
 	}
 	return nil
+}
+
+func flattenedValues(root v1.Value) []v1.Value {
+	var values []v1.Value
+	_ = root.Walk(func(v v1.Value) error { values = append(values, v); return nil })
+	return values
 }

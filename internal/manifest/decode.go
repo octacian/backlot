@@ -75,6 +75,13 @@ func convert(n *yaml.Node, typ reflect.Type, path string, depth int) (any, error
 	if n.Tag == "!!null" {
 		return fail("null is not supported; omit optional fields")
 	}
+	if typ == reflect.TypeFor[v1.Argument]() {
+		if n.Kind == yaml.ScalarNode && n.Tag == "!!str" {
+			typ = reflect.TypeFor[string]()
+		} else {
+			typ = reflect.TypeFor[v1.Value]()
+		}
+	}
 	switch n.Kind {
 	case yaml.MappingNode:
 		if n.Tag != "!!map" {

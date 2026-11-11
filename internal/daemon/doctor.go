@@ -23,6 +23,8 @@ import (
 	"github.com/octacian/backlot/internal/gateway"
 	"github.com/octacian/backlot/internal/manifest"
 	"github.com/octacian/backlot/internal/plan"
+	"github.com/octacian/backlot/internal/projectconfig"
+	bolt "go.etcd.io/bbolt"
 )
 
 func diagnosticAdd(r *v1.DoctorResponse, name, execution string, status v1.DoctorStatus, message string) {
@@ -111,6 +113,47 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 			diagnosticAdd(&r, "runtime_inputs", "daemon/host", v1.DoctorFailed, "cannot discover selected manifest; verify --project and retain exactly one supported manifest")
 			return r, nil
 		}
+		// Identity diagnostics precede private composition so its fence cannot hide shared conflict.
+		var document v1.Manifest
+		if raw, e := projectconfig.Read(source.ManifestPath); e == nil && manifest.Decode(raw, filepath.Ext(source.ManifestPath), &document) == nil {
+			identity, e := identifyShared(source, document.Project)
+			if e == nil {
+				state := "legacy"
+				if identity.Registration.CommonID != "" {
+					state = "enrolled"
+				}
+				r.Registration = &v1.RegistrationResult{State: state, Identity: identity.Registration, Conflicts: []v1.RegistrationConflict{}}
+				e = s.store.db.View(func(tx *bolt.Tx) error {
+					checkout, err := identify(source.CheckoutPath)
+					if err != nil {
+						return err
+					}
+					if _, err := locateCheckout(tx, checkout); err != nil {
+						return err
+					}
+					owner, err := boundShared(tx, identity)
+					if err != nil || tx.Bucket([]byte("shared_projects")).Get([]byte(owner.ID)) == nil {
+						return err
+					}
+
+					parent, err := locateCheckout(tx, checkout)
+					if err != nil || tx.Bucket([]byte("checkout_bindings")).Get([]byte(parent)) == nil {
+						return err
+					}
+					_, err = checkSharedBinding(tx, checkout, identity)
+					return err
+				})
+			}
+			failure := "shared registration conflicts; use project diagnose and explicit reassociation; records preserved"
+			var detail *v1.PlanError
+			if errors.As(e, &detail) && detail.Registration != nil {
+				r.Registration = detail.Registration
+			}
+			if errors.As(e, &detail) && detail.Code == "project_unverified" {
+				failure = "project_unverified: checkout has not verified the current shared binding; use project diagnose and explicit reassociation; records preserved"
+			}
+			diagnosticResult(&r, "shared_project_identity", "daemon/filesystem", e, "current sharing anchor and checkout verification agree with registration or are unregistered", failure)
+		}
 		r.Paths = append(r.Paths, v1.DoctorPath{Name: "selected_manifest", Path: source.ManifestPath, State: "present"})
 		snap, err = plan.Prepare(source, v1.PlanRequest{Scene: request.Scene, ProjectPath: request.ProjectPath, ConfigPath: request.ConfigPath})
 		if err != nil {
@@ -149,6 +192,13 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 		s.doctorGateway(ctx, &r, snap, instance)
 	}
 	if instance.Execution != nil {
+		if settlement := instance.Execution.Settlement; settlement != nil {
+			status := v1.DoctorFailed
+			if settlement.State == v1.ConsumerSettled {
+				status = v1.DoctorOK
+			}
+			diagnosticAdd(&r, "consumer_settlement", "attempt", status, "Current consumer release: "+string(settlement.State)+" ("+string(settlement.Cause)+"); historical outcomes and collection gaps remain independent")
+		}
 		for _, cleanup := range instance.Execution.NativeCleanup {
 			status := v1.DoctorOK
 			if cleanup.Confidence != v1.ObservedEmpty {
@@ -497,6 +547,9 @@ func checkCurrentComposition(r *v1.DoctorResponse, launch plan.Snapshot) {
 	addPrivatePath(r, "current_private_config", current)
 	if current.PrivateSourceState != "" {
 		r.Paths[len(r.Paths)-1].State = current.PrivateSourceState
+		if current.PrivateSourceState == "conflict" {
+			r.Paths[len(r.Paths)-1].State = "rebound"
+		}
 	}
 
 	if err != nil {

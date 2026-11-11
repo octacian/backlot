@@ -196,6 +196,9 @@ func TestDoctorRecoveryPinsEngineIdentity(t *testing.T) {
 						expected = append(expected, "POST "+originalID+"/stop", "GET "+originalID+"/json")
 					}
 					expected = append(expected, "DELETE "+originalID+"/")
+					if kind == "container" {
+						expected = append(expected, "GET "+originalID+"/json")
+					}
 				} else if scenario == "uncertain" || scenario == "gone-before-reverify" {
 					expected = append(expected, "GET "+originalID+suffix)
 				} else if strings.HasPrefix(scenario, "gone-at-") {
@@ -208,6 +211,9 @@ func TestDoctorRecoveryPinsEngineIdentity(t *testing.T) {
 					}
 					if scenario == "gone-at-remove" {
 						expected = append(expected, "DELETE "+originalID+"/")
+						if kind == "container" {
+							expected = append(expected, "GET "+originalID+"/json")
+						}
 					}
 				}
 				if !reflect.DeepEqual(requests, expected) {

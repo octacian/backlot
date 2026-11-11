@@ -42,6 +42,105 @@ outputs. The executor serializes these groups per canonical checkout
 across scenes and runs; a plan is not a lock. Backlot cannot infer undeclared
 command side effects.
 
+Set `empty_before_execution: true` only for a disposable scratch directory, such
+as reports. Backlot removes and recreates each selected opted-in directory once
+per new execution, after all output locks or task output reservations are acquired
+and before any component launches. Omitted or false preserves contents. Joining accepted work, offline
+planning and metadata preparation never empty outputs. New starts and explicit
+restarts prepare again; healthy starts retain accepted settings and report drift.
+
+Opted-in paths must be strict descendants of the manifest directory, with no
+symlink path components and a directory or absent target. Tree symlinks are
+unlinked, never followed. Private daemon/resource state and the checkout Git
+marker, resolved Git directory and common directory are protected, including
+filesystem aliases. Overlaps involving an opted-in output require the same
+directory, concurrency group and opt-in; nested or mixed-policy overlaps are
+rejected across scene declarations. Ordinary output overlap rules are unchanged.
+
+All targets are checked under the owned output locks or task reservations before
+removal. Missing selected directories may be created empty before this check so filesystem aliases can be resolved;
+offline planning defers aliases it cannot resolve without creation. Rejection
+preserves existing contents but may leave newly created empty directories.
+Cancelled lock waiters do not delete; a filesystem failure or cancellation during preparation can leave
+some directories empty, but launches no components. There is no rollback,
+automatic retry or preparation replay on daemon recovery. Locks and kept/uncertain
+consumer fences remain through collection and joined cleanup. These checks bound
+cooperative checkout execution, not hostile filesystem or mount manipulation.
+Fresh-only initialization stamps are unchanged: a skipped producer does not
+repopulate an emptied directory. Use each-start jobs for repeatable reports; see
+[evidence](evidence.md#declared-artifacts-and-fixtures) for collection limits.
+
+## Declared native tasks
+
+Enable native `job` components with `policy: each-start` in a persistent scene's
+`tasks` list for explicit invocation. `components` selects automatic startup work;
+a component in both lists also runs at startup. Tasks cannot initialize resources
+or produce build images. Every attached resource and dependency must already be selected by
+the parent; dependencies test accepted ready services or successful/skipped parent
+jobs without launching work.
+
+```yaml
+components:
+  maintenance:
+    kind: job
+    runtime: native
+    policy: each-start
+    command: {tool: app, args: [maintenance]}
+    resources: [database]
+    environment:
+      assign:
+        PASSWORD: {ref: {kind: resource, name: database, field: password}}
+scenes:
+  dev:
+    lifetime: persistent
+    components: [server]
+    resources: [database]
+    tasks: [maintenance]
+```
+
+This fragment assumes the application's existing `app`, `server` and allocation
+resource declarations. Task environments use native endpoints and the parent's
+accepted paired credentials, including composed values; `instance.id` means the
+parent ID. Sensitive values stay in environment mappings, never argv. Task output
+and artifact declarations use the existing project-relative anchors.
+
+Each new parent attempt validates and privately captures every enabled task's tools,
+cwd, seeds and inputs, even for unused tasks. Task outputs are validated without
+acquiring startup locks. Invocation rejects relevant changes to current configuration
+or referenced parent contracts and unavailable inputs; explicit parent restart is
+required. Unrelated task edits do not invalidate the capture. Legacy snapshots
+have no task captures, and ordinary joins never add them. See
+[invocation](cli.md#declared-task-invocation) and
+[parent ownership](daemon.md#tasks-borrowing-a-ready-parent).
+
+## Native working directories
+
+Native `command.working_directory` selects an existing directory relative to the
+manifest directory. Omission keeps the manifest directory; `.` explicitly selects
+it. Paths cannot be absolute, contain traversal, backslashes or drive names, or
+escape the manifest directory through symlinks. Planning checks filesystem
+metadata without executing tools; launch rechecks the retained canonical target
+and rejects a changed, missing or invalid directory.
+
+A native service's command readiness probe inherits the service cwd when its own
+`working_directory` is omitted. An explicit probe override is always relative to
+the manifest, including `.` to return to its directory. Command probes on container
+services also execute on the host and support overrides; their omitted default
+remains the manifest directory. Container image `WORKDIR` is unchanged.
+
+Relative argv paths are interpreted by the application from the selected cwd.
+Relative tool paths, discovery, output declarations, artifact paths and seed files
+keep their existing manifest/project anchors. For example, a build in `app` may
+use argv `../build/app`, with output `build` and artifact `build/app`.
+
+Plans and retained snapshots carry the effective canonical directory; omitted
+fields in older snapshots retain the manifest-directory default. Healthy work
+keeps its accepted cwd and reports unapplied drift, including symlink retargets
+with unchanged manifest bytes. Compatible start/restart may accept an ordinary
+command or probe cwd change; changing a retained fresh-only initializer's effective
+cwd requires reset/destroy. This is cooperative native execution, not a sandbox
+against concurrent host filesystem mutation or application file access.
+
 ## Components and scenes
 
 Components declare `kind: service|job` and `runtime: native|container`. Native
@@ -75,7 +174,8 @@ other finite execution budgets). Command probes contain
 an explicit native tool command, whose availability is checked. Network probes
 contain a `target` value: TCP uses a symbolic port or literal `host:port` with a
 numeric port in 1..65535 (TCP service-name ports are unsupported). HTTP uses a
-symbolic origin or literal HTTP(S) URL without credentials. Explicit
+symbolic origin or literal HTTP(S) URL without credentials; composed TCP/HTTP
+targets follow [explicit value composition](manifest.md#compose-explicit-values). Explicit
 HTTP(S) ports, including Caddy admin endpoint ports, must be in 1..65535; omitted
 ports retain the scheme default and an explicitly empty port is invalid. A symbolic
 service port is resolved at execution; offline planning invents no numeric port.
@@ -114,14 +214,16 @@ propagation; this introduces no expressions or duplicate value declarations.
 
 The selection authorizes automatic display of its sensitive values after successful
 `run`, `scene start`, `restart` and `reset`, including already-running starts.
-Human output prints labels/values after instance/URL information; JSON emits one
-result with a transient `startup_details` object containing `attempt`, ordered
-`details`, or a sanitized `warning`. No successful summary appears on failed
-readiness. If summary retrieval fails after readiness, startup still succeeds
-with its identity/URL and an unavailable warning; incomplete details are omitted.
+Human output prints labels/values after instance/URL information; JSON includes a
+transient `startup_details` object containing `attempt`, ordered `details`, or a
+sanitized `warning`. Attached starts emit it once, only in
+`ready.result.startup_details`. No successful summary appears on failed readiness.
+If summary retrieval fails after readiness, startup still succeeds with its
+identity/URL and an unavailable warning; incomplete details are omitted.
 
-Repeated start and stop/run use actual retained selections/values despite current
-manifest/config drift. Restart/reset adopt current selections through existing
+Starting or already-ready scenes keep recorded selections/values and report
+configuration changes. New attempts use compatible current inputs and
+startup-details selections. Restart/reset adopt current selections through existing
 compatibility and snapshot rules. A startup replaced before observed readiness
 conflicts instead of reporting a replacement attempt's summary. Ordinary plans,
 status/follow, inspect, diagnostics, fixture discovery, execution results and
@@ -141,7 +243,7 @@ presence/validity, with no network call or certificate/DNS check.
 
 ## Values and environment
 
-A value contains exactly one `literal` string or `ref` object, optionally
+A value contains exactly one `literal`, `ref`, `format`, `host_port`, `url_path` or `file_path` payload, optionally
 `secret: true`. A reference has explicit `kind`, `name`, `field` and, only for a
 service port, `port`. Supported shapes are:
 
@@ -155,7 +257,7 @@ service port, `port`. Supported shapes are:
 | `output` | Attached output | `path` | Resolve project-relative output path |
 
 Resource fields are `port.port`, `directory.path`, `volume.name`, `network.name`,
-`secret.value`, `origin.url` or `origin.ca_cert_path`, and allocation
+`secret.value`, `origin.url`, `origin.hostname` or `origin.ca_cert_path`, and allocation
 `host`, `port`, `database`, `username`, `password`. Allocation passwords are
 automatically sensitive. `ca_cert_path` is only for
 explicit component environment assignments (including explicitly selected reusable sets), requires
@@ -164,8 +266,89 @@ and stays symbolic offline. Container assignments also require an explicit
 `origin_ca_cert` mount and resolve to its target. See [explicit application trust](https.md#explicit-application-trust). Unused reference fields may be omitted or
 empty strings; nonempty extra values are rejected. Prefer omission when authoring
 manifests.
-There are no concatenation, expressions, variable substitutions or embedded
-`${...}` references. Literal strings retain their literal characters.
+`origin.hostname` is the canonical hostname without scheme or port, with the same
+attachment, selection and publication requirements as `origin.url`.
+
+### Compose explicit values
+
+Use compositions in explicit environment assignments, native/container argv
+entries and TCP/HTTP readiness targets. Operands are recursive values, with the
+same reference and context checks at every level. Images and fixtures keep their
+existing literal/reference forms. Each composition has a 1 MiB **rendered byte**
+limit, checked before rendering known offline output and final hydrated output,
+including URL escaping and filesystem cleaning; raw operand length is not the
+rendered size when later cleaning can shorten it. Existing literals, references and scalar argv keep their
+previous compatibility and limits.
+
+| Payload | Behavior |
+| --- | --- |
+| `format: {template: '%s:%s', values: [Value, Value]}` | Substitute the next string for each `%s`; `%%` emits one percent. Require exact operand count; reject every other verb, flag, width, precision or index. |
+| `host_port: {host: Value, port: Value}` | Validate a hostname/numeric IP and decimal port in 1..65535; join IPv6 with brackets. Supply the host without brackets. |
+| `url_path: {base: Value, parts: [Value, ...]}` | Append parts in order beneath a credential-free absolute HTTP(S) base without query/fragment. One separator at each boundary; a single leading slash does not replace the base. Empty parts are no-ops; `[]` preserves the validated base exactly. Preserve interior characters and the last nonempty part's trailing slash. |
+| `file_path: {base: Value, parts: [Value, ...]}` | Join and clean base plus parts using Go `filepath.Join` for native consumers and POSIX `path.Join` for containers on every daemon OS. `[]` still normalizes the base. `..` may escape the base; empty paths and separators follow the selected library. Reject NUL in every operand, including parts later removed by cleaning. |
+
+Both path constructors require `base` and a non-null `parts` array; the former
+unshipped URL `path` field is not accepted. Filesystem joining only constructs a
+string: no filesystem access, containment, mount rewriting or conversion of native
+paths to container paths. Existing working-directory, mount and output policies
+stay unchanged. Filesystem-looking URL/readiness values still require valid final
+destinations. Every operand retains its reference, sensitivity and context checks,
+even when cleaning removes its text.
+
+URL paths reject traversal (including recursively encoded dot segments/separators),
+backslashes, authority replacement, and query/fragment syntax. Go `net/url` owns
+URL parsing and escaping; valid existing path escapes are interpreted as path
+characters and escaped for the resulting URL. Formatting performs no numeric
+conversion, recursive percent processing, automatic credential escaping or shell
+expansion. Application connection-string conventions remain application-owned.
+For example:
+
+```yaml
+environment:
+  assign:
+    DB_ENDPOINT:
+      host_port:
+        host: {ref: {kind: service, name: database, field: host}}
+        port: {ref: {kind: service, name: database, field: port, port: sql}}
+    API_URL:
+      url_path:
+        base: {ref: {kind: resource, name: public, field: url}}
+        parts: [{literal: api}, {literal: /v1/}]
+    REPORT_PATH:
+      file_path:
+        base: {literal: reports}
+        parts: [{literal: results}, {literal: junit.xml}]
+command:
+  tool: app
+  args:
+    - serve
+    - format:
+        template: '--port=%s'
+        values: [{ref: {kind: resource, name: http_port, field: port}}]
+```
+
+Each argv entry resolves to exactly one argument: spaces, percent signs and
+special characters are retained without splitting or quoting. Forwarded CLI
+arguments remain literal strings. Sensitive argv, including nested secret
+references, is rejected before effects. Environment sensitivity includes the
+outer value and every operand; redact the whole sensitive composition.
+
+Offline plans partially resolve known operands while preserving typed unresolved
+compositions and reference provenance. There are no environment references or
+assignment-order dependencies. Check every assignment even when a later layer
+overrides it. Runtime endpoints follow the actual consumer: host-native command
+probes use host endpoints even on container services; workload containers use
+private/reachable endpoints; daemon network probes use owned host destinations.
+Filesystem constructors use that same actual consumer's path syntax. Shared
+container/host-probe environment values retain typed filesystem constructions
+until each consumer resolves them, including nested private operands.
+Nested CA references remain limited to explicit environment assignments, with
+existing publication and mount requirements. A reference in a URL path grants no
+destination ownership, publication-cycle exemption or trust. Aggregate composed
+probes retain the selected canonical origin and ordinary TLS/marker checks.
+
+There is no concatenation operator, expression language, variable substitution or
+embedded `${...}` reference. Literal strings retain their literal characters.
 
 A component explicitly lists `environment_sets`, then declares its own
 `environment`. Each set/environment may have `pass_through`, `seeds`, `assign`
@@ -182,10 +365,10 @@ order followed by the component environment:
 Check all required environment keys after layering; missing or empty values
 fail. Symbolic references satisfy presence, without claiming allocation.
 Assignment sensitivity follows `secret: true`, secret input declarations or
-secret resources. For conservative safety, **all inherited and seed values are
+secret resources, including every nested operand. For conservative safety, **all inherited and seed values are
 redacted** in ordinary plans, including the baseline. Non-sensitive explicit
 literals remain visible. Redacted values carry neither a literal nor a symbolic
-payload; the plan never serializes raw environment definitions or machine config.
+or composition payload; the plan never serializes raw environment definitions or machine config.
 
 Seeds are UTF-8 regular files bounded to 1 MiB, with safe project-relative paths
 and no symlink escape. Blank lines and lines whose first non-whitespace character
@@ -250,7 +433,8 @@ are illustrative adoption inputs, and providers are not provisioned. Their
 machine example contains illustrative endpoints; its private example supplies the image name.
 
 Human `plan` output shows command/readiness executable paths as caller/offline
-selections; JSON uses their existing `executable` fields. Missing-tool errors name
+selections, with a working directory when it differs from the manifest directory;
+JSON uses `executable` and optional effective `working_directory` fields. Missing-tool errors name
 the attempted candidate and winning declaration file. Bare missing names remain
 bare; relative paths resolve from the project. These are launcher selections,
 not runtime version checks or proof of execution.
@@ -312,12 +496,29 @@ Setup stores a registry at `backlot/projects.json` under `os.UserConfigDir()` an
 immutable private generations under `backlot/projects/`, outside the checkout.
 Managed directories/files must be user-owned and private (0700/0600); unsafe
 existing boundaries are rejected rather than repaired. Import files are copied,
-not ongoing dependencies. Git common-directory path plus filesystem identity
-and repository-relative manifest path bind the association. Linked worktrees
-reuse it; monorepo manifest paths isolate it. Names/remotes and independent
-clones do not enroll. Moved/replaced repository identities require explicit
-`--reassociate` and new values; old credentials are not implicitly imported.
-Non-Git projects bind canonical directory identity and manifest filename.
+not ongoing dependencies. Registry format 2 maps a local common registration marker,
+its canonical anchor, Git classification and relative manifest to the same immutable
+private association and generation. Linked worktrees reuse it; monorepo manifests
+remain distinct. Ordinary clones start fresh. The same administrative marker at the
+same registered canonical path means continuity, including private inputs, even if
+filesystem device numbers change. This is the local development trust policy; it
+does not distinguish hostile same-user restoration at that exact path.
+
+Setup and preparation enroll `backlot-common.json` in the resolved Git common
+directory and `backlot-checkout.json` in each checkout's administrative directory.
+Non-Git projects use `.backlot-local/` with both files. These files are local,
+untracked administrative metadata, not owner IDs or credentials. Do not commit or
+copy them into an independent clone. No Git configuration or ignore file is edited.
+Read-only commands never enroll; already enrolled read-only sources work. Invalid,
+missing-at-enrolled-path or unwritable markers require explicit setup/repair.
+
+Exact legacy reads remain supported. Use `project setup --reassociate` without input
+edits to explicitly enroll an exact existing private association or reconcile its
+same-path marker stage without rotating the private file. A legacy location mismatch
+still requires explicit new values (`--reassociate --from FILE`). Duplicate markers
+at a different path require [selected-path repair](cli.md#reassociate-retained-project-data)
+first; they never import the original path's secrets. Setup changes only the private
+registry; daemon ownership repair is a separate acknowledged stage.
 
 Ordinary plan/prepare/run/restart/reset and scene diagnostics automatically read
 the registered layer. Validate manifest, machine, and private sources independently,
@@ -327,7 +528,8 @@ null or unused. Remove old fields and supply project values explicitly; no shim,
 import or migration occurs. Invalid overridden/unused
 entries still fail. Registered missing/unsafe/invalid files fail explicitly,
 including for scenes that use no inputs. Unregistered projects can select work
-that needs no inputs; selected missing values direct you to project setup. Ordinary operations create no registry, locks, or secrets.
+that needs no inputs; selected missing values direct you to project setup. Read-only operations create no registry, locks, markers or secrets. Mutating setup and
+preparation may publish local markers; only explicit setup writes private generations.
 Relative private tools resolve from the project directory; bare PATH names and
 absolute paths remain supported. Only selected scene inputs/tools are required.
 Provider settings stay in the shared machine document; there is no per-command
@@ -336,9 +538,9 @@ private-file override, recursive include, or deep merge.
 `config_digest` retains the machine-file byte digest. The additive
 `effective_config_digest` records composed validated inputs/tools/providers;
 source-only formatting or overridden tool changes do not become effective drift.
-Running attempts retain private launch values and provenance. Repeated run reports
-drift; explicit restart/reset resolves current layers subject to existing retained
-resource safety checks. Stop, destroy and recovery use recorded snapshots.
+Starting or already-ready scenes keep recorded configuration and report changes.
+New attempts and explicit restart/reset use current layers subject to
+retained-resource safety checks. Stop, destroy and recovery use recorded snapshots.
 Diagnostics distinguish launch/current private sources and effective configuration;
 export records the attempt's effective digest without private contents.
 

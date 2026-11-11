@@ -41,7 +41,7 @@ func TestDiscoveryStrictWireValidation(t *testing.T) {
 	c := New("unused")
 	defer c.Close()
 	id := strings.Repeat("a", 64)
-	response := `{"api_version":"v1","instance_id":"` + id + `","records":[],"gaps":[],"historical_collection":"unknown","more":false,"active":false,"unexpected":true}`
+	response := `{"api_version":"v1","instance_id":"` + id + `","records":[],"gaps":[],"historical_collection":"known","more":false,"active":false,"unexpected":true}`
 	c.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		var q v1.LogPageRequest
 		if r.URL.Path != "/v1/logs/page" || json.NewDecoder(r.Body).Decode(&q) != nil || q.InstanceID != id || q.Attempt != id || q.Stream != "stderr" {
@@ -57,8 +57,71 @@ func TestDiscoveryStrictWireValidation(t *testing.T) {
 	if _, err := c.LogPage(context.Background(), q); err != nil {
 		t.Fatal(err)
 	}
-	response = strings.Replace(response, `"historical_collection":"unknown"`, `"historical_collection":"complete"`, 1)
+	response = strings.Replace(response, `"historical_collection":"known"`, `"historical_collection":"complete"`, 1)
 	if _, err := c.LogPage(context.Background(), q); err == nil {
 		t.Fatal("invented completeness accepted")
+	}
+}
+
+func TestCheckoutScopeWireValidation(t *testing.T) {
+	c := New("unused")
+	defer c.Close()
+	response := `{"api_version":"v1","instances":[],"checkout":{"id":"` + strings.Repeat("a", 64) + `","path":"/checkout"}}`
+	calls := 0
+	c.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		var q v1.FilteredListRequest
+		if json.NewDecoder(r.Body).Decode(&q) != nil || !q.IncludeCheckout || q.CWD != "/checkout/sub" {
+			t.Fatal("scope request", q)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}, "X-Backlot-Api-Version": []string{v1.Version}}, Body: io.NopCloser(strings.NewReader(response))}, nil
+	})
+	q := v1.FilteredListRequest{APIVersion: v1.Version, CWD: "/checkout/sub", IncludeCheckout: true}
+	if _, err := c.FilteredList(context.Background(), q); err != nil {
+		t.Fatal(err)
+	}
+	launch := v1.InstanceSummary{ID: strings.Repeat("b", 64), Project: "fixture", Scene: "dev", Checkout: "/other", Lifetime: v1.Persistent, Status: v1.Prepared, CreatedAt: "2026-10-07T12:00:00Z"}
+	row, _ := json.Marshal(launch)
+	response = strings.Replace(response, `"instances":[]`, `"instances":[`+string(row)+`]`, 1)
+	if got, err := c.FilteredList(context.Background(), q); err != nil || len(got.Instances) != 1 || got.Instances[0].Checkout != launch.Checkout || got.Checkout == nil || got.Checkout.Path != "/checkout" {
+		t.Fatal("launch provenance must be independent of current scope", got, err)
+	}
+	for _, bad := range []string{
+		`{"api_version":"v1","instances":[]}`,
+		strings.Replace(response, `"path":"/checkout"`, `"path":"relative"`, 1),
+		strings.Replace(response, `"path":"/checkout"`, `"path":"/checkout/../other"`, 1),
+		strings.Replace(response, `"path":"/checkout"`, `"path":"/checkout","git_directory":"relative"`, 1),
+	} {
+		response = bad
+		if _, err := c.FilteredList(context.Background(), q); err == nil {
+			t.Fatal("accepted", bad)
+		}
+	}
+	if calls != 6 {
+		t.Fatal("unexpected retry", calls)
+	}
+}
+
+func TestCheckoutScopeRetainsRowFilterValidation(t *testing.T) {
+	c := New("unused")
+	defer c.Close()
+	row := v1.InstanceSummary{ID: strings.Repeat("b", 64), Project: "fixture", Scene: "dev", Checkout: "/launch", Lifetime: v1.Persistent, Status: v1.Prepared, CreatedAt: "2026-10-07T12:00:00Z"}
+	c.http.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		data, _ := json.Marshal(v1.ListResponse{APIVersion: v1.Version, Instances: []v1.InstanceSummary{row}, Checkout: &v1.CheckoutIdentity{ID: strings.Repeat("a", 64), Path: "/current"}})
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}, "X-Backlot-Api-Version": []string{v1.Version}}, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
+	})
+	base := v1.FilteredListRequest{APIVersion: v1.Version, CheckoutPath: "/current", IncludeCheckout: true}
+	for _, change := range []func(*v1.FilteredListRequest){
+		func(q *v1.FilteredListRequest) { q.AfterID = row.ID },
+		func(q *v1.FilteredListRequest) { q.ProjectID = "other" },
+		func(q *v1.FilteredListRequest) { q.Scene = "other" },
+		func(q *v1.FilteredListRequest) { q.Lifetime = v1.Disposable },
+		func(q *v1.FilteredListRequest) { q.State = v1.Stopped },
+	} {
+		q := base
+		change(&q)
+		if _, err := c.FilteredList(context.Background(), q); err == nil {
+			t.Fatal("accepted row outside requested filters", q)
+		}
 	}
 }

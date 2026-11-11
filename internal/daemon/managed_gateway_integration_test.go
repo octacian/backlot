@@ -139,7 +139,7 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	// set exercises the same reference path as application runtime settings.
 	h.manifest.Environments = map[string]v1.Environment{"trust": {Assign: map[string]v1.Value{"CERT": fixtureRef("resource", "origin", "ca_cert_path")}}}
 	for _, mode := range []string{"trusted", "missing", "wrong"} {
-		client := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "fixture", Args: []string{"client"}}, Resources: []string{"origin"}, EnvironmentSets: []string{"trust"}, DependsOn: []v1.Dependency{{Component: "api", Condition: v1.Ready}, {Component: "web", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"ORIGIN": originRef}}}
+		client := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "fixture", Args: v1.StringArguments("client")}, Resources: []string{"origin"}, EnvironmentSets: []string{"trust"}, DependsOn: []v1.Dependency{{Component: "api", Condition: v1.Ready}, {Component: "web", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"ORIGIN": originRef}}}
 		if mode == "missing" {
 			client.Environment.Assign["CERT"] = fixtureLiteral("")
 			client.Environment.Assign["SSL_CERT_FILE"] = fixtureLiteral(filepath.Join(buildDir, "empty.pem"))
@@ -525,7 +525,7 @@ https.get(new URL('/api/value', process.env.APP_ORIGIN), { ca: readFileSync(proc
 		if mode == "node-override" {
 			script = override
 		}
-		component := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "node", Args: []string{"--input-type=module", "-e", script}}, Resources: []string{"origin"}, EnvironmentSets: []string{"node-trust"}, DependsOn: []v1.Dependency{{Component: "api", Condition: v1.Ready}, {Component: "web", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"APP_ORIGIN": fixtureRef("resource", "origin", "url"), "WRONG_CA": fixtureLiteral(filepath.Join(buildDir, "wrong.pem"))}}}
+		component := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "node", Args: v1.StringArguments("--input-type=module", "-e", script)}, Resources: []string{"origin"}, EnvironmentSets: []string{"node-trust"}, DependsOn: []v1.Dependency{{Component: "api", Condition: v1.Ready}, {Component: "web", Condition: v1.Ready}}, Environment: v1.Environment{Assign: map[string]v1.Value{"APP_ORIGIN": fixtureRef("resource", "origin", "url"), "WRONG_CA": fixtureLiteral(filepath.Join(buildDir, "wrong.pem"))}}}
 		if mode == "node-missing" {
 			component.EnvironmentSets = nil
 		}

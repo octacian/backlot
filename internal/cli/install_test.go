@@ -11,10 +11,16 @@ import (
 )
 
 func TestInstallCountsAndFraming(t *testing.T) {
-	instances := []v1.Instance{{Status: v1.RuntimeReady}, {Status: v1.Prepared}, {Status: v1.Failed, Execution: &v1.ExecutionResult{Kept: true, CleanupFailure: "pending"}}, {Status: v1.Stopped, Execution: &v1.ExecutionResult{CleanupFailure: "pending"}}}
-	running, unresolved := installCounts(instances)
-	if running != 2 || unresolved != 2 {
-		t.Fatal(running, unresolved)
+	pages := []v1.ActivityResponse{{PreparingAdmissions: 2, Entries: []v1.ActivityEntry{
+		{Owner: "running", Settlement: &v1.ConsumerSettlement{State: v1.ConsumerUnsettled}},
+		{Kept: true, Settlement: &v1.ConsumerSettlement{State: v1.ConsumerUnsettled}},
+		{Settlement: &v1.ConsumerSettlement{State: v1.ConsumerUnknown}},
+		{Settlement: &v1.ConsumerSettlement{State: v1.ConsumerSettled}},
+		{Status: "running"},
+	}}, {PreparingAdmissions: 1}}
+	running, unresolved, preparing := installCounts(pages)
+	if running != 2 || unresolved != 3 || preparing != 2 {
+		t.Fatal(running, unresolved, preparing)
 	}
 	var out, diagnostic bytes.Buffer
 	err := NewCommand(v1.VersionResponse{}, &out, &diagnostic).Run(context.Background(), []string{"backlot", "install-replace", "--stage", "/stage", "--destination", "/dest", "--version", "v0.4.0", "--json"})

@@ -59,11 +59,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y lsof libnss3-tools
           mkdir -p "$RUNNER_TEMP/backlot-tools"
-          GOBIN="$RUNNER_TEMP/backlot-tools" go install github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.6
+          GOBIN="$RUNNER_TEMP/backlot-tools" go install github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.7
           docker pull alpine:3.21
           docker pull mariadb:11.4
           docker pull postgres:17
-          docker pull caddy:2.11.6
+          docker pull caddy:2.11.7
       - name: Verify Linux installation
         run: |
           make release-build RELEASE_GOOS=linux RELEASE_GOARCH=amd64
@@ -92,4 +92,4 @@ jobs:
         run: |
           export BACKLOT_CADDY_TEST_BINARY="$RUNNER_TEMP/backlot-tools/caddy"
           go test -race ./internal/gateway -count=1 -v -timeout=15m
-          go test -race ./internal/daemon -run '^(TestDockerRuntime|TestDisposableEvidenceDocker|TestHTTPSRuntime|TestManagedHTTPSRuntime|TestManagedForceRestart|TestGatewayDefaultConfig|TestContainerManagedHTTPSRuntime|TestBuildImagesDocker)$' -count=1 -v -timeout=40m
+          go test -race ./internal/daemon -run '^(TestComposeEarlyFlow|TestCompositionSharedSQL|TestDockerRuntime|TestDisposableEvidenceDocker|TestHTTPSRuntime|TestManagedHTTPSRuntime|TestManagedForceRestart|TestGatewayDefaultConfig|TestContainerManagedHTTPSRuntime|TestBuildImagesDocker)$' -count=1 -v -timeout=40m

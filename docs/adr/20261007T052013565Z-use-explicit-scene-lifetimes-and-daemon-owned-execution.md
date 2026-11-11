@@ -1,40 +1,57 @@
 ---
 title: "Use explicit scene lifetimes and daemon-owned execution"
 date: 2026-10-07
-status: accepted
+status: superseded
+implementation: implemented
 summary: "Use a local daemon and explicit persistent or disposable scenes to centralize isolation and lifecycle guarantees."
 tags: [architecture, lifecycle, isolation]
 supersedes: []
-superseded_by: []
+superseded_by: [/docs/adr/20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md]
+related: []
+tracking: []
+implemented_by: ["/internal/daemon/runtime.go", "/internal/daemon/resources.go"]
 ---
 
 # Use explicit scene lifetimes and daemon-owned execution
 
-Backlot runs as one local daemon with a CLI client. Projects compose reusable components into persistent or disposable scenes. The daemon owns resource allocation, readiness, cancellation, logs, and cleanup.
+## Context and Problem Statement
 
-## Context
+Worktrees isolate source, but applications still collide through ports, origins,
+databases, storage and process lifetimes. Project scripts repeat lifecycle and
+interruption logic without a common ownership boundary.
 
-Checkouts isolate source but applications still collide through ports, origins, databases, mutable storage, and process lifetimes. Repeating coordination in project scripts creates inconsistent interruption and ownership behavior.
+## Considered Options
 
-## Decision
+- Project-specific scripts: retain duplicated coordination and cleanup behavior.
+- A CLI-only launcher: cannot provide background management across invocations.
+- A local daemon with explicit lifetimes: centralizes ownership and recovery.
 
-Key persistent instances by project, distinct checkout/worktree identity, and scene. Give each disposable run a fresh identity. Stop preserves persistent data; reset replaces mutable resources; destroy removes owned runtime/data. Record fresh-only initialization separately from each-start jobs.
+## Decision Outcome
 
-Use explicit restart without automatic retry or Backlot watching. Graceful daemon shutdown interrupts work. Crash recovery stops verifiably owned survivors, preserves uncertain resources, and requires explicit restart. For the initial scaffold, all four [historical PRD workflows](https://github.com/octacian/backlot/blob/c524670fc27ba76d4329ade36966d18fbd40105e/docs/prd.md#v1-boundary) were release requirements using generic fixtures.
+Use one local daemon with a CLI client. Projects compose reusable components into
+persistent or disposable scenes; the daemon owns allocation, readiness,
+cancellation, logs and cleanup.
 
-## Consequences
+Key persistent instances by project, checkout/worktree identity and scene. Give
+each disposable run a fresh identity. Stop preserves persistent data, reset
+replaces mutable resources, and destroy removes owned runtime and data. Distinguish
+fresh-only initialization from each-start work.
 
-Projects share lifecycle guarantees through one interface. Backlot must maintain durable ownership, interruption handling, evidence, and reconciliation. Persistent environments do not transparently survive daemon shutdown or crashes.
+Require explicit restart. Graceful daemon shutdown interrupts work; crash recovery
+stops verifiably owned survivors, preserves uncertainty and never resumes or retries
+applications automatically.
 
-## Alternatives considered
+The [persistent-start decision](/docs/adr/20261028T234801291Z-ensure-persistent-start-accepts-one-eligible-current-attempt.md)
+replaces only ordinary-start eligibility and input/attempt selection; other
+contracts and existing successors remain in force.
 
-Project-specific scripts retain duplicated lifecycle code. A CLI-only launcher cannot provide the chosen background management contract. Transparent continuation and automatic retries expand V1 supervision complexity.
+### Consequences
 
-## Revisit when
+Projects share lifecycle guarantees through one interface, at the cost of durable
+ownership journals and reconciliation. Persistent environments do not transparently
+survive daemon shutdown. Seamless upgrades or continuous previews would require a
+new supervision decision.
 
-A concrete need for seamless daemon upgrades or continuous previews may justify stronger supervision and recovery.
+## More Information
 
-## References
-
-- [V1 PRD](https://github.com/octacian/backlot/blob/c524670fc27ba76d4329ade36966d18fbd40105e/docs/prd.md)
-- [Implementation plan](https://github.com/octacian/backlot/blob/c524670fc27ba76d4329ade36966d18fbd40105e/docs/implementation-plan.md)
+[Architecture](/docs/architecture.md), [lifecycle operations](/docs/daemon.md#identity-and-lifecycle).

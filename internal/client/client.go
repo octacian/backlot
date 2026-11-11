@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -62,7 +63,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 	// state must retain its ownership records (see docs/containers.md).
 	checkCompatibility := false
 	switch path {
-	case "/v1/scenes/start", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/gateway/start", "/v1/gateway/restart":
+	case "/v1/tasks/run", "/v1/projects/reassociate", "/v1/scenes/start", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/gateway/start", "/v1/gateway/restart":
 		checkCompatibility = true
 	case "/v1/doctor":
 		// An explicit diagnostic image authorizes container creation/start, unlike
@@ -104,7 +105,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 	httpClient := *c.http
 	// Cleanup/restart can use a configured grace exceeding the transport default.
 	// The daemon bounds cleanup; callers retain context cancellation authority.
-	if path == "/v1/shared/start" || path == "/v1/shared/stop" || path == "/v1/shared/restart" || path == "/v1/shared/destroy" || path == "/v1/attached/cancel" || path == "/v1/scenes/stop" || path == "/v1/export" || path == "/v1/doctor" || path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
+	if path == "/v1/runtime/stop-all" || path == "/v1/tasks/run" || path == "/v1/run" || path == "/v1/scenes/start" || path == "/v1/shared/start" || path == "/v1/shared/stop" || path == "/v1/shared/restart" || path == "/v1/shared/destroy" || path == "/v1/attached/cancel" || path == "/v1/scenes/stop" || path == "/v1/export" || path == "/v1/doctor" || path == "/v1/runtime/stop" || path == "/v1/reset" || path == "/v1/destroy" || path == "/v1/restart" || path == "/v1/stop" || path == "/v1/cancel" {
 		httpClient.Timeout = 0
 	}
 	rejected := false
@@ -145,12 +146,24 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 			return &v1.PlanError{Code: "invalid_response", Message: "invalid daemon error envelope"}
 		}
 		rejected = true
+		named := false
+		switch value := request.(type) {
+		case v1.RunRequest:
+			named = value.Target != nil
+		case v1.DestroyRequest:
+			named = value.Target != nil
+		}
+		if named && envelope.Error.Code == "invalid_document" && strings.Contains(envelope.Error.Message, "unknown field") {
+			return &v1.PlanError{Code: "unsupported_feature", Message: "daemon does not support fenced named lifecycle; upgrade the daemon; no mutation was accepted"}
+		}
 		return &envelope.Error
 	}
 	if err := manifest.Decode(data, ".json", response); err != nil {
 		return &v1.PlanError{Code: "invalid_response", Message: "invalid daemon response contract"}
 	}
 	switch value := response.(type) {
+	case *v1.ReassociationResponse:
+		return value.Validate()
 	case *v1.DoctorResponse:
 		return value.Validate()
 	case *v1.GatewayResponse:
@@ -163,7 +176,30 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 			return responseError()
 		}
 	case *v1.ListResponse:
-		return ValidateList(*value)
+		if value.APIVersion != v1.Version || len(value.Instances) > 100 || value.Instances == nil {
+			return responseError()
+		}
+		last := ""
+		for _, instance := range value.Instances {
+			if !validID(instance.ID) || instance.ID <= last || instance.Project == "" || instance.Scene == "" || !filepath.IsAbs(instance.Checkout) || (instance.Lifetime != v1.Persistent && instance.Lifetime != v1.Disposable) {
+				return responseError()
+			}
+			if err := validateOrigin(instance.ID, instance.Origin); err != nil {
+				return err
+			}
+			if _, err := time.Parse(time.RFC3339Nano, instance.CreatedAt); err != nil {
+				return responseError()
+			}
+			switch instance.Status {
+			case v1.Preparing, v1.Prepared, v1.Cancelled, v1.Interrupted, v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Destroyed, v1.Succeeded, v1.Failed:
+			default:
+				return responseError()
+			}
+			last = instance.ID
+		}
+		if value.NextAfterID != "" && (last == "" || value.NextAfterID != last) {
+			return responseError()
+		}
 	case *v1.LogsResponse:
 		if value.APIVersion != v1.Version || value.NextOffset < 0 {
 			return responseError()
@@ -199,7 +235,17 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 		if value.APIVersion != v1.Version {
 			return &v1.PlanError{Code: "api_version", Message: "incompatible daemon response version"}
 		}
-		return ValidateInstance(*value)
+		var target *v1.SceneTarget
+		switch q := request.(type) {
+		case v1.RunRequest:
+			target = q.Target
+		case v1.DestroyRequest:
+			target = q.Target
+		}
+		if target != nil && (value.Instance.Plan.Scene != target.Scene || value.Instance.Plan.Lifetime != v1.Persistent) {
+			return responseError()
+		}
+		return validateInstance(*value)
 	}
 	return nil
 }
@@ -208,6 +254,9 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 func (c *Client) List(ctx context.Context, request v1.ListRequest) (v1.ListResponse, error) {
 	var response v1.ListResponse
 	err := c.call(ctx, http.MethodPost, "/v1/instances", request, &response)
+	if err == nil && response.Checkout != nil {
+		err = responseError()
+	}
 	return response, err
 }
 
@@ -266,7 +315,7 @@ func (c *Client) Doctor(ctx context.Context, request v1.DoctorRequest) (v1.Docto
 
 func mutationPath(path string) bool {
 	switch path {
-	case "/v1/export", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/runtime/stop", "/v1/destroy", "/v1/stop", "/v1/cancel", "/v1/renew", "/v1/scenes/start", "/v1/scenes/stop", "/v1/attached/renew", "/v1/attached/cancel", "/v1/gateway/start", "/v1/gateway/stop", "/v1/gateway/restart", "/v1/shared/start", "/v1/shared/stop", "/v1/shared/restart", "/v1/shared/destroy":
+	case "/v1/runtime/stop-all", "/v1/tasks/run", "/v1/projects/reassociate", "/v1/attempts/prune", "/v1/export", "/v1/prepare", "/v1/run", "/v1/restart", "/v1/reset", "/v1/runtime/stop", "/v1/destroy", "/v1/stop", "/v1/cancel", "/v1/renew", "/v1/scenes/start", "/v1/scenes/stop", "/v1/attached/renew", "/v1/attached/cancel", "/v1/gateway/start", "/v1/gateway/stop", "/v1/gateway/restart", "/v1/shared/start", "/v1/shared/stop", "/v1/shared/restart", "/v1/shared/destroy":
 		return true
 	}
 	return false
@@ -284,9 +333,21 @@ func mutationError(path string, request any, err error) error {
 	}
 	if detail != nil && (detail.Code == "daemon_unavailable" || detail.Code == "invalid_response" || detail.Code == "api_version") {
 		target := ""
+		if path == "/v1/runtime/stop-all" {
+			return &v1.PlanError{Code: detail.Code, Message: "bulk stop acceptance/result is unknown; inspect activity and known targets with the same --state-dir before explicit recovery; do not automatically retry"}
+		}
 		switch value := request.(type) {
+		case v1.ReassociationRequest:
+			if !value.Apply {
+				return err
+			}
+			target = value.ProjectID
+		case v1.HistoryPruneRequest:
+			target = value.InstanceID
 		case v1.ExportRequest:
 			target = value.InstanceID
+		case v1.TaskRunRequest:
+			target = value.Target.InstanceID
 		case v1.RunRequest:
 			target = value.InstanceID
 		case v1.InstanceRequest:
@@ -313,4 +374,14 @@ func mutationError(path string, request any, err error) error {
 		err = &v1.PlanError{Code: detail.Code, Message: "daemon exchange failed (" + path + "); " + resultContext + "; inspect status/recorded targets with the same --state-dir before explicit recovery; do not automatically retry"}
 	}
 	return err
+}
+
+// Reassociate previews or explicitly applies current associations to retained ownership.
+func (c *Client) Reassociate(ctx context.Context, request v1.ReassociationRequest) (v1.ReassociationResponse, error) {
+	var response v1.ReassociationResponse
+	if err := request.Validate(); err != nil {
+		return response, err
+	}
+	err := c.call(ctx, http.MethodPost, "/v1/projects/reassociate", request, &response)
+	return response, err
 }

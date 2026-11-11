@@ -21,26 +21,32 @@ import (
 )
 
 type execution struct {
-	acceptImages     bool
-	allowImageChange bool
-	shared           map[string]sharedConnection
-	attachment       *attachment // guarded by service.mu; never persisted
-	caCertPath       string
-	kept             bool
-	cancel           context.CancelFunc
-	done             chan struct{}
-	mu               sync.Mutex
-	groups           []*native.Group
-	jobs             map[string]workload
-	services         map[string]workload
-	components       map[string]workload
-	containers       []*dockerWork
-	docker           *dockerEngine
-	resources        *resourceGeneration
-	outputRelease    func()
-	err              error
-	source           capturedSource
-	grace            time.Duration
+	bulkCancelled       bool // guarded by service.mu; retains data and suppresses investigation keep
+	taskAdmissionClosed bool // guarded by service.mu; teardown closes before joining dependents
+	borrowed            bool
+	referenceID         string
+	referencePlan       *v1.PlanResponse
+	attempt             string
+	acceptImages        bool
+	allowImageChange    bool
+	shared              map[string]sharedConnection
+	attachment          *attachment // guarded by service.mu; never persisted
+	caCertPath          string
+	kept                bool
+	cancel              context.CancelFunc
+	done                chan struct{}
+	mu                  sync.Mutex
+	groups              []*native.Group
+	jobs                map[string]workload
+	services            map[string]workload
+	components          map[string]workload
+	containers          []*dockerWork
+	docker              *dockerEngine
+	resources           *resourceGeneration
+	outputRelease       func()
+	err                 error
+	source              capturedSource
+	grace               time.Duration
 }
 type deadlines struct{ startup, job, grace time.Duration }
 
@@ -84,19 +90,47 @@ func (s *service) run(ctx context.Context, request v1.RunRequest) (v1.InstanceRe
 	return s.runMode(ctx, request, false)
 }
 func (s *service) runMode(ctx context.Context, request v1.RunRequest, reset bool) (v1.InstanceResponse, error) {
-	return s.runSelected(ctx, request, reset, false)
-}
-
-func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset, persistentOnly bool) (v1.InstanceResponse, error) {
-	if request.AllowImageChange && (request.InstanceID == "" || reset || request.Attached) {
+	if request.AllowImageChange && (request.InstanceID == "" && request.Target == nil || reset || request.Attached) {
 		return v1.InstanceResponse{}, problem("invalid_request", "allow_image_change is only supported by explicit restart")
 	}
-	ctx, finish, admissionErr := s.beginMutation(ctx)
+	ctx, finish, admissionErr := s.beginWorkload(ctx)
 	if admissionErr != nil {
 		return v1.InstanceResponse{}, admissionErr
 	}
 	defer finish()
+	return s.runSelected(ctx, request, reset, false)
+}
+
+// runSelected carries the caller's workload admission through discovery and acceptance.
+func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset, persistentOnly bool) (v1.InstanceResponse, error) {
 	var empty v1.InstanceResponse
+	var selected v1.SceneResponse
+	if request.Target != nil {
+		if err := v1.ValidateMutationTarget(request.InstanceID, request.Target); err != nil {
+			return empty, err
+		}
+		if request.Attached || request.Options.KeepOnFailure || request.Plan.Scene != "" || request.Plan.ProjectPath != "" || len(request.Plan.TerminalArgs) != 0 {
+			return empty, problem("invalid_request", "named restart/reset accepts only config and execution options alongside target")
+		}
+		var err error
+		selected, err = s.selectMutation(*request.Target)
+		if err != nil {
+			return empty, err
+		}
+		request.InstanceID = selected.Result.Instance.ID
+		if s.beforeSceneMutation != nil {
+			s.beforeSceneMutation(request.InstanceID)
+		}
+		// Fence preparation as well as teardown: stale names must not enroll or create a replacement slot.
+		unlock := s.lockMutation(request.InstanceID)
+		defer unlock()
+		if err := s.revalidateMutation(selected); err != nil {
+			return empty, err
+		}
+		previous := selected.Result.Instance
+		request.Plan.Scene = previous.Plan.Scene
+		request.Plan.ProjectPath = associatedProject(previous)
+	}
 	if request.Attached && (request.InstanceID != "" || reset || request.Options.KeepOnFailure || len(request.Plan.TerminalArgs) > 0) {
 		return empty, problem("invalid_request", "attached mode requires a persistent start without terminal arguments or keep-on-failure")
 	}
@@ -121,6 +155,9 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	}
 	source, err := plan.Locate(request.Plan.ProjectPath)
 	if err != nil {
+		return empty, err
+	}
+	if err := s.enrollSource(ctx, source); err != nil {
 		return empty, err
 	}
 	identity, err := captureSource(source)
@@ -152,11 +189,17 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		if previous.Status == v1.Destroyed {
 			return empty, problem("destroyed", "instance was destroyed; run the scene to create a fresh identity")
 		}
-		if previous.Plan.Project != snapshot.Plan.Project || previous.Plan.Scene != snapshot.Plan.Scene || previous.Plan.Lifetime != v1.Persistent || previous.Checkout.ID != identity.checkout.ID {
+		if previous.Plan.Project != snapshot.Plan.Project || previous.Plan.Scene != snapshot.Plan.Scene || previous.Plan.Lifetime != v1.Persistent || snapshot.Plan.Lifetime != v1.Persistent || !sameCheckoutValue(associatedCheckout(previous), identity.checkout) {
 			return empty, problem("conflict", "restart must address the same persistent project, checkout and scene")
 		}
 	}
-	response, err := s.prepareCaptured(ctx, snapshot, identity, request.Plan.Scene, persistentOnly)
+	if request.Target != nil {
+		if err := s.revalidateMutation(selected); err != nil {
+			return empty, err
+		}
+	}
+	var observed startObservation
+	response, err := s.prepareCaptured(ctx, snapshot, identity, request.Plan.Scene, persistentOnly, &observed)
 	if err != nil {
 		return empty, err
 	}
@@ -164,14 +207,19 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	if s.beforeExecution != nil {
 		s.beforeExecution(id)
 	}
-	unlock := s.lockMutation(id)
-	defer unlock()
+	if request.Target == nil {
+		unlock := s.lockMutation(id)
+		defer unlock()
+	}
 	response.Instance, err = s.store.inspect(id)
 	if err != nil {
 		return empty, err
 	}
+	if err := s.store.verifyStartAssociation(id, observed); err != nil {
+		return empty, err
+	}
 	if response.Instance.Status == v1.Destroyed {
-		return empty, problem("destroyed", "instance was destroyed during start acceptance; run the scene again for a fresh identity")
+		return empty, startConflict(id, observed.attempt)
 	}
 	if persistentOnly {
 		if err := requireSceneLocation(response.Instance, identity.source.ProjectPath); err != nil {
@@ -179,27 +227,67 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		}
 	}
 
-	var legacyActivation *plan.Snapshot
-	if request.InstanceID == "" {
-		previous, loadErr := s.store.snapshot(id)
-		if loadErr != nil {
-			return empty, loadErr
+	if request.Target != nil {
+		if err := s.revalidateMutation(selected); err != nil {
+			return empty, err
 		}
-		// Only a predecessor snapshot lacks both provenance additions. Ordinary
-		// state9 stop/start retains its immutable snapshot, even after edits.
-		if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" &&
-			response.Instance.Plan.Lifetime == v1.Persistent &&
-			(response.Instance.Status == v1.Prepared || response.Instance.Status == v1.Stopped) {
-			if err := safeRestart(previous, snapshot); err != nil {
+	}
+	var acceptanceSnapshot *plan.Snapshot
+	ordinaryPersistent := request.InstanceID == "" && snapshot.Plan.Lifetime == v1.Persistent
+	if ordinaryPersistent {
+		current, bound, err := s.store.boundStart(id, observed, request.Attached)
+		if err != nil {
+			return empty, err
+		}
+		response.Instance = current
+		response.ManifestDrift = plan.ManifestDrift(current.Plan, snapshot.Plan)
+		response.ConfigDrift = plan.ConfigurationDrift(current.Plan, snapshot.Plan)
+		if bound {
+			if err := s.checkWorkload(ctx); err != nil {
 				return empty, err
 			}
-			legacyActivation = &snapshot
-		} else {
-			if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" {
-				return empty, problem("restart_required", "historical instance requires explicit restart with current project configuration")
+			if request.Attached {
+				return empty, problem("conflict", "attached start cannot adopt an existing execution; stop it first")
 			}
-			snapshot = previous
+			return response, nil
 		}
+		switch current.Status {
+		case v1.Prepared, v1.Stopped, v1.Failed, v1.Cancelled, v1.Interrupted, v1.Stopping:
+		default:
+			return empty, problem("conflict", "persistent instance is not eligible for a new start; inspect its status")
+		}
+		previous, err := s.store.snapshot(id)
+		if err != nil {
+			return empty, err
+		}
+		if err := safeRestart(previous, snapshot); err != nil {
+			return empty, err
+		}
+		if err := identity.verify(); err != nil {
+			return empty, err
+		}
+		if err := s.checkWorkload(ctx); err != nil {
+			return empty, err
+		}
+		if _, err := s.stopExecution(id); err != nil {
+			var typed *v1.PlanError
+			if !errors.As(err, &typed) || typed.Code != "collection_failed" {
+				return empty, err
+			}
+		}
+		if err := s.store.recoverExecutionCause(id, v1.SettlementExplicitStop, false); err != nil {
+			return empty, err
+		}
+		acceptanceSnapshot = &snapshot
+	} else if request.InstanceID == "" {
+		previous, err := s.store.snapshot(id)
+		if err != nil {
+			return empty, err
+		}
+		if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" {
+			return empty, problem("restart_required", "historical instance requires explicit restart with current project configuration")
+		}
+		snapshot = previous
 		if err := executablePlan(snapshot.Plan); err != nil {
 			return empty, err
 		}
@@ -217,7 +305,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 			return empty, err
 		}
 		if previous.PrivateProvenance == nil && previous.Plan.EffectiveConfigDigest == "" {
-			legacyActivation = &snapshot
+			acceptanceSnapshot = &snapshot
 		}
 		if snapshot.Plan.Publish != nil && snapshot.Caddy != nil && response.Instance.Execution != nil && response.Instance.Execution.Origin != "" {
 			origin, err := url.Parse(response.Instance.Execution.Origin)
@@ -233,6 +321,9 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		if err := identity.verify(); err != nil {
 			return empty, err
 		}
+		if err := s.checkWorkload(ctx); err != nil {
+			return empty, err
+		}
 		if _, err := s.stopExecution(id); err != nil {
 			var typed *v1.PlanError
 			if !errors.As(err, &typed) || typed.Code != "collection_failed" {
@@ -241,6 +332,9 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		}
 	}
 	if reset {
+		if err := s.checkWorkload(ctx); err != nil {
+			return empty, err
+		}
 		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		cleanupErr := s.store.removeResources(cleanup, id)
 		cancel()
@@ -250,8 +344,8 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closing {
-		return empty, problem("shutting_down", "daemon is shutting down")
+	if err := s.workloadAllowed(ctx); err != nil {
+		return empty, err
 	}
 	if snapshot.Plan.Publish != nil && snapshot.Caddy != nil {
 		if err := s.requireManaged(ctx, *snapshot.Caddy); err != nil {
@@ -265,7 +359,7 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	if s.executions == nil {
 		s.executions = map[string]*execution{}
 	}
-	if existing := s.executions[id]; existing != nil && request.InstanceID == "" && response.Instance.Status != v1.Stopped {
+	if existing := s.executions[id]; existing != nil && request.InstanceID == "" && !ordinaryPersistent && response.Instance.Status != v1.Stopped {
 		if request.Attached {
 			return empty, problem("conflict", "attached start cannot adopt an existing execution; stop it first")
 		}
@@ -277,7 +371,10 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 		return empty, err
 	}
 	if request.InstanceID != "" {
-		if legacyActivation == nil {
+		if response.Instance.Association != nil && !sameCheckoutValue(response.Instance.Checkout, response.Instance.Association.Checkout) {
+			acceptanceSnapshot = &snapshot
+		}
+		if acceptanceSnapshot == nil {
 			if err := s.store.replaceSnapshot(id, snapshot); err != nil {
 				return empty, err
 			}
@@ -299,16 +396,24 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 			result.Origin += ":" + strconv.Itoa(*snapshot.Caddy.HTTPSPort)
 		}
 	}
-	r := runtimeRecord{ExportSource: &v1.ExportSource{Project: snapshot.Plan.Project, Scene: snapshot.Plan.Scene, Lifetime: snapshot.Plan.Lifetime, CheckoutID: identity.checkout.ID, GitHead: launchGitCommit(ctx, identity.checkout), ManifestDigest: snapshot.Plan.ManifestDigest, ConfigDigest: snapshot.Plan.ConfigDigest, EffectiveConfigDigest: snapshot.Plan.EffectiveConfigDigest}, StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Attempt: attempt, Groups: []native.Identity{}, Options: request.Options, ConfigPath: request.Plan.ConfigPath}
-	response.Instance, err = s.store.acceptExecutionSnapshot(id, r, result, request.InstanceID != "" || response.Instance.Status == v1.Stopped, legacyActivation)
+	r := runtimeRecord{NativeNotStarted: true, ExportSource: &v1.ExportSource{Project: snapshot.Plan.Project, Scene: snapshot.Plan.Scene, Lifetime: snapshot.Plan.Lifetime, CheckoutID: identity.checkout.ID, GitHead: launchGitCommit(ctx, identity.checkout), ManifestDigest: snapshot.Plan.ManifestDigest, ConfigDigest: snapshot.Plan.ConfigDigest, EffectiveConfigDigest: snapshot.Plan.EffectiveConfigDigest}, StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Attempt: attempt, Groups: []native.Identity{}, Options: request.Options, ConfigPath: request.Plan.ConfigPath}
+	r.OutputPaths, err = outputPaths(snapshot.Plan)
 	if err != nil {
 		return empty, err
 	}
-	if legacyActivation != nil {
+	var expected *startObservation
+	if ordinaryPersistent {
+		expected = &observed
+	}
+	response.Instance, err = s.store.acceptExecutionSnapshot(id, r, result, request.InstanceID != "" || ordinaryPersistent || response.Instance.Status == v1.Stopped, acceptanceSnapshot, expected)
+	if err != nil {
+		return empty, err
+	}
+	if acceptanceSnapshot != nil {
 		response.ManifestDrift, response.ConfigDrift = false, false
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
-	entry := &execution{acceptImages: request.InstanceID != "", allowImageChange: request.AllowImageChange, caCertPath: caCertPath, cancel: cancel, done: make(chan struct{}), jobs: map[string]workload{}, services: map[string]workload{}, components: map[string]workload{}, source: identity, grace: mustGrace(request.Options)}
+	entry := &execution{attempt: attempt, acceptImages: request.InstanceID != "", allowImageChange: request.AllowImageChange, caCertPath: caCertPath, cancel: cancel, done: make(chan struct{}), jobs: map[string]workload{}, services: map[string]workload{}, components: map[string]workload{}, source: identity, grace: mustGrace(request.Options)}
 	if request.Attached {
 		entry.attachment = &attachment{owner: v1.AttachedOwner{DaemonGeneration: s.generation, Attempt: attempt, Token: newID()}, expires: time.Now().Add(s.lease)}
 		response.Attachment = &v1.Attachment{Owner: entry.attachment.owner, ExpiresAt: entry.attachment.expires.UTC().Format(time.RFC3339Nano), LeaseDuration: s.lease.String()}
@@ -324,17 +429,36 @@ func (s *service) runSelected(ctx context.Context, request v1.RunRequest, reset,
 	return response, nil
 }
 func (s *service) stopExecution(id string) (v1.Instance, error) {
+	if err := s.store.fenceTaskAdmission(id); err != nil {
+		return v1.Instance{}, err
+	}
+	if err := s.stopDependents(id); err != nil {
+		return v1.Instance{}, err
+	}
 	s.mu.Lock()
+	if entry := s.executions[id]; entry != nil {
+		entry.taskAdmissionClosed = true
+	}
 	if entry := s.executions[id]; entry != nil && entry.attachment != nil {
 		entry.attachment.ended = true
 	}
 	s.mu.Unlock()
 	instance, err := s.joinExecution(id)
 	var typed *v1.PlanError
-	if errors.As(err, &typed) && typed.Code == "cleanup_failed" {
-		s.mu.Lock()
-		entry := s.executions[id]
-		s.mu.Unlock()
+	s.mu.Lock()
+	entry := s.executions[id]
+	s.mu.Unlock()
+	if entry != nil && instance.Execution != nil && entry.attempt == instance.Execution.Attempt && instance.Execution.Kept {
+		entry.mu.Lock()
+		kept := entry.kept
+		entry.mu.Unlock()
+		// A cancellation can enter investigation retention while the owner joins.
+		// A later stop uses stopKept; this live owner is not interrupted recovery.
+		if kept {
+			return instance, err
+		}
+	}
+	if err == nil && instance.Execution != nil && (instance.Execution.Settlement == nil || instance.Execution.Settlement.State != v1.ConsumerSettled) || errors.As(err, &typed) && typed.Code == "cleanup_failed" {
 		if entry != nil {
 			select {
 			case <-entry.done:
@@ -343,7 +467,21 @@ func (s *service) stopExecution(id string) (v1.Instance, error) {
 			}
 		}
 
-		if recoveryErr := s.store.recoverExecution(id); recoveryErr != nil {
+		if err != nil {
+			// A completed owner can retain its teardown error after its child settles.
+			// Reload under the caller's mutation ownership; never retry another attempt.
+			current, readErr := s.store.inspect(id)
+			if readErr != nil {
+				return instance, err
+			}
+			instance = current
+			if instance.Execution == nil || entry != nil && entry.attempt != instance.Execution.Attempt {
+				return instance, err
+			}
+		}
+
+		emptyVerified := entry != nil && entry.attempt == instance.Execution.Attempt && len(entry.groups) == 0 && len(entry.containers) == 0
+		if recoveryErr := s.store.recoverExecutionCause(id, v1.SettlementExplicitStop, emptyVerified); recoveryErr != nil {
 			return instance, recoveryErr
 		}
 		instance, err = s.store.inspect(id)
@@ -354,7 +492,67 @@ func (s *service) stopExecution(id string) (v1.Instance, error) {
 			entry.releaseOutputs()
 		}
 	}
+	if err == nil && !active(instance.Status) && (instance.Execution == nil || !instance.Execution.Kept) {
+		err = s.stopInstanceNetworks(&instance)
+	}
+	if err == nil && instance.Execution != nil && (instance.Execution.Settlement == nil || instance.Execution.Settlement.State != v1.ConsumerSettled) {
+		// A repeated acknowledged force-stop is idempotent, but its unknown native
+		// survivors remain a data/repair fence. It cannot waive another effect.
+		waived := false
+		for _, warning := range instance.NativeOwnershipWarnings {
+			waived = waived || warning.Attempt == instance.Execution.Attempt && warning.RecordedAt != ""
+		}
+		if settlement := instance.Execution.Settlement; settlement != nil {
+			for _, blocker := range settlement.Blockers {
+				waived = waived && (blocker.Code == "native_abandoned" || blocker.Code == "no_release_evidence")
+			}
+		} else {
+			waived = false
+		}
+		if !waived {
+			err = problem("cleanup_failed", "consumer release remains unverified; inspect current settlement and restore recorded ownership before retrying stop")
+		}
+	}
 	return instance, err
+}
+
+// Explicit stop also retires networks from older, already-stopped records.
+func (s *service) stopInstanceNetworks(instance *v1.Instance) error {
+	g, err := s.store.resources(instance.ID)
+	if err != nil {
+		return err
+	}
+	pending := false
+	for _, r := range g.Resources {
+		pending = pending || r.Kind == "network" && !r.Removed
+	}
+	if !pending {
+		return nil
+	}
+	if instance.Execution == nil {
+		return problem("cleanup_failed", "network allocation has no execution ownership; preserved")
+	}
+	for _, observed := range instance.Execution.NativeCleanup {
+		if observed.FencesResources(instance.NativeOwnershipWarnings) {
+			return problem("cleanup_failed", "native cleanup incomplete; instance networks preserved")
+		}
+	}
+	status := instance.Status
+	if _, err = s.store.execution(instance.ID, v1.Stopping, instance.Execution); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err = s.store.removeNetworks(ctx, instance.ID, &g, nil); err != nil {
+		result := *instance.Execution
+		result.CleanupFailure = "instance network cleanup incomplete; restore provider/ownership or remove foreign consumers and retry stop"
+		result.CleanupDetails = cleanupDetails(err)
+		var saveErr error
+		*instance, saveErr = s.store.execution(instance.ID, status, &result)
+		return errors.Join(problem("cleanup_failed", result.CleanupFailure), saveErr)
+	}
+	*instance, err = s.store.execution(instance.ID, status, instance.Execution)
+	return err
 }
 
 // OwnerJoin budgets joining one execution owner after cancellation. It covers two
@@ -456,7 +654,16 @@ func (s *service) acquireOutputs(ctx context.Context, p v1.PlanResponse) (func()
 	return release, nil
 }
 func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot, journal runtimeRecord, entry *execution, result *v1.ExecutionResult, identity capturedSource) {
-	defer close(entry.done)
+	defer func() {
+		close(entry.done)
+		if entry.borrowed && result.CompletedAt != "" && result.CleanupFailure == "" {
+			s.mu.Lock()
+			if s.executions[id] == entry {
+				delete(s.executions, id)
+			}
+			s.mu.Unlock()
+		}
+	}()
 	d, _ := executionDeadlines(journal.Options)
 	status := v1.Failed
 	var failure error
@@ -481,10 +688,21 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			}
 		}
 		s.mu.Lock()
-		shuttingDown := s.closing
+		entry.taskAdmissionClosed = true
+		shuttingDown := s.closing || entry.bulkCancelled
 		s.mu.Unlock()
 		sanitizeResult(result, snapshot, entry)
 		_ = save(v1.Stopping)
+		if !entry.borrowed {
+			if err := s.stopDependents(id); err != nil {
+				result.CleanupFailure = "dependent task cleanup incomplete; parent resources preserved"
+				result.CompletedAt = time.Now().UTC().Format(time.RFC3339Nano)
+				entry.mu.Lock()
+				entry.err = errors.Join(err, save(v1.Failed))
+				entry.mu.Unlock()
+				return
+			}
+		}
 		potentialKeep := journal.Options.KeepOnFailure && snapshot.Plan.Lifetime == v1.Disposable && !shuttingDown
 		var cleanup error
 		var cleanupMu sync.Mutex
@@ -574,19 +792,27 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 
 		joined.Wait()
 		omitActiveNativeSuccess(result, entry)
-		if cleanup == nil && result.CleanupFailure != "" {
-			cleanup = errors.New(result.CleanupFailure)
-		}
 
-		if entry.resources != nil && cleanup == nil && !keep {
+		if entry.resources != nil && !entry.borrowed && cleanup == nil && !keep {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			cleanup = s.store.cleanupContainers(cleanupCtx, id, entry.resources, entry.docker)
+			if cleanup == nil {
+				cleanup = s.store.removeNetworks(cleanupCtx, id, entry.resources, entry.docker)
+			}
 			cancel()
 		}
 		if entry.docker != nil && !keep {
 			_ = entry.docker.Close()
 		}
-		if snapshot.Plan.Lifetime == v1.Disposable && cleanup == nil && !keep && !shuttingDown {
+		if s.beforeDisposableCleanup != nil && snapshot.Plan.Lifetime == v1.Disposable {
+			s.beforeDisposableCleanup(id)
+		}
+		// invariant: selection/retention and commitment to destructive teardown share
+		// service.mu. A cause applied after teardown began cannot undo deletion.
+		s.mu.Lock()
+		removeData := snapshot.Plan.Lifetime == v1.Disposable && !entry.borrowed && cleanup == nil && !keep && !s.closing && !entry.bulkCancelled
+		s.mu.Unlock()
+		if removeData {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			cleanup = s.store.removeResources(cleanupCtx, id)
 			cancel()
@@ -627,6 +853,16 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			result.CleanupDetails = cleanupDetails(cleanup)
 			status = v1.Failed
 		}
+		if cleanup == nil && !keep {
+			proofCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			cleanup = s.store.recordConsumerRelease(proofCtx, id, journal, v1.SettlementExecutionCleanup, true)
+			cancel()
+			if cleanup != nil {
+				result.CleanupFailure, result.CleanupDetails, status = cleanup.Error(), cleanupDetails(cleanup), v1.Failed
+			} else {
+				result.CleanupFailure, result.CleanupDetails = "", nil
+			}
+		}
 		result.CompletedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		sanitizeResult(result, snapshot, entry)
 		if err := save(status); err != nil {
@@ -635,40 +871,55 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			entry.mu.Unlock()
 		}
 		if cleanup == nil && !keep {
+			if err := s.store.retireTaskInputs(id); err != nil {
+				entry.mu.Lock()
+				entry.err = err
+				entry.mu.Unlock()
+			}
 			entry.releaseOutputs()
 		}
 	}()
 	startup, cancel := withDeadline(ctx, d.startup)
 	defer cancel()
-	if failure = s.store.outputConflict(snapshot.Plan); failure != nil {
-		return
-	}
-	release, failure = s.acquireOutputs(startup, snapshot.Plan)
-	if failure != nil {
-		return
-	}
-	entry.mu.Lock()
-	entry.outputRelease = release
-	entry.mu.Unlock()
-	if failure = s.allocateResources(startup, id, snapshot, entry); failure != nil {
-		return
-	}
-	if failure = s.prepareBuildImages(startup, id, snapshot, entry); failure != nil {
-		return
-	}
-	for name, resource := range snapshot.Plan.Resources {
-		if resource.Kind != "port" {
-			continue
-		}
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			failure = err
+	if !entry.borrowed {
+		if failure = s.store.outputConflict(snapshot.Plan); failure != nil {
 			return
 		}
-		result.Ports[name] = listener.Addr().(*net.TCPAddr).Port
-		if err := listener.Close(); err != nil {
-			failure = err
+		release, failure = s.acquireOutputs(startup, snapshot.Plan)
+		if failure != nil {
 			return
+		}
+		entry.mu.Lock()
+		entry.outputRelease = release
+		entry.mu.Unlock()
+		if failure = s.store.outputConflict(snapshot.Plan); failure != nil {
+			return
+		}
+	}
+	if failure = s.prepareOutputDirectories(startup, snapshot, identity, id); failure != nil {
+		return
+	}
+	if !entry.borrowed {
+		if failure = s.allocateResources(startup, id, snapshot, entry); failure != nil {
+			return
+		}
+		if failure = s.prepareBuildImages(startup, id, snapshot, entry); failure != nil {
+			return
+		}
+		for name, resource := range snapshot.Plan.Resources {
+			if resource.Kind != "port" {
+				continue
+			}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				failure = err
+				return
+			}
+			result.Ports[name] = listener.Addr().(*net.TCPAddr).Port
+			if err := listener.Close(); err != nil {
+				failure = err
+				return
+			}
 		}
 	}
 	if failure = s.captureFixtures(id, snapshot, result, entry); failure != nil {
@@ -694,7 +945,12 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		componentCtx := startup
 		if component.Name == snapshot.Plan.TerminalJob {
 			if snapshot.Plan.Publish != nil {
-				if failure = awaitPublication(startup, result.Origin, snapshot.Plan.Publish.Probe.Timeout, services); failure != nil {
+				target, targetErr := publicationTarget(id, snapshot, result, entry)
+				if targetErr != nil {
+					failure = targetErr
+					return
+				}
+				if failure = awaitPublication(startup, target, snapshot.Plan.Publish.Probe.Timeout, services); failure != nil {
 					return
 				}
 			}
@@ -717,7 +973,7 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 			if component.Runtime == v1.Container {
 				group, err = s.launchContainer(componentCtx, id, component, snapshot, result, entry)
 			} else {
-				group, err = s.launch(componentCtx, id, component.Name, component.Executable, component.Command.Args, component.Environment, snapshot, result, entry, &journal)
+				group, err = s.launch(componentCtx, id, component.Name, component.Executable, *component.Command, component.WorkingDirectory, component.Environment, snapshot, result, entry, &journal)
 			}
 			if err == nil {
 				entry.components[component.Name] = group
@@ -846,7 +1102,12 @@ func (s *service) execute(ctx context.Context, id string, snapshot plan.Snapshot
 		}
 	}
 	if snapshot.Plan.Publish != nil && snapshot.Plan.Lifetime == v1.Persistent {
-		if failure = awaitPublication(startup, result.Origin, snapshot.Plan.Publish.Probe.Timeout, services); failure != nil {
+		target, targetErr := publicationTarget(id, snapshot, result, entry)
+		if targetErr != nil {
+			failure = targetErr
+			return
+		}
+		if failure = awaitPublication(startup, target, snapshot.Plan.Publish.Probe.Timeout, services); failure != nil {
 			return
 		}
 	}
@@ -876,9 +1137,9 @@ func serviceFailure(services map[string]workload) error {
 	for name, g := range services {
 		if result := g.Result(); result != nil {
 			if !result.Known {
-				return fmt.Errorf("required service %s supervision failed: %s; explicit restart required", name, result.Error)
+				return fmt.Errorf("required service %s supervision failed: %s; inspect before another explicit start", name, result.Error)
 			}
-			return fmt.Errorf("required service %s exited unexpectedly (exit %d); explicit restart required", name, result.Code)
+			return fmt.Errorf("required service %s exited unexpectedly (exit %d); inspect before another explicit start", name, result.Code)
 		}
 		// Docker Result already performs a fresh running-state inspection. A second
 		// inspection through Alive could fail independently and discard its cause.
@@ -887,7 +1148,7 @@ func serviceFailure(services map[string]workload) error {
 			continue
 		}
 		if !g.Alive() {
-			return fmt.Errorf("required service %s is unavailable without a verified exit; explicit restart required", name)
+			return fmt.Errorf("required service %s is unavailable without a verified exit; inspect before another explicit start", name)
 		}
 	}
 	return nil
@@ -917,18 +1178,39 @@ func waitJob(ctx context.Context, g workload, services map[string]workload) (*na
 		}
 	}
 }
-func (s *service) launch(ctx context.Context, id, name, executable string, args []string, environment map[string]v1.PlannedValue, snapshot plan.Snapshot, result *v1.ExecutionResult, entry *execution, journal *runtimeRecord) (*native.Group, error) {
+func (s *service) launch(ctx context.Context, id, name, executable string, command v1.Command, workingDirectory string, environment map[string]v1.PlannedValue, snapshot plan.Snapshot, result *v1.ExecutionResult, entry *execution, journal *runtimeRecord) (*native.Group, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if err := entry.source.verify(); err != nil {
 		return nil, err
 	}
+	checkDirectory := func() error {
+		current, err := plan.WorkingDirectory(filepath.Dir(snapshot.Plan.ManifestPath), command.WorkingDirectory)
+		if err != nil {
+			return err
+		}
+		if current != workingDirectory {
+			return problem("working_directory_changed", "working directory target changed after planning; retry with a stable project")
+		}
+		return nil
+	}
+	if err := checkDirectory(); err != nil {
+		return nil, err
+	}
+	env, err := resolvedEnvironment(name, environment, id, snapshot, result, entry, v1.Native)
+	if err != nil {
+		return nil, err
+	}
+	args, err := resolvedArguments(command.Args, id, snapshot, result, entry, v1.Native)
+	if err != nil {
+		return nil, err
+	}
 	directory := filepath.Join(s.directory, "logs")
 	if err := localipc.Directory(directory, true); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(directory, id+"-output.ndjson")
+	path := filepath.Join(directory, id+"-"+result.Attempt+"-output.ndjson")
 	if _, err := os.Lstat(path); err == nil {
 		if err := localipc.File(path, false); err != nil {
 			return nil, err
@@ -950,6 +1232,7 @@ func (s *service) launch(ctx context.Context, id, name, executable string, args 
 		_ = file.Close()
 		return nil, err
 	}
+	journal.NativeNotStarted = false
 	journal.LaunchPurpose = "application"
 	journal.LaunchPending, journal.PendingBoot = true, boot
 	if err := s.store.saveRuntime(id, *journal); err != nil {
@@ -975,10 +1258,6 @@ func (s *service) launch(ctx context.Context, id, name, executable string, args 
 		}
 		return nil, errors.Join(startErr, closeErr)
 	}
-	env, err := resolvedEnvironment(name, environment, id, snapshot, result, entry, v1.Native)
-	if err != nil {
-		return nil, err
-	}
 	if closeErr != nil {
 		return nil, closeErr
 	}
@@ -990,10 +1269,20 @@ func (s *service) launch(ctx context.Context, id, name, executable string, args 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	err = group.Activate(native.Spec{Executable: executable, Args: args, Environment: env, Directory: filepath.Dir(snapshot.Plan.ManifestPath), InstanceID: id, Component: name, Attempt: result.Attempt})
+	if err := checkDirectory(); err != nil {
+		return nil, err
+	}
+	if workingDirectory == "" {
+		workingDirectory = filepath.Dir(snapshot.Plan.ManifestPath)
+	}
+	err = group.Activate(native.Spec{Executable: executable, Args: args, Environment: env, Directory: workingDirectory, InstanceID: id, Component: name, Attempt: result.Attempt})
 	return group, err
 }
 func runtimeValue(value v1.PlannedValue, id string, p v1.PlanResponse, ports map[string]int) (string, error) {
+	if value.Composition != nil {
+		return resolveComposition(*value.Composition, v1.Native, func(v v1.Value) (string, error) { return runtimeValue(plannedValue(v), id, p, ports) })
+	}
+
 	if value.Literal != nil {
 		return *value.Literal, nil
 	}
@@ -1162,29 +1451,45 @@ func (s *service) waitOwners() {
 // Never replay them or silently move those resources during a later bind retry.
 func consumeComponentPorts(consumed map[string]string, c v1.PlannedComponent, snapshot plan.Snapshot) {
 	consume := func(value v1.PlannedValue) {
-		r := value.Symbolic
-		if r == nil || r.Field != "port" {
-			return
-		}
-		resource := ""
-		if r.Kind == "resource" {
-			resource = r.Name
-		}
-		if r.Kind == "service" {
-			for _, service := range snapshot.Plan.Components {
-				if service.Name == r.Name {
-					resource = service.Ports[r.Port].Resource
-					break
+		_ = walkPlanned(value, func(v v1.Value) error {
+			r := v.Ref
+			if r == nil || r.Field != "port" {
+				return nil
+			}
+			resource := ""
+			if r.Kind == "resource" {
+				resource = r.Name
+			}
+			if r.Kind == "service" {
+				for _, service := range snapshot.Plan.Components {
+					if service.Name == r.Name {
+						resource = service.Ports[r.Port].Resource
+						break
+					}
 				}
 			}
-		}
-		if resource != "" && consumed[resource] == "" {
-			consumed[resource] = c.Name
-		}
+			if resource != "" && consumed[resource] == "" {
+				consumed[resource] = c.Name
+			}
+			return nil
+		})
 	}
 	for _, port := range c.Ports {
 		if consumed[port.Resource] == "" {
 			consumed[port.Resource] = c.Name
+		}
+	}
+	for _, arg := range c.Args {
+		consume(plannedValue(arg.Value))
+	}
+	if c.Command != nil {
+		for _, arg := range c.Command.Args {
+			consume(plannedValue(arg.Value))
+		}
+	}
+	if c.Readiness != nil && c.Readiness.Command != nil {
+		for _, arg := range c.Readiness.Command.Args {
+			consume(plannedValue(arg.Value))
 		}
 	}
 	for key, value := range c.Environment {

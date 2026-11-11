@@ -32,7 +32,7 @@ func TestForceDestroyWireRouting(t *testing.T) {
 					}
 				} else {
 					var got v1.DestroyRequest
-					if r.URL.Path != "/v1/destroy" || manifest.Decode(body, ".json", &got) != nil || got != (v1.DestroyRequest{APIVersion: v1.Version, InstanceID: id, Force: true}) {
+					if r.URL.Path != "/v1/destroy" || manifest.Decode(body, ".json", &got) != nil || got != (v1.DestroyRequest{Contract: v1.DestroyContract, APIVersion: v1.Version, InstanceID: id, Force: true}) {
 						t.Fatal("force instance request lost authority or identity")
 					}
 				}

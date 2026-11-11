@@ -12,6 +12,8 @@ type PlanRequest struct {
 
 // PlanResponse is a redacted, allocation-free execution plan.
 type PlanResponse struct {
+	// Tasks lists enabled task names without private launch details.
+	Tasks                 []string                 `json:"tasks,omitempty"`
 	BuildImages           map[string]BuildImage    `json:"build_images,omitempty"`
 	SharedServices        map[string]SharedService `json:"shared_services,omitempty"`
 	StartupDetails        []StartupDetailSelection `json:"startup_details,omitempty"`
@@ -31,23 +33,28 @@ type PlanResponse struct {
 	Publish               *Publication             `json:"publish,omitempty"`
 }
 
-// PlannedValue contains a known value, a symbolic allocation reference, or redaction.
-// Redacted values never carry their literal or reference payload.
+// PlannedValue contains a known value, symbolic reference, unresolved composition or redaction.
+// Redacted values never carry a payload.
 type PlannedValue struct {
 	Literal  *string    `json:"literal,omitempty"`
 	Symbolic *Reference `json:"symbolic,omitempty"`
-	Redacted bool       `json:"redacted,omitempty"`
+	// Composition retains typed partially resolved operands and their provenance.
+	Composition *Value `json:"composition,omitempty"`
+	Redacted    bool   `json:"redacted,omitempty"`
 }
 
 // PlannedComponent contains selected work in dependency order.
 type PlannedComponent struct {
+	// WorkingDirectory is the canonical native cwd; empty means the manifest directory.
+	WorkingDirectory string `json:"working_directory,omitempty"`
+
 	Artifacts    map[string]ArtifactSource `json:"artifacts,omitempty"`
 	Fixtures     map[string]PlannedFixture `json:"fixtures,omitempty"`
 	Name         string                    `json:"name"`
 	Kind         ComponentKind             `json:"kind"`
 	Runtime      Runtime                   `json:"runtime"`
 	Command      *Command                  `json:"command,omitempty"`
-	Args         []string                  `json:"args,omitempty"`
+	Args         []Argument                `json:"args,omitempty"`
 	Policy       JobPolicy                 `json:"policy,omitempty"`
 	Initializes  []string                  `json:"initializes,omitempty"`
 	DependsOn    []Dependency              `json:"depends_on,omitempty"`
@@ -70,11 +77,13 @@ type ErrorResponse struct {
 
 // PlanError identifies a failure category and field/component context.
 type PlanError struct {
-	Code        string `json:"code"`
-	SourceLayer string `json:"source_layer,omitempty"`
-	SourcePath  string `json:"source_path,omitempty"`
-	Field       string `json:"field,omitempty"`
-	Message     string `json:"message"`
+	// Registration contains safe actionable selected-store registration diagnostics.
+	Registration *RegistrationResult `json:"registration,omitempty"`
+	Code         string              `json:"code"`
+	SourceLayer  string              `json:"source_layer,omitempty"`
+	SourcePath   string              `json:"source_path,omitempty"`
+	Field        string              `json:"field,omitempty"`
+	Message      string              `json:"message"`
 }
 
 // Error formats diagnostic fields and quotes the declaration path.
@@ -91,6 +100,9 @@ func (e *PlanError) Error() string {
 
 // PlannedProbe preserves readiness intent with a redacted or symbolic target.
 type PlannedProbe struct {
+	// WorkingDirectory is the canonical host command cwd; empty means the manifest directory.
+	WorkingDirectory string `json:"working_directory,omitempty"`
+
 	Executable string        `json:"executable,omitempty"`
 	Kind       string        `json:"kind"`
 	Target     *PlannedValue `json:"target,omitempty"`

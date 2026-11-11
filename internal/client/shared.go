@@ -43,6 +43,9 @@ func (c *Client) sharedCall(ctx context.Context, action, serviceID string, reque
 			if !validID(service.ID) || !validID(service.ProjectID) || !validID(service.Configuration) || service.Name == "" || service.Allocations < 0 || service.PendingReleases < 0 || service.PendingReleases > service.Allocations || seen[service.ID] {
 				return response, mutationError("/v1/shared/"+action, request, responseError())
 			}
+			if service.LastTransition != nil && (service.LastTransition.Validate() != nil || service.LastTransition.To != service.Status) {
+				return response, mutationError("/v1/shared/"+action, request, responseError())
+			}
 			seen[service.ID] = true
 			switch service.Status {
 			case "intent", "running", "stopped", "uncertain", "destroying", "destroyed":

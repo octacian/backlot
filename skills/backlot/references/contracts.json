@@ -1,6 +1,6 @@
 {
   "api_version": "v1",
-  "state_version": 11,
+  "state_version": 16,
   "context": "",
   "schemas": [
     "manifest",
@@ -8,6 +8,14 @@
     "private"
   ],
   "contracts": [
+    {
+      "id": "activity/v1",
+      "mode": "finite"
+    },
+    {
+      "id": "task-executions/v1",
+      "mode": "finite"
+    },
     {
       "id": "scene-declarations/v1",
       "mode": "finite"
@@ -18,6 +26,10 @@
     },
     {
       "id": "log-page/v1",
+      "mode": "finite"
+    },
+    {
+      "id": "attempt-history/v1",
       "mode": "finite"
     },
     {

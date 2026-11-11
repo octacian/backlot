@@ -21,10 +21,28 @@ func validID(id string) bool {
 	_, err := hex.DecodeString(id)
 	return err == nil
 }
-
-// ValidateInstance checks a decoded public instance without transport or state access.
-func ValidateInstance(response v1.InstanceResponse) error {
+func validateInstance(response v1.InstanceResponse) error {
 	instance := response.Instance
+	if b := instance.Task; b != nil {
+		if !validID(b.InstanceID) || !validID(b.Attempt) || !validID(b.Generation) || b.InstanceID == instance.ID || b.Name == "" || instance.Plan.Lifetime != v1.Disposable {
+			return responseError()
+		}
+	}
+	if instance.CheckoutParent != "" && !validID(instance.CheckoutParent) {
+		return responseError()
+	}
+	if instance.Association != nil {
+		if err := instance.Association.Validate(); err != nil {
+			return err
+		}
+		parent := instance.CheckoutParent
+		if parent == "" {
+			parent = instance.Checkout.ID
+		}
+		if instance.Association.CheckoutParent != parent {
+			return responseError()
+		}
+	}
 	if response.StartupDetails != nil || response.Error != nil {
 		return responseError()
 	}
@@ -75,13 +93,18 @@ func ValidateInstance(response v1.InstanceResponse) error {
 func validateExecution(instance v1.Instance) error {
 	result := instance.Execution
 	switch instance.Status {
-	case v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Destroyed, v1.Succeeded, v1.Failed:
+	case v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Succeeded, v1.Failed:
 		if result == nil {
 			return responseError()
 		}
 	}
 	if result == nil {
 		return nil
+	}
+	if s := result.Settlement; s != nil {
+		if s.Validate() != nil || s.InstanceID != instance.ID || s.Attempt != result.Attempt {
+			return responseError()
+		}
 	}
 	if err := v1.ValidateBuildImages(instance.ID, result.BuildImages, result.ImageChangeWarnings); err != nil {
 		return responseError()
@@ -96,13 +119,17 @@ func validateExecution(instance v1.Instance) error {
 			}
 		}
 	}
-	if err := validateNativeCleanup(result.NativeCleanup, result.Attempt, result.Components, result.CleanupFailure, instance.NativeOwnershipWarnings); err != nil {
+	if err := validateNativeCleanup(result.NativeCleanup, result.Attempt, result.Components, result.CleanupFailure, instance.NativeOwnershipWarnings, result.Settlement); err != nil {
 		return err
 	}
 	if !validID(result.Attempt) {
 		return responseError()
 	}
-	if err := validateOrigin(instance.ID, result.Origin); err != nil {
+	originID := instance.ID
+	if instance.Task != nil {
+		originID = instance.Task.InstanceID
+	}
+	if err := validateOrigin(originID, result.Origin); err != nil {
 		return err
 	}
 	if instance.Status == v1.RuntimeReady && instance.Plan.Publish != nil && result.Origin == "" {
@@ -179,6 +206,9 @@ func validateOutcome(status v1.InstanceStatus, exit *int, cancelled bool, failur
 }
 
 func validateExportResult(result v1.ExportResult) error {
+	if s := result.Settlement; s != nil && (s.Validate() != nil || s.InstanceID != result.InstanceID || s.Attempt != result.Attempt) {
+		return responseError()
+	}
 	if err := v1.ValidateBuildImages(result.InstanceID, result.BuildImages, result.ImageChangeWarnings); err != nil {
 		return responseError()
 	}
@@ -187,53 +217,25 @@ func validateExportResult(result v1.ExportResult) error {
 	default:
 		return responseError()
 	}
-	if err := validateNativeCleanup(result.NativeCleanup, result.Attempt, result.Components, result.CleanupFailure, result.NativeOwnershipWarnings); err != nil {
+	if err := validateNativeCleanup(result.NativeCleanup, result.Attempt, result.Components, result.CleanupFailure, result.NativeOwnershipWarnings, result.Settlement); err != nil {
 		return err
 	}
 	return validateOutcome(result.Status, result.TerminalExitCode, result.Cancelled, result.Failure, result.CollectionFailure, result.CleanupFailure, result.Components)
 }
 
-func validateNativeCleanup(results []v1.NativeCleanupResult, attempt string, components []v1.ComponentResult, failure string, warnings []v1.NativeOwnershipWarning) error {
+func validateNativeCleanup(results []v1.NativeCleanupResult, attempt string, components []v1.ComponentResult, failure string, warnings []v1.NativeOwnershipWarning, settlement *v1.ConsumerSettlement) error {
+	// The enclosing result reports current fences independently of worst native history.
+	reported := settlement != nil && settlement.Validate() == nil && settlement.Attempt == attempt
 	seen := map[string]bool{}
 	names := map[string]bool{}
 	for _, c := range components {
 		names[c.Name] = true
 	}
 	for _, r := range results {
-		if r.Validate() != nil || r.Attempt != attempt || !names[r.Component] || seen[r.Component] || r.FencesResources(warnings) && failure == "" {
+		if r.Validate() != nil || r.Attempt != attempt || !names[r.Component] || seen[r.Component] || r.FencesResources(warnings) && failure == "" && !reported {
 			return responseError()
 		}
 		seen[r.Component] = true
 	}
-	return nil
-}
-
-// ValidateList checks one public discovery page without transport access.
-func ValidateList(value v1.ListResponse) error {
-	if value.APIVersion != v1.Version || len(value.Instances) > 100 || value.Instances == nil {
-		return responseError()
-	}
-	last := ""
-	for _, instance := range value.Instances {
-		if !validID(instance.ID) || instance.ID <= last || instance.Project == "" || instance.Scene == "" || !filepath.IsAbs(instance.Checkout) || (instance.Lifetime != v1.Persistent && instance.Lifetime != v1.Disposable) {
-			return responseError()
-		}
-		if err := validateOrigin(instance.ID, instance.Origin); err != nil {
-			return err
-		}
-		if _, err := time.Parse(time.RFC3339Nano, instance.CreatedAt); err != nil {
-			return responseError()
-		}
-		switch instance.Status {
-		case v1.Preparing, v1.Prepared, v1.Cancelled, v1.Interrupted, v1.Starting, v1.RuntimeReady, v1.Stopping, v1.Stopped, v1.Destroyed, v1.Succeeded, v1.Failed:
-		default:
-			return responseError()
-		}
-		last = instance.ID
-	}
-	if value.NextAfterID != "" && (last == "" || value.NextAfterID != last) {
-		return responseError()
-	}
-
 	return nil
 }

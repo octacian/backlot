@@ -11,7 +11,7 @@ import (
 )
 
 func planCommand() *urfave.Command {
-	return &urfave.Command{Name: "plan", Usage: "Validate an offline scene plan without executing work", ArgsUsage: "<scene> [terminal-job args...]", Description: "Example: backlot plan test --project . -- -run TestExample", Flags: []urfave.Flag{&urfave.StringFlag{Name: "project", Usage: "Project directory or manifest path"}, &urfave.StringFlag{Name: "config", Usage: "Machine configuration path"}}, Action: func(_ context.Context, c *urfave.Command) error {
+	return &urfave.Command{Name: "plan", Usage: "Validate an offline scene plan without executing work", ArgsUsage: "<scene> [terminal-job args...]", Description: "Validate typed values and argv without allocation. Compositions retain unresolved references; sensitive values are redacted. Forwarded arguments remain literal. Example: backlot plan test --project . -- -run TestExample", Flags: []urfave.Flag{&urfave.StringFlag{Name: "project", Usage: "Project directory or manifest path"}, &urfave.StringFlag{Name: "config", Usage: "Machine configuration path"}}, Action: func(_ context.Context, c *urfave.Command) error {
 		if c.Args().Len() == 0 {
 			return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "plan requires a scene name"})
 		}
@@ -33,16 +33,21 @@ func planCommand() *urfave.Command {
 
 func executableOutput(w io.Writer, result v1.PlanResponse, context string) error {
 	for _, component := range result.Components {
-		readiness := ""
+		readiness, probeDirectory := "", ""
 		if component.Readiness != nil {
-			readiness = component.Readiness.Executable
+			readiness, probeDirectory = component.Readiness.Executable, component.Readiness.WorkingDirectory
 		}
-		for _, selection := range []struct{ role, path string }{{"command", component.Executable}, {"readiness", readiness}} {
+		for _, selection := range []struct{ role, path, directory string }{{"command", component.Executable, component.WorkingDirectory}, {"readiness", readiness, probeDirectory}} {
 			if selection.path == "" {
 				continue
 			}
 			if _, err := fmt.Fprintf(w, "  %s %s (%s): %q\n", component.Name, selection.role, context, selection.path); err != nil {
 				return err
+			}
+			if selection.directory != "" {
+				if _, err := fmt.Fprintf(w, "    working directory: %q\n", selection.directory); err != nil {
+					return err
+				}
 			}
 		}
 	}

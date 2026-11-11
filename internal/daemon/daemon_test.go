@@ -391,7 +391,7 @@ func TestMovedAndReplacedCheckoutNeverAdopted(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := cli.Prepare(context.Background(), request(moved, config, "dev"))
-	code(t, err, "project_config")
+	code(t, err, "project_registration")
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestMovedAndReplacedCheckoutNeverAdopted(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = cli.Prepare(context.Background(), request(root, config, "dev"))
-	code(t, err, "project_config")
+	code(t, err, "project_registration")
 	inspected, err := cli.Inspect(context.Background(), original.Instance.ID)
 	if err != nil || inspected.Instance.ID != original.Instance.ID || inspected.Instance.Checkout.Path != original.Instance.Checkout.Path {
 		t.Fatal("old record mutated")
@@ -698,7 +698,7 @@ func TestInFlightReplacementRejectsSnapshotBeforeDurableAcceptance(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if prepared.Instance.Checkout.ID != current.ID || prepared.Instance.Plan.Components[0].Command.Args[0] != "env" {
+			if prepared.Instance.Checkout.ID != current.ID || *prepared.Instance.Plan.Components[0].Command.Args[0].Literal != "env" {
 				t.Fatal("replacement adopted the original snapshot")
 			}
 		})

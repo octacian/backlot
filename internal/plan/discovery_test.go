@@ -26,7 +26,7 @@ func TestDeclarationDiscoveryBeforeSetup(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := m.Components["check"]
-	c.Command.Args = []string{"argument-canary"}
+	c.Command.Args = v1.StringArguments("argument-canary")
 	c.EnvironmentSets = []string{"base"}
 	c.Environment.Seeds = []string{"missing.env"}
 	literal := "literal-canary"

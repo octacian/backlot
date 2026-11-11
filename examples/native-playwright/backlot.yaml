@@ -5,14 +5,8 @@ tools: {node: node}
 resources:
   http: {kind: port}
 outputs:
-  reports: {path: reports, concurrency_group: reports}
+  reports: {path: reports, concurrency_group: reports, empty_before_execution: true}
 components:
-  reports:
-    kind: job
-    runtime: native
-    policy: each-start
-    command: {tool: node, args: [prepare.mjs]}
-    outputs: [reports]
   app:
     kind: service
     runtime: native
@@ -31,7 +25,7 @@ components:
     runtime: native
     policy: each-start
     command: {tool: node, args: [node_modules/@playwright/test/cli.js, test]}
-    depends_on: [{component: reports, condition: completed}, {component: app, condition: ready}]
+    depends_on: [{component: app, condition: ready}]
     outputs: [reports]
     environment:
       pass_through: [PLAYWRIGHT_BROWSERS_PATH]
@@ -42,6 +36,6 @@ components:
 scenes:
   browser:
     lifetime: disposable
-    components: [reports, app, tests]
+    components: [app, tests]
     resources: [http]
     terminal_job: tests

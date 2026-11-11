@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,9 +15,9 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-func copyStateNine(t *testing.T) string {
+func copyStateFixture(t *testing.T, path string) string {
 	t.Helper()
-	data, err := os.ReadFile("testdata/state/v9/state.db")
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,18 +28,32 @@ func copyStateNine(t *testing.T) string {
 	return dir
 }
 
-func TestRetainedStateNine(t *testing.T) { testRetainedState(t, copyStateNine(t), 9) }
+func copyStateNine(t *testing.T) string {
+	t.Helper()
+	return copyStateFixture(t, "testdata/state/v9/state.db")
+}
 
+func TestRetainedStateNine(t *testing.T) { testRetainedState(t, copyStateNine(t), 9) }
 func TestRetainedStateTen(t *testing.T) {
-	data, err := os.ReadFile("testdata/state/v10/state.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	if err = os.WriteFile(filepath.Join(dir, "state.db"), data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	testRetainedState(t, dir, 10)
+	testRetainedState(t, copyStateFixture(t, "testdata/state/v10/state.db"), 10)
+}
+func TestRetainedStateEleven(t *testing.T) {
+	testRetainedState(t, copyStateFixture(t, "testdata/state/v11/state.db"), 11)
+}
+func TestRetainedStateThirteen(t *testing.T) {
+	testRetainedState(t, copyStateFixture(t, "testdata/state/v13/state.db"), 13)
+}
+
+func TestRetainedStateFourteen(t *testing.T) {
+	testRetainedState(t, copyStateFixture(t, "testdata/state/v14/state.db"), 14)
+}
+
+func TestRetainedStateFifteen(t *testing.T) {
+	testRetainedState(t, copyStateFixture(t, "testdata/state/v15/state.db"), 15)
+}
+
+func TestRetainedStateTwelve(t *testing.T) {
+	testRetainedState(t, copyStateFixture(t, "testdata/state/v12/state.db"), 12)
 }
 
 func testRetainedState(t *testing.T, dir string, version int) {
@@ -63,13 +78,22 @@ func testRetainedState(t *testing.T, dir string, version int) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if before["meta"]["version"] != strconv.Itoa(version) || len(before["instances"]) != 2 || len(before["checkouts"]) != 1 || len(before["persistent"]) != 1 || len(before["snapshots"]) != 2 || len(before["secrets"]) != 2 {
+	wantInstances := 2
+	if version == 11 {
+		wantInstances = 3
+	}
+	wantSlots := 1
+	if version == 12 || version == 13 || version == 14 || version == 15 {
+		wantSlots = 2
+	}
+	if before["meta"]["version"] != strconv.Itoa(version) || len(before["instances"]) != wantInstances || len(before["checkouts"]) != 1 || len(before["persistent"]) != wantSlots || len(before["snapshots"]) != wantInstances || len(before["secrets"]) != wantInstances {
 		t.Fatal("fixture lost its historical record classes")
 	}
 	before["meta"]["version"] = strconv.Itoa(v1.StateVersion)
 	for _, name := range sharedBuckets {
 		before[name] = map[string]string{}
 	}
+	var migrated map[string]map[string]string
 	for range 2 {
 		s, err := openStore(dir)
 		if err != nil {
@@ -81,11 +105,53 @@ func testRetainedState(t *testing.T, dir string, version int) {
 					t.Error(err)
 				}
 			}()
-			if !reflect.DeepEqual(before, stateContents(t, s)) {
+			after := stateContents(t, s)
+			if migrated != nil && !reflect.DeepEqual(migrated, after) {
+				t.Fatal("reopen changed history")
+			}
+			migrated = after
+			wantAttempts := 1
+			if version == 11 {
+				wantAttempts = 2
+			}
+			if len(after["attempts"]) != wantAttempts || len(after["attempt_sequences"]) != wantAttempts || len(after["evidence_deletions"]) != 0 {
+				t.Fatal("migration did not seed only known current attempts")
+			}
+			if err := s.db.View(func(tx *bolt.Tx) error {
+				for id, raw := range before["checkouts"] {
+					var expected v1.CheckoutIdentity
+					if err := json.Unmarshal([]byte(raw), &expected); err != nil {
+						return err
+					}
+					b, err := readCheckoutBinding(tx, id)
+					if err != nil {
+						return err
+					}
+					// v15 already enrolled logical mappings; full source bytes are checked below.
+					if version < 15 && (b.Current != expected || b.Revision != "" || b.Acknowledgement != "") {
+						t.Fatal("migration invented binding provenance")
+					}
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			comparable := stateContents(t, s)
+			if version < 13 {
+				for _, name := range []string{"project_bindings", "checkout_bindings"} {
+					delete(comparable, name)
+				}
+			}
+			if version < 12 {
+				for _, name := range []string{"attempts", "attempt_sequences", "evidence_deletions"} {
+					delete(comparable, name)
+				}
+			}
+			if !reflect.DeepEqual(before, comparable) {
 				t.Fatal("open/reopen rewrote retained records")
 			}
 			list, err := s.list(v1.ListRequest{APIVersion: v1.Version})
-			if err != nil || len(list.Instances) != 2 {
+			if err != nil || len(list.Instances) != wantInstances {
 				t.Fatal("cannot read historical instances", err)
 			}
 			prepared, completed := false, false
@@ -100,7 +166,7 @@ func testRetainedState(t *testing.T, dir string, version int) {
 				if i.Plan.Lifetime == v1.Persistent && i.Status == v1.Prepared {
 					prepared = true
 				}
-				if i.Plan.Lifetime == v1.Disposable && i.Status == v1.Succeeded && i.Execution != nil && len(i.Execution.NativeCleanup) == 1 && i.Execution.NativeCleanup[0].Confidence == v1.ObservedEmpty {
+				if ((i.Plan.Lifetime == v1.Disposable && i.Status == v1.Succeeded) || ((version == 12 || version == 13 || version == 14 || version == 15) && i.Status == v1.Stopped)) && i.Execution != nil && len(i.Execution.NativeCleanup) == 1 && i.Execution.NativeCleanup[0].Confidence == v1.ObservedEmpty {
 					completed = true
 				}
 			}
@@ -201,5 +267,110 @@ func TestRetainedStateTenRejectsInventedPinsUnchanged(t *testing.T) {
 	}
 	if !bytes.Equal(before, after) {
 		t.Fatal("rejected v10 fixture changed")
+	}
+}
+
+func TestRetainedStateTwelveSharedRegistration(t *testing.T) {
+	dir := copyStateFixture(t, "testdata/state/v12/state-shared.db")
+	db, err := bolt.Open(filepath.Join(dir, "state.db"), 0600, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := stateContents(t, &store{db: db})
+	if len(before["shared_projects"]) != 1 || len(before["shared_paths"]) != 1 {
+		t.Fatal("genuine shared predecessor missing registration")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before["meta"]["version"] = strconv.Itoa(v1.StateVersion)
+	for range 2 {
+		state, err := openStore(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		after := stateContents(t, state)
+		delete(after, "project_bindings")
+		delete(after, "checkout_bindings")
+		if !reflect.DeepEqual(before, after) {
+			t.Fatal("shared predecessor authority bytes rewritten")
+		}
+		if err := state.db.View(func(tx *bolt.Tx) error {
+			for id, raw := range before["shared_projects"] {
+				var origin sharedProjectIdentity
+				if err := json.Unmarshal([]byte(raw), &origin); err != nil {
+					return err
+				}
+				b, err := readProjectBinding(tx, id)
+				if err != nil {
+					return err
+				}
+				if b.Current != origin || b.Revision != "" || b.Acknowledgement != "" {
+					t.Fatal("migration invented shared provenance")
+				}
+				if err := tx.Bucket([]byte("instances")).ForEach(func(k, d []byte) error {
+					r, err := load(tx, string(k))
+					if err != nil {
+						return err
+					}
+					owners, err := retainedSharedProjects(tx, r.Instance)
+					if err != nil {
+						return err
+					}
+					if len(owners) != 1 || !owners[id] {
+						t.Fatal("source12 prepared-only ownership not recovered from retained provenance")
+					}
+					return nil
+				}); err != nil {
+					return err
+				}
+
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := state.db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestTaskMigrationRejectsInventedLegacyCapturesUnchanged(t *testing.T) {
+	dir := copyStateFixture(t, "testdata/state/v13/state.db")
+	path := filepath.Join(dir, "state.db")
+	db, err := bolt.Open(path, 0600, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Update(func(tx *bolt.Tx) error {
+		c := tx.Bucket([]byte("snapshots")).Cursor()
+		key, data := c.First()
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil {
+			return err
+		}
+		fields["tasks"] = json.RawMessage(`{}`)
+		return put(tx, "snapshots", string(key), fields)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s, err := openStore(dir); err == nil {
+		_ = s.db.Close()
+		t.Fatal("invented legacy capture accepted")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("failed migration changed predecessor bytes")
 	}
 }

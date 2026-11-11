@@ -1,7 +1,7 @@
 package v1
 
 // StateVersion identifies the supported durable database format.
-const StateVersion = 11
+const StateVersion = 16
 
 // InstanceStatus distinguishes metadata preparation from observed execution.
 type InstanceStatus string
@@ -40,10 +40,12 @@ type ControlRequest struct {
 
 // CheckoutIdentity records canonical checkout and filesystem/Git provenance.
 type CheckoutIdentity struct {
-	ID           string `json:"id"`
-	Path         string `json:"path"`
-	GitDirectory string `json:"git_directory,omitempty"`
-	GitHead      string `json:"git_head,omitempty"`
+	// Registration selects logical continuity separately from physical launch provenance.
+	Registration RegistrationIdentity `json:"registration,omitzero"`
+	ID           string               `json:"id"`
+	Path         string               `json:"path"`
+	GitDirectory string               `json:"git_directory,omitempty"`
+	GitHead      string               `json:"git_head,omitempty"`
 }
 
 // AllocationRecord preserves intent/effect ownership across interruption.
@@ -66,6 +68,12 @@ type Operation struct {
 
 // Instance is the redacted durable public view of preparation and optional execution.
 type Instance struct {
+	// Task records independent execution lineage when this instance borrows a parent.
+	Task *TaskBinding `json:"task,omitempty"`
+	// CheckoutParent preserves the original registration across association changes.
+	CheckoutParent string `json:"checkout_parent,omitempty"`
+	// Association exposes current selection separately from recorded launch provenance.
+	Association             *ProjectAssociation      `json:"association,omitempty"`
 	NativeOwnershipWarnings []NativeOwnershipWarning `json:"native_ownership_warnings,omitempty"`
 	ID                      string                   `json:"id"`
 	Execution               *ExecutionResult         `json:"execution,omitempty"`
@@ -112,6 +120,8 @@ type InstanceSummary struct {
 
 // ListResponse is one bounded page; NextAfterID is empty on the last page.
 type ListResponse struct {
+	// Checkout is opt-in daemon-resolved scope, including empty pages.
+	Checkout    *CheckoutIdentity `json:"checkout,omitempty"`
 	APIVersion  string            `json:"api_version"`
 	Instances   []InstanceSummary `json:"instances"`
 	NextAfterID string            `json:"next_after_id,omitempty"`
@@ -126,10 +136,16 @@ type DaemonStatusResponse struct {
 	LeaseDuration string `json:"lease_duration"`
 }
 
-// DestroyRequest authorizes explicit cleanup of one recorded instance.
+// DestroyContract acknowledges irreversible attempt-history erasure.
+const DestroyContract = "erase-attempt-history/v1"
+
+// DestroyRequest acknowledges erasure and authorizes explicit cleanup.
 // Force waives shared-resource ownership proof only for this invocation.
 type DestroyRequest struct {
-	APIVersion string `json:"api_version"`
-	InstanceID string `json:"instance_id"`
-	Force      bool   `json:"force,omitempty"`
+	// Target selects a recorded named scene instead of InstanceID.
+	Target     *SceneTarget `json:"target,omitempty"`
+	Contract   string       `json:"contract"`
+	APIVersion string       `json:"api_version"`
+	InstanceID string       `json:"instance_id"`
+	Force      bool         `json:"force,omitempty"`
 }

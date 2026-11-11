@@ -62,7 +62,7 @@ func TestPublicCommandConfiguration(t *testing.T) {
 		}
 	}
 	visit(root)
-	if actions != 44 || jsonFlags != 1 || root.ExitErrHandler == nil {
+	if actions != 53 || jsonFlags != 1 || root.ExitErrHandler == nil {
 		t.Fatal(actions, jsonFlags)
 	}
 	for _, c := range root.Commands {
@@ -219,6 +219,8 @@ func TestPublicHelpMetadata(t *testing.T) {
 	}{
 		{[]string{"secret"}, "<instance-id> <fixture-name>", []string{"requires --component", "backlot secret --component db INSTANCE_ID password"}},
 		{[]string{"fixtures"}, "<instance-id>", []string{"redacted", "backlot fixtures --component db INSTANCE_ID"}},
+		{[]string{"project", "diagnose"}, " ", []string{"without mutation", "preserves service/instance IDs"}},
+		{[]string{"project", "reassociate"}, " ", []string{"--apply", "--preview", "Private setup is a separate prerequisite"}},
 		{[]string{"project", "setup"}, " ", []string{"Inspect registered setup", "--edit", "--from private.yaml --reassociate", "does not import old credentials"}},
 		{[]string{"scene", "start"}, "<scene>", []string{"--attached owns", "backlot scene start dev"}},
 		{[]string{"scene", "status"}, "<scene>", []string{"without lifecycle ownership", "backlot scene status dev"}},

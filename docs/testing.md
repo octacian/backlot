@@ -2,7 +2,7 @@
 
 ## Setup
 
-Use the Go version declared in `go.mod` (currently 1.27.1), Git, and Make.
+Use the Go version declared in `go.mod` (currently 1.27.3), Git, and Make.
 Repository contributor tooling is Go-only; Node and a JavaScript package manager
 are not required by `make check`. The optional [application CI example](../examples/ci-scenes/README.md)
 pins its own Node/Playwright dependencies and runs in a separate Ubuntu workflow.
@@ -39,13 +39,13 @@ Run these from the repository root:
 | `make tools` | Install pinned development tooling locally |
 | `make lint` | Validate lint configuration and run golangci-lint |
 | `make adr-create TITLE="Decision title"` | Create a proposed ADR without overwriting records |
-| `make adr-verify` | Verify all ADR records |
-| `make adr-test` | Run ADR tooling tests |
+| `make adr-verify` | Alias for `make check-docs` |
+| `make todo-check` | Reject TODO comments without issue URLs |
 | `make schema-generate` | Regenerate committed editor schemas from `api/v1` |
 | `make skills-generate`, `make skills-check` | Generate/verify independent installed skill references, schemas and examples |
 | `make schema-check` | Reject stale generated schemas without writing |
-| `make check-implementation` | Run schema/notice drift checks, formatting, vet, lint, Go race tests, and build |
-| `make check-docs` | Run ADR tooling tests and verify ADR records |
+| `make check-implementation` | Run TODO and generated-output checks, formatting, vet, lint, Go race tests, and build |
+| `make check-docs` | Run the pinned Corestack record and local file-link checker |
 | `make check` | Run both implementation and documentation checks |
 
 Before committing Go/tooling changes, run `make check`. Documentation changes
@@ -74,7 +74,7 @@ multi-commit pushes.
 
 | Changed files | Jobs that run |
 | --- | --- |
-| `docs/` files or Markdown anywhere, including ADR additions/deletions | Docs workflow: ADR tooling tests and record verification |
+| Every change, including code-only changes | Docs workflow: Corestack record and local file-link verification |
 | Go/runtime sources, schemas, non-CI examples, `install.sh`, module/build/lint configuration | macOS/Ubuntu repository checks, Linux runtime, current-head scenes and project inputs |
 | `THIRD_PARTY_NOTICES.md` | Repository and Linux installation checks, plus Docs |
 | `actions/` implementation | Current-head scenes and project inputs |
@@ -85,11 +85,14 @@ multi-commit pushes.
 
 Markdown inside implementation/example directories stays documentation-only.
 The [Docs workflow](../.github/workflows/docs.yml) always owns documentation
-validation: it runs `make check-docs` whenever documentation or its tooling,
-module dependencies or Makefile change. Mixed implementation/documentation PRs
-run both workflows independently. The Check workflow runs
-`make check-implementation` and does not validate ADR records. Its Go test suite
-still tests ADR tooling code as part of the complete Go suite. The independent consumer is a manual
+validation: it runs the `make check-docs` checker on every PR and push to main,
+without path selection, since code-only changes can break record links. The checker is pinned
+to v0.2.0 in Makefile, AGENTS.md and workflows; it is a public Go tool rather than
+a runtime dependency. The equivalent Gitea workflow is
+[docs-check.yml](../.gitea/workflows/docs-check.yml). Mixed changes run applicable
+implementation gates independently. The Check workflow runs
+`make check-implementation`, including the linked-TODO check, and does not validate
+ADR records. The independent consumer is a manual
 [current-commit packaging smoke test](ci.md#independent-action-consumer), without
 browser shards or repeated lifecycle checks. It does not use path detection.
 Go package tests remain together: shared packages and separately built subprocesses
@@ -103,7 +106,8 @@ See [schema generation and editor setup](../schemas/README.md).
 
 Tests exercise strict manifest/config decoding, graph/reference validity, offline
 CLI JSON/errors, environment precedence, read-only seeds, secret redaction, tool
-availability and ADR validation. Daemon tests additionally exercise real temporary Git worktrees and aliases,
+availability. The external checker owns ADR format validation. Daemon tests
+additionally exercise real temporary Git worktrees and aliases,
 concurrent preparation, typed Unix-socket contracts, private snapshots, leases,
 shutdown, owned-child crashes and intent/effect recovery. See the
 [daemon guide](daemon.md). Native integration tests additionally build the real CLI, launch private fixture
@@ -114,7 +118,9 @@ provider suites below for those boundaries. Runtime integration tests must use
 owned resources and must never modify an operator's unrelated containers, routes,
 files, or databases.
 
-The race gate disables Go test result caching with `-count=1`. Native integration
+The race gate disables Go test result caching with `-count=1` and allows 20 minutes
+for each complete package suite. This whole-suite runner budget leaves application,
+fixture, lease and cleanup deadlines unchanged. Native integration
 builds and executes a separate CLI/guardian binary; changes to that subprocess's
 private helper code may leave the parent test binary unchanged, so cached results
 cannot validate the current runtime. `make check` and CI execute this suite fresh.
@@ -219,7 +225,9 @@ BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
 
 The suite builds the real race-instrumented CLI/daemon and uses uniquely owned
 containers, networks, volumes, private directories and loopback ports. It exercises
-MariaDB persistence/reset through CLI/daemon/Docker; drift rejection before stop;
+MariaDB persistence/reset through CLI/daemon/Docker; repeated instance network
+release/recreation with stable names and a retained `network.name` initializer
+witness; drift rejection before stop;
 failed/successful fresh-only jobs; each-start jobs; real concurrent worktrees and
 disposable runs; output serialization; partial allocation and interrupted cleanup;
 owned daemon crash recovery; uncertain ownership; foreign consumer blocking and
@@ -238,13 +246,27 @@ BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
   go test -race ./internal/daemon -run '^TestDisposableEvidenceDocker$' -count=1 -v
 ```
 
-This exercises container artifacts before removal, historical logs after destroy,
+This exercises container artifacts/logs before explicit destroy, successful destroy
+erasure with identity tombstones,
 exact job results, kept failure/cancellation/collection errors and healthy services,
+explicit kept-stop network release, shutdown network release with retained data,
 and injected directory-ownership cleanup failure with explicit recovery. Select
 it when changes affect these guarantees beyond existing CI coverage.
 The provider-independent `TestDisposableEvidenceNative` runs in `make check` and
 covers native artifacts, fixture metadata/secrets, kept cancellation and client
 loss, shutdown/crash retained data, and executable SIGINT/SIGTERM exit codes.
+
+The composition checkpoint uses the same owned fixture grant and cached
+`alpine:3.21`/`postgres:17` images:
+
+```sh
+BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
+  go test -race ./internal/daemon -run '^(TestComposeEarlyFlow|TestCompositionSharedSQL)$' -count=1 -v -timeout=8m
+```
+
+It checks real CLI/native/container environment, argv, readiness and SQL connection
+strings, original application failures, redaction and authenticated cleanup. The
+Linux runtime job includes it in the existing provider gate; HTTPS remains separate.
 
 ## HTTPS/mixed integration
 
@@ -254,7 +276,7 @@ image outside Backlot runtime (there are no implicit image pulls):
 
 ```sh
 go test -race ./internal/gateway/testdata/fixture -count=1 -v
-docker pull caddy:2.11.6
+docker pull caddy:2.11.7
 docker pull alpine:3.21
 BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
 BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
@@ -267,8 +289,8 @@ BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
 Run suites serially with exclusive fixture mutation ownership. Gateway fixtures
 use private cert/config/storage, dynamic ports, exact owned route effects and
 retained child handles or labeled containers. The container gateway is pinned to
-the Caddy 2.11.6 multi-platform digest
-`sha256:3422ce6de165df66534f9b9ba50efaf457114ec961763cc52f5dbdaac2972d73`.
+the Caddy 2.11.7 multi-platform digest
+`sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e`.
 Each suite builds a unique image from the generic static Go fixture source and
 pre-pulled `alpine:3.21` (including standard public CA roots);
 cleanup verifies ownership and removes fixture images/containers/networks and
@@ -311,7 +333,7 @@ Select this suite for affected managed-HTTPS guarantees lacking CI coverage. It 
 race-enabled CLI/native fixtures, uses dynamic IPv4/IPv6 loopback ports and a
 unique private daemon/CA state, and runs real CLI lifecycle and path traffic with
 normal host DNS. Private trust is explicit only in fixture clients/daemon process
-(`SSL_CERT_FILE` with Go 1.27.1 and an empty private `SSL_CERT_DIR`, plus fixture
+(`SSL_CERT_FILE` with Go 1.27.3 and an empty private `SSL_CERT_DIR`, plus fixture
 client root pools); production does not inject CA trust. Missing/wrong private
 trust must fail. Tests register authenticated cleanup before faults and preserve
 uncertain residuals. No existing gateway, trust store or resolver is changed.
@@ -475,7 +497,7 @@ already-present diagnostic image satisfying the [probe contract](daemon.md#expli
 ```sh
 BACKLOT_CADDY_TEST_BINARY=/absolute/path/to/caddy \
 BACKLOT_DOCKER_TEST_ENDPOINT=unix:///absolute/local/docker.sock \
-BACKLOT_DOCTOR_TEST_IMAGE=golang:1.27.1 \
+BACKLOT_DOCTOR_TEST_IMAGE=golang:1.27.3 \
   go test -race ./internal/daemon -run '^TestDoctor(Runtime|OwnedProbeCancellationAndRecovery)$' -count=1 -v
 ```
 
@@ -504,7 +526,7 @@ images; production/default gateway exposure stays unchanged.
 
 ## Native watcher example and browser HMR
 
-Prepare a private copy of `examples/native-watchers` with Go 1.27.1, Air 1.67.4,
+Prepare a private copy of `examples/native-watchers` with Go 1.27.3, Air 1.67.4,
 Node 26.8.1 and `npm ci --ignore-scripts` (Vite 8.3.4). Put those tools on the
 fixture daemon PATH. The test mutates the private copy's `main.js`; never point it
 at a working checkout. Select an existing private empty fixture root on a short
@@ -603,6 +625,16 @@ or faults; fault/reap retained children only after observing real effects. Recov
 retains the five-second API expectation; the aggregate timeout allows serial fixtures.
 Prove SQL database/user and owned runtime/image absence; retain cached base images
 and uncertain diagnostics.
+
+Within each test process, shared SQL fixtures lazily build one race-enabled host
+CLI, one non-race host consumer and one static Linux consumer (`GOOS=linux`,
+`CGO_ENABLED=0`). TestMain owns these immutable binaries through all scenario
+cleanup and removes them after a successful suite; failures retain their directory
+for diagnosis. Each new test process builds from current sources using the existing
+Go build cache. Missing provider opt-in and private supervisor/anchor helper paths
+do not initialize the bundle. Images, private state and SQL allocations remain
+independently owned by each scenario. Both engines' MainContracts checks cover
+ordinary Inspect/Fixtures/Logs/Shared redaction alongside selected startup disclosure.
 
 Select related [DockerRuntime](#dockerprivate-state-integration) and disposable
 evidence checks where changed guarantees lack CI coverage. Run mutating fixtures

@@ -186,6 +186,9 @@ func (s *store) stopManaged(r *managedRecord, group *native.Group) error {
 	if r.Status == "unconfigured" && r.Identity == nil && !r.Pending {
 		return nil
 	}
+	if err := s.publishedActive(); err != nil {
+		return err
+	}
 	if r.Pending {
 		previous, err := native.PreviousBoot(r.PendingBoot)
 		if err != nil || !previous {
@@ -321,15 +324,19 @@ func (s *service) gatewayControl(ctx context.Context, action string, request v1.
 }
 
 func (s *store) publishedActive() error {
+	boot, _ := native.CurrentBoot()
 	return s.db.View(func(tx *bolt.Tx) error {
 		return tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
 			var r record
 			if err := decodeRecord(data, string(key), &r); err != nil {
 				return err
 			}
-			i := r.Instance
-			if i.Plan.Publish != nil && i.Execution != nil && (active(i.Status) || i.Execution.Kept) {
-				return problem("gateway_busy", "stop all active published scenes before gateway stop/restart")
+			blocked, err := gatewayConsumerBlocked(tx, r, boot)
+			if err != nil {
+				return err
+			}
+			if blocked {
+				return problem("gateway_busy", "stop all active published scenes and dependent tasks before gateway stop/restart")
 			}
 			return nil
 		})
@@ -573,22 +580,27 @@ func (s *store) consumerCACertPath(snapshot plan.Snapshot) (string, error) {
 			if value.Redacted {
 				value = snapshot.Secrets[component.Name+"/environment/"+key]
 			}
-			if r := value.Symbolic; r != nil && r.Kind == "resource" && r.Field == "ca_cert_path" {
-				if snapshot.Plan.Publish == nil || snapshot.Plan.Publish.Resource != r.Name || snapshot.Plan.Resources[r.Name].Kind != "origin" {
-					return "", problem("invalid_contract", "ca_cert_path requires a selected consumer and published origin")
-				}
-				if component.Runtime == v1.Container {
-					found := false
-					for _, mount := range component.Mounts {
-						if mount.OriginCACert == r.Name && mount.ReadOnly {
-							found = true
+			if err := walkPlanned(value, func(v v1.Value) error {
+				if r := v.Ref; r != nil && r.Kind == "resource" && r.Field == "ca_cert_path" {
+					if snapshot.Plan.Publish == nil || snapshot.Plan.Publish.Resource != r.Name || snapshot.Plan.Resources[r.Name].Kind != "origin" {
+						return problem("invalid_contract", "ca_cert_path requires a selected consumer and published origin")
+					}
+					if component.Runtime == v1.Container {
+						found := false
+						for _, mount := range component.Mounts {
+							if mount.OriginCACert == r.Name && mount.ReadOnly {
+								found = true
+							}
+						}
+						if !found {
+							return problem("invalid_contract", "container ca_cert_path requires an explicit read-only origin_ca_cert mount")
 						}
 					}
-					if !found {
-						return "", problem("invalid_contract", "container ca_cert_path requires an explicit read-only origin_ca_cert mount")
-					}
+					needed = true
 				}
-				needed = true
+				return nil
+			}); err != nil {
+				return "", err
 			}
 		}
 	}

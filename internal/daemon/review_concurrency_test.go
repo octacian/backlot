@@ -35,10 +35,15 @@ func testConsumedPortConflict(t *testing.T, binary, kind, reference string) {
 	h.extraPIDFiles = append(h.extraPIDFiles, firstPIDs)
 	first.Resources = []string{"port"}
 	ref := &v1.Reference{Kind: "resource", Name: "port", Field: "port"}
-	if reference == "service" {
+	if strings.TrimPrefix(reference, "composed-") == "service" {
 		ref = &v1.Reference{Kind: "service", Name: "server", Field: "port", Port: "http"}
 	}
-	first.Environment.Assign["BACKEND_PORT"] = v1.Value{Ref: ref, Secret: kind == "job"}
+	value := v1.Value{Ref: ref}
+	if strings.HasPrefix(reference, "composed-") {
+		value = composeFormat("%s", value)
+	}
+	value.Secret = kind == "job"
+	first.Environment.Assign["BACKEND_PORT"] = value
 	resources := []string{"port"}
 	condition := v1.Completed
 	if kind == "service" {
@@ -55,7 +60,7 @@ func testConsumedPortConflict(t *testing.T, binary, kind, reference string) {
 		first.Policy = v1.EachStart
 		first.Ports = nil
 		first.Readiness = nil
-		first.Command = &v1.Command{Tool: "fixture", Args: []string{"-test.run=^TestNativeFixtureProcess$", "--", "prep"}}
+		first.Command = &v1.Command{Tool: "fixture", Args: v1.StringArguments("-test.run=^TestNativeFixtureProcess$", "--", "prep")}
 		first.Environment.Assign["JOBPIDFILE"] = v1.Value{Literal: ptr(firstPIDs)}
 	}
 	h.manifest.Components["ahead"] = first
@@ -194,7 +199,7 @@ func fixtureNumbers(t *testing.T, path string) []int {
 func testIndependentNativeExpiry(t *testing.T, binary, action string) {
 	h := newNativeHarness(t, binary, "500ms")
 	job := h.manifest.Components["job"]
-	job.Command = &v1.Command{Tool: "fixture", Args: []string{"-test.run=^TestNativeFixtureProcess$", "--", "never"}}
+	job.Command = &v1.Command{Tool: "fixture", Args: v1.StringArguments("-test.run=^TestNativeFixtureProcess$", "--", "never")}
 	h.manifest.Components["job"] = job
 	start := func(name, grace string) v1.InstanceResponse {
 		serverPIDs := filepath.Join(h.project, name+"-server-pids")

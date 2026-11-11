@@ -70,6 +70,9 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	if len(retained.NativeAbandonments) != 1 || !retained.NativeAbandonments[0].Pending || retained.NativeAbandonments[0].Result.CleanupFailure == "" || *retained.NativeAbandonments[0].Result.TerminalExitCode != 17 {
 		t.Fatal("exact private history lost")
 	}
+	if forced.Execution.Settlement == nil || forced.Execution.Settlement.State == v1.ConsumerSettled {
+		t.Fatal("force waiver fabricated verified consumer release")
+	}
 	if len(forced.Execution.NativeCleanup) != 1 || forced.Execution.NativeCleanup[0] != original.NativeCleanup[0] || forced.Execution.NativeCleanup[0].FencesResources(forced.NativeOwnershipWarnings) {
 		t.Fatal("waiver lost historical observation or kept native claim fenced")
 	}
@@ -117,6 +120,16 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	effectiveDigest := strings.Repeat("a", 64)
+	snap, err := s.store.snapshot(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Plan.EffectiveConfigDigest = effectiveDigest
+	snap.Plan.Lifetime = v1.Persistent
+	if err := s.store.replaceSnapshot(target, snap); err != nil {
+		t.Fatal(err)
+	}
 	// Replacement changes latest attempt/result, never the durable private history.
 	next := &v1.ExecutionResult{Attempt: newID(), TerminalExitCode: new(0), Components: []v1.ComponentResult{{Name: "test", Status: "completed", ExitCode: new(0)}}}
 	if _, err := s.store.acceptExecution(target, runtimeRecord{Attempt: next.Attempt}, next, true); err != nil {
@@ -131,17 +144,6 @@ func TestNativeWaiverAtomicScopeAndRetention(t *testing.T) {
 	}
 	warning := v1.NativeOwnershipWarning{Message: nativeWaiverWarning, Attempt: original.Attempt + `<script>attempt</script>`, RecordedAt: retained.NativeAbandonments[0].RecordedAt + `<script>time</script>`}
 	// Combined configuration/recovery reports must retain both independent facts.
-	effectiveDigest := strings.Repeat("a", 64)
-	if err := s.store.db.Update(func(tx *bolt.Tx) error {
-		r, err := load(tx, target)
-		if err != nil {
-			return err
-		}
-		r.Instance.Plan.EffectiveConfigDigest = effectiveDigest
-		return put(tx, "instances", target, r)
-	}); err != nil {
-		t.Fatal(err)
-	}
 	request := v1.ExportRequest{APIVersion: v1.Version, InstanceID: target, Output: filepath.Join(privateExportParent(t), "report")}
 	report, err := s.export(context.Background(), request)
 	if err != nil || !report.Complete || len(report.Result.NativeOwnershipWarnings) != 1 || report.Result.NativeOwnershipWarnings[0] != warning {

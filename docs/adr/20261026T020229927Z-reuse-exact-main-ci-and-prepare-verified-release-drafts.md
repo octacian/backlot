@@ -2,73 +2,60 @@
 title: 'Reuse exact main CI and prepare verified release drafts'
 date: '2026-10-26'
 status: accepted
+implementation: implemented
 summary: 'Reuse trusted exact-commit main CI while freshly verifying release archives and leaving generated GitHub notes in an unpublished draft for human review.'
 tags: [release, compatibility, tooling, ci]
-supersedes: [20261023T212448687Z-publish-immutable-versioned-releases-with-goreleaser.md]
+supersedes: [/docs/adr/20261023T212448687Z-publish-immutable-versioned-releases-with-goreleaser.md]
 superseded_by: []
+related: []
+tracking: ["https://github.com/octacian/backlot/issues/85", "https://github.com/octacian/backlot/issues/86"]
+implemented_by: ["https://github.com/octacian/backlot/commit/21d16765c6c6f01e06518fcbbd2db3f4e312a044"]
 ---
 
 # Reuse exact main CI and prepare verified release drafts
 
-Reuse trusted exact-commit `main` CI and prepare a verified GitHub draft with
-generated notes for human curation and publication. Incorporate the
-[previous release decision](20261023T212448687Z-publish-immutable-versioned-releases-with-goreleaser.md) in full,
-except the repository-check and notes/publication changes below.
+## Context and Problem Statement
 
-## Context
+Tag builds repeat repository checks already passed by the exact main source.
+An earlier release also skipped final archive smoke gates after an intentionally
+skipped changes ancestor. Publication must verify final assets without unnecessary
+full-suite repetition or automatic release exposure.
 
-[Issue #85](https://github.com/octacian/backlot/issues/85) identifies duplicate
-repository checks on tags whose exact source already passed main CI.
-[Issue #86](https://github.com/octacian/backlot/issues/86) records skipped archive
-smokes and publication on `v0.1.0` after an intentionally skipped `changes` ancestor.
+## Considered Options
 
-## Decision
+- Reuse trusted exact-main CI and retain fresh archive/asset verification.
+- Repeat repository checks on tags: safe but duplicates exact-source coverage.
+- Accept PR/older/partial successes: misses merged coverage or newer adverse evidence.
+- Auto-publish or checked-in version notes: removes human curation or duplicates
+  the canonical GitHub release record.
 
-- Require trusted `main` push runs for the exact full tagged SHA, all completed
-  with conclusion `success`, from the five workflow paths in the [release procedure](../preparing-a-release.md).
-  Match workflow identity and repository/head-repository ownership. Each workflow's
-  newest relevant run and latest attempt are authoritative, never an older success.
-  Discovery must be complete and fail closed on missing, inaccessible, malformed,
-  unknown, pending or adverse evidence, including skipped workflows. Successful
-  workflows retain their existing legitimate job-level path skips.
-- Require successful main CI preflight before packaging and recheck immediately
-  before draft creation. These are bounded checks, not continuous validation of
-  later reruns or edits. Retain the fresh final-archive packaging, native-smoke and
-  exact uploaded-asset verification gates in the [workflow](../../.github/workflows/release.yml)
-  and [script](../../.github/scripts/release.sh), uploading the smoked bytes without rebuilding.
-- Make eligibility explicit across the skipped tag `changes` ancestor: smokes
-  require successful packaging and no cancellation; drafting requires successful
-  preflight, packaging and both native smokes and no cancellation. Failed,
-  cancelled or unexpectedly skipped required gates block drafting. Preserve
-  PR/main path selection and tag-only drafting; preflight receives Actions read access.
-- Use GitHub-generated notes as the canonical per-release record in an unpublished
-  verified draft. Keep durable compatibility/migration guidance in the repository;
-  link tagged installation/upgrade, migration docs and schemas from the notes.
-  Retain historical notes. A maintainer curates changes, targets, compatibility,
-  known issues and evidence limits, confirms the mutable draft still has its
-  verified assets, then manually publishes. Follow the [procedure](../preparing-a-release.md)
-  for the ordinary notes baseline and failed-draft recovery.
+## Decision Outcome
 
-## Consequences
+Require complete trusted main-push CI for the exact tagged SHA from the required
+workflow identities. Repository ownership, newest relevant runs and latest attempts
+matter; missing, inaccessible, malformed, pending or adverse evidence fails closed.
+Legitimate successful workflow-level outcomes may include their normal job skips;
+a skipped required workflow is not success.
 
-Maintainers own the workflow list and must complete/rerun exact-SHA main CI when its
-evidence is unavailable or unsuccessful. GitHub API access is required at both
-gates; generated prose and subsequent draft edits remain a human review duty.
+Check eligibility before packaging and again immediately before draft creation.
+Keep fresh native smoke of both exact final archives and verification of the uploaded
+asset set/bytes, without rebuilding. Required packaging/smokes/preflight must succeed
+across intentionally skipped ancestors; failure/cancellation/unexpected skip blocks
+drafting. The [release procedure](/docs/preparing-a-release.md) owns the workflow list.
 
-## Alternatives considered
+Create a verified unpublished draft with generated notes and tagged compatibility/
+installation/schema links. A maintainer curates notes, reconfirms the mutable draft
+assets and publishes manually. Keep the prior reproducibility, immutability and
+failed-draft safeguards; this replaces only duplicate repository checks and the
+notes/publication steps.
 
-- **Repeat repository checks on tags:** safe, but duplicates exact-source main CI.
-- **Accept PR checks, an older success or only Check:** misses merged-source
-  coverage or newer adverse evidence. Requiring every job would undo path selection.
-- **Auto-publish or require checked-in version notes:** removes human curation or
-  duplicates GitHub's record.
+### Consequences
 
-## Revisit when
+Maintainers own workflow-list changes, exact-SHA reruns when evidence is unavailable,
+GitHub API availability and final publication review. Bounded preflight does not
+continuously validate later reruns or draft edits. No release service or new runtime
+boundary is introduced.
 
-Automatic workflows, their job-selection trust model or GitHub run/attempt semantics
-change, or maintainers need automatic publication or continuous draft validation.
+## More Information
 
-## References
-
-- [Packaging checks and limits](../testing.md#release-packaging-and-publication), [release procedure and recovery](../preparing-a-release.md)
-- [Guard tests](../../cmd/backlot/release_test.go), [original tag run](https://github.com/octacian/backlot/actions/runs/40254695599)
+[Release guard](/.github/scripts/release.sh), [guard tests](/cmd/backlot/release_test.go).

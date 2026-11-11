@@ -161,7 +161,7 @@ func (h *harness) jobObservationFailure(collection bool) {
 		t.Fatal("job manifest malformed")
 	}
 	image := literal("alpine:3.21")
-	m.Components["observation-job"] = v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: &image, Args: []string{"sh", "-c", `echo job-ready; while true; do echo job-tick; sleep 0.1; done`}}
+	m.Components["observation-job"] = v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: &image, Args: v1.StringArguments("sh", "-c", `echo job-ready; while true; do echo job-tick; sleep 0.1; done`)}
 	m.Scenes["observation-job"] = v1.Scene{Lifetime: v1.Disposable, Components: []string{"observation-job"}, TerminalJob: "observation-job"}
 	h.writeManifest(m)
 	child.config = configPath

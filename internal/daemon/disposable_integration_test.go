@@ -46,7 +46,7 @@ func TestDisposableEvidenceNative(t *testing.T) {
 			if mode == "cancellation" || mode == "client-loss" || mode == "shutdown" || mode == "crash" {
 				script += "; exec sleep 60"
 			}
-			job.Command = &v1.Command{Tool: "sh", Args: []string{"-c", script, "job"}}
+			job.Command = &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", script, "job")}
 			job.Artifacts = map[string]v1.ArtifactSource{"report": {Path: "evidence/report"}}
 			if mode == "collection-failure" {
 				job.Artifacts["missing"] = v1.ArtifactSource{Path: "missing-report"}
@@ -63,7 +63,11 @@ func TestDisposableEvidenceNative(t *testing.T) {
 				t.Fatal(err)
 			}
 			id := r.Instance.ID
-			waitComponentLog(t, h, id, "job", "job-stdout")
+			if mode == "client-loss" {
+				waitComponentLog(t, h, id, "job", "job-stdout", r.LeaseToken)
+			} else {
+				waitComponentLog(t, h, id, "job", "job-stdout")
+			}
 			if mode == "cancellation" {
 				if _, err := h.cli.StopExecution(context.Background(), id); err != nil {
 					t.Fatal(err)
@@ -164,8 +168,15 @@ func TestDisposableEvidenceNative(t *testing.T) {
 			if strings.Contains(string(encoded), secret.Fixtures[0].Value) {
 				t.Fatal("ordinary result leaked fixture secret")
 			}
-			if mode == "collection-failure" {
-				h.expectShutdownFailureAfterCleanup("collection_failed", h.guardianCapabilities(id))
+
+			logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "job"})
+			if err != nil || len(logs.Records) == 0 {
+				t.Fatal("retained output lost before destroy", logs, err)
+			}
+			for _, record := range logs.Records {
+				if record.Attempt != result.Attempt || record.InstanceID != id || record.Component != "job" || record.Time == "" || record.Stream == "" {
+					t.Fatal("log context lost", record)
+				}
 			}
 			if _, err := h.cli.Destroy(context.Background(), id); err != nil {
 				t.Fatal(err)
@@ -175,14 +186,9 @@ func TestDisposableEvidenceNative(t *testing.T) {
 					t.Fatal("explicit destroy retained data", err)
 				}
 			}
-			logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "job"})
-			if err != nil || len(logs.Records) == 0 {
-				t.Fatal("historical output lost after destroy", logs, err)
-			}
-			for _, record := range logs.Records {
-				if record.Attempt != result.Attempt || record.InstanceID != id || record.Component != "job" || record.Time == "" || record.Stream == "" {
-					t.Fatal("log context lost", record)
-				}
+			logs, err = h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "job"})
+			if err != nil || len(logs.Records) != 0 {
+				t.Fatal("destroy retained output", logs, err)
 			}
 		})
 	}
@@ -190,7 +196,7 @@ func TestDisposableEvidenceNative(t *testing.T) {
 		t.Run("cli-signal-"+signal.String(), func(t *testing.T) {
 			h := newNativeHarness(t, binary)
 			job := h.manifest.Components["job"]
-			job.Command.Args[len(job.Command.Args)-1] = "never"
+			job.Command.Args[len(job.Command.Args)-1] = v1.StringArguments("never")[0]
 			h.manifest.Components["job"] = job
 			h.write()
 			command := exec.Command(binary, "run", "test", "--project", h.project, "--state-dir", h.dir, "--stop-grace", "50ms", "--json")
@@ -238,7 +244,7 @@ func TestDisposableEvidenceNative(t *testing.T) {
 	}
 }
 
-func waitComponentLog(t *testing.T, h *nativeHarness, id, component, needle string) {
+func waitComponentLog(t *testing.T, h *nativeHarness, id, component, needle string, leaseToken ...string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -251,9 +257,17 @@ func waitComponentLog(t *testing.T, h *nativeHarness, id, component, needle stri
 				return
 			}
 		}
+		// Lease-loss fixtures retain their capability until the observed-effect
+		// barrier, then stop renewing to exercise loss rather than startup latency.
+		if len(leaseToken) > 0 {
+			if _, err := h.cli.Renew(context.Background(), id, leaseToken[0]); err != nil {
+				t.Fatal("startup lease renewal", err)
+			}
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("job output did not arrive")
+	observed, err := h.cli.Inspect(context.Background(), id)
+	t.Fatalf("job output did not arrive: status=%s result=%+v error=%v", observed.Instance.Status, observed.Instance.Execution, err)
 }
 
 func TestCancelledOutputWaiterArtifacts(t *testing.T) {
@@ -263,11 +277,11 @@ func TestCancelledOutputWaiterArtifacts(t *testing.T) {
 	}
 	h := newNativeHarness(t, binary, "30s")
 	h.manifest.Tools["sh"] = "/bin/sh"
-	h.manifest.Outputs = map[string]v1.Output{"evidence": {Path: "evidence", ConcurrencyGroup: "reports"}}
+	h.manifest.Outputs = map[string]v1.Output{"evidence": {Path: "evidence", ConcurrencyGroup: "reports", EmptyBeforeExecution: true}}
 	job := h.manifest.Components["job"]
 	job.Outputs = []string{"evidence"}
 	job.Environment.Assign["RUN_ID"] = v1.Value{Ref: &v1.Reference{Kind: "instance", Field: "id"}}
-	job.Command = &v1.Command{Tool: "sh", Args: []string{"-c", "mkdir -p evidence; printf '%s' \"$RUN_ID\" > evidence/report; echo report-owned; exec sleep 60"}}
+	job.Command = &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "mkdir -p evidence; printf '%s' \"$RUN_ID\" > evidence/report; echo report-owned; exec sleep 60")}
 	job.Artifacts = map[string]v1.ArtifactSource{"report": {Path: "evidence/report"}}
 	h.manifest.Components["job"] = job
 	h.write()
@@ -348,7 +362,7 @@ func TestCLIResultNative(t *testing.T) {
 			}
 			h.manifest.Tools["sh"] = "/bin/sh"
 			job := h.manifest.Components["job"]
-			job.Command = &v1.Command{Tool: "sh", Args: []string{"-c", fmt.Sprintf("printf 'witness:<%%s>\\n' \"$@\"; exit %d", code), "job"}}
+			job.Command = &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", fmt.Sprintf("printf 'witness:<%%s>\\n' \"$@\"; exit %d", code), "job")}
 			h.manifest.Components["job"] = job
 			h.write()
 			command := exec.Command(binary, "run", "test", "--project", h.project, "--state-dir", h.dir, "--stop-grace", "50ms", "--json", "--", "argument with spaces", "--selector", "")

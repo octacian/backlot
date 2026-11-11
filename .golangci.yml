@@ -15,6 +15,7 @@ linters:
   settings:
     revive:
       rules:
+        - name: package-comments
         - name: exported
           arguments:
             - checkPrivateReceivers

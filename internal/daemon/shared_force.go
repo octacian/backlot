@@ -73,7 +73,7 @@ func (s *store) releaseSharedAllocation(ctx context.Context, record *sharedServi
 			return result, nil
 		}
 	}
-	if err := s.startSharedMode(ctx, record, force); err != nil {
+	if err := s.startSharedMode(ctx, record, force, "allocation_release"); err != nil {
 		return result, err
 	}
 	db, err := sharedDB(*record)
@@ -108,15 +108,15 @@ func (s *store) checkSharedReleaseCollision(instanceID, name string, target shar
 
 // stopForcedShared targets only the recorded container. It never authenticates
 // native processes by PID and never detaches or removes foreign consumers.
-func (s *store) stopForcedShared(ctx context.Context, record *sharedServiceRecord) (resultErr error) {
-	defer func() { resultErr = s.sharedOperationResult(record, resultErr) }()
+func (s *store) stopForcedShared(ctx context.Context, record *sharedServiceRecord, cause string) (resultErr error) {
+	defer func() { resultErr = s.sharedOperationResult(record, cause, resultErr) }()
 	d, err := newDocker(record.Endpoint)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = d.Close() }()
 	if err = verifySharedResource(ctx, d, record.Server, true); errdefs.IsNotFound(err) {
-		return nil
+		return s.sharedStopped(record, cause)
 	} else if err != nil {
 		return sharedProviderError(err)
 	}
@@ -127,7 +127,7 @@ func (s *store) stopForcedShared(ctx context.Context, record *sharedServiceRecor
 		if err != nil {
 			return sharedProviderError(err)
 		}
-		if err = s.saveShared(*record); err != nil {
+		if err = s.saveShared(record, cause); err != nil {
 			return err
 		}
 		handle = record.Server.ID
@@ -141,7 +141,7 @@ func (s *store) stopForcedShared(ctx context.Context, record *sharedServiceRecor
 	}
 	out, err := d.ContainerInspect(ctx, handle, client.ContainerInspectOptions{})
 	if errdefs.IsNotFound(err) {
-		return nil
+		return s.sharedStopped(record, cause)
 	}
 	if err != nil {
 		return sharedProviderError(err)
@@ -149,7 +149,7 @@ func (s *store) stopForcedShared(ctx context.Context, record *sharedServiceRecor
 	if out.Container.State == nil || out.Container.State.Running {
 		return problem("cleanup_failed", "shared server remains live; obligation retained")
 	}
-	return s.saveShared(*record)
+	return s.sharedStopped(record, cause)
 }
 
 // removeForcedSharedResource never forces provider consumer checks or implicitly

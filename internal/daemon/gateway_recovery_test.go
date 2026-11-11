@@ -14,6 +14,8 @@ import (
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/gateway"
 	"github.com/octacian/backlot/internal/gateway/gatewaytest"
+	"github.com/octacian/backlot/internal/manifest"
+	bolt "go.etcd.io/bbolt"
 )
 
 func TestShutdownRetainsUnavailableRecoveredRoute(t *testing.T) {
@@ -37,10 +39,21 @@ func TestShutdownRetainsUnavailableRecoveredRoute(t *testing.T) {
 	}
 	result := &v1.ExecutionResult{Attempt: newID(), CleanupFailure: "previous unavailable recovery"}
 	id := prepared.Instance.ID
+	if err := f.s.store.db.Update(func(tx *bolt.Tx) error {
+		r, err := load(tx, id)
+		if err != nil {
+			return err
+		}
+		r.Instance.Plan.Publish = &v1.Publication{Resource: "origin"}
+		return put(tx, "instances", id, r)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := f.s.store.execution(id, v1.Interrupted, result); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.s.store.saveRuntime(id, runtimeRecord{Attempt: result.Attempt, Gateway: &intent}); err != nil {
+	// Prior-boot intent supplies independent consumer absence proof without launching OS work.
+	if err := f.s.store.saveRuntime(id, runtimeRecord{Attempt: result.Attempt, Gateway: &intent, LaunchPending: true, PendingBoot: "00000000-0000-0000-0000-000000000001"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.s.stop(); err == nil {
@@ -53,6 +66,53 @@ func TestShutdownRetainsUnavailableRecoveredRoute(t *testing.T) {
 	instance, err := f.s.store.inspect(id)
 	if err != nil || instance.Status != v1.Interrupted || instance.Execution.CleanupFailure == "" {
 		t.Fatal("failed cleanup uncertainty not preserved", err)
+	}
+	if !journal.GatewayOnlyCleanup {
+		t.Fatal("route unavailability obscured successful consumer cleanup")
+	}
+	managed := managedRecord{Scope: newID(), Config: manifest.CaddyDefaults(v1.CaddyConfig{Mode: "managed", Executable: "/explicit/caddy"}), Status: "uncertain", Pending: true}
+	if err := f.s.store.saveManaged(managed); err != nil {
+		t.Fatal(err)
+	}
+	managed, err = f.s.store.managed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &service{store: f.s.store}
+	_, err = svc.gatewayControl(context.Background(), "stop", v1.GatewayRequest{})
+	code(t, err, "gateway_ownership")
+	forced, err := svc.gatewayControl(context.Background(), "stop", v1.GatewayRequest{Force: true, ExpectedClaimRevision: managed.ClaimRevision})
+	if err != nil || len(forced.NativeOwnershipWarnings) != 1 {
+		t.Fatal("route-only uncertainty prevented explicit native waiver", forced, err)
+	}
+	retained, err := f.s.store.runtime(id)
+	if err != nil || retained.Gateway == nil || retained.Gateway.ID != intent.ID {
+		t.Fatal("gateway waiver discarded scene route authority", err)
+	}
+	// An unresolved launch is an independent consumer obligation, even with the same route failure.
+	retained.LaunchPending = true
+	if err := f.s.store.saveRuntime(id, retained); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.store.recoverExecution(id); err != nil {
+		t.Fatal(err)
+	}
+	retained, err = f.s.store.runtime(id)
+	if err != nil || retained.GatewayOnlyCleanup {
+		t.Fatal("uncertain native consumer classified as route-only", err)
+	}
+	_, err = svc.gatewayControl(context.Background(), "stop", v1.GatewayRequest{Force: true, ExpectedClaimRevision: managed.ClaimRevision})
+	code(t, err, "gateway_busy")
+	retained.LaunchPending = false
+	if err := f.s.store.saveRuntime(id, retained); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.store.recoverExecution(id); err != nil {
+		t.Fatal(err)
+	}
+	retained, err = f.s.store.runtime(id)
+	if err != nil || retained.GatewayOnlyCleanup {
+		t.Fatal("empty legacy journal manufactured consumer absence proof", err)
 	}
 }
 

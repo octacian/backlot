@@ -49,17 +49,19 @@ func (s *service) stopKept(id string, entry *execution) (v1.Instance, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cleanup = errors.Join(cleanup, s.store.removeGateway(ctx, id, &journal))
-	for _, observed := range instance.Execution.NativeCleanup {
-		if observed.FencesResources(instance.NativeOwnershipWarnings) {
-			cleanup = errors.Join(cleanup, errors.New("native cleanup observation remains incomplete"))
-			break
-		}
-	}
+	cleanup = errors.Join(cleanup, verifyNativeRelease(journal, instance.Execution))
 	if cleanup == nil && entry.resources != nil {
 		cleanup = s.store.cleanupContainers(ctx, id, entry.resources, entry.docker)
+		if cleanup == nil {
+			cleanup = s.store.removeNetworks(ctx, id, entry.resources, entry.docker)
+		}
+	}
+	if cleanup == nil {
+		cleanup = s.store.recordConsumerRelease(ctx, id, journal, v1.SettlementExplicitStop, true)
 	}
 	if cleanup != nil {
 		instance.Execution.CleanupFailure = "retained runtime cleanup failed"
+		instance.Execution.CleanupDetails = cleanupDetails(cleanup)
 		_, saveErr := s.store.execution(id, v1.Failed, instance.Execution)
 		return instance, errors.Join(problem("cleanup_failed", instance.Execution.CleanupFailure), saveErr)
 	}
@@ -68,6 +70,7 @@ func (s *service) stopKept(id string, entry *execution) (v1.Instance, error) {
 	}
 	entry.kept = false
 	instance.Execution.Kept = false
+	instance.Execution.CleanupFailure, instance.Execution.CleanupDetails = "", nil
 	for i := range instance.Execution.Components {
 		if instance.Execution.Components[i].Status == "ready" {
 			instance.Execution.Components[i].Status = "stopped"
@@ -78,16 +81,23 @@ func (s *service) stopKept(id string, entry *execution) (v1.Instance, error) {
 	if release != nil {
 		release()
 	}
-	return s.store.execution(id, v1.Stopped, instance.Execution)
+	status := v1.Stopped
+	if instance.Execution.Outcome == v1.Cancelled {
+		status = v1.Cancelled
+	}
+	return s.store.execution(id, status, instance.Execution)
 }
 
 // sanitizeResult applies only to Backlot diagnostics, never application streams.
 func sanitizeResult(result *v1.ExecutionResult, snapshot plan.Snapshot, entry *execution) {
 	redact := func(text string) string {
 		for _, value := range snapshot.Secrets {
-			if value.Literal != nil && *value.Literal != "" {
-				text = strings.ReplaceAll(text, *value.Literal, "[redacted]")
-			}
+			_ = walkPlanned(value, func(v v1.Value) error {
+				if v.Literal != nil && *v.Literal != "" {
+					text = strings.ReplaceAll(text, *v.Literal, "[redacted]")
+				}
+				return nil
+			})
 		}
 		if entry.resources != nil {
 			for _, resource := range entry.resources.Resources {

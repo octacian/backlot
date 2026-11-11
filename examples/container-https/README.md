@@ -2,7 +2,7 @@
 
 Run a native Go frontend/API, Linux Go/Alpine SSR service and disposable test
 through one canonical managed HTTPS origin. Targets: macOS ARM64 Docker Desktop bridges and the
-[Linux amd64 rootful bridge topology](../../docs/platforms.md), with stock native Caddy 2.11.6. Container clients use ordinary DNS and
+[Linux amd64 rootful bridge topology](../../docs/platforms.md), with stock native Caddy 2.11.7. Container clients use ordinary DNS and
 Go root loading; no custom dialer or TLS verification bypass exists.
 
 ## Prepare

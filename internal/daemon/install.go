@@ -14,14 +14,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
 	v1 "github.com/octacian/backlot/api/v1"
-	"github.com/octacian/backlot/internal/client"
 	"github.com/octacian/backlot/internal/localipc"
 	"github.com/octacian/backlot/internal/manifest"
 )
@@ -29,7 +27,7 @@ import (
 // InstallOptions selects one executable and state root; Consent must use a terminal.
 type InstallOptions struct {
 	Directory, Stage, Destination, Version string
-	Consent                                func([]v1.Instance) error
+	Consent                                func([]v1.ActivityResponse) error
 }
 
 var installVersion = regexp.MustCompile(`^v0\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
@@ -131,19 +129,30 @@ func Install(ctx context.Context, o InstallOptions) (result error) {
 		if !installStatus(status, identity.StateVersion, "running") {
 			return fmt.Errorf("daemon status is incompatible or uncertain")
 		}
-		instances, err := installInstances(ctx, o.Destination, o.Directory)
+		pages, err := installActivity(ctx, o.Destination, o.Directory)
 		if err != nil {
 			return err
 		}
 		if o.Consent == nil {
 			return fmt.Errorf("shutdown requires terminal consent")
 		}
-		if err := o.Consent(instances); err != nil {
+		if err := o.Consent(pages); err != nil {
 			return err
 		}
 		if err := installUnchanged(o.Destination, old, oldHash); err != nil {
 			return err
 		}
+		var stopped v1.StopAllResponse
+		if err := installCLI(ctx, o.Destination, &stopped, "stop", "--all", "--state-dir", o.Directory); err != nil {
+			return err
+		}
+		if err := stopped.Validate(); err != nil {
+			return err
+		}
+		if stopped.Error != nil || stopped.DaemonGeneration != pages[0].DaemonGeneration {
+			return fmt.Errorf("bulk stop incomplete or daemon changed; inspect activity with the old executable before recovery")
+		}
+		// Bulk stop reopens admission; daemon shutdown must still fence and join later work.
 		runningPID := status.PID
 		status = v1.DaemonStatusResponse{}
 		if err := installCLI(ctx, o.Destination, &status, append([]string{"daemon", "stop"}, args...)...); err != nil {
@@ -267,7 +276,11 @@ func (b *installOutput) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 func installCLI(ctx context.Context, binary string, result any, args ...string) error {
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	budget := 45 * time.Second
+	if args[0] == "stop" {
+		budget = 2*time.Minute + 15*time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	command := exec.CommandContext(ctx, binary, append(args, "--json")...)
 	var data installOutput
@@ -286,60 +299,35 @@ func installStatus(s v1.DaemonStatusResponse, state int, status string) bool {
 	return s.APIVersion == v1.Version && s.StateVersion == state && s.Status == status && s.PID > 0 && err == nil && lease >= 100*time.Millisecond && lease <= 24*time.Hour
 }
 
-func installInstances(ctx context.Context, binary, directory string) ([]v1.Instance, error) {
+func installActivity(ctx context.Context, binary, directory string) ([]v1.ActivityResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	affected := []v1.Instance{}
+	pages := []v1.ActivityResponse{}
 	after := ""
-	for count := 0; count < 10000; {
-		var page v1.ListResponse
-		if err := installCLI(ctx, binary, &page, "list", "--state-dir", directory, "--limit", "100", "--after", after); err != nil {
+	for range 100 {
+		var page v1.ActivityResponse
+		if err := installCLI(ctx, binary, &page, "activity", "--state-dir", directory, "--limit", "100", "--after", after); err != nil {
 			return nil, err
 		}
-		if err := client.ValidateList(page); err != nil {
+		if err := page.Validate(); err != nil {
 			return nil, err
 		}
-		for _, summary := range page.Instances {
-			if summary.ID <= after {
-				return nil, fmt.Errorf("invalid instance identity or continuation")
-			}
-			after = summary.ID
-			count++
-			var response v1.InstanceResponse
-			if err := installCLI(ctx, binary, &response, "inspect", "--state-dir", directory, summary.ID); err != nil {
-				return nil, err
-			}
-			i := response.Instance
-			if response.APIVersion != v1.Version || response.Attachment != nil || i.ID != summary.ID {
-				return nil, fmt.Errorf("invalid instance inspection")
-			}
-			if err := client.ValidateInstance(response); err != nil {
-				return nil, err
-			}
-
-			active := i.Status == v1.Starting || i.Status == v1.RuntimeReady || i.Status == v1.Stopping
-			if active || i.Execution != nil && (i.Execution.Kept || i.Execution.CleanupFailure != "") {
-				affected = append(affected, i)
+		if len(pages) > 0 && page.DaemonGeneration != pages[0].DaemonGeneration {
+			return nil, fmt.Errorf("daemon changed during activity inspection")
+		}
+		for _, entry := range page.Entries {
+			if entry.Key <= after {
+				return nil, fmt.Errorf("invalid activity continuation")
 			}
 		}
-		if page.NextAfterID == "" {
-			return affected, nil
+		if page.NextAfter != "" && (page.NextAfter <= after || len(page.Entries) > 0 && page.NextAfter < page.Entries[len(page.Entries)-1].Key) {
+			return nil, fmt.Errorf("invalid activity continuation")
 		}
+		pages = append(pages, page)
+		if page.Complete {
+			return pages, nil
+		}
+		after = page.NextAfter
 	}
-	return nil, fmt.Errorf("instance inspection limit exceeded")
-}
-
-// InstallDescription renders bounded terminal-safe instance details.
-func InstallDescription(i v1.Instance) string {
-	cleanup := ""
-	if i.Execution != nil && i.Execution.CleanupFailure != "" {
-		cleanup = " (unresolved cleanup)"
-	}
-	return fmt.Sprintf("%s %s/%s %s%s", strconv.QuoteToASCII(i.ID), strconv.QuoteToASCII(installShort(i.Plan.Project)), strconv.QuoteToASCII(installShort(i.Plan.Scene)), i.Status, cleanup)
-}
-func installShort(s string) string {
-	if len(s) > 160 {
-		return s[:160] + "..."
-	}
-	return s
+	return nil, fmt.Errorf("activity inspection exceeds 100 pages; inspect with old executable before manual installation")
 }

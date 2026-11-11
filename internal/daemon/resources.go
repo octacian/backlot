@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/localipc"
@@ -106,7 +107,7 @@ func hasDocker(p v1.PlanResponse) bool {
 	return false
 }
 func retained(p v1.PlanResponse) bool {
-	// Every selected Docker workload also retains its implicit instance network.
+	// Docker workloads retain their network contract even while allocations retire.
 	if hasDocker(p) {
 		return true
 	}
@@ -151,7 +152,7 @@ func safeRestart(old, next plan.Snapshot) error {
 		BuildProducer  string
 		Runtime        v1.Runtime
 		Image          *v1.PlannedValue
-		Args           []string
+		Args           []v1.Argument
 		Resources      []string
 		HostMappings   []v1.HostMapping
 		Mounts         []v1.Mount
@@ -163,7 +164,7 @@ func safeRestart(old, next plan.Snapshot) error {
 			x := contract{Name: c.Name, Resources: c.Resources, Mounts: c.Mounts, HostMappings: c.HostMappings, Runtime: c.Runtime}
 			if c.Runtime == v1.Container && len(c.Mounts) > 0 {
 				x.Image = c.Image
-				x.Args = c.Args
+				x.Args = canonicalArguments(c.Args)
 			}
 			if c.Image != nil && (len(c.Mounts) > 0 || c.Policy == v1.FreshOnly) {
 				value := *c.Image
@@ -176,6 +177,21 @@ func safeRestart(old, next plan.Snapshot) error {
 			}
 			if c.Policy == v1.FreshOnly {
 				copy := c
+				copy.Args = canonicalArguments(c.Args)
+				// Compare effective cwd, not equivalent declarations such as dot and omission.
+				if c.Command != nil {
+					command := *c.Command
+					command.WorkingDirectory = ""
+					command.Args = canonicalArguments(command.Args)
+					copy.Command = &command
+				}
+				if c.Readiness != nil && c.Readiness.Command != nil {
+					probe, command := *c.Readiness, *c.Readiness.Command
+					command.WorkingDirectory = ""
+					command.Args = canonicalArguments(command.Args)
+					probe.Command = &command
+					copy.Readiness = &probe
+				}
 				x.Initialization = &copy
 			}
 			if len(c.Resources) > 0 || len(c.Mounts) > 0 || x.Initialization != nil {
@@ -271,9 +287,33 @@ func (s *service) allocateResources(ctx context.Context, id string, snap plan.Sn
 			return err
 		}
 		r, exists := g.Resources[name]
+		if exists && r.Kind == "network" {
+			if !r.Removed {
+				if r.ID == "" {
+					r.ID, err = recoverResourceEffect(ctx, entry.docker, r)
+				} else {
+					err = verifyResource(ctx, entry.docker, r)
+				}
+				if err != nil && !errdefs.IsNotFound(err) {
+					return err
+				}
+				if err == nil {
+					g.Resources[name] = r
+					if err = s.store.saveResources(id, g); err != nil {
+						return err
+					}
+					continue
+				}
+			}
+			// A new capability fences the retired effect; references keep its name.
+			r.Token, r.ID, r.Removed = newID(), "", false
+			exists = false
+		}
 		if !exists {
-			r = ownedResource{Kind: declarations[name].Kind, Token: newID()}
-			r.Name = "backlot-" + r.Token
+			if r.Name == "" {
+				r = ownedResource{Kind: declarations[name].Kind, Token: newID()}
+				r.Name = "backlot-" + r.Token
+			}
 			if r.Kind == "directory" {
 				r.Name = filepath.Join(s.directory, "data", r.Token)
 			}
@@ -371,10 +411,86 @@ func verifyResource(ctx context.Context, d *dockerEngine, r ownedResource) error
 		return verifyDockerResource(ctx, d, r)
 	}
 }
+
+// removeNetworks requires joined consumers and a durable cleanup obligation.
+// It retires only instance networks; data and shared allocations stay retained.
+func (s *store) removeNetworks(ctx context.Context, id string, g *resourceGeneration, d *dockerEngine) (failure error) {
+	if err := s.guardDependentTasks(id); err != nil {
+		return err
+	}
+	defer func() {
+		if failure != nil {
+			failure = errors.Join(&v1.PlanError{Code: "cleanup_failed", Field: "resources.network", Message: "instance network cleanup incomplete; restore provider/ownership or remove foreign consumers and retry stop"}, failure)
+		}
+	}()
+	networks := resourceGeneration{Resources: map[string]ownedResource{}}
+	for name, r := range g.Resources {
+		if r.Kind == "network" && !r.Removed {
+			networks.Resources[name] = r
+		}
+	}
+	if len(networks.Resources) == 0 {
+		return nil
+	}
+	if err := s.guardAbandonedData(id); err != nil {
+		return err
+	}
+	for _, r := range g.Containers {
+		if !r.Removed {
+			return problem("cleanup_failed", "container cleanup incomplete; instance networks preserved")
+		}
+	}
+	if d == nil {
+		var err error
+		d, err = newDocker(g.Endpoint)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = d.Close() }()
+	}
+	for name, r := range networks.Resources {
+		if r.ID == "" {
+			var err error
+			r.ID, err = recoverResourceEffect(ctx, d, r)
+			if err != nil && !errdefs.IsNotFound(err) {
+				return err
+			}
+			r.Removed = errdefs.IsNotFound(err)
+			g.Resources[name], networks.Resources[name] = r, r
+			if err = s.saveResources(id, *g); err != nil {
+				return err
+			}
+		}
+	}
+	if err := d.noConsumers(ctx, networks); err != nil {
+		return err
+	}
+	for name, r := range networks.Resources {
+		if r.Removed {
+			continue
+		}
+		if err := removeDockerResource(ctx, d, r); err != nil {
+			return err
+		}
+		if err := s.sharedPoint("network-remove-effect:" + name); err != nil {
+			return err
+		}
+		r.Removed = true
+		g.Resources[name] = r
+		if err := s.saveResources(id, *g); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *store) removeResources(ctx context.Context, id string) error {
 	return s.removeResourcesWithForce(ctx, id, false)
 }
 func (s *store) removeResourcesWithForce(ctx context.Context, id string, force bool) error {
+	if err := s.guardDependentTasks(id); err != nil {
+		return err
+	}
 	if err := s.guardAbandonedData(id); err != nil {
 		return err
 	}
@@ -459,13 +575,36 @@ func (s *service) destroy(ctx context.Context, id string) (v1.Instance, error) {
 	return s.destroyWithForce(ctx, id, false)
 }
 func (s *service) destroyWithForce(ctx context.Context, id string, force bool) (v1.Instance, error) {
+	return s.destroySelected(ctx, id, force, nil)
+}
+
+func (s *service) destroySelected(ctx context.Context, id string, force bool, target *v1.SceneTarget) (v1.Instance, error) {
 	ctx, finish, admissionErr := s.beginMutation(ctx)
 	if admissionErr != nil {
 		return v1.Instance{}, admissionErr
 	}
 	defer finish()
+	var selected v1.SceneResponse
+	if target != nil {
+		var err error
+		selected, err = s.selectMutation(*target)
+		if err != nil {
+			return v1.Instance{}, err
+		}
+		id = selected.Result.Instance.ID
+		if s.beforeSceneMutation != nil {
+			s.beforeSceneMutation(id)
+		}
+	}
+	s.evidence.mu.Lock()
+	defer s.evidence.mu.Unlock()
 	unlock := s.lockMutation(id)
 	defer unlock()
+	if target != nil {
+		if err := s.revalidateMutation(selected); err != nil {
+			return v1.Instance{}, err
+		}
+	}
 	instance, err := s.stopExecution(id)
 	// Cancellation may create a kept owner while the finite executor joins.
 	// Destroy must join that retained owner before removing its consumers' data.
@@ -493,23 +632,8 @@ func (s *service) destroyWithForce(ctx context.Context, id string, force bool) (
 		err = s.store.recordCleanupFailure(id, err)
 		return instance, problem("cleanup_failed", fmt.Sprintf("destroy preserved remaining resources: %v", err))
 	}
-	if instance.Execution == nil {
-		instance.Execution = &v1.ExecutionResult{Attempt: newID(), Components: []v1.ComponentResult{}}
-	}
-	instance, err = s.store.execution(id, v1.Destroyed, instance.Execution)
-	if err != nil {
-		return instance, err
-	}
-	err = s.store.db.Update(func(tx *bolt.Tx) error {
-		key := instance.Plan.Project + "/" + instance.Checkout.ID + "/" + instance.Plan.Scene
-		bucket := tx.Bucket([]byte("persistent"))
-		if string(bucket.Get([]byte(key))) == id {
-			return bucket.Delete([]byte(key))
-		}
-		return nil
-	})
-	// Keep the owner of a sticky collection gap for truthful shutdown reporting.
-	if err == nil && instance.Execution.CollectionFailure == "" {
+	instance, err = s.eraseDestroyed(id)
+	if err == nil {
 		s.mu.Lock()
 		delete(s.executions, id)
 		s.mu.Unlock()

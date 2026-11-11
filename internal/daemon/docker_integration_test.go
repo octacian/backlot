@@ -172,9 +172,9 @@ func (h *dockerHarness) componentEnv() v1.Environment {
 }
 func (h *dockerHarness) alpine() {
 	env := h.componentEnv()
-	init := v1.Component{Kind: v1.Job, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"sh", "-c", "echo initialized >> /data/init; printf '%s' \"$SECRET\" > /private/secret"}, Policy: v1.FreshOnly, Initializes: []string{"data", "directory"}, Resources: []string{"data", "directory", "secret"}, Mounts: []v1.Mount{{Resource: "data", Target: "/data"}, {Resource: "directory", Target: "/private"}}, Environment: env}
-	server := v1.Component{Kind: v1.Service, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"sh", "-c", "while true; do nc -l -p 8080 < /dev/null; done"}, Resources: []string{"data", "directory", "secret", "port"}, Mounts: init.Mounts, Environment: env, Ports: map[string]v1.ServicePort{"http": {Resource: "port", ContainerPort: 8080}}, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(fixtureRef("resource", "port", "port")), Timeout: "30s"}, DependsOn: []v1.Dependency{{Component: "init", Condition: v1.Completed}}}
-	each := v1.Component{Kind: v1.Job, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"sh", "-c", "test \"$(cat /private/secret)\" = \"$SECRET\"; echo start >> /data/starts; echo terminal-output"}, Policy: v1.EachStart, Resources: []string{"data", "directory", "secret"}, Mounts: init.Mounts, Environment: env, DependsOn: []v1.Dependency{{Component: "server", Condition: v1.Ready}}}
+	init := v1.Component{Kind: v1.Job, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: v1.StringArguments("sh", "-c", "echo initialized >> /data/init; printf '%s' \"$SECRET\" > /private/secret"), Policy: v1.FreshOnly, Initializes: []string{"data", "directory"}, Resources: []string{"data", "directory", "secret"}, Mounts: []v1.Mount{{Resource: "data", Target: "/data"}, {Resource: "directory", Target: "/private"}}, Environment: env}
+	server := v1.Component{Kind: v1.Service, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: v1.StringArguments("sh", "-c", "while true; do nc -l -p 8080 < /dev/null; done"), Resources: []string{"data", "directory", "secret", "port"}, Mounts: init.Mounts, Environment: env, Ports: map[string]v1.ServicePort{"http": {Resource: "port", ContainerPort: 8080}}, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(fixtureRef("resource", "port", "port")), Timeout: "30s"}, DependsOn: []v1.Dependency{{Component: "init", Condition: v1.Completed}}}
+	each := v1.Component{Kind: v1.Job, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: v1.StringArguments("sh", "-c", "test \"$(cat /private/secret)\" = \"$SECRET\"; echo start >> /data/starts; echo terminal-output"), Policy: v1.EachStart, Resources: []string{"data", "directory", "secret"}, Mounts: init.Mounts, Environment: env, DependsOn: []v1.Dependency{{Component: "server", Condition: v1.Ready}}}
 	h.manifest.Components = map[string]v1.Component{"init": init, "server": server, "each": each}
 	resources := []string{"data", "directory", "secret", "port"}
 	h.manifest.Scenes = map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"init", "server", "each"}, Resources: resources}, "test": {Lifetime: v1.Disposable, Components: []string{"init", "server", "each"}, Resources: resources, TerminalJob: "each"}}
@@ -391,6 +391,232 @@ func TestDockerRuntime(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, out)
 	}
+	t.Run("default-grace-retains-final-output", func(t *testing.T) {
+		h := newDockerHarness(t, binary, endpoint)
+		h.alpine()
+		server := h.manifest.Components["server"]
+		server.Args = v1.StringArguments("sh", "-c", "trap 'sleep 7; echo final-stop-marker; exit 0' TERM; echo stop-ready; while true; do nc -l -p 8080 < /dev/null & wait $!; done")
+		server.DependsOn = nil
+		h.manifest.Components = map[string]v1.Component{"server": server}
+		h.manifest.Scenes = map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"server"}, Resources: []string{"data", "directory", "secret", "port"}}}
+		h.write()
+		// Use the CLI default grace, rather than the harness's one-second override.
+		output, err := exec.Command(binary, "run", "--project", h.project, "--config", h.config, "--state-dir", h.dir, "--json", "dev").Output()
+		if err != nil {
+			t.Fatal("CLI start", err, string(output))
+		}
+		var started v1.InstanceResponse
+		if err := json.Unmarshal(output, &started); err != nil {
+			t.Fatal(err)
+		}
+		id := started.Instance.ID
+		waitComponentLog(t, h.nativeHarness, id, "server", "stop-ready")
+		proveAbsent := h.observeDisposableDockerObjects(id, "")
+		output, err = exec.Command(binary, "stop", "--state-dir", h.dir, "--json", id).Output()
+		if err != nil {
+			t.Fatal("CLI stop", err, string(output))
+		}
+		stopped := h.state(id, v1.Stopped).Instance.Execution
+		if stopped == nil || stopped.CollectionFailure != "" || stopped.CleanupFailure != "" || stopped.Failure != "" {
+			t.Fatalf("stop outcomes: %+v", stopped)
+		}
+		if len(stopped.Components) != 1 || stopped.Components[0].ExitCode == nil || *stopped.Components[0].ExitCode != 0 {
+			t.Fatalf("actual container exit lost: %+v", stopped.Components)
+		}
+		waitComponentLog(t, h.nativeHarness, id, "server", "final-stop-marker")
+		if _, err := h.cli.Destroy(context.Background(), id); err != nil {
+			t.Fatal(err)
+		}
+		if err := proveAbsent(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("stopped-networks-recreated-with-data", func(t *testing.T) {
+		h := newDockerHarness(t, binary, endpoint)
+		h.alpine()
+		h.manifest.Resources["network"] = v1.Resource{Kind: "network"}
+		for _, name := range []string{"init", "server", "each"} {
+			c := h.manifest.Components[name]
+			c.Resources = append(c.Resources, "network")
+			c.Environment.Assign["NETWORK"] = fixtureRef("resource", "network", "name")
+			if name == "init" {
+				*c.Args[2].Literal += "; printf '%s' \"$NETWORK\" > /private/network"
+			}
+			h.manifest.Components[name] = c
+		}
+		for name, scene := range h.manifest.Scenes {
+			scene.Resources = append(scene.Resources, "network")
+			h.manifest.Scenes[name] = scene
+		}
+		h.write()
+		cli := func(args ...string) ([]byte, error) {
+			return exec.Command(binary, append(args, "--state-dir", h.dir, "--json")...).CombinedOutput()
+		}
+		var previous map[string]string
+		var id string
+		for cycle := range 3 {
+			out, err := cli("run", "dev", "--project", h.project, "--config", h.config, "--stop-grace", "1s")
+			if err != nil {
+				t.Fatalf("CLI start: %v %s", err, out)
+			}
+			var response v1.InstanceResponse
+			if err := json.Unmarshal(out, &response); err != nil {
+				t.Fatal(err)
+			}
+			if cycle > 0 && response.Instance.ID != id {
+				t.Fatal("stop/start replaced logical instance")
+			}
+			id = response.Instance.ID
+			server := h.container(id, "server")
+			inspect, err := h.engine.ContainerInspect(context.Background(), server.ID, client.ContainerInspectOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			current := map[string]string{}
+			for name, attachment := range inspect.Container.NetworkSettings.Networks {
+				current[name] = attachment.NetworkID
+				if cycle > 0 && (previous[name] == "" || previous[name] == attachment.NetworkID) {
+					t.Fatal("network name changed or Engine allocation reused")
+				}
+			}
+			if len(current) != 2 {
+				t.Fatal("implicit/declared attachments missing")
+			}
+			text, code := h.exec(server, []string{"sh", "-c", "test \"$(cat /private/network)\" = \"$NETWORK\" && test \"$(cat /private/secret)\" = \"$SECRET\" && test \"$(wc -l < /data/init)\" = 1 && echo witnesses-preserved"})
+			if code != 0 || strings.TrimSpace(text) != "witnesses-preserved" {
+				t.Fatal("retained network reference/data/credential/init witness", code)
+			}
+			if out, err := cli("stop", id); err != nil {
+				t.Fatalf("CLI stop: %v %s", err, out)
+			}
+			for name, networkID := range current {
+				if _, err := h.engine.NetworkInspect(context.Background(), networkID, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+					t.Fatal("stopped exact network survived", err)
+				}
+				t.Logf("cycle %d: name %s, exact network %s absent; retained witnesses passed", cycle, name, networkID)
+			}
+			previous = current
+		}
+		// Distinct stopped scenes must not accumulate their own idle networks.
+		for _, name := range []string{"other0", "other1"} {
+			h.manifest.Scenes[name] = h.manifest.Scenes["dev"]
+			h.write()
+			peer := h.run(name).Instance.ID
+			h.state(peer, v1.RuntimeReady)
+			server := h.container(peer, "server")
+			observed, err := h.engine.ContainerInspect(context.Background(), server.ID, client.ContainerInspectOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.cli.StopExecution(context.Background(), peer); err != nil {
+				t.Fatal(err)
+			}
+			for _, attachment := range observed.Container.NetworkSettings.Networks {
+				if _, err := h.engine.NetworkInspect(context.Background(), attachment.NetworkID, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+					t.Fatal("distinct stopped scene retained exact network", err)
+				}
+			}
+		}
+		if out, err := cli("run", "dev", "--project", h.project, "--config", h.config, "--stop-grace", "1s"); err != nil {
+			t.Fatalf("CLI foreign-case start: %v %s", err, out)
+		}
+		server := h.container(id, "server")
+		inspect, err := h.engine.ContainerInspect(context.Background(), server.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var networkID, networkName string
+		for name, attachment := range inspect.Container.NetworkSettings.Networks {
+			networkName, networkID = name, attachment.NetworkID
+			break
+		}
+		foreign := ownedResource{Kind: "container", Name: "backlot-fixture-" + newID(), Token: newID()}
+
+		t.Cleanup(func() {
+			if err := removeContainer(context.Background(), h.engine, foreign); err != nil {
+				h.cleanupUnverified = true
+				t.Error(err)
+				return
+			}
+			if _, err := h.engine.ContainerInspect(context.Background(), resourceHandle(foreign), client.ContainerInspectOptions{}); !errdefs.IsNotFound(err) {
+				h.cleanupUnverified = true
+				t.Error("exact foreign fixture container absence unverified", err)
+			}
+		})
+		created, err := h.engine.ContainerCreate(context.Background(), client.ContainerCreateOptions{Name: foreign.Name, Config: &container.Config{Image: "alpine:3.21", Cmd: []string{"sleep", "300"}, Labels: resourceLabels(foreign)}, HostConfig: &container.HostConfig{NetworkMode: container.NetworkMode(networkName)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		foreign.ID = created.ID
+		declared, err := h.engine.ContainerInspect(context.Background(), foreign.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		endpoint := declared.Container.NetworkSettings.Networks[networkName]
+		if declared.Container.HostConfig.NetworkMode != container.NetworkMode(networkName) || endpoint == nil || endpoint.NetworkID != "" || declared.Container.State.Running {
+			t.Fatal("fixture did not reproduce a never-started name-only network declaration")
+		}
+		t.Logf("never-started foreign consumer %s declares network %s with blank endpoint ID", foreign.ID, networkName)
+		for _, running := range []bool{false, true} {
+			if running {
+				if _, err := h.engine.ContainerStart(context.Background(), foreign.ID, client.ContainerStartOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if out, err := cli("stop", id); err == nil {
+				t.Fatalf("foreign consumer did not block CLI stop: %s", out)
+			}
+			if _, err := h.engine.NetworkInspect(context.Background(), networkID, client.NetworkInspectOptions{}); err != nil {
+				t.Fatal("foreign-consumed network lost", err)
+			}
+			state, err := h.cli.Inspect(context.Background(), id)
+			if err != nil || state.Instance.Execution == nil || state.Instance.Execution.CleanupFailure == "" {
+				t.Fatal("failed stop lost cleanup obligation", err)
+			}
+			got, err := h.engine.ContainerInspect(context.Background(), foreign.ID, client.ContainerInspectOptions{})
+			if err != nil || got.Container.State.Running != running {
+				t.Fatal("foreign consumer changed", err)
+			}
+			t.Logf("foreign consumer %s running=%t and exact network %s preserved after failed CLI stop", foreign.ID, running, networkID)
+		}
+		if err := removeContainer(context.Background(), h.engine, foreign); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.engine.ContainerInspect(context.Background(), foreign.ID, client.ContainerInspectOptions{}); !errdefs.IsNotFound(err) {
+			t.Fatal("exact foreign fixture container absence unverified", err)
+		}
+		if out, err := cli("stop", id); err != nil {
+			t.Fatalf("explicit stop retry: %v %s", err, out)
+		}
+		state, err := h.cli.Inspect(context.Background(), id)
+		if err != nil || state.Instance.Execution == nil || state.Instance.Execution.CleanupFailure != "" {
+			t.Fatal("successful retry retained cleanup failure", err)
+		}
+		if _, err := h.engine.NetworkInspect(context.Background(), networkID, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+			t.Fatal("retry left exact network", err)
+		}
+		h.close()
+		journal, err := openStore(h.dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = journal.db.Close() }()
+		g, err := journal.resources(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range g.Resources {
+			if r.Kind == "network" {
+				if !r.Removed {
+					t.Fatal("retry left a journaled network cleanup obligation")
+				}
+				if _, err := h.engine.NetworkInspect(context.Background(), r.ID, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+					t.Fatal("journaled exact network absence unverified", err)
+				}
+			}
+		}
+		t.Logf("explicit retry settled journaled networks; exact fixture consumer %s and network %s absent", foreign.ID, networkID)
+	})
 	t.Run("native-stale-foreign-bind-cleanup", func(t *testing.T) {
 		h := newDockerHarness(t, binary, endpoint)
 		// Cleanup authority is retained before creating a stopped foreign declaration.
@@ -871,7 +1097,7 @@ func TestDockerRuntime(t *testing.T) {
 	t.Run("implicit-network-endpoint-drift-preserves-live-service", func(t *testing.T) {
 		h := newDockerHarness(t, binary, endpoint)
 		env := v1.Environment{Assign: map[string]v1.Value{"BACKLOT_FIXTURE": fixtureLiteral(h.token), "INSTANCE": fixtureRef("instance", "", "id")}}
-		h.manifest.Components = map[string]v1.Component{"server": {Kind: v1.Service, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"sh", "-c", "while true; do nc -l -p 8080 < /dev/null; done"}, Resources: []string{"port"}, Ports: map[string]v1.ServicePort{"http": {Resource: "port", ContainerPort: 8080}}, Environment: env, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(fixtureRef("resource", "port", "port")), Timeout: "15s"}}}
+		h.manifest.Components = map[string]v1.Component{"server": {Kind: v1.Service, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: v1.StringArguments("sh", "-c", "while true; do nc -l -p 8080 < /dev/null; done"), Resources: []string{"port"}, Ports: map[string]v1.ServicePort{"http": {Resource: "port", ContainerPort: 8080}}, Environment: env, Readiness: &v1.Probe{Kind: "tcp", Target: ptrValue(fixtureRef("resource", "port", "port")), Timeout: "15s"}}}
 		h.manifest.Scenes = map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"server"}, Resources: []string{"port"}}}
 		h.write()
 		id := h.run("dev").Instance.ID
@@ -929,7 +1155,7 @@ func TestDockerRuntime(t *testing.T) {
 					if mode == "missing-image" {
 						image = "backlot-fixture-absent:" + h.token
 					}
-					h.manifest.Components = map[string]v1.Component{"job": {Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral(image)), Args: []string{"true"}, Resources: []string{"data"}}}
+					h.manifest.Components = map[string]v1.Component{"job": {Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral(image)), Args: v1.StringArguments("true"), Resources: []string{"data"}}}
 					h.manifest.Scenes = map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"job"}, Resources: []string{"data"}}}
 					h.write()
 					command := exec.Command(binary, "run", "dev", "--project", h.project, "--config", h.config, "--state-dir", h.dir, "--json")
@@ -1085,19 +1311,26 @@ func TestDockerRuntime(t *testing.T) {
 		if h.sql(r, "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='fixture'") != "0" || fingerprint(r) == secret {
 			t.Fatal("reset did not replace data and credential generation")
 		}
-		if _, err = h.cli.Destroy(context.Background(), id); err != nil {
+		if _, err = h.cli.StopExecution(context.Background(), id); err != nil {
 			t.Fatal(err)
 		}
 		logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id})
 		if err != nil || len(logs.Records) == 0 {
 			t.Fatal("historical container logs missing", err)
 		}
+		if _, err := h.cli.Destroy(context.Background(), id); err != nil {
+			t.Fatal(err)
+		}
+		erased, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id})
+		if err != nil || len(erased.Records) != 0 {
+			t.Fatal("destroy retained provider logs", err)
+		}
 	})
 	t.Run("fresh-only-failed-init-retry-and-each-start", func(t *testing.T) {
 		h := newDockerHarness(t, binary, endpoint)
 		h.alpine()
 		init := h.manifest.Components["init"]
-		init.Args = []string{"sh", "-c", "if ! test -f /private/attempt; then touch /private/attempt; echo failed-initialization; exit 19; fi; echo initialized >> /data/init; printf '%s' \"$SECRET\" > /private/secret"}
+		init.Args = v1.StringArguments("sh", "-c", "if ! test -f /private/attempt; then touch /private/attempt; echo failed-initialization; exit 19; fi; echo initialized >> /data/init; printf '%s' \"$SECRET\" > /private/secret")
 		h.manifest.Components["init"] = init
 		h.write()
 		id := h.run("dev").Instance.ID
@@ -1129,7 +1362,7 @@ func TestDockerRuntime(t *testing.T) {
 		if code != 0 || strings.TrimSpace(text) != "1\n2" {
 			t.Fatal("restart job policy", text, code)
 		}
-		init.Args = append(init.Args, "changed")
+		init.Args = append(init.Args, v1.StringArguments("changed")...)
 		h.manifest.Components["init"] = init
 		h.write()
 		req := h.request("dev")
@@ -1186,6 +1419,13 @@ func TestDockerRuntime(t *testing.T) {
 		h.witness(rb, "worktree-b", true)
 		h.witness(ra, "worktree-a", false)
 		h.witness(rb, "worktree-b", false)
+		if _, err := h.cli.StopExecution(context.Background(), a.Instance.ID); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(pb, h.privateState(rb)) {
+			t.Fatal("peer generation changed after stop")
+		}
+		h.witness(rb, "worktree-b", false)
 		h.restart(a.Instance.ID, true)
 		h.state(a.Instance.ID, v1.RuntimeReady)
 		fresh := h.privateState(h.container(a.Instance.ID, "server"))
@@ -1204,7 +1444,7 @@ func TestDockerRuntime(t *testing.T) {
 		// Two disposable runs stay overlapping until the test releases each private
 		// terminal. Their service mounts expose their independent retained state.
 		each := h.manifest.Components["each"]
-		each.Args = []string{"sh", "-c", "while [ ! -f /private/release ]; do sleep 0.1; done"}
+		each.Args = v1.StringArguments("sh", "-c", "while [ ! -f /private/release ]; do sleep 0.1; done")
 		h.manifest.Components["each"] = each
 		h.write()
 		da, db := h.run("test"), h.run("test")
@@ -1237,7 +1477,7 @@ func TestDockerRuntime(t *testing.T) {
 		// A separate scene writes an explicitly shared output through two concurrent
 		// disposable runs. The atomic directory detects overlap inside the real job.
 		h.manifest.Outputs = map[string]v1.Output{"build": {Path: "build", ConcurrencyGroup: "build"}}
-		job := v1.Component{Kind: v1.Job, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Policy: v1.EachStart, Args: []string{"sh", "-c", "mkdir /output/lock || exit 41; echo start; sleep 0.4; rmdir /output/lock; echo done"}, Outputs: []string{"build"}, Mounts: []v1.Mount{{Output: "build", Target: "/output"}}}
+		job := v1.Component{Kind: v1.Job, Runtime: v1.Container, Image: ptrValue(fixtureLiteral("alpine:3.21")), Policy: v1.EachStart, Args: v1.StringArguments("sh", "-c", "mkdir /output/lock || exit 41; echo start; sleep 0.4; rmdir /output/lock; echo done"), Outputs: []string{"build"}, Mounts: []v1.Mount{{Output: "build", Target: "/output"}}}
 		h.manifest.Components["output"] = job
 		h.manifest.Scenes["output"] = v1.Scene{Lifetime: v1.Disposable, Components: []string{"output"}, TerminalJob: "output"}
 		h.write()
@@ -1260,9 +1500,9 @@ func TestDockerRuntime(t *testing.T) {
 			t.Fatal("disposable identities shared")
 		}
 	})
-	t.Run("bounded-log-records-retained-after-destroy", func(t *testing.T) {
+	t.Run("bounded-log-records-retained-before-destroy", func(t *testing.T) {
 		h := newDockerHarness(t, binary, endpoint)
-		job := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"sh", "-c", "head -c 16384 /dev/zero; printf '\\377\\376'; printf 'ordinary-output\\n'"}}
+		job := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: v1.StringArguments("sh", "-c", "head -c 16384 /dev/zero; printf '\\377\\376'; printf 'ordinary-output\\n'")}
 		job.Environment = v1.Environment{Assign: map[string]v1.Value{"BACKLOT_FIXTURE": fixtureLiteral(h.token), "INSTANCE": fixtureRef("instance", "", "id")}}
 		h.manifest.Components = map[string]v1.Component{"logs": job}
 		h.manifest.Scenes = map[string]v1.Scene{"logs": {Lifetime: v1.Persistent, Components: []string{"logs"}}}
@@ -1281,7 +1521,7 @@ func TestDockerRuntime(t *testing.T) {
 		if err := reader.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := h.cli.Destroy(context.Background(), id); err != nil {
+		if _, err := h.cli.StopExecution(context.Background(), id); err != nil {
 			t.Fatal(err)
 		}
 		command := exec.Command(binary, "logs", "--state-dir", h.dir, "--json", id)
@@ -1318,6 +1558,13 @@ func TestDockerRuntime(t *testing.T) {
 		}
 		if !bytes.HasPrefix(raw.Bytes(), make([]byte, 16384)) || !bytes.HasSuffix(raw.Bytes(), []byte("ordinary-output\n")) {
 			t.Fatal("control/ordinary output incomplete")
+		}
+		if _, err := h.cli.Destroy(context.Background(), id); err != nil {
+			t.Fatal(err)
+		}
+		erased, err := exec.Command(binary, "logs", "--state-dir", h.dir, "--json", id).Output()
+		if err != nil || len(erased) != 0 {
+			t.Fatal("destroy retained provider byte output", err)
 		}
 	})
 	t.Run("declared-native-docker-build-before-container", func(t *testing.T) {
@@ -1359,8 +1606,8 @@ func TestDockerRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		h.manifest.Tools = map[string]string{"docker": docker}
-		build := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "docker", Args: []string{"--host", endpoint, "build", "--pull=false", "--network=none", "--label", "io.backlot.fixture=" + h.token, "--tag", image, "."}}}
-		job := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral(image)), Args: []string{"sh", "-c", "test \"$(cat /witness)\" = \"$EXPECTED\" && echo built-image-consumed"}, Environment: v1.Environment{Assign: map[string]v1.Value{"EXPECTED": fixtureLiteral(h.token)}}, DependsOn: []v1.Dependency{{Component: "build", Condition: v1.Completed}}}
+		build := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "docker", Args: v1.StringArguments("--host", endpoint, "build", "--pull=false", "--network=none", "--label", "io.backlot.fixture="+h.token, "--tag", image, ".")}}
+		job := v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral(image)), Args: v1.StringArguments("sh", "-c", "test \"$(cat /witness)\" = \"$EXPECTED\" && echo built-image-consumed"), Environment: v1.Environment{Assign: map[string]v1.Value{"EXPECTED": fixtureLiteral(h.token)}}, DependsOn: []v1.Dependency{{Component: "build", Condition: v1.Completed}}}
 		h.manifest.Components = map[string]v1.Component{"build": build, "consume": job}
 		h.manifest.Scenes = map[string]v1.Scene{"build": {Lifetime: v1.Disposable, Components: []string{"build", "consume"}, TerminalJob: "consume"}}
 		h.write()
@@ -1493,14 +1740,20 @@ func TestDockerRuntime(t *testing.T) {
 		server.Outputs = []string{"shared"}
 		server.Mounts = append(server.Mounts, v1.Mount{Output: "shared", Target: "/output"})
 		h.manifest.Components["server"] = server
-		h.manifest.Components["blocked"] = v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: []string{"true"}, Outputs: []string{"shared"}, Mounts: []v1.Mount{{Output: "shared", Target: "/output"}}}
+		h.manifest.Components["blocked"] = v1.Component{Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureLiteral("alpine:3.21")), Args: v1.StringArguments("true"), Outputs: []string{"shared"}, Mounts: []v1.Mount{{Output: "shared", Target: "/output"}}}
 		h.manifest.Scenes["blocked"] = v1.Scene{Lifetime: v1.Disposable, Components: []string{"blocked"}, TerminalJob: "blocked"}
 		h.write()
 		peer := h.manifest.Components["server"]
-		peer.Args = []string{"sh", "-c", "echo recovery-peer; exec sleep 300"}
+		peer.Args = v1.StringArguments("sh", "-c", "echo recovery-peer; exec sleep 300")
 		peer.Ports = nil
-		h.manifest.Tools = map[string]string{"true": "true"}
-		peer.Readiness = &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "true"}, Timeout: "3s"}
+		if err := os.Mkdir(filepath.Join(h.project, "probe"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(h.project, "probe", "host-marker"), []byte("fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		h.manifest.Tools = map[string]string{"probe": "sh"}
+		peer.Readiness = &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "probe", WorkingDirectory: "probe", Args: v1.StringArguments("-c", "test -f host-marker")}, Timeout: "3s"}
 		peer.Resources = []string{"data", "directory", "secret"}
 		h.manifest.Components["peer"] = peer
 		scene := h.manifest.Scenes["dev"]
@@ -1522,6 +1775,13 @@ func TestDockerRuntime(t *testing.T) {
 		}
 		if err := verifyDockerResource(context.Background(), h.engine, r); !errdefs.IsNotFound(err) {
 			t.Fatal("owned survivor not removed", err)
+		}
+		for _, resource := range g.Resources {
+			if resource.Kind == "network" {
+				if _, err := h.engine.NetworkInspect(context.Background(), resource.ID, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+					t.Fatal("crash recovery retained unused exact network", err)
+				}
+			}
 		}
 		h.restart(id, false)
 		h.state(id, v1.RuntimeReady)
@@ -1569,6 +1829,9 @@ func TestDockerRuntime(t *testing.T) {
 		interrupted := h.state(id, v1.Interrupted)
 		if interrupted.Instance.Execution.CleanupFailure == "" || !h.engineAlive(r) {
 			t.Fatal("uncertain ownership acted on")
+		}
+		if err := verifyDockerResource(context.Background(), h.engine, current.Resources["@network"]); err != nil {
+			t.Fatal("uncertain consumer lost its network", err)
 		}
 		if err := verifyDockerResource(context.Background(), h.engine, verifiedPeer); !errdefs.IsNotFound(err) {
 			t.Fatal("independently owned survivor not collected/removed", err)

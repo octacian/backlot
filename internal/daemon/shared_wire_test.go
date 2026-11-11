@@ -25,7 +25,7 @@ func TestSharedWirePrivacyAndStrictness(t *testing.T) {
 	}
 	declaration := v1.SharedService{Manager: "mariadb", Image: "mariadb:11.4", Storage: "volume", Admin: "generated", Port: 3306, ReadinessTimeout: "1m"}
 	record := sharedServiceRecord{ID: newID(), Project: sharedProjectIdentity{ID: newID()}, Name: "sql", Declaration: declaration, Endpoint: "unix:///unavailable-private-engine.sock", Configuration: sharedDigest(declaration, "unix:///unavailable-private-engine.sock"), AdminPassword: newID(), Server: newResource("container"), Volume: newResource("volume"), Network: newResource("network"), Status: "intent"}
-	if err = state.saveShared(record); err != nil {
+	if err = state.saveSharedFixture(record); err != nil {
 		t.Fatal(err)
 	}
 	handler := handler(&service{store: state}, v1.DaemonStatusResponse{}, func() {})
@@ -74,5 +74,5 @@ func TestSharedWirePrivacyAndStrictness(t *testing.T) {
 	}
 	_, err = svc.sharedControl(context.Background(), "stop", v1.SharedRequest{APIVersion: v1.Version, ServiceID: record.ID})
 	code(t, err, "shared_in_use")
-	code(t, state.stopSharedServices(context.Background()), "shared_in_use")
+	code(t, state.stopSharedServices(context.Background(), "daemon_recovery"), "shared_in_use")
 }

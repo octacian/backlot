@@ -23,6 +23,49 @@ func TestSceneNativeCLI(t *testing.T) {
 		t.Fatal(err, string(out))
 	}
 
+	t.Run("checkout-discovery-and-named-missing", func(t *testing.T) {
+		h := newNativeHarness(t, binary)
+		execute := func(cwd string, args ...string) ([]byte, error) {
+			command := exec.Command(binary, append(args, "--state-dir", h.dir)...)
+			command.Dir = cwd
+			var out bytes.Buffer
+			command.Stdout = &out
+			err := command.Run()
+			return out.Bytes(), err
+		}
+		// The native harness is deliberately non-Git: explicit root works, implicit fails.
+		out, err := execute(h.project, "checkout", "list", "--checkout", h.project, "--json")
+		var listed v1.ListResponse
+		canonical, _ := filepath.EvalSymlinks(h.project)
+		if err != nil || json.Unmarshal(out, &listed) != nil || listed.Checkout == nil || listed.Checkout.Path != canonical || listed.Instances == nil || len(listed.Instances) != 0 {
+			t.Fatal(string(out), err)
+		}
+		out, err = execute(h.project, "checkout", "list", "--json")
+		var failure v1.ErrorResponse
+		if err == nil || json.Unmarshal(out, &failure) != nil || failure.Error.Code != "checkout_identity" {
+			t.Fatal(string(out), err)
+		}
+		git(t, h.project, "init", "-q")
+		sub := filepath.Join(h.project, "sub")
+		if err := os.Mkdir(sub, 0700); err != nil {
+			t.Fatal(err)
+		}
+		out, err = execute(sub, "checkout", "list", "--json")
+		if err != nil || json.Unmarshal(out, &listed) != nil || listed.Checkout.Path != canonical {
+			t.Fatal(string(out), err)
+		}
+		out, err = execute(sub, "checkout", "list")
+		if err != nil || !strings.Contains(string(out), "Checkout: "+canonical) {
+			t.Fatal(string(out), err)
+		}
+		for _, action := range []string{"restart", "reset", "destroy"} {
+			out, err = execute(sub, "scene", action, "missing", "--project", h.project, "--json")
+			if err == nil || json.Unmarshal(out, &failure) != nil || failure.Error.Code != "not_found" {
+				t.Fatal(action, string(out), err)
+			}
+		}
+	})
+
 	t.Run("private-inputs-and-recorded-cleanup", func(t *testing.T) {
 		t.Setenv("BACKLOT_PROJECT_CONFIG_DIR", filepath.Join(shortTemp(t), "registry"))
 		h := newNativeHarness(t, binary)
@@ -377,7 +420,7 @@ func TestStartupDetailsCLI(t *testing.T) {
 			t.Fatal("startup CLI failed", args[0], err)
 		}
 		var response v1.InstanceResponse
-		if args[0] == "scene" {
+		if args[0] == "scene" && args[1] == "start" {
 			var named v1.SceneResponse
 			if err := json.Unmarshal(out, &named); err != nil || named.Result == nil {
 				t.Fatal("scene envelope", err)
@@ -430,11 +473,11 @@ func TestStartupDetailsCLI(t *testing.T) {
 			t.Fatal("startup-only result persisted")
 		}
 	}
-	if _, err := execute("restart", id, "--state-dir", h.dir, "--json"); err == nil {
+	if _, err := execute("scene", "restart", "dev", "--state-dir", h.dir, "--json"); err == nil {
 		t.Fatal("restart accepted changed sensitive input")
 	}
 	configure("input-private-canary")
-	restarted := read("restart", id, "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
+	restarted := read("scene", "restart", "dev", "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
 	if restarted.StartupDetails.Details[2].Value != generated || restarted.StartupDetails.Details[0].Value != "changed reminder" {
 		t.Fatal("restart did not preserve generation/adopt ordinary drift")
 	}
@@ -442,7 +485,7 @@ func TestStartupDetailsCLI(t *testing.T) {
 	if _, err := h.cli.FixtureSecret(context.Background(), stale); err == nil {
 		t.Fatal("replaced attempt retrieved current secret")
 	}
-	reset := read("reset", id, "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
+	reset := read("scene", "reset", "dev", "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
 	if reset.StartupDetails.Details[2].Value == generated {
 		t.Fatal("reset retained generated credential")
 	}
@@ -457,12 +500,19 @@ func TestStartupDetailsCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A new failed startup must not hydrate details or claim readiness.
-	server.Command.Args = []string{"-test.run=TestNativeFixtureProcess", "--", "fail"}
+	server.Command.Args = v1.StringArguments("-test.run=TestNativeFixtureProcess", "--", "fail")
 	h.manifest.Components["server"] = server
 	h.write()
-	out, err := execute("restart", id, "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
+	out, err := execute("scene", "restart", "dev", "--state-dir", h.dir, "--json", "--stop-grace", "50ms")
 	var failed v1.InstanceResponse
 	if err == nil || json.Unmarshal(out, &failed) != nil || failed.Instance.ID != id || failed.Instance.Status != v1.Failed || failed.Instance.Execution == nil || failed.Instance.Execution.Failure == "" || failed.StartupDetails != nil {
 		t.Fatal("failed readiness emitted startup summary")
 	}
+	out, err = execute("scene", "destroy", "dev", "--project", h.project, "--state-dir", h.dir, "--json")
+	var destroyed v1.InstanceResponse
+	if err != nil || json.Unmarshal(out, &destroyed) != nil || destroyed.Instance.ID != id || destroyed.Instance.Status != v1.Destroyed || destroyed.Instance.Execution != nil {
+		t.Fatal("named destroy envelope", string(out), err)
+	}
+	h.absent()
+
 }

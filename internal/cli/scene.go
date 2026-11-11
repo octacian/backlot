@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,7 +27,20 @@ func sceneCommand() *urfave.Command {
 		if name == "status" {
 			flags = append(flags, statusFollowFlags()...)
 		}
-		children = append(children, &urfave.Command{Name: name, Description: "Example: backlot scene " + name + " dev\nNamed scenes resolve within the selected checkout; use status/inspect with an instance ID for exact recorded state.", ArgsUsage: "<scene>", Usage: map[string]string{"start": "Start a persistent scene and wait for readiness; --attached owns its attempt", "status": "Read a named persistent scene; --follow observes without lifecycle ownership", "stop": "Stop a recorded persistent scene, retaining data; current manifest is not required"}[name], Flags: flags, Action: sceneAction})
+		children = append(children, &urfave.Command{Name: name, Description: "Example: backlot scene " + name + " dev\nNamed scenes resolve within the selected checkout; use status/inspect with an instance ID for exact recorded state.", ArgsUsage: "<scene>", Usage: map[string]string{"start": "Ensure a persistent scene is running; --attached owns a new attempt", "status": "Read a named persistent scene; --follow observes without lifecycle ownership", "stop": "Stop a recorded persistent scene, releasing unused instance networks and retaining data; cleanup failures can be retried; current manifest is not required"}[name], Flags: flags, Action: sceneAction})
+	}
+	for _, command := range runtimeCommands() {
+		if command.Name != "restart" && command.Name != "reset" && command.Name != "destroy" {
+			continue
+		}
+		command.ArgsUsage = "<scene>"
+		command.Description = strings.Replace(command.Description, "backlot "+command.Name+" INSTANCE_ID", "backlot scene "+command.Name+" dev", 1)
+		if command.Name == "destroy" {
+			command.Description += "\nUse export --allow-partial when evidence is incomplete."
+		}
+		command.Description += "\nSelect exactly one recorded persistent scene; --project selects its recorded project."
+		command.Flags = append(command.Flags, &urfave.StringFlag{Name: "project", Usage: "Exact project directory or recognized manifest path (default: working directory)"})
+		children = append(children, command)
 	}
 	return &urfave.Command{Name: "scene", Usage: "Discover declarations and manage recorded persistent scenes", Commands: children}
 }
@@ -237,7 +251,7 @@ func startScene(ctx context.Context, c *urfave.Command, cli *client.Client, targ
 		grace, _ := time.ParseDuration(request.Options.StopGrace)
 		cleanup, cancel := context.WithTimeout(context.Background(), cleanupWait(grace))
 		defer cancel()
-		result, err := cli.StopExecution(cleanup, id)
+		result, err := cli.StopExecutionWithRequest(cleanup, v1.StopRequest{APIVersion: v1.Version, InstanceID: id, ExpectedAttempt: attempt})
 		if err != nil {
 			return sceneOutput(c, response, err)
 		}
@@ -322,4 +336,22 @@ func startScene(ctx context.Context, c *urfave.Command, cli *client.Client, targ
 		response.CanonicalTarget = canonicalTarget
 		response.Result.ManifestDrift, response.Result.ConfigDrift = driftManifest, driftConfig
 	}
+}
+
+func namedLifecycleTarget(c *urfave.Command) (*v1.SceneTarget, error) {
+	if len(c.Lineage()) < 2 || c.Lineage()[1].Name != "scene" {
+		return nil, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	target := &v1.SceneTarget{Scene: c.Args().First(), CWD: cwd}
+	if c.String("project") != "" {
+		target.ProjectPath, err = filepath.Abs(c.String("project"))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return target, target.Validate()
 }

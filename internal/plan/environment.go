@@ -14,6 +14,7 @@ import (
 var keyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func resolveEnvironmentValues(m v1.Manifest, config resolvedConfig, c v1.Component, project string, p v1.PlanResponse) (map[string]resolvedValue, error) {
+	runtime := environmentRuntime(c)
 	values := map[string]resolvedValue{}
 	// The launch baseline is deliberately small; no ambient credentials are copied.
 	baseline := []string{"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "SystemRoot"}
@@ -59,7 +60,7 @@ func resolveEnvironmentValues(m v1.Manifest, config resolvedConfig, c v1.Compone
 	}
 	for _, layer := range layers {
 		for key, value := range layer.Assign {
-			resolved, err := resolveValue(m, config, value, project, p)
+			resolved, err := resolveValue(m, config, value, project, p, runtime)
 			if err != nil {
 				return nil, err
 			}
@@ -105,4 +106,13 @@ func parseSeed(data []byte, file string) (map[string]string, error) {
 		return fail()
 	}
 	return values, nil
+}
+
+// A container environment also feeds host-native command probes, so preserve
+// filesystem constructions until each actual consumer resolves them.
+func environmentRuntime(c v1.Component) v1.Runtime {
+	if c.Runtime == v1.Container && c.Readiness != nil && c.Readiness.Kind == "command" {
+		return ""
+	}
+	return c.Runtime
 }

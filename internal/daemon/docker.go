@@ -35,7 +35,10 @@ import (
 
 // dockerEngine is the official Docker client boundary, with explicit local
 // endpoint selection and API negotiation. Image building/pulling is external.
-type dockerEngine struct{ *client.Client }
+type dockerEngine struct {
+	*client.Client
+	stopClient *client.Client
+}
 
 func newDocker(endpoint string) (*dockerEngine, error) {
 	parsed, parseErr := url.Parse(endpoint)
@@ -49,8 +52,31 @@ func newDocker(endpoint string) (*dockerEngine, error) {
 	if err != nil {
 		return nil, problem("missing_provider", "cannot configure local Docker client")
 	}
-	return &dockerEngine{c}, nil
+	stop, err := client.New(client.WithHTTPClient(&http.Client{Transport: &http.Transport{}}), client.WithHost(endpoint), client.WithScheme("http"))
+	if err != nil {
+		return nil, errors.Join(problem("missing_provider", "cannot configure local Docker stop client"), c.Close())
+	}
+	return &dockerEngine{Client: c, stopClient: stop}, nil
 }
+
+// Close releases both operation-specific transports.
+func (d *dockerEngine) Close() error {
+	return errors.Join(d.Client.Close(), d.stopClient.Close())
+}
+
+// ContainerStop lets the engine use its requested grace before the request ends.
+func (d *dockerEngine) ContainerStop(ctx context.Context, id string, options client.ContainerStopOptions) (client.ContainerStopResult, error) {
+	if options.Timeout != nil && *options.Timeout >= 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(*options.Timeout)*time.Second+10*time.Second)
+		defer cancel()
+	} else if _, bounded := ctx.Deadline(); !bounded {
+		return client.ContainerStopResult{}, errors.New("docker stop with default or indefinite grace requires a context deadline")
+	}
+	// The ordinary transport's header budget is shorter than valid stop grace.
+	return d.stopClient.ContainerStop(ctx, id, options)
+}
+
 func resourceLabels(r ownedResource) map[string]string {
 	return map[string]string{"io.backlot.owner": r.Token}
 }
@@ -88,6 +114,12 @@ func createDockerResource(ctx context.Context, d *dockerEngine, r ownedResource)
 		}
 		return out.Volume.Name, nil
 	case "network":
+		if _, err := d.NetworkInspect(ctx, r.Name, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+			if err == nil {
+				err = problem("conflict", "recorded network name already exists; preserved")
+			}
+			return "", err
+		}
 		out, err := d.NetworkCreate(ctx, r.Name, client.NetworkCreateOptions{Driver: "bridge", Labels: resourceLabels(r)})
 		if err != nil {
 			return "", err
@@ -113,11 +145,17 @@ func verifyDockerResource(ctx context.Context, d *dockerEngine, r ownedResource)
 		if err != nil {
 			return err
 		}
+		if r.ID != "" && out.Network.ID != r.ID {
+			return problem("cleanup_failed", "network immutable identity changed; preserved")
+		}
 		return owned(out.Network.Labels, r)
 	case "container":
 		out, err := d.ContainerInspect(ctx, handle, client.ContainerInspectOptions{})
 		if err != nil {
 			return err
+		}
+		if r.ID != "" && out.Container.ID != r.ID {
+			return problem("cleanup_failed", "container immutable identity changed; preserved")
 		}
 		if out.Container.Config == nil {
 			return problem("cleanup_failed", "container configuration missing; preserved")
@@ -186,9 +224,16 @@ func (d *dockerEngine) noConsumers(ctx context.Context, g resourceGeneration) er
 					return problem("cleanup_failed", "directory has a positively identified Docker bind consumer; preserved; remove the consumer before retrying reset/destroy")
 				}
 			}
-			if r.Kind == "network" && c.NetworkSettings != nil {
-				for _, n := range c.NetworkSettings.Networks {
-					if n.NetworkID == r.ID {
+			if r.Kind == "network" {
+				// Never-started declarations can retain only the name, with no endpoint ID.
+				if c.HostConfig != nil && (r.Name != "" && string(c.HostConfig.NetworkMode) == r.Name || r.ID != "" && string(c.HostConfig.NetworkMode) == r.ID) {
+					return problem("cleanup_failed", "network still has a Docker consumer; preserved")
+				}
+				if c.NetworkSettings == nil {
+					continue
+				}
+				for name, n := range c.NetworkSettings.Networks {
+					if r.Name != "" && name == r.Name || r.ID != "" && (name == r.ID || n != nil && n.NetworkID == r.ID) {
 						return problem("cleanup_failed", "network still has a Docker consumer; preserved")
 					}
 				}
@@ -445,7 +490,7 @@ func (s *store) captureContainer(ctx context.Context, id string, d *dockerEngine
 	if err := localipc.Directory(directory, true); err != nil {
 		return nil, nil, nil, err
 	}
-	path := filepath.Join(directory, id+"-output.ndjson")
+	path := filepath.Join(directory, id+"-"+r.Attempt+"-output.ndjson")
 	if _, err := os.Lstat(path); err == nil {
 		if err = localipc.File(path, false); err != nil {
 			return nil, nil, nil, err
@@ -491,7 +536,11 @@ func (s *service) launchContainer(ctx context.Context, id string, c v1.PlannedCo
 	}
 	r := ownedResource{Kind: "container", Token: newID(), Component: c.Name, Attempt: result.Attempt}
 	r.Name = "backlot-" + r.Token
-	config := &container.Config{Image: image, Cmd: c.Args, Env: env, Labels: resourceLabels(r), ExposedPorts: network.PortSet{}}
+	args, err := resolvedArguments(c.Args, id, snap, result, entry, c.Runtime)
+	if err != nil {
+		return nil, err
+	}
+	config := &container.Config{Image: image, Cmd: args, Env: env, Labels: resourceLabels(r), ExposedPorts: network.PortSet{}}
 	host := &container.HostConfig{RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled}, PortBindings: network.PortMap{}}
 	host.ExtraHosts, err = containerOriginHosts(c, snap, result.Origin)
 	if err != nil {
@@ -646,6 +695,17 @@ func contains(values []string, value string) bool {
 	return false
 }
 func removeContainer(ctx context.Context, d *dockerEngine, r ownedResource) error {
+	// Pin pending names before effects; later name reuse never authorizes a target.
+	if r.ID == "" {
+		var err error
+		r.ID, err = recoverResourceEffect(ctx, d, r)
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
 	if err := verifyDockerResource(ctx, d, r); err != nil {
 		if errdefs.IsNotFound(err) {
 			return nil
@@ -653,18 +713,26 @@ func removeContainer(ctx context.Context, d *dockerEngine, r ownedResource) erro
 		return err
 	}
 	zero := 0
-	if _, err := d.ContainerStop(ctx, resourceHandle(r), client.ContainerStopOptions{Timeout: &zero}); err != nil {
+	if _, err := d.ContainerStop(ctx, r.ID, client.ContainerStopOptions{Timeout: &zero}); err != nil {
 		return err
 	}
-	out, err := d.ContainerInspect(ctx, resourceHandle(r), client.ContainerInspectOptions{})
+	out, err := d.ContainerInspect(ctx, r.ID, client.ContainerInspectOptions{})
 	if err != nil {
 		return err
 	}
-	if out.Container.State == nil || out.Container.State.Running {
-		return problem("cleanup_failed", "owned container remains live; resources preserved")
+	if out.Container.ID != r.ID || out.Container.State == nil || out.Container.State.Running {
+		return problem("cleanup_failed", "owned container remains live or changed; resources preserved")
 	}
-	_, err = d.ContainerRemove(ctx, resourceHandle(r), client.ContainerRemoveOptions{RemoveVolumes: true})
-	return err
+	if _, err := d.ContainerRemove(ctx, r.ID, client.ContainerRemoveOptions{RemoveVolumes: true}); err != nil && !errdefs.IsNotFound(err) {
+		return err
+	}
+	if _, err := d.ContainerInspect(ctx, r.ID, client.ContainerInspectOptions{}); !errdefs.IsNotFound(err) {
+		if err != nil {
+			return err
+		}
+		return problem("cleanup_failed", "owned container absence unverified; obligation retained")
+	}
+	return nil
 }
 func (s *store) containerRemoved(id string, g *resourceGeneration, i int) error {
 	g.Containers[i].Removed = true
@@ -697,8 +765,17 @@ func resolvedEnvironment(name string, environment map[string]v1.PlannedValue, id
 	return env, nil
 }
 func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, result *v1.ExecutionResult, entry *execution, runtime v1.Runtime) (string, error) {
+	if entry != nil && entry.referencePlan != nil {
+		id = entry.referenceID
+		snap.Plan = *entry.referencePlan
+	}
 	if value.Redacted {
 		value = snap.Secrets[key]
+	}
+	if value.Composition != nil {
+		return resolveComposition(*value.Composition, runtime, func(v v1.Value) (string, error) {
+			return resolvedValue(plannedValue(v), key, id, snap, result, entry, runtime)
+		})
 	}
 	r := value.Symbolic
 	if r != nil && r.Kind == "build_image" {
@@ -750,9 +827,16 @@ func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, re
 		}
 		return entry.caCertPath, nil
 	}
-	if r != nil && r.Kind == "resource" && r.Field == "url" {
+	if r != nil && r.Kind == "resource" && (r.Field == "url" || r.Field == "hostname") {
 		if snap.Plan.Publish == nil || r.Name != snap.Plan.Publish.Resource || result.Origin == "" {
 			return "", problem("invalid_publication", "origin reference requires the scene publication")
+		}
+		if r.Field == "hostname" {
+			u, err := url.Parse(result.Origin)
+			if err != nil {
+				return "", problem("invalid_publication", "invalid canonical origin")
+			}
+			return u.Hostname(), nil
 		}
 		return result.Origin, nil
 	}
@@ -795,15 +879,27 @@ func resolvedValue(value v1.PlannedValue, key, id string, snap plan.Snapshot, re
 	return runtimeValue(value, id, snap.Plan, result.Ports)
 }
 
-func containerProbeOwned(ctx context.Context, d *dockerEngine, w *dockerWork, c v1.PlannedComponent, value v1.PlannedValue, ports map[string]int, address netip.Addr) error {
-	r := value.Symbolic
+// authz: only the final numeric destination and authenticated binding establish ownership.
+func containerProbeOwned(ctx context.Context, d *dockerEngine, w *dockerWork, c v1.PlannedComponent, ports map[string]int, address netip.Addr, destination string) error {
+	host, portText, err := net.SplitHostPort(destination)
+	if err != nil {
+		return problem("readiness_unowned", "invalid container probe destination")
+	}
+	expected := address
+	if expected.IsUnspecified() {
+		expected = mappedAddress(&v1.DockerConfig{PublishAddress: address.String()})
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil || ip != expected {
+		return problem("readiness_unowned", "container probe destination must match owned host binding")
+	}
 	resource := ""
-	if r != nil && r.Kind == "service" && r.Name == c.Name && r.Field == "port" {
-		resource = c.Ports[r.Port].Resource
+	for _, p := range c.Ports {
+		if portText == strconv.Itoa(ports[p.Resource]) {
+			resource = p.Resource
+		}
 	}
-	if r != nil && r.Kind == "resource" && r.Field == "port" {
-		resource = r.Name
-	}
+
 	var port v1.ServicePort
 	for _, p := range c.Ports {
 		if p.Resource == resource {
@@ -811,7 +907,7 @@ func containerProbeOwned(ctx context.Context, d *dockerEngine, w *dockerWork, c 
 		}
 	}
 	if resource == "" || port.ContainerPort == 0 {
-		return problem("readiness_unowned", "container network probes require a symbolic port owned by that component; use a native command probe for other checks")
+		return problem("readiness_unowned", "container network probes require a destination bound by that component; use a native command probe for other checks")
 	}
 	if err := verifyDockerResource(ctx, d, w.resource); err != nil {
 		return err
@@ -855,53 +951,74 @@ func mappedAddress(config *v1.DockerConfig) netip.Addr {
 
 // Recovery stops only containers bearing the recorded capability; output gaps
 // remain explicit. It never resumes jobs or silently recreates retained state.
-func (s *store) recoverContainers(id string, g *resourceGeneration) error {
+// recoverContainers keeps historical collection gaps independent of verified cleanup.
+func (s *store) recoverContainers(id string, g *resourceGeneration) (collection, cleanup error) {
 	if g.ID == "" || len(g.Containers) == 0 {
-		return nil
+		return nil, nil
 	}
 	d, err := newDocker(g.Endpoint)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = d.Close() }()
-	var failures error
 	for i, r := range g.Containers {
 		if r.Removed {
 			continue
 		}
-		// Give each independent capability its own budget so a failed consumer
-		// cannot exhaust the recovery budget of later verifiably owned work.
+		// Each capability gets its own budget; one survivor cannot hide other releases.
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		err := s.recoverContainer(ctx, id, d, r)
+		if r.ID == "" {
+			r.ID, err = recoverResourceEffect(ctx, d, r)
+			if err == nil {
+				g.Containers[i] = r
+				err = s.saveResources(id, *g)
+			}
+			if err != nil {
+				cancel()
+				if errdefs.IsNotFound(err) {
+					cleanup = errors.Join(cleanup, s.containerRemoved(id, g, i))
+				} else {
+					cleanup = errors.Join(cleanup, err)
+				}
+				continue
+			}
+		}
+		collected, removed := s.recoverContainer(ctx, id, d, r)
 		cancel()
-		if err != nil {
-			failures = errors.Join(failures, err)
+		if collection == nil {
+			collection = collected
+		}
+		if removed != nil {
+			cleanup = errors.Join(cleanup, removed)
 			continue
 		}
-		failures = errors.Join(failures, s.containerRemoved(id, g, i))
+		cleanup = errors.Join(cleanup, s.containerRemoved(id, g, i))
 	}
-	return failures
+	return collection, cleanup
 }
-func (s *store) recoverContainer(ctx context.Context, id string, d *dockerEngine, r ownedResource) error {
+
+func (s *store) recoverContainer(ctx context.Context, id string, d *dockerEngine, r ownedResource) (collection, cleanup error) {
 	if err := verifyDockerResource(ctx, d, r); err != nil {
 		if errdefs.IsNotFound(err) {
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
 	zero := 0
 	if _, err := d.ContainerStop(ctx, resourceHandle(r), client.ContainerStopOptions{Timeout: &zero}); err != nil {
-		return err
+		return nil, err
 	}
 	_, done, w, err := s.captureContainer(ctx, id, d, r, false)
+	if err == nil {
+		<-done
+		err = w.logErr
+	}
 	if err != nil {
-		return err
+		collection = problem("collection_failed", "recovery container logs could not be retained")
 	}
-	<-done
-	if w.logErr != nil {
-		return problem("collection_failed", "recovery container logs could not be retained; container preserved")
-	}
-	return removeContainer(ctx, d, r)
+	// Lost output does not authorize deletion; removeContainer independently
+	// authenticates the exact effect and verifies its final absence.
+	return collection, removeContainer(ctx, d, r)
 }
 
 // providerFailure retains its cause for classification without publishing engine

@@ -127,10 +127,10 @@ func TestSharedDestroyIntentFencesStart(t *testing.T) {
 	record := sharedLockRecord(newID())
 	record.Server.Removed = false
 	record.Destroying = true
-	if err = state.saveShared(record); err != nil {
+	if err = state.saveSharedFixture(record); err != nil {
 		t.Fatal(err)
 	}
-	code(t, state.startShared(context.Background(), &record), "shared_cleanup_pending")
+	code(t, state.startShared(context.Background(), &record, "explicit_shared_start"), "shared_cleanup_pending")
 	observed, err := state.sharedService(record.ID)
 	if err != nil || !observed.Destroying || observed.Status != "destroying" || observed.Failure == "" {
 		t.Fatal("destructive obligation/status lost", err)
@@ -145,7 +145,7 @@ func TestSharedDestroyTracksReleaseOwner(t *testing.T) {
 	defer func() { _ = state.db.Close() }()
 	root := shortTemp(t)
 	config := writeFixture(t, root)
-	svc := &service{store: state, lease: time.Second}
+	svc := &service{store: state, directory: state.directory, lease: time.Second}
 	prepared, err := svc.prepare(context.Background(), request(root, config, "dev"))
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +211,7 @@ func TestSharedCorruptReleaseCannotBypassFence(t *testing.T) {
 	}
 	defer func() { _ = state.db.Close() }()
 	record := sharedLockRecord(newID())
-	if err = state.saveShared(record); err != nil {
+	if err = state.saveSharedFixture(record); err != nil {
 		t.Fatal(err)
 	}
 	allocation := sharedAllocation{ServiceID: record.ID, Request: v1.ManagerRequest{Version: v1.ManagerProtocolVersion, Operation: "release", AllocationID: newID(), Ownership: newID(), Database: "bl" + newID()[:32], Username: "bl" + newID()[:32], Password: newID()}, Released: true}
@@ -238,7 +238,7 @@ func TestSharedCompletedDestroyClearsFailure(t *testing.T) {
 	record.Server.Removed = true
 	record.Volume.Removed = true
 	record.Network.Removed = true
-	if err := state.saveShared(record); err != nil {
+	if err := state.saveSharedFixture(record); err != nil {
 		t.Fatal(err)
 	}
 	svc := &service{store: state}
@@ -487,7 +487,7 @@ func TestSharedShutdownAfterJoinedCollectionFailure(t *testing.T) {
 	server.Server.Removed = false
 	server.Server.Name = "missing-recorded-server"
 	server.Server.Kind = "container"
-	if err := svc.store.saveShared(server); err != nil {
+	if err := svc.store.saveSharedFixture(server); err != nil {
 		t.Fatal(err)
 	}
 	code(t, svc.stop(), "collection_failed")
@@ -502,7 +502,7 @@ func TestSharedShutdownAfterJoinedCollectionFailure(t *testing.T) {
 	if err := svc.store.saveSharedAllocations(instance.ID, map[string]sharedAllocation{"db": allocation}); err != nil {
 		t.Fatal(err)
 	}
-	code(t, svc.store.stopSharedServices(context.Background()), "shared_in_use")
+	code(t, svc.store.stopSharedServices(context.Background(), "daemon_recovery"), "shared_in_use")
 	if inspections.Load() != 1 {
 		t.Fatal("known consumer fence contacted provider")
 	}
@@ -519,8 +519,9 @@ func TestSharedCompletedResourceCleanupRetainsExecution(t *testing.T) {
 			if _, err := svc.store.execution(instance.ID, instance.Status, &original); err != nil {
 				t.Fatal(err)
 			}
-			if err := svc.store.saveRuntime(instance.ID, runtimeRecord{Attempt: original.Attempt}); err != nil {
-				t.Fatal(err)
+			journal, err := svc.store.runtime(instance.ID)
+			if err != nil || journal.Attempt != original.Attempt || journal.Release == nil {
+				t.Fatal("known zero-launch fixture proof missing", err)
 			}
 			if err := svc.store.recordCleanupFailure(instance.ID, errors.New("owned resource release failed")); err == nil {
 				t.Fatal("resource failure lost")
@@ -533,9 +534,36 @@ func TestSharedCompletedResourceCleanupRetainsExecution(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, err := svc.store.inspect(instance.ID)
-			if err != nil || got.Status != instance.Status || !reflect.DeepEqual(got.Execution, &original) {
+			if err != nil || got.Execution == nil {
+				t.Fatal(err)
+			}
+			before, after := original, *got.Execution
+			before.Settlement, after.Settlement = nil, nil
+			if got.Status != instance.Status || !reflect.DeepEqual(after, before) {
 				t.Fatal("resource retry replaced completed execution facts", err)
 			}
+			if got.Execution.Settlement == nil || original.Settlement == nil || got.Execution.Settlement.ObservedAt != original.Settlement.ObservedAt {
+				t.Fatal("cleanup read refreshed the actual prior release observation")
+			}
 		})
+	}
+}
+
+func TestSharedPreparedAllocationReservesServer(t *testing.T) {
+	svc, id := historyFixture(t)
+	server := sharedLockRecord(newID())
+	if err := svc.store.saveSharedFixture(server); err != nil {
+		t.Fatal(err)
+	}
+	allocation := sharedAllocation{ServiceID: server.ID, Request: v1.ManagerRequest{Version: v1.ManagerProtocolVersion, Operation: "allocate", AllocationID: newID(), Ownership: newID(), Database: "bl" + newID()[:32], Username: "bl" + newID()[:32], Password: newID()}}
+	if err := svc.store.saveSharedAllocations(id, map[string]sharedAllocation{"db": allocation}); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := svc.store.inspect(id)
+	if err != nil || prepared.Execution != nil || prepared.Status != v1.Prepared {
+		t.Fatal("fixture is not a real prepared consumer", err)
+	}
+	if count, err := svc.store.sharedDependents(server.ID, false); err != nil || count != 1 {
+		t.Fatal("prepared startup lost its server reservation", count, err)
 	}
 }

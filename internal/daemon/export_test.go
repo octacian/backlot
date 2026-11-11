@@ -5,6 +5,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	bolt "go.etcd.io/bbolt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,19 @@ func exportFixture(t *testing.T) (*service, v1.Instance, v1.ExportRequest) {
 	code := 23
 	result := &v1.ExecutionResult{Attempt: newID(), TerminalExitCode: &code, CompletedAt: time.Now().UTC().Format(time.RFC3339Nano), Components: []v1.ComponentResult{{Name: "test", Status: "completed", ExitCode: &code}}}
 	instance, err := s.store.execution(prepared.Instance.ID, v1.Failed, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This evidence-format fixture launches no external work. Record that known
+	// current-owner fact through the real producer; empty legacy state is unknown.
+	journal := runtimeRecord{Attempt: result.Attempt}
+	if err := s.store.saveRuntime(instance.ID, journal); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.recordConsumerRelease(context.Background(), instance.ID, journal, v1.SettlementExecutionCleanup, true); err != nil {
+		t.Fatal(err)
+	}
+	instance, err = s.store.execution(instance.ID, instance.Status, result)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +154,16 @@ func TestExportIncompleteEvidence(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := s.store.execution(instance.ID, v1.Failed, &result); err != nil {
+			if err := s.store.db.Update(func(tx *bolt.Tx) error {
+				r, err := load(tx, instance.ID)
+				if err != nil {
+					return err
+				}
+				r.Instance.Status = v1.Failed
+				r.Instance.Operation.Status = v1.Failed
+				r.Instance.Execution = &result
+				return put(tx, "instances", instance.ID, r)
+			}); err != nil {
 				t.Fatal(err)
 			}
 			response, err := s.export(context.Background(), request)
@@ -254,7 +277,16 @@ func TestExportWaitingAndUnknownTargets(t *testing.T) {
 	// Active and kept executions cannot use partial mode to bypass settlement.
 	result := *instance.Execution
 	result.Kept = true
-	if _, err := s.store.execution(instance.ID, v1.Failed, &result); err != nil {
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		r, err := load(tx, instance.ID)
+		if err != nil {
+			return err
+		}
+		r.Instance.Status = v1.Failed
+		r.Instance.Operation.Status = v1.Failed
+		r.Instance.Execution = &result
+		return put(tx, "instances", instance.ID, r)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	request.AllowPartial = true
@@ -324,7 +356,16 @@ func TestExportEscapesHostileSummary(t *testing.T) {
 	s, instance, request := exportFixture(t)
 	result := *instance.Execution
 	result.Failure = `<script>alert("hostile")</script> & injected`
-	if _, err := s.store.execution(instance.ID, v1.Failed, &result); err != nil {
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		r, err := load(tx, instance.ID)
+		if err != nil {
+			return err
+		}
+		r.Instance.Status = v1.Failed
+		r.Instance.Operation.Status = v1.Failed
+		r.Instance.Execution = &result
+		return put(tx, "instances", instance.ID, r)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.export(context.Background(), request); err != nil {
@@ -411,7 +452,16 @@ func TestExportLatestAttemptAndDestinationExclusions(t *testing.T) {
 	}
 	result := *instance.Execution
 	result.Attempt = newID()
-	if _, err := s.store.execution(instance.ID, v1.Failed, &result); err != nil {
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		r, err := load(tx, instance.ID)
+		if err != nil {
+			return err
+		}
+		r.Instance.Status = v1.Failed
+		r.Instance.Operation.Status = v1.Failed
+		r.Instance.Execution = &result
+		return put(tx, "instances", instance.ID, r)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	next := v1.LogRecord{InstanceID: instance.ID, Attempt: result.Attempt, Component: "test", Time: time.Now().UTC().Format(time.RFC3339Nano), Stream: "stdout", Message: "LATEST-ONLY"}
@@ -447,7 +497,16 @@ func TestExportIndefiniteWaitObservesWithoutCancellation(t *testing.T) {
 	s, instance, request := exportFixture(t)
 	result := *instance.Execution
 	result.Kept = true
-	if _, err := s.store.execution(instance.ID, v1.Failed, &result); err != nil {
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		r, err := load(tx, instance.ID)
+		if err != nil {
+			return err
+		}
+		r.Instance.Status = v1.Failed
+		r.Instance.Operation.Status = v1.Failed
+		r.Instance.Execution = &result
+		return put(tx, "instances", instance.ID, r)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	request.Wait = true
@@ -457,7 +516,16 @@ func TestExportIndefiniteWaitObservesWithoutCancellation(t *testing.T) {
 	go func() { _, err := s.export(ctx, request); done <- err }()
 	// Settlement comes from an independent execution owner, not the exporter.
 	result.Kept = false
-	if _, err := s.store.execution(instance.ID, v1.Failed, &result); err != nil {
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		r, err := load(tx, instance.ID)
+		if err != nil {
+			return err
+		}
+		r.Instance.Status = v1.Failed
+		r.Instance.Operation.Status = v1.Failed
+		r.Instance.Execution = &result
+		return put(tx, "instances", instance.ID, r)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-done; err != nil {

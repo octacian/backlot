@@ -21,8 +21,18 @@ func (s *store) filteredList(request v1.FilteredListRequest) (v1.ListResponse, e
 	}
 	var checkout *v1.CheckoutIdentity
 	project := ""
-	if request.ProjectPath != "" || request.CheckoutPath != "" {
+	if request.ProjectPath != "" || request.CheckoutPath != "" || request.CWD != "" {
 		path := request.CheckoutPath
+		if request.CWD != "" {
+			anchor, err := sceneDirectory(request.CWD)
+			if err != nil {
+				return result, err
+			}
+			path = plan.CheckoutRoot(anchor)
+			if _, err := os.Lstat(filepath.Join(path, ".git")); err != nil {
+				return result, problem("checkout_identity", "working directory is outside a Git checkout; use --checkout PATH for an exact checkout root or recorded instance IDs")
+			}
+		}
 		if request.ProjectPath != "" {
 			var err error
 			project, err = sceneDirectory(request.ProjectPath)
@@ -73,17 +83,20 @@ func (s *store) filteredList(request v1.FilteredListRequest) (v1.ListResponse, e
 				return err
 			}
 			i := r.Instance
+			if err := associateInstance(tx, &i); err != nil {
+				return err
+			}
 			if checkout != nil {
 				if err := validateSceneRecord(i); err != nil {
 					return err
 				}
-				if i.Checkout.Path != checkout.Path {
+				if associatedCheckout(i).Path != checkout.Path {
 					continue
 				}
-				if !sameCheckout(&i.Checkout, checkout) {
+				if !sameCheckoutValue(associatedCheckout(i), *checkout) {
 					return problem("checkout_changed", "recorded checkout identity changed; use explicit recorded ID")
 				}
-				if project != "" && filepath.Dir(i.Plan.ManifestPath) != project {
+				if project != "" && associatedProject(i) != project {
 					continue
 				}
 			}
@@ -96,12 +109,17 @@ func (s *store) filteredList(request v1.FilteredListRequest) (v1.ListResponse, e
 			}
 			summary := v1.InstanceSummary{ID: i.ID, Project: i.Plan.Project, Scene: i.Plan.Scene, Checkout: i.Checkout.Path, Status: i.Status, Lifetime: i.Plan.Lifetime, CreatedAt: i.CreatedAt}
 			if i.Execution != nil {
-				summary.Origin = i.Execution.Origin
+				if i.Task == nil {
+					summary.Origin = i.Execution.Origin
+				}
 			}
 			result.Instances = append(result.Instances, summary)
 		}
 		return nil
 	})
+	if err == nil && request.IncludeCheckout {
+		result.Checkout = checkout
+	}
 	return result, err
 }
 

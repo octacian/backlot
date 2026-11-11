@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"syscall"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ import (
 	v1 "github.com/octacian/backlot/api/v1"
 )
 
-func recipeCancellation(t *testing.T, h *nativeHarness, docker *dockerHarness, scene string, args []string, sig os.Signal) {
+func recipeCancellation(t *testing.T, h *nativeHarness, docker *dockerHarness, config, scene string, args []string, sig os.Signal) {
 	t.Helper()
 	job := h.manifest.Components["tests"]
 	if job.Environment.Assign == nil {
@@ -28,9 +29,7 @@ func recipeCancellation(t *testing.T, h *nativeHarness, docker *dockerHarness, s
 	h.manifest.Components["tests"] = job
 	h.write()
 	argv := []string{"run", scene, "--project", h.project, "--state-dir", h.dir, "--json", "--stop-grace", "2s", "--startup-timeout", "90s"}
-	if docker != nil {
-		argv = append(argv, "--config", docker.config)
-	}
+	argv = append(argv, "--config", config)
 	argv = append(append(argv, "--"), args...)
 	command := exec.Command(h.binary, argv...)
 	var stdout, stderr bytes.Buffer
@@ -126,6 +125,15 @@ func recipeCancellation(t *testing.T, h *nativeHarness, docker *dockerHarness, s
 	if instance.ID != holding.Instance || instance.Status != v1.Cancelled || result == nil || !result.Cancelled || result.Failure != "" || result.CollectionFailure != "" || result.CleanupFailure != "" {
 		t.Fatal("cancellation facts", result)
 	}
+	stopped, err := h.cli.StopExecution(context.Background(), instance.ID)
+	if err != nil {
+		t.Fatal("stop cancelled recipe before export", err)
+	}
+	settled := stopped.Instance.Execution
+	if stopped.Instance.Status != instance.Status || settled == nil || settled.Kept || !reflect.DeepEqual(settled, result) {
+		t.Fatal("stop changed original cancellation diagnosis", settled)
+	}
+	bundle := exportRecipe(t, h, stopped.Instance, args, -1)
 	if _, err := h.cli.Destroy(context.Background(), instance.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +151,7 @@ func recipeCancellation(t *testing.T, h *nativeHarness, docker *dockerHarness, s
 	if h.cleanupUnverified {
 		t.Fatal("observed process cleanup incomplete")
 	}
-	exportRecipe(t, h, instance, args, -1)
+	verifyRecipeExport(t, stopped.Instance, bundle, args, -1)
 	native := "unknown"
 	if result.TerminalExitCode != nil {
 		native = fmt.Sprint(*result.TerminalExitCode)

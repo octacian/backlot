@@ -16,7 +16,6 @@ import (
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
-	bolt "go.etcd.io/bbolt"
 )
 
 func TestDisposableEvidenceDocker(t *testing.T) {
@@ -29,7 +28,7 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, output)
 	}
-	for _, mode := range []string{"success", "job-failure", "cancellation", "collection-failure", "cleanup-failure"} {
+	for _, mode := range []string{"success", "job-failure", "cancellation", "collection-failure", "cleanup-failure", "shutdown"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newDockerHarness(t, binary, endpoint)
 			h.alpine()
@@ -38,12 +37,12 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			switch mode {
 			case "job-failure":
 				script += "; exit 17"
-			case "cancellation":
+			case "cancellation", "shutdown":
 				script += "; exec sleep 90"
 			case "cleanup-failure":
 				script += "; while [ ! -f /private/release ]; do sleep 0.1; done"
 			}
-			job.Args = []string{"sh", "-c", script, "job"}
+			job.Args = v1.StringArguments("sh", "-c", script, "job")
 			job.Fixtures = map[string]v1.Fixture{"directory": {Value: fixtureRef("resource", "directory", "path")}}
 			job.Artifacts = map[string]v1.ArtifactSource{"report": {Path: "/tmp/report"}}
 			if mode == "collection-failure" {
@@ -61,7 +60,7 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			id := response.Instance.ID
 			h.ids = append(h.ids, id)
 			h.tokens[id] = response.LeaseToken
-			if mode == "cancellation" || mode == "cleanup-failure" {
+			if mode == "cancellation" || mode == "cleanup-failure" || mode == "shutdown" {
 				h.waitTerminalRunning(id)
 			}
 			var proveObjectsAbsent func() error
@@ -100,11 +99,31 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if mode == "shutdown" {
+				if _, err := h.cli.Stop(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				if err := h.process.Wait(); err != nil {
+					t.Fatal(err)
+				}
+				h.waited = true
+				g := h.generation(id)
+				for _, r := range g.Resources {
+					if r.Kind == "network" {
+						if _, err := h.engine.NetworkInspect(context.Background(), r.ID, client.NetworkInspectOptions{}); !r.Removed || !errdefs.IsNotFound(err) {
+							t.Fatal("shutdown did not retire exact network", err)
+						}
+					} else if err := verifyResource(context.Background(), h.engine, r); err != nil {
+						t.Fatal("shutdown lost retained data/credentials", err)
+					}
+				}
+				h.start()
+			}
 			want := v1.Succeeded
 			if mode == "job-failure" || mode == "collection-failure" || mode == "cleanup-failure" {
 				want = v1.Failed
 			}
-			if mode == "cancellation" {
+			if mode == "cancellation" || mode == "shutdown" {
 				want = v1.Cancelled
 			}
 			final := h.state(id, want).Instance
@@ -124,7 +143,7 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			if mode == "cleanup-failure" && (result.CompletedAt == "" || result.CollectionFailure != "") {
 				t.Fatal("cleanup-only failure changed completed collection facts")
 			}
-			if mode == "cancellation" && !result.Cancelled {
+			if (mode == "cancellation" || mode == "shutdown") && !result.Cancelled {
 				t.Fatal("cancellation omitted")
 			}
 			if mode == "collection-failure" {
@@ -149,6 +168,20 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 				if code != 0 || !strings.Contains(output, "retained") {
 					t.Fatal("investigation data lost", code)
 				}
+				if mode != "collection-failure" {
+					observed, err := h.engine.ContainerInspect(context.Background(), server.ID, client.ContainerInspectOptions{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := h.cli.StopExecution(context.Background(), id); err != nil {
+						t.Fatal("explicit kept stop", err)
+					}
+					for _, attachment := range observed.Container.NetworkSettings.Networks {
+						if _, err := h.engine.NetworkInspect(context.Background(), attachment.NetworkID, client.NetworkInspectOptions{}); !errdefs.IsNotFound(err) {
+							t.Fatal("kept stop retained exact network", err)
+						}
+					}
+				}
 			} else {
 				list, err := h.engine.ContainerList(context.Background(), client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "io.backlot.owner")})
 				if err != nil {
@@ -164,9 +197,37 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 					}
 				}
 			}
+			logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "each"})
+			if err != nil || len(logs.Records) < 2 {
+				t.Fatal("retained stdout/stderr logs missing before destroy", logs, err)
+			}
+			for _, record := range logs.Records {
+				if record.Attempt != result.Attempt || record.Time == "" || record.Stream == "" {
+					t.Fatal("context missing", record)
+				}
+			}
 			if mode == "cleanup-failure" {
 				if err := os.WriteFile(marker, proof, 0600); err != nil {
 					t.Fatal(err)
+				}
+				recovered, err := h.cli.StopExecution(context.Background(), id)
+				if err != nil || recovered.Instance.Execution == nil {
+					t.Fatal("cleanup retry failed", err)
+				}
+				before, after := result.Settlement, recovered.Instance.Execution.Settlement
+				if before == nil || before.State != v1.ConsumerUnsettled || before.Cause != v1.SettlementIncomplete {
+					t.Fatal("cleanup failure lost current consumer fence", before)
+				}
+				if after == nil || after.Validate() != nil || after.InstanceID != id || after.Attempt != result.Attempt || after.Generation != before.Generation || after.State != v1.ConsumerSettled || after.Cause != v1.SettlementExplicitStop || after.ObservedAt == "" {
+					t.Fatal("cleanup retry did not verify current consumer release", after)
+				}
+				expected := *result
+				expected.CleanupFailure, expected.CleanupDetails = "", nil
+				actual := *recovered.Instance.Execution
+				// Current release changes independently of the original execution facts.
+				expected.Settlement, actual.Settlement = nil, nil
+				if recovered.Instance.Status != final.Status || !reflect.DeepEqual(actual, expected) {
+					t.Fatal("cleanup retry changed original execution result")
 				}
 				if _, err := h.cli.Destroy(context.Background(), id); err != nil {
 					t.Fatal("cleanup could not recover", err)
@@ -174,31 +235,19 @@ func TestDisposableEvidenceDocker(t *testing.T) {
 			} else if _, err := h.cli.Destroy(context.Background(), id); err != nil {
 				t.Fatal(err)
 			}
-			logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "each"})
-			if err != nil || len(logs.Records) < 2 {
-				t.Fatal("historical logs missing", logs, err)
-			}
-			for _, record := range logs.Records {
-				if record.Attempt != result.Attempt || record.Time == "" || record.Stream == "" {
-					t.Fatal("context missing", record)
-				}
+			logs, err = h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: "each"})
+			if err != nil || len(logs.Records) != 0 {
+				t.Fatal("destroy retained logs", logs, err)
 			}
 			// No cleanup error may be forgotten by the final explicit destroy.
 			inspected, err := h.cli.Inspect(context.Background(), id)
-			if err != nil || inspected.Instance.Status != v1.Destroyed || inspected.Instance.Execution.CleanupFailure != "" {
+			if err != nil || inspected.Instance.Status != v1.Destroyed || inspected.Instance.Execution != nil {
 				t.Fatal("destroy failed", inspected, err)
 			}
-			if mode == "cleanup-failure" {
-				expected := *result
-				expected.CleanupFailure, expected.CleanupDetails = "", nil
-				if !reflect.DeepEqual(inspected.Instance.Execution, &expected) {
-					t.Fatal("cleanup retry changed original execution result")
-				}
+			if proveObjectsAbsent != nil {
 				if err := proveObjectsAbsent(); err != nil {
 					t.Fatal(err)
 				}
-			} else if proveObjectsAbsent != nil {
-				h.expectDisposableDockerCollectionFailure(inspected.Instance, proveObjectsAbsent)
 			}
 		})
 	}
@@ -298,77 +347,5 @@ func (h *dockerHarness) observeDisposableDockerObjects(id, directoryComponent st
 			}
 		}
 		return nil
-	}
-}
-
-// This exception is deliberately limited to the one fully destroyed Docker-only
-// disposable attempt. Native/Caddy authority, extra instances, pending effects or
-// changed historical results require their own proof and fail this one closed.
-func (h *dockerHarness) expectDisposableDockerCollectionFailure(want v1.Instance, proveObjectsAbsent func() error) {
-	h.t.Helper()
-	if want.Status != v1.Destroyed || want.Execution == nil || want.Execution.CollectionFailure == "" || want.Execution.CleanupFailure != "" || want.Execution.TerminalExitCode == nil || *want.Execution.TerminalExitCode != 0 {
-		h.t.Fatal("expected destroyed original collection-failure result missing")
-	}
-	h.shutdownFailureCode = "collection_failed"
-	h.shutdownFailureProof = func() error {
-		db, err := bolt.Open(filepath.Join(h.dir, "state.db"), 0600, &bolt.Options{ReadOnly: true, Timeout: time.Second})
-		if err != nil {
-			return err
-		}
-		err = db.View(func(tx *bolt.Tx) error {
-			count := 0
-			if err := tx.Bucket([]byte("instances")).ForEach(func(key, data []byte) error {
-				var r record
-				if err := decodeRecord(data, string(key), &r); err != nil {
-					return err
-				}
-				count++
-				if r.Instance.ID != want.ID || !reflect.DeepEqual(r.Instance.Execution, want.Execution) || r.Instance.Status != v1.Destroyed || len(r.NativeAbandonments) != 0 || r.Instance.Plan.Publish != nil {
-					return errors.New("destroyed original attempt/history or authority changed")
-				}
-				for _, c := range r.Instance.Plan.Components {
-					if c.Runtime != v1.Container {
-						return errors.New("native authority requires independent authenticated cleanup proof")
-					}
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-			if count != 1 || tx.Bucket([]byte("meta")).Get([]byte("managed_gateway")) != nil {
-				return errors.New("unexpected instance or managed gateway authority")
-			}
-			for _, name := range []string{"resources", "runtime"} {
-				entries := 0
-				if err := tx.Bucket([]byte(name)).ForEach(func(key, data []byte) error {
-					entries++
-					if string(key) != want.ID {
-						return errors.New("unexpected private resource/runtime journal")
-					}
-					if name == "resources" {
-						g, err := decodeResources(data)
-						if err != nil || g.ID != "" {
-							return errors.New("recorded resource cleanup incomplete")
-						}
-					} else {
-						r, err := decodeRuntime(data)
-						if err != nil || r.LaunchPending || len(r.Groups) != 0 || r.Gateway != nil {
-							return errors.New("recorded native/pending/gateway cleanup incomplete")
-						}
-					}
-					return nil
-				}); err != nil {
-					return err
-				}
-				if entries != 1 {
-					return errors.New("original private resource/runtime journal missing")
-				}
-			}
-			return nil
-		})
-		if err := errors.Join(err, db.Close()); err != nil {
-			return err
-		}
-		return proveObjectsAbsent()
 	}
 }

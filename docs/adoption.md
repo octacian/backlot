@@ -89,7 +89,10 @@ Backlot does not invent application environment names or concatenate URLs.
 If no build is needed, remove that component and its dependency from both scenes.
 If commands write `dist` or reports, declare their outputs/groups before concurrent
 use; [the existing adoption manifest](../examples/adoption/backlot.yaml) shows
-build outputs. Backlot cannot lock undeclared writes. Each selected dependency
+build outputs. For disposable report directories, explicitly opt into
+`empty_before_execution: true` to remove previous files before any component
+starts; see [output preparation](manifest.md#project-declarations). Backlot cannot
+lock undeclared writes. Each selected dependency
 must be listed in the scene; a reference alone does not select or wait for it.
 
 A TCP probe observes a listener, not schema or credential correctness. Use a
@@ -144,7 +147,9 @@ Only the terminal job gets that tail. Read each command's exit and result before
 continuing; discovery/configuration/plan/doctor do not establish execution success.
 Once ready, use the [daily loop](operations.md#daily-loop) for logs, evidence and
 scoped cleanup, and the [lifecycle table](daemon.md#identity-and-lifecycle) when edits
-need restart/reset. Test failures keep their original exit independently of
+need restart/reset. After fixing a persistent failure, explicitly start again for
+one new attempt; follow [conflict and missing-reply guidance](cli.md#commands-and-defaults).
+Test failures keep their original exit independently of
 orchestration, collection and cleanup.
 
 Use the existing [loopback Playwright recipe](../examples/native-playwright/README.md)
@@ -154,3 +159,13 @@ private data and environment-only credentials. They contain runnable application
 code; the manifest above is an adaptation outline. Add
 [HTTPS publication/application trust](https.md) or [containers/state](containers.md)
 when required, keeping those topology-specific settings explicit.
+
+## Keep diagnostics across attempts
+
+Use `history ID` and `inspect ID --last-completed` when validating replacement
+attempts; `inspect ID --attempt ATTEMPT` and `export ID --attempt ATTEMPT --output
+NEW_DIRECTORY` select retained evidence without using the current execution.
+Before successful destroy, export anything you need to keep: destroy erases the
+instance's results/logs/artifacts. Ordinary disposable completion still retains
+diagnostics under [age/byte/count retention](evidence.md#logs-and-retention).
+Manual history pruning removes selected evidence, never application data or credentials.

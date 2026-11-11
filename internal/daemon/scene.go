@@ -2,12 +2,14 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 	bolt "go.etcd.io/bbolt"
 )
@@ -20,6 +22,14 @@ func (s *service) startScene(ctx context.Context, request v1.SceneStartRequest) 
 	}
 	if len(request.Plan.TerminalArgs) > 0 {
 		return result, problem("invalid_request", "persistent scene start does not accept terminal arguments")
+	}
+	ctx, finish, err := s.beginWorkload(ctx)
+	if err != nil {
+		return result, err
+	}
+	defer finish()
+	if s.beforeSceneDiscovery != nil {
+		s.beforeSceneDiscovery()
 	}
 	_, project, err := plan.Discover(request.CWD, request.Plan.ProjectPath)
 	if err != nil {
@@ -36,6 +46,9 @@ func (s *service) startScene(ctx context.Context, request v1.SceneStartRequest) 
 	}
 	result.CanonicalTarget = &canonicalTarget
 	request.Plan.ProjectPath = project
+	if err := s.checkWorkload(ctx); err != nil {
+		return result, err
+	}
 	response, err := s.runSelected(ctx, v1.RunRequest{Attached: request.Attached, APIVersion: v1.Version, Plan: request.Plan, Options: request.Options}, false, true)
 	if err != nil {
 		return result, err
@@ -118,6 +131,7 @@ func (s *service) resolveScene(target v1.SceneTarget, persistentOnly bool) (v1.S
 	if boundaryErr != nil && !os.IsNotExist(boundaryErr) {
 		return response, problem("checkout_identity", "cannot inspect Git checkout boundary")
 	}
+	boot, _ := native.CurrentBoot()
 	err = s.store.db.View(func(tx *bolt.Tx) error {
 		// Collect recorded locations before filtering by scene/status. This also makes
 		// destroyed history available for nearest-project discovery and non-Git roots.
@@ -150,29 +164,45 @@ func (s *service) resolveScene(target v1.SceneTarget, persistentOnly bool) (v1.S
 			return err
 		}
 		selected := ""
+		candidates := []string{}
 		for _, instance := range instances {
 			project := instance.project
 			if project != nearest {
 				continue
 			}
-			if instance.Checkout.Path != checkout.Path || instance.Checkout.ID != checkout.ID || instance.Checkout.GitDirectory != checkout.GitDirectory {
+			if !sameCheckoutValue(instance.Checkout, checkout) {
 				return problem("checkout_changed", "recorded project checkout identity changed; use explicit recorded ID")
 			}
 			if instance.lifetime != v1.Persistent || instance.status == v1.Destroyed || instance.scene != target.Scene {
 				continue
 			}
-			if selected != "" {
-				return problem("ambiguous_target", "multiple recorded persistent instances match; use backlot status ID or backlot stop ID")
-			}
-			selected = instance.id
+			candidates = append(candidates, instance.id)
 		}
+		sort.Strings(candidates)
+		if len(candidates) > 1 {
+			sample := candidates
+			suffix := ""
+			if len(sample) > 5 {
+				sample = sample[:5]
+				suffix = " (incomplete sample)"
+			}
+			return problem("ambiguous_target", "multiple recorded persistent instances match; candidate IDs: "+strings.Join(sample, ", ")+suffix+"; use list --scene "+target.Scene+" and an exact-ID command")
+		}
+		if len(candidates) == 1 {
+			selected = candidates[0]
+		}
+
 		if selected != "" {
 			r, err := load(tx, selected)
 			if err != nil {
 				return err
 			}
+			instance, err := inspectRecord(tx, r, boot)
+			if err != nil {
+				return err
+			}
 			response.Outcome = v1.SceneFound
-			response.Result = &v1.InstanceResponse{APIVersion: v1.Version, Instance: r.Instance}
+			response.Result = &v1.InstanceResponse{APIVersion: v1.Version, Instance: instance}
 		}
 		return nil
 	})
@@ -180,7 +210,14 @@ func (s *service) resolveScene(target v1.SceneTarget, persistentOnly bool) (v1.S
 }
 
 func sameCheckout(a, b *v1.CheckoutIdentity) bool {
-	return a != nil && b != nil && a.ID == b.ID && a.Path == b.Path && a.GitDirectory == b.GitDirectory
+	if a != nil && b != nil && a.Registration.CheckoutID != "" && b.Registration.CheckoutID != "" {
+		return a.Path == b.Path && a.GitDirectory == b.GitDirectory && a.Registration == b.Registration
+	}
+	return a != nil && b != nil && sameCheckoutPhysical(*a, *b)
+}
+
+func sameCheckoutPhysical(a, b v1.CheckoutIdentity) bool {
+	return a.ID == b.ID && a.Path == b.Path && a.GitDirectory == b.GitDirectory
 }
 
 func (s *service) scene(target v1.SceneTarget, stop bool) (v1.SceneResponse, error) {
@@ -248,7 +285,7 @@ func requireSceneLocation(instance v1.Instance, project string) error {
 	if err := validateSceneRecord(instance); err != nil {
 		return err
 	}
-	if filepath.Dir(instance.Plan.ManifestPath) != project {
+	if associatedProject(instance) != project {
 		return problem("conflict", "persistent scene belongs to a different recorded project directory; use its explicit recorded instance ID")
 	}
 	return nil
@@ -277,32 +314,19 @@ func storedSceneInstances(tx *bolt.Tx) (map[string]recordedScene, error) {
 			return err
 		}
 		i := r.Instance
+		if err := associateInstance(tx, &i); err != nil {
+			return err
+		}
 		instances[string(key)] = recordedScene{
-			id: i.ID, project: filepath.Dir(i.Plan.ManifestPath), scene: i.Plan.Scene,
+			id: i.ID, project: associatedProject(i), scene: i.Plan.Scene,
 			slot: sceneSlot(i), lifetime: i.Plan.Lifetime, status: i.Status,
-			Checkout: v1.CheckoutIdentity{ID: i.Checkout.ID, Path: i.Checkout.Path, GitDirectory: i.Checkout.GitDirectory},
+			Checkout: associatedCheckout(i),
 		}
 		return nil
 	}); err != nil {
 		return nil, err
 	}
-	checkouts := make(map[string]v1.CheckoutIdentity)
-	if err := tx.Bucket([]byte("checkouts")).ForEach(func(key, data []byte) error {
-		var checkout v1.CheckoutIdentity
-		if json.Unmarshal(data, &checkout) != nil || checkout.ID != string(key) {
-			return problem("state_corrupt", "cannot decode recorded checkout identity")
-		}
-		checkout.GitHead = "" // HEAD is provenance, not selection identity.
-		checkouts[string(key)] = checkout
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	paths := make(map[string]string)
-	if err := tx.Bucket([]byte("paths")).ForEach(func(key, data []byte) error {
-		paths[string(key)] = string(data)
-		return nil
-	}); err != nil {
+	if err := validateOriginCheckouts(tx); err != nil {
 		return nil, err
 	}
 	slots := make(map[string]string)
@@ -319,10 +343,6 @@ func storedSceneInstances(tx *bolt.Tx) (map[string]recordedScene, error) {
 		return nil, err
 	}
 	for _, i := range instances {
-		checkout, exists := checkouts[i.Checkout.ID]
-		if !exists || !sameCheckout(&checkout, &i.Checkout) || paths[i.Checkout.Path] != i.Checkout.ID {
-			return nil, problem("state_corrupt", "recorded scene and checkout location indexes disagree")
-		}
 		if i.lifetime == v1.Persistent && i.status != v1.Destroyed && slots[i.slot] != i.id {
 			return nil, problem("state_corrupt", "recorded persistent scene has no matching slot")
 		}
@@ -331,22 +351,75 @@ func storedSceneInstances(tx *bolt.Tx) (map[string]recordedScene, error) {
 }
 
 func sceneSlot(i v1.Instance) string {
-	return i.Plan.Project + "/" + i.Checkout.ID + "/" + i.Plan.Scene
+	return i.Plan.Project + "/" + checkoutParent(i) + "/" + i.Plan.Scene
 }
 
 // verifyRecordedCheckout compares current filesystem identity with recorded location indexes.
 func verifyRecordedCheckout(tx *bolt.Tx, checkout v1.CheckoutIdentity) error {
-	if data := tx.Bucket([]byte("paths")).Get([]byte(checkout.Path)); data != nil && string(data) != checkout.ID {
-		return problem("checkout_replaced", "recorded checkout path identifies different files; use explicit recorded ID")
+	_, err := locateCheckout(tx, checkout)
+	return err
+}
+func sameCheckoutValue(a, b v1.CheckoutIdentity) bool { return sameCheckout(&a, &b) }
+
+// selectMutation freezes canonical locations before waiting for lifecycle serialization.
+func (s *service) selectMutation(target v1.SceneTarget) (v1.SceneResponse, error) {
+	response, err := s.resolveScene(target, true)
+	if err != nil {
+		return response, err
 	}
-	if data := tx.Bucket([]byte("checkouts")).Get([]byte(checkout.ID)); data != nil {
-		var previous v1.CheckoutIdentity
-		if err := json.Unmarshal(data, &previous); err != nil {
-			return problem("state_corrupt", "cannot decode checkout identity")
+	if response.Result == nil {
+		return response, s.missingMutationTarget(target, response)
+	}
+	return response, nil
+}
+
+func (s *service) missingMutationTarget(target v1.SceneTarget, response v1.SceneResponse) error {
+	ids := []string{}
+	err := s.store.db.View(func(tx *bolt.Tx) error {
+		instances, err := storedSceneInstances(tx)
+		if err != nil {
+			return err
 		}
-		if previous.Path != checkout.Path || previous.GitDirectory != checkout.GitDirectory {
-			return problem("checkout_moved", "checkout moved; use explicit recorded ID")
+		nearest := ""
+		anchor := response.CanonicalTarget
+		if anchor == nil || response.Checkout == nil {
+			return nil
 		}
+		for _, i := range instances {
+			if sameCheckoutValue(i.Checkout, *response.Checkout) && within(i.project, anchor.CWD) && (anchor.ProjectPath == "" || i.project == anchor.ProjectPath) && len(i.project) > len(nearest) {
+				nearest = i.project
+			}
+		}
+		for _, i := range instances {
+			if i.project == nearest && i.scene == target.Scene && i.status != v1.Destroyed {
+				ids = append(ids, i.id)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	sort.Strings(ids)
+	message := "no recorded persistent scene; use scene start for a new persistent scene, or list --scene " + target.Scene + " and an exact-ID command"
+	if len(ids) > 0 {
+		suffix := ""
+		if len(ids) > 5 {
+			ids = ids[:5]
+			suffix = " (incomplete sample; use list --scene " + target.Scene + ")"
+		}
+		message += "; candidate IDs: " + strings.Join(ids, ", ") + suffix
+	}
+	return problem("not_found", message)
+}
+
+func (s *service) revalidateMutation(selected v1.SceneResponse) error {
+	current, err := s.resolveScene(*selected.CanonicalTarget, true)
+	if err != nil {
+		return err
+	}
+	if current.Result == nil || current.Result.Instance.ID != selected.Result.Instance.ID || !sameCheckout(selected.Checkout, current.Checkout) {
+		return problem("conflict", "scene selection changed while awaiting mutation lock; inspect or use explicit recorded ID")
 	}
 	return nil
 }

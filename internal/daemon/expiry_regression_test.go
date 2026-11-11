@@ -34,7 +34,7 @@ func newControlledExpiry(t *testing.T) *controlledExpiry {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &controlledExpiry{s: &service{store: store, lease: time.Minute, executions: map[string]*execution{}}, root: root, config: config}
+	f := &controlledExpiry{s: &service{store: store, directory: store.directory, lease: time.Minute, executions: map[string]*execution{}}, root: root, config: config}
 	t.Cleanup(func() {
 		for _, release := range f.gates {
 			release()
@@ -65,7 +65,10 @@ func (f *controlledExpiry) owner(t *testing.T, expired bool, grace time.Duration
 	var released, cancelled sync.Once
 	owner.release = func() { released.Do(func() { close(owner.gate) }) }
 	f.gates = append(f.gates, owner.release)
-	owner.entry = &execution{done: owner.done, grace: grace, cancel: func() {
+	if err := f.s.store.saveRuntime(owner.id, runtimeRecord{Attempt: result.Attempt}); err != nil {
+		t.Fatal(err)
+	}
+	owner.entry = &execution{attempt: result.Attempt, done: owner.done, grace: grace, cancel: func() {
 		cancelled.Do(func() {
 			close(owner.cancelled)
 			go func() {
@@ -74,8 +77,13 @@ func (f *controlledExpiry) owner(t *testing.T, expired bool, grace time.Duration
 					panic(err)
 				}
 				<-owner.gate
+				result.CompletedAt = time.Now().UTC().Format(time.RFC3339Nano)
 				_, err = f.s.store.execution(owner.id, v1.Cancelled, result)
 				if err != nil {
+					panic(err)
+				}
+				// This joined synthetic owner never launched work.
+				if err := f.s.store.recordConsumerRelease(context.Background(), owner.id, runtimeRecord{Attempt: result.Attempt}, v1.SettlementExecutionCleanup, true); err != nil {
 					panic(err)
 				}
 				close(owner.done)

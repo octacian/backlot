@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	v1 "github.com/octacian/backlot/api/v1"
 )
@@ -24,7 +26,22 @@ func (c *Client) FilteredList(ctx context.Context, request v1.FilteredListReques
 		return response, err
 	}
 	err := c.discoveryCall(ctx, "/v1/discovery/instances", request, &response)
+	var detail *v1.PlanError
+	if request.IncludeCheckout && errors.As(err, &detail) && detail.Code == "invalid_document" && strings.Contains(detail.Message, "unknown field") {
+		return response, &v1.PlanError{Code: "unsupported_feature", Message: "daemon does not support checkout scope; upgrade the daemon"}
+	}
 	if err == nil {
+		if request.IncludeCheckout {
+			scope := response.Checkout
+			if scope == nil {
+				return response, &v1.PlanError{Code: "unsupported_feature", Message: "daemon omitted requested checkout scope; upgrade the daemon"}
+			}
+			if !validID(scope.ID) || !filepath.IsAbs(scope.Path) || filepath.Clean(scope.Path) != scope.Path || strings.ContainsRune(scope.Path, 0) || scope.GitDirectory != "" && (!filepath.IsAbs(scope.GitDirectory) || filepath.Clean(scope.GitDirectory) != scope.GitDirectory || strings.ContainsRune(scope.GitDirectory, 0)) {
+				return response, responseError()
+			}
+		} else if response.Checkout != nil {
+			return response, responseError()
+		}
 		limit := request.Limit
 		if limit == 0 {
 			limit = 100
@@ -32,6 +49,7 @@ func (c *Client) FilteredList(ctx context.Context, request v1.FilteredListReques
 		if len(response.Instances) > limit {
 			return response, responseError()
 		}
+		// Summary checkout paths are launch provenance; current scope is resolved by the daemon.
 		for _, i := range response.Instances {
 			if i.ID <= request.AfterID || request.ProjectID != "" && i.Project != request.ProjectID || request.Scene != "" && i.Scene != request.Scene || request.Lifetime != "" && i.Lifetime != request.Lifetime || request.State != "" && i.Status != request.State {
 				return response, responseError()
@@ -70,6 +88,9 @@ func (c *Client) LogPage(ctx context.Context, request v1.LogPageRequest) (v1.Log
 	err := c.discoveryCall(ctx, "/v1/logs/page", request, &r)
 	if err == nil {
 		err = r.Validate(request)
+		if err == nil && request.Attempt != "" && r.HistoricalCollection != "known" {
+			err = &v1.PlanError{Code: "unsupported_feature", Message: "daemon does not support retained attempt collection facts; upgrade the daemon"}
+		}
 	}
 	return r, err
 }

@@ -35,9 +35,9 @@ For adapting application commands across supported platforms, start with
 
 The [release installer](operations.md#release-installer-and-updates) uses stock
 shell/download/archive/checksum tools and needs no Go toolchain. For source
-builds and contributor checks, install Go at the version in `go.mod` (1.27.1, or a compatible newer patch), Git,
+builds and contributor checks, install Go at the version in `go.mod` (1.27.3, or a compatible newer patch), Git,
 Make, `lsof`, and a C compiler/libc headers for the contributor race gate. Install
-stock Caddy 2.11.6 separately for managed HTTPS and explicitly configure its
+stock Caddy 2.11.7 separately for managed HTTPS and explicitly configure its
 absolute path. Distro packages can lag these versions: Debian 13's original
 Go 1.24 and Caddy 2.6.2 packages do not match this validation baseline. Toolchain
 installation and system services remain operator responsibilities. Do not start a

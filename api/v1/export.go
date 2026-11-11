@@ -1,8 +1,9 @@
 package v1
 
-// ExportRequest selects the latest settled attempt and a new caller-owned directory.
+// ExportRequest selects the current or exact retained settled attempt and a new directory.
 // Wait enables observation without cancellation; WaitTimeout is empty for indefinite waiting.
 type ExportRequest struct {
+	Attempt      string `json:"attempt,omitempty"`
 	APIVersion   string `json:"api_version"`
 	InstanceID   string `json:"instance_id"`
 	Output       string `json:"output"`
@@ -26,6 +27,8 @@ type ExportResponse struct {
 
 // ExportResult preserves original runtime outcomes without private runtime records.
 type ExportResult struct {
+	// Settlement preserves the selected attempt release observation without cleanup authority.
+	Settlement              *ConsumerSettlement      `json:"settlement,omitempty"`
 	BuildImages             []BuildImageResult       `json:"build_images,omitempty"`
 	ImageChangeWarnings     []ImageChangeWarning     `json:"image_change_warnings,omitempty"`
 	NativeOwnershipWarnings []NativeOwnershipWarning `json:"native_ownership_warnings,omitempty"`

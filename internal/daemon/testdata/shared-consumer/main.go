@@ -191,6 +191,13 @@ func serve(port string) error {
 
 func applicationDB() (*sql.DB, error) {
 	if os.Getenv("DB_MANAGER") == "postgresql" {
+		if dsn := os.Getenv("DB_DSN"); dsn != "" {
+			connector, err := pq.NewConnector(dsn)
+			if err != nil {
+				return nil, err
+			}
+			return sql.OpenDB(connector), nil
+		}
 		port, err := strconv.Atoi(os.Getenv("DB_PORT"))
 		if err != nil {
 			return nil, err

@@ -51,14 +51,21 @@ is tracked separately from the existing private-state fixture.
 
 ## State compatibility
 
-The durable state format is version 11; version 9 is the minimum supported baseline. Pre-v9
+The durable state format is version 16; version 9 is the minimum supported baseline. Pre-v9
 formats, including 6 and 8, are rejected unchanged; no migration from those
 preproduction formats is provided. From v9 onward, retain every real Go migration
 so the newest binary can apply the complete path when users skip releases,
 without intermediate binaries or reset. The 9-to-10 step adds four empty shared
 project/path/service/allocation buckets without rewriting retained records. The
 10-to-11 semantic fence adds optional build-image pins/provenance; historical
-generations keep no pins and no invented image identity.
+generations keep no pins and no invented image identity. The 11-to-12 step seeds
+[attempt history](evidence.md#retained-attempt-history) from known current
+outcomes only; overwritten earlier attempts cannot be reconstructed. The 12-to-13
+step seeds current project and checkout bindings from retained origins, preserving
+ownership, credentials and history for later [explicit reassociation](cli.md#reassociate-retained-project-data).
+The 14-to-15 step fences logical registration and staged marker repair. Legacy
+observations remain unrecorded; migration never publishes markers or infers release. Version 16 fences current consumer-release and shared-transition semantics;
+old records gain no proof, observation time or transition history during upgrade.
 
 Source validation, transformations, current authority validation and the final
 version fence share one write transaction. Any precommit error, cancellation or
@@ -76,9 +83,9 @@ locking, without automatic retry/start or live process handover. Cleanup and
 transport failures remain errors. Supported upgrades require no wipe or fresh directory.
 
 Existing snapshots remain readable for recorded cleanup without becoming a current
-input source or acquiring invented provenance. Eligible prepared/stopped starts use
+input source or acquiring invented provenance. Eligible persistent starts use
 current captured configuration after retained-resource/sensitive-value checks;
-unsafe drift fails before effects. Failed/interrupted instances need explicit restart.
+unsafe drift fails before effects and preserves the old snapshot.
 
 Preserve unsupported state for diagnosis and its matching binary's lifecycle.
 A different directory does not clean its resources. Backlot never automatically
@@ -89,10 +96,16 @@ deletes incompatible state. See the [migration decision](adr/20261022T201438827Z
 Each accepted execution records an attempt. Each retained generation records its
 own resource capabilities and generated secrets in the private daemon database.
 Containers are recreated on start, with Docker restart policies disabled. Storage,
-network and secret generations survive persistent stop/run, restart and daemon
-shutdown. Generated credentials remain paired with their storage. Host port values
-are scoped to an attempt and bound on loopback by default; explicit machine
-`docker.publish_address` selects another numeric interface. Containers use service
+generated credentials and fresh-only completion records survive persistent
+stop/run, restart and daemon shutdown. After verified consumer teardown, Backlot
+releases implicit and declared instance networks and recreates them on later
+start within the same data generation. Recorded network names, including
+`network.name` references retained by initialization jobs, stay stable; Engine IDs
+and subnets may change. Shared-service networks remain retained separately.
+Credentials stay paired with storage; shutdown retains disposable data too.
+Host port values are scoped to an attempt and bound on loopback by default;
+explicit machine `docker.publish_address` selects another numeric interface.
+Containers use service
 references for private DNS names and internal ports. Container-to-native references
 require explicit `docker.host_address` and reachable native listener interfaces;
 see the [HTTPS/mixed guide](https.md). Managed HTTPS consumers on
@@ -107,14 +120,16 @@ checks. See [container application trust](https.md#public-root-file-mounts-for-c
 
 
 A fresh-only job is skipped only after its successful exit and completion record.
-A failed initialization leaves its generation incomplete. Explicit restart can
-retry that same contract/generation; no background retry, repair or initialization
-rollback occurs. Each-start jobs run at every start. Image initialization is the
-image's responsibility and does not create a separate Backlot job record.
+A failed initialization leaves its generation incomplete. An explicit start can
+retry the same compatible contract/generation once cleanup finishes; no automatic
+retry, repair or initialization rollback occurs. Each-start jobs run at every start.
+Image initialization is the image's responsibility and does not create a separate
+Backlot job record.
 
-Repeated run returns the recorded instance and manifest/config digest drift.
-Restart applies ordinary commands, probes and non-sensitive environment changes.
-Before stopping any existing work, it rejects retained resource declarations,
+Start leaves an already-running scene unchanged and reports unapplied configuration
+changes. If the scene needs a new attempt, start uses the current compatible
+configuration. Use restart to apply changes to a running scene.
+Before stopping old work, both reject changes to retained resource declarations,
 attachments/mounts, storage-consuming container image/argument changes, fresh-only
 contracts, Docker endpoint changes (including port-only scenes with an implicit
 network), and resolved sensitive/inherited/seed-value changes. Implicit native
@@ -122,13 +137,14 @@ launch locations such as PATH/HOME/TMPDIR may change for ordinary work; explicit
 pass-throughs, seeds and secret assignments remain protected even for those keys.
 Fresh-only contracts protect their resolved launch values too. Mark credentials `secret: true` or use declared secret inputs/resources.
 The conservative contract may require reset for changes that an application could
-handle; there is no permissive compatibility engine. Failed/interrupted instances
-require explicit restart. Stop/run reuses the old snapshot, reporting drift.
+handle; there is no permissive compatibility engine. Stop/run uses current
+compatible inputs for a new attempt; it never resets data to force progress.
+See [start/concurrency behavior](cli.md#commands-and-defaults).
 
 Reset stops and joins owned consumers, removes the old generation, accepts the new
 validated snapshot and initializes/starts a new generation under the same logical
-instance ID. Destroy stops work and removes owned data, retaining snapshots,
-results and historical logs under a `destroyed` status. A later run gets a new
+instance ID. Destroy stops work and removes owned data, then erases snapshots, current results,
+retained attempts, logs and artifacts, keeping a minimal `destroyed` identity. A later run gets a new
 instance ID. Repeated destroy is idempotent. Cleanup failures return nonzero and
 retain remaining handles for explicit cleanup retry. Neither reset nor destroy
 promises atomic rollback after destructive cleanup has begun.
@@ -153,6 +169,16 @@ Docker consumers of volumes/directories/networks also block resource deletion,
 including unrelated consumers; no broad prune or forced volume/network deletion
 is used. Image-declared anonymous volumes belong to the owned container and are
 removed with it.
+
+Network release uses those same ownership and consumer fences, including stopped
+foreign containers, and never disconnects foreign endpoints. Healthy services kept
+for investigation retain their networks until explicit stop. Provider failure,
+uncertain ownership or unfinished consumer cleanup retains the network and reports
+a cleanup failure. Restore access/authority or remove the foreign consumer, then
+retry `stop ID` or named `scene stop`; explicit stop also reclaims unused networks
+from older already-stopped records. There is no historical sweep or global prune.
+A foreign collision at a retained network name fails later startup without adoption
+or deletion.
 
 Authenticated directory ownership authorizes cleanup by default even when a
 foreign bind source is unresolved, dangling, noncanonical or otherwise uncertain.
@@ -180,16 +206,23 @@ Docker list/inspect errors still block cleanup, as do owned-consumer shutdown,
 directory ownership/privacy, replaced/symlinked path and volume/network safeguards.
 
 After a daemon crash, verifiably owned surviving containers are stopped, available
-logs are retained, and containers are removed. Data/credentials remain retained;
-instances become interrupted and require explicit restart. Unknown ownership stays
+logs are retained, and containers and verified-unused instance networks are removed.
+Container removal requires an independent absence check of the exact Engine ID;
+a successful delete reply alone does not release its obligation. A collection
+failure stays visible even when independently authenticated cleanup succeeds.
+Data/credentials remain retained. Unfinished executions become interrupted;
+completed executions retain their original outcome and completion time while
+cleanup observations change. Another start remains explicit. Unknown ownership stays
 untouched. An unfinished intent with a verifiably owned effect can be recorded on explicit
-restart; a missing or unverifiable retained allocation requires reset/destroy
-rather than silently creating empty storage. Recovery records a
+start; an authoritatively absent network can be recreated, while missing or
+unverifiable retained storage requires reset/destroy rather than silently creating
+empty storage. Recovery records a
 collection gap, because output/status around the interruption may be incomplete.
 
 Docker log drivers may transform output before returning it; Backlot preserves
 the bytes supplied by the engine. Container stdout/stderr is collected outside Docker containers while running and
-joined before deletion. Historical `logs` remains available after destroy.
+joined before deletion. Logs remain after ordinary stop and disposable cleanup; successful explicit destroy
+erases them. Export before destroy to retain caller-owned diagnostics.
 Application output is captured as emitted and can contain application-printed
 credentials; ordinary Backlot plans/status never expose private secret values.
 See [disposable evidence](evidence.md) for artifacts, keep-on-failure, explicit
@@ -208,6 +241,8 @@ defines contributor provider checks; a local check is not full platform acceptan
 ## Project-scoped shared services
 
 Shared MariaDB and PostgreSQL servers retain independent instance allocations.
+[Explicit reassociation](cli.md#reassociate-retained-project-data) preserves retained
+ownership and data. Destroying the last service retains its project identity reservation.
 
 Declare `shared_services` and select `kind: allocation` resources per the
 [manifest guide](manifest.md#shared-service-declarations); follow the runnable
@@ -260,7 +295,13 @@ backlot shared destroy --state-dir /absolute/private/daemon --json SERVICE_ID
 
 List/inspect report durable lifecycle state, retained allocation counts and pending
 release counts with bounded control-failure diagnostics; they are not SQL health
-probes. Instance inspect also retains failed explicit cleanup diagnostics. Start also happens for selected scene dependencies.
+probes. Optional `last_transition` reports the latest actual status change with
+`from`, `to`, `cause` and `at`. Causes distinguish consumer start, allocation release,
+explicit shared control, daemon recovery and shutdown. Reads, repeated unchanged
+status and resource-only saves preserve that observation. Older records without it
+have unknown transition history. Successful destroy erases the retained transition;
+its response includes the final destroyed transition. Instance inspect also retains
+failed explicit cleanup diagnostics. Start also happens for selected scene dependencies.
 Stop/restart refuse active/kept dependents. Destroy refuses every retained allocation;
 explicitly destroy those instances first. Scene stop never stops the shared server.
 Server declarations/endpoint must match retained configuration exactly; use distinct
@@ -356,7 +397,7 @@ local Engine IDs and producer/attempt/tag provenance with the resource generatio
 Container creation uses the ID, never a mutable tag. Stop/start runs declared
 each-start jobs and validates their fresh tag handoff, but keeps accepted IDs even
 if an unused candidate differs. Active repeated starts remain idempotent.
-First creation, explicit restart, reset and each disposable run may accept an ID;
+First unpinned use, explicit restart, reset and each disposable run may accept an ID;
 same-ID restart is valid. A missing retained image fails with explicit restoration
 or restart guidance. Recovery preserves pins and never completes a leftover tag
 handoff or restarts work automatically.

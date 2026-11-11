@@ -15,6 +15,10 @@ capabilities and targeted command help before using the procedures below. Allow
 `dev`/`dev-dirty`; users of global development builds must refresh installed skill
 copies as their runtime changes. Capability/help presence does not prove semantics.
 
+Use explicit `format.template` (`%s` and `%%` only), `host_port`, `url_path` and `file_path`
+values for endpoint/argv assembly; see [value composition](references/manifest.md#compose-explicit-values).
+Keep each argv entry intact and credentials in sensitive environment assignments.
+
 1. Inspect the application's own instructions and working foreground/build/test
    commands. Preserve its tools and argument vectors. Read
    [adoption](references/adoption.md) to map them to components, scene lifetimes,
@@ -25,10 +29,19 @@ copies as their runtime changes. Capability/help presence does not prove semanti
    [manifest schema](assets/schemas/manifest-v1.schema.json) and
    [adaptation example](assets/examples/adoption/backlot.yaml). The example is a
    declaration outline, not a runnable app: replace its commands with the actual
-   application. Its [seed](assets/examples/adoption/defaults.env) is literal data.
+   application. Use `command.working_directory` for package-local native entry
+   points; keep tool/output/artifact/seed anchors at the manifest. Its [seed](assets/examples/adoption/defaults.env) is literal data.
    Declare selected dependencies/resources explicitly, terminal_job for disposable
-   tests, and output concurrency groups for generated files. Offline schema success
+   tests, and output concurrency groups for generated files. Use
+   `empty_before_execution: true` only with explicit authority to erase the whole
+   scratch directory; see [output preparation](references/manifest.md#project-declarations). Offline schema success
    does not replace `backlot plan` or actual execution.
+   For finite administrative work on retained data, enable existing native
+   each-start jobs through persistent `scene.tasks`; keep initialization in the
+   startup graph. Declare only parent-selected resources/dependency predicates and
+   disjoint task outputs. Enabling captures required task inputs/tools/cwd at parent
+   acceptance; joins do not retrofit captures. Map credentials directly through
+   sensitive environment references. See [tasks](references/manifest.md#declared-native-tasks).
 3. Discover with `scene list --json` and `scene describe NAME --json`; inspect
    `config show --json`. Configure required inputs through explicit `project setup`
    in a terminal or a private import/stdin, never secret argv or committed values.
@@ -47,12 +60,17 @@ copies as their runtime changes. Capability/help presence does not prove semanti
    work or `run NAME --json -- ACTUAL_TEST_ARGS` for disposable tests. Preserve the
    process exit and parse the named result as described by [CLI](references/cli.md).
    Record returned instance/attempt IDs and whether persistent work was reused;
+   repeat start after a repaired eligible failure for one compatible new attempt,
+   retaining data/paired credentials. Ready joins report unapplied drift; healthy
+   replacement remains explicit restart. On startup conflict, inspect exact history;
    discovery, plan, doctor and metadata-only prepared state do not prove success.
    If a mutation reply is missing, acceptance is unknown: inspect recorded scope
    before considering retry, and never blindly repeat it.
 6. Inspect an actual application failure too when validating adoption. Read
    [evidence](references/evidence.md) and [lifecycle](references/daemon.md#identity-and-lifecycle).
-   Distinguish terminal exit, runtime, collection and cleanup outcomes; preserve
+   Use `history ID`/`inspect ID --last-completed` to distinguish retained attempts.
+   Export needed evidence before destroy, which erases results/logs/artifacts; exports
+   survive. Distinguish terminal exit, runtime, collection and cleanup outcomes; preserve
    uncertainty. Stop/destroy only work authorized for this task, by returned ID in
    the same daemon scope. Stop retains data; reset/destroy need explicit removal
    intent. Reused scenes, peer worktrees, shared servers, daemons and gateways are

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,11 +18,15 @@ import (
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/localipc"
 	"github.com/octacian/backlot/internal/manifest"
+	"github.com/octacian/backlot/internal/registration"
 )
 
 type entry struct {
-	Identity Identity `json:"identity"`
-	File     string   `json:"file"`
+	CheckoutPath string   `json:"checkout_path,omitempty"`
+	AdminPath    string   `json:"admin_path,omitempty"`
+	Identity     Identity `json:"identity"`
+	File         string   `json:"file"`
+	CommonID     string   `json:"common_id,omitempty"`
 }
 type registry struct {
 	Version  int              `json:"version"`
@@ -31,6 +36,8 @@ type registry struct {
 
 // Provenance records private source selection, distinguishing absent from historical unknown.
 type Provenance struct {
+	// CommonID is the enrolled logical anchor; Identity remains historical provenance.
+	CommonID    string   `json:"common_id,omitempty"`
 	Identity    Identity `json:"identity"`
 	Association string   `json:"association,omitempty"`
 	Path        string   `json:"path,omitempty"`
@@ -50,6 +57,10 @@ type Selection struct {
 	registryDigest                  string
 	checkpoint                      func(string) error
 	stale                           []string
+	observed                        Identity
+	location                        registration.Location
+	markers                         registration.Identity
+	reassociate                     bool
 }
 
 // Read bounds regular document reads, including transient setup imports.
@@ -99,6 +110,10 @@ func rootPath(checkout string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return rootPathAt(checkout, root)
+}
+func rootPathAt(checkout, root string) (string, error) {
+	var err error
 	// Canonicalize existing ancestors, preserving a missing suffix without creating it.
 	ancestor := root
 	suffix := ""
@@ -161,10 +176,16 @@ func readRegistry(root string) (result registry, revision string, readErr error)
 	if err = manifest.Decode(data, ".json", &r); err != nil {
 		return empty, "", err
 	}
-	if r.Version != 1 || r.Projects == nil || r.Revision == "" {
+	if (r.Version != 1 && r.Version != 2) || r.Projects == nil || r.Revision == "" {
 		return empty, "", problem("unsupported or invalid project registry; inspect registry without modifying it")
 	}
 	for key, e := range r.Projects {
+		if e.CheckoutPath != "" && !filepath.IsAbs(e.CheckoutPath) || e.AdminPath != "" && !filepath.IsAbs(e.AdminPath) {
+			return empty, "", problem("invalid private registration checkout location")
+		}
+		if e.CommonID != "" && (r.Version == 1 || !registration.ValidID(e.CommonID)) {
+			return empty, "", problem("invalid project registration in registry")
+		}
 		if key == "" || !filepath.IsAbs(e.Identity.Directory) || e.Identity.Filesystem == "" || e.Identity.Manifest == "" || filepath.IsAbs(e.Identity.Manifest) || (filepath.Clean(e.Identity.Manifest) != e.Identity.Manifest || e.Identity.Manifest == ".." || strings.HasPrefix(e.Identity.Manifest, ".."+string(filepath.Separator))) || filepath.Base(e.File) != e.File || filepath.Ext(e.File) != ".json" {
 			return empty, "", problem("invalid project registry entry")
 		}
@@ -174,7 +195,17 @@ func readRegistry(root string) (result registry, revision string, readErr error)
 
 // Select captures one registry generation without reading private values.
 // Partial selection provenance remains useful on a selection error.
-func Select(project, checkout, file string, reassociate bool) (s Selection, loadErr error) {
+func Select(project, checkout, file string, reassociate bool) (Selection, error) {
+	root, err := selectedRoot()
+	if err != nil {
+		return Selection{}, err
+	}
+	return SelectAt(project, checkout, file, root, reassociate)
+}
+
+// SelectAt inspects an explicitly selected root without changing process environment.
+func SelectAt(project, checkout, file, root string, reassociate bool) (s Selection, loadErr error) {
+	s.reassociate = reassociate
 	s.State = "unavailable"
 	layer, path := "registry", ""
 	if root, err := selectedRoot(); err == nil {
@@ -185,7 +216,16 @@ func Select(project, checkout, file string, reassociate bool) (s Selection, load
 	if err != nil {
 		return s, err
 	}
-	root, err := rootPath(checkout)
+	s.observed = id
+	s.location, err = registration.Locate(project, checkout)
+	if err != nil {
+		return s, err
+	}
+	s.markers, err = registration.Read(s.location)
+	if err != nil {
+		return s, registrationError(err)
+	}
+	root, err = rootPathAt(checkout, root)
 	if err != nil {
 		return s, err
 	}
@@ -200,16 +240,46 @@ func Select(project, checkout, file string, reassociate bool) (s Selection, load
 	s.State = "absent"
 	s.Config = v1.PrivateConfig{Version: v1.ManifestVersion, Inputs: map[string]string{}, Tools: map[string]string{}}
 	for key, e := range s.registry.Projects {
-		if e.Identity == id {
+		if e.CommonID != "" && e.CommonID == s.markers.CommonID && e.AdminPath == s.location.Admin && e.CheckoutPath != "" && e.CheckoutPath != s.location.Checkout {
+			return s, registrationError(fmt.Errorf("different checkout paths share one administrative directory; repair Git links before private selection"))
+		}
+		// A checkout path can survive Git/admin changes without retaining the same registration context.
+		sameCommon := e.CommonID != "" && e.CommonID == s.markers.CommonID && e.Identity.Directory == id.Directory && e.Identity.Git == id.Git
+		if !reassociate && sameCommon && s.markers.CheckoutID == "" && (e.CheckoutPath == s.location.Checkout || e.AdminPath == s.location.Admin) {
+			return s, registrationError(fmt.Errorf("checkout marker is missing at its registered location; use explicit project setup --reassociate or repair"))
+		}
+		logical := e.CommonID != "" && e.CommonID == s.markers.CommonID && e.Identity.Manifest == id.Manifest && e.Identity.Git == id.Git
+		if e.CommonID != "" && e.CommonID == s.markers.CommonID && e.Identity.Directory != id.Directory {
+			s.State = "conflict"
+			s.Provenance.Association = key
+			s.Provenance.Path = filepath.Join(root, "projects", e.File)
+			return s, &v1.PlanError{Code: "project_registration", Message: "common marker is registered at another path; explicitly select the path receiving fresh identity", Registration: &v1.RegistrationResult{State: "conflict", Conflicts: []v1.RegistrationConflict{{Role: "common", Path: id.Directory, ClaimedPath: e.Identity.Directory}}, NextAction: "project reassociate --fresh-identity-at PATH"}}
+		}
+		repair := reassociate && e.CommonID != "" && e.Identity.Directory == id.Directory && e.Identity.Manifest == id.Manifest && e.Identity.Git == id.Git
+		if e.CommonID != "" && e.Identity.Directory == id.Directory && e.Identity.Manifest == id.Manifest && e.Identity.Git == id.Git && !logical && !repair {
+			s.State = "rebound"
+			s.Provenance.Association = key
+			s.Provenance.Path = filepath.Join(root, "projects", e.File)
+			return s, registrationError(fmt.Errorf("registered marker is missing or changed; use explicit project repair/setup"))
+		}
+		if logical || repair || e.CommonID == "" && e.Identity == id {
+			if s.Provenance.Present {
+				return s, problem("ambiguous private project registration")
+			}
+			s.Provenance.Identity = e.Identity
+			s.Provenance.CommonID = e.CommonID
 			s.Provenance.Association = key
 			s.Provenance.Present = true
 			s.State = "unavailable"
 			s.Provenance.Path = filepath.Join(root, "projects", e.File)
-			break
+			continue
 		}
 		if e.Identity.Manifest == id.Manifest && e.Identity.Git == id.Git && (e.Identity.Directory == id.Directory || e.Identity.Filesystem == id.Filesystem) {
 			s.stale = append(s.stale, key)
 		}
+	}
+	if s.markers.CommonID == "" && s.markers.CheckoutID != "" && !reassociate {
+		return s, registrationError(fmt.Errorf("registration is incomplete; complete explicit project setup"))
 	}
 	if !s.Provenance.Present && len(s.stale) > 0 && !reassociate {
 		s.State = "rebound"
@@ -227,6 +297,15 @@ func Select(project, checkout, file string, reassociate bool) (s Selection, load
 		s.State = "rebound"
 		return s, problem("project identity changed while reading; retry setup or scene operation")
 	}
+	location, err := registration.Locate(project, checkout)
+	if err != nil {
+		return s, err
+	}
+	markers, err := registration.Read(location)
+	if err != nil || location != s.location || !markers.Extends(s.markers) {
+		return s, registrationError(fmt.Errorf("registration changed while reading; retry from a stable source"))
+	}
+	s.markers = markers
 	return s, nil
 }
 
@@ -266,10 +345,19 @@ func (s Selection) Read(m v1.Manifest, staged bool) (result Selection, readErr e
 		s.State = "rebound"
 		return s, err
 	}
-	if current != s.Provenance.Identity {
+	if current != s.observed {
 		s.State = "rebound"
 		return s, problem("project identity changed while reading; retry setup or scene operation")
 	}
+	location, err := registration.Locate(s.project, s.checkout)
+	if err != nil {
+		return s, err
+	}
+	markers, err := registration.Read(location)
+	if err != nil || location != s.location || !markers.Extends(s.markers) {
+		return s, registrationError(fmt.Errorf("registration changed while reading; retry from a stable source"))
+	}
+	s.markers = markers
 	return s, nil
 }
 
@@ -362,7 +450,8 @@ func (s Selection) Commit(ctx context.Context, c v1.PrivateConfig, verify func()
 	for _, key := range s.stale {
 		delete(r.Projects, key)
 	}
-	r.Projects[association] = entry{Identity: s.Provenance.Identity, File: id + ".json"}
+	r.Version = 2
+	r.Projects[association] = entry{Identity: s.Provenance.Identity, File: id + ".json", CommonID: s.markers.CommonID, CheckoutPath: s.location.Checkout, AdminPath: s.location.Admin}
 	r.Revision = id
 	encoded, err := json.Marshal(r)
 	if err != nil || len(encoded) > manifest.MaxBytes {
@@ -384,7 +473,7 @@ func (s Selection) Commit(ctx context.Context, c v1.PrivateConfig, verify func()
 	if err := os.Rename(temp, filepath.Join(s.root, "projects.json")); err != nil {
 		return result, problem("registry publication failed before commit; active setup unchanged")
 	}
-	result = Provenance{Identity: s.Provenance.Identity, Association: association, Path: path, Present: true, Digest: digest(data)}
+	result = Provenance{Identity: s.Provenance.Identity, CommonID: s.markers.CommonID, Association: association, Path: path, Present: true, Digest: digest(data)}
 	syncErr := syncDir(s.root)
 	if s.checkpoint != nil {
 		syncErr = errors.Join(syncErr, s.checkpoint("after_commit"))
@@ -425,5 +514,83 @@ func syncDir(path string) error {
 
 // Same reports whether the captured private selection is unchanged.
 func (s Selection) Same(other Selection) bool {
-	return s.registryDigest == other.registryDigest && reflect.DeepEqual(s.Provenance, other.Provenance)
+	return s.registryDigest == other.registryDigest && s.observed == other.observed && s.location == other.location && s.markers == other.markers && reflect.DeepEqual(s.Provenance, other.Provenance)
+}
+
+// Root returns the canonical runtime registry root without creating it.
+func Root(checkout string) (string, error) {
+	root, err := rootPath(checkout)
+	if err != nil {
+		return "", err
+	}
+	return RootAt(checkout, root)
+}
+func canonicalRoot(root string) (string, error) {
+	ancestor := root
+	suffix := ""
+	for {
+		if _, err := os.Lstat(ancestor); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		suffix = filepath.Join(filepath.Base(ancestor), suffix)
+		ancestor = filepath.Dir(ancestor)
+	}
+	path, err := filepath.EvalSymlinks(ancestor)
+	return filepath.Join(path, suffix), err
+}
+
+// RootAt validates and canonicalizes an explicit root, without fallback or mutation.
+func RootAt(checkout, root string) (string, error) {
+	if !filepath.IsAbs(root) || strings.ContainsRune(root, 0) {
+		return "", problem("registry root must be absolute")
+	}
+	path, err := rootPathAt(checkout, root)
+	if err != nil {
+		return "", err
+	}
+	if info, e := os.Lstat(path); e == nil && info.Mode()&os.ModeSymlink != 0 {
+		return "", problem("private registry root cannot be a symlink")
+	} else if e != nil && !os.IsNotExist(e) {
+		return "", e
+	}
+	return canonicalRoot(path)
+}
+
+// Lock serializes repair revalidation with cooperating offline setup publications.
+func Lock(ctx context.Context, root string) (func(), error) {
+	if err := localipc.Directory(root, true); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(root, "projects.lock")
+	if err := localipc.File(path, false); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	lock := flock.New(path, flock.SetPermissions(0600))
+	ok, err := lock.TryLockContext(ctx, 25*time.Millisecond)
+	if err != nil || !ok {
+		return nil, problem("cannot lock private registry")
+	}
+	if err := localipc.File(path, false); err != nil {
+		_ = lock.Close()
+		return nil, err
+	}
+	return func() { _ = lock.Close() }, nil
+}
+
+// Freshness returns captured source bytes only to an in-process keyed comparator.
+func (s Selection) Freshness() ([]byte, error) {
+	data, err := json.Marshal(s.registry)
+	if err != nil {
+		return nil, err
+	}
+	if s.Provenance.Present {
+		private, err := Read(s.Provenance.Path)
+		if err != nil {
+			return nil, err
+		}
+		data = append(data, private...)
+	}
+	return data, nil
 }

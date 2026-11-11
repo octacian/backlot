@@ -2,41 +2,52 @@
 title: "Share contributor guides and maintain frontmatter ADRs"
 date: 2026-10-07
 status: accepted
+implementation: implemented
 summary: "Keep engineering rules in shared guides and validate timestamped frontmatter ADRs with Go-only tooling."
 tags: [documentation, conventions, tooling]
 supersedes: []
 superseded_by: []
+related: []
+tracking: []
+implemented_by: ["/Makefile", "/AGENTS.md", "/docs/adr/README.md"]
 ---
 
 # Share contributor guides and maintain frontmatter ADRs
 
-Humans and coding agents use shared engineering guides. AGENTS.md is a reading map. Consequential choices use timestamped ADRs with searchable frontmatter and Go-only creation/validation tooling.
+## Context and Problem Statement
 
-## Context
+Duplicated agent-specific rules drift. The local ADR template also encourages
+implementation specifications and repeated summaries, making decisions expensive
+to read. A bespoke format/checker creates maintenance without improving rationale.
 
-Duplicated tool-specific instructions drift. Decisions need discoverable rationale and safe supersession without manual numbering. Repository tooling should not add Node to a Go project.
+## Considered Options
 
-## Decision
+- Tighten the local template/checker: retains a second format implementation.
+- Adopt the public BSD-licensed Corestack checker and MADR-based format: removes
+  local tooling while retaining metadata and lifecycle validation.
+- Separate agent manuals or JavaScript tooling: duplicate policy or add a runtime.
 
-Document package grouping, DRY reuse, public contracts, narrow interfaces, and owned background work in shared guides. Require formatting, vet, pinned golangci-lint, tests/race checks, builds, and ADR validation.
+## Decision Outcome
 
-Require ADR title/date/status/summary/tags/supersession metadata, an actionable overview, and supporting sections. Preserve accepted rationale through reciprocal supersession links and reject cycles. Create exclusively with UTC millisecond collision handling. Decision acceptance is independent of implementation progress.
+Keep human and agent expectations in shared contributor guides, with `AGENTS.md`
+as the entry point. Adopt the pinned Corestack Go checker as the sole record-format
+and template owner; the project owns its version pin and documentation policy.
+Generate records with that tool and validate them in dedicated documentation CI.
 
-## Consequences
+ADRs retain consequential choices, rationale, meaningful alternatives and
+consequences. Delivery scope, steps and validation belong in issues/plans, execution
+evidence in PRs, and current contracts/procedures in maintained guides or code.
+Do not require a duplicate overview, implementation inventory or delivery checklist.
+Acceptance belongs to the owner and remains independent of delivery state.
 
-Standards remain consistent across contributors/tools. The creator/validator requires maintenance but reuses YAML, Markdown, and Unicode libraries. Automation cannot judge rationale quality or approval.
+### Consequences
 
-## Alternatives considered
+One policy serves contributors and agents, and local checker/template maintenance
+is removed. Checks now depend on availability of a pinned public Go module hosted
+outside this repository. Structural validation cannot judge decision quality,
+approval or whether implementation evidence is sufficient; review still must.
 
-Agent-specific copies create competing standards. Sequential ADR numbers collide. JavaScript tooling adds an unwanted development runtime. A handwritten Markdown parser adds avoidable format-handling code.
+## More Information
 
-## Revisit when
-
-An established Go ADR tool that preserves these metadata/lifecycle contracts with less maintained code would justify replacement.
-
-## References
-
-- [Developer documentation](../README.md)
-- [ADR policy](README.md)
-- [ADR tooling](../../internal/adr/adr.go)
-- [Checks](../testing.md#commands)
+[Documentation policy](/docs/adr/README.md), [contributor checks](/docs/testing.md#commands),
+[public format specification](https://gitea.auvem.com/corestack/go/src/branch/main/docs/docs-format.md).

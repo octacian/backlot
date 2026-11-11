@@ -96,8 +96,8 @@ func writeBuildImageFixture(t *testing.T, h *dockerHarness, base, token string) 
 		t.Fatal("explicit Docker CLI required", err)
 	}
 	h.manifest = v1.Manifest{Version: v1.ManifestVersion, Project: "image-handoff", Tools: map[string]string{"sh": "/bin/sh"}, BuildImages: map[string]v1.BuildImage{"app": {Producer: "build"}}, Outputs: map[string]v1.Output{"control": {Path: ".control", ConcurrencyGroup: "build"}}, Resources: map[string]v1.Resource{"data": {Kind: "directory"}}, Components: map[string]v1.Component{
-		"build": {Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "sh", Args: []string{"build.sh"}}, Outputs: []string{"control"}, Environment: v1.Environment{Assign: map[string]v1.Value{"APP_IMAGE": fixtureRef("build_image", "app", "tag"), "DOCKER": fixtureLiteral(docker), "DOCKER_HOST": fixtureLiteral(h.endpoint)}}},
-		"check": {Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureRef("build_image", "app", "id")), Args: []string{"sh", "-c", "cat /marker; test -f /data/witness || echo retained > /data/witness; cat /data/witness"}, DependsOn: []v1.Dependency{{Component: "build", Condition: v1.Completed}}, Resources: []string{"data"}, Mounts: []v1.Mount{{Resource: "data", Target: "/data"}}},
+		"build": {Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("build.sh")}, Outputs: []string{"control"}, Environment: v1.Environment{Assign: map[string]v1.Value{"APP_IMAGE": fixtureRef("build_image", "app", "tag"), "DOCKER": fixtureLiteral(docker), "DOCKER_HOST": fixtureLiteral(h.endpoint)}}},
+		"check": {Kind: v1.Job, Runtime: v1.Container, Policy: v1.EachStart, Image: ptrValue(fixtureRef("build_image", "app", "id")), Args: v1.StringArguments("sh", "-c", "cat /marker; test -f /data/witness || echo retained > /data/witness; cat /data/witness"), DependsOn: []v1.Dependency{{Component: "build", Condition: v1.Completed}}, Resources: []string{"data"}, Mounts: []v1.Mount{{Resource: "data", Target: "/data"}}},
 	}, Scenes: map[string]v1.Scene{"dev": {Lifetime: v1.Persistent, Components: []string{"build", "check"}, Resources: []string{"data"}}, "test": {Lifetime: v1.Disposable, Components: []string{"build", "check"}, Resources: []string{"data"}, TerminalJob: "check"}}}
 
 	// Only the fresh-only initializer mounts data: later changed-ID checks must
@@ -108,7 +108,7 @@ func writeBuildImageFixture(t *testing.T, h *dockerHarness, base, token string) 
 	h.manifest.Components["init"] = init
 	check := h.manifest.Components["check"]
 	check.Mounts, check.Resources = nil, nil
-	check.Args = []string{"cat", "/marker"}
+	check.Args = v1.StringArguments("cat", "/marker")
 	check.Environment = v1.Environment{Assign: map[string]v1.Value{"BACKLOT_FIXTURE": fixtureLiteral(h.token), "INSTANCE": fixtureRef("instance", "", "id")}}
 	check.DependsOn = append(check.DependsOn, v1.Dependency{Component: "init", Condition: v1.Completed})
 	h.manifest.Components["check"] = check
@@ -210,6 +210,10 @@ func TestBuildImagesDocker(t *testing.T) {
 		t.Fatal("changed mounted ID was accepted", denied.Instance.Execution)
 	}
 	changed := restart(true, v1.RuntimeReady)
+	historicalPin, historyErr := h.cli.Attempt(context.Background(), v1.AttemptRequest{APIVersion: v1.Version, InstanceID: id, Attempt: first.Instance.Execution.Attempt})
+	if historyErr != nil || len(historicalPin.Attempt.Result.BuildImages) != 1 || historicalPin.Attempt.Result.BuildImages[0].ID != pin.ID {
+		t.Fatal("direct image writer lost historical accepted pin", historyErr)
+	}
 	next := changed.Instance.Execution.BuildImages[0]
 	if next.ID == pin.ID || len(changed.Instance.Execution.ImageChangeWarnings) != 1 {
 		t.Fatal("missing replacement/warning")
@@ -217,7 +221,7 @@ func TestBuildImagesDocker(t *testing.T) {
 	// Permission does not bypass existing pre-stop initialization/argument fences.
 	originalInit := h.manifest.Components["init"]
 	drifted := originalInit
-	drifted.Args = append(append([]string{}, drifted.Args...), "changed")
+	drifted.Args = append(append([]v1.Argument{}, drifted.Args...), v1.StringArguments("changed")...)
 	h.manifest.Components["init"] = drifted
 	h.write()
 	unsafe := h.request("dev")

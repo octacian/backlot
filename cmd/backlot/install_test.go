@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -371,7 +372,7 @@ func TestInstaller(t *testing.T) {
 }
 
 func testInstallHandoff(t *testing.T, fixture func(*testing.T) *installFixture) {
-	for _, mode := range []string{"success", "cancel", "status-invalid", "stop-failed", "stop-lost", "lock-retained", "stage-changed", "destination-changed", "rename-denied", "downgrade", "context-cancel", "no-socket", "socket-without-lock", "lock-changed"} {
+	for _, mode := range []string{"success", "cancel", "activity-unsupported", "bulk-failed", "bulk-partial", "bulk-invalid", "bulk-lost", "bulk-generation", "status-invalid", "stop-failed", "stop-lost", "lock-retained", "stage-changed", "destination-changed", "rename-denied", "downgrade", "context-cancel", "no-socket", "socket-without-lock", "lock-changed"} {
 		t.Run(mode, func(t *testing.T) {
 			f := fixture(t)
 			f.installOld()
@@ -411,6 +412,7 @@ func testInstallHandoff(t *testing.T, fixture func(*testing.T) *installFixture) 
 				t.Fatal(err)
 			}
 			stop := make(chan struct{}, 1)
+			var bulkCalls, shutdownCalls atomic.Int32
 			server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("X-Backlot-API-Version", v1.Version)
@@ -422,9 +424,48 @@ func testInstallHandoff(t *testing.T, fixture func(*testing.T) *installFixture) 
 						status.PID = 0
 						result = status
 					}
-				case "/v1/instances":
-					result = v1.ListResponse{APIVersion: v1.Version, Instances: []v1.InstanceSummary{}}
+				case "/v1/activity":
+					if mode == "activity-unsupported" {
+						w.WriteHeader(404)
+						return
+					}
+					result = v1.ActivityResponse{APIVersion: v1.Version, DaemonGeneration: strings.Repeat("a", 64), GatewayStatus: "unconfigured", Entries: []v1.ActivityEntry{}, Complete: true}
+				case "/v1/runtime/stop-all":
+					bulkCalls.Add(1)
+					var q v1.StopAllRequest
+					if json.NewDecoder(r.Body).Decode(&q) != nil || q.Validate() != nil {
+						t.Error("invalid bulk intent")
+					}
+					bulk := v1.StopAllResponse{APIVersion: v1.Version, DaemonGeneration: strings.Repeat("a", 64), OperationID: strings.Repeat("b", 64), Targets: []v1.StopAllTarget{}, SelectionComplete: true, AdmissionsJoined: true}
+					switch mode {
+					case "bulk-failed":
+						w.WriteHeader(500)
+						result = v1.ErrorResponse{APIVersion: v1.Version, Error: v1.PlanError{Code: "cleanup_failed", Message: "owned fixture refusal"}}
+					case "bulk-lost":
+						connection, _, err := w.(http.Hijacker).Hijack()
+						if err == nil {
+							_ = connection.Close()
+						}
+						return
+					default:
+						if mode == "bulk-partial" {
+							bulk.SelectionComplete = false
+							bulk.SelectionFailure = "scope_too_large"
+							bulk.Error = &v1.PlanError{Code: "partial_failure", Message: "bulk stop incomplete; inspect activity and selected targets before explicit recovery"}
+						}
+						if mode == "bulk-invalid" {
+							bulk.AdmissionsJoined = false
+						}
+						if mode == "bulk-generation" {
+							bulk.DaemonGeneration = strings.Repeat("c", 64)
+						}
+						result = bulk
+					}
 				case "/v1/stop":
+					shutdownCalls.Add(1)
+					if bulkCalls.Load() != 1 {
+						t.Error("shutdown without exactly one bulk stop")
+					}
 					switch mode {
 					case "stop-failed":
 						w.WriteHeader(500)
@@ -488,7 +529,7 @@ func testInstallHandoff(t *testing.T, fixture func(*testing.T) *installFixture) 
 			if mode == "downgrade" {
 				version = "v0.3.0"
 			}
-			err = daemon.Install(ctx, daemon.InstallOptions{Directory: state, Stage: stage, Destination: f.root + "/bin/backlot", Version: version, Consent: func([]v1.Instance) error {
+			err = daemon.Install(ctx, daemon.InstallOptions{Directory: state, Stage: stage, Destination: f.root + "/bin/backlot", Version: version, Consent: func([]v1.ActivityResponse) error {
 				consented = true
 				contender := flock.New(state + "/daemon.lock")
 				acquired, err := contender.TryLock()
@@ -522,10 +563,13 @@ func testInstallHandoff(t *testing.T, fixture func(*testing.T) *installFixture) 
 			if (err == nil) != (mode == "success") {
 				t.Fatalf("handoff %s: %v", mode, err)
 			}
-			if mode == "status-invalid" || mode == "downgrade" || mode == "no-socket" || mode == "socket-without-lock" {
+			if mode == "activity-unsupported" || mode == "status-invalid" || mode == "downgrade" || mode == "no-socket" || mode == "socket-without-lock" {
 				if consented {
 					t.Fatal("consent reached before valid identity/status")
 				}
+			}
+			if strings.HasPrefix(mode, "bulk-") && (bulkCalls.Load() != 1 || shutdownCalls.Load() != 0) {
+				t.Fatal("bulk failure retried or reached shutdown", bulkCalls.Load(), shutdownCalls.Load())
 			}
 			if mode == "success" {
 				if !bytes.Equal(mustInstallRead(t, f.root+"/bin/backlot"), mustInstallRead(t, f.target)) {
@@ -676,7 +720,7 @@ func testInstallTerminal(t *testing.T, fixture func(*testing.T) *installFixture)
 			}
 			_ = slave.Close()
 			text := <-output
-			if !strings.Contains(text, "0 running/kept instances; 0 unresolved") || strings.HasPrefix(answer, "l\n") && !strings.Contains(text, "[y/n]") {
+			if !strings.Contains(text, "0 running/kept instances; 0 unsettled/unknown") || strings.HasPrefix(answer, "l\n") && !strings.Contains(text, "[y/n]") {
 				t.Fatal(text)
 			}
 			if answer != "l\ny\n" {

@@ -68,8 +68,12 @@ func TestSharedMariaDBForceEarly(t *testing.T) {
 	if json.Unmarshal(out, &destroyed) != nil || destroyed.Instance.Status != v1.Destroyed {
 		t.Fatal("force CLI did not report actual destruction")
 	}
-	if destroyed.Instance.Execution == nil || destroyed.Instance.Execution.CollectionFailure != "" || destroyed.Instance.Execution.CompletedAt != completed.Instance.Execution.CompletedAt || destroyed.Instance.Execution.Outcome != completed.Instance.Execution.Outcome {
-		t.Fatal("forced resource retry fabricated interruption or replaced completion")
+	if destroyed.Instance.Execution != nil {
+		t.Fatal("successful force destroy retained execution")
+	}
+	history, err := f.h.cli.History(context.Background(), v1.HistoryRequest{APIVersion: v1.Version, InstanceID: a.Instance.ID})
+	if err != nil || len(history.Attempts) != 0 {
+		t.Fatal("force destroy retained history", err)
 	}
 	released = true
 	for _, secret := range []string{ca.password, cb.password, original, f.liveAdminRecord(t).AdminPassword} {
@@ -175,7 +179,7 @@ func TestSharedMariaDBForceLabels(t *testing.T) {
 		record.Server.Token = original.Server.Token
 		record.Volume.Token = original.Volume.Token
 		record.Network.Token = original.Network.Token
-		if err = state.saveShared(record); err != nil {
+		if err = state.saveSharedFixture(record); err != nil {
 			t.Error(err)
 		}
 	})
@@ -187,7 +191,7 @@ func TestSharedMariaDBForceLabels(t *testing.T) {
 	drift.Server.Token = newID()
 	drift.Volume.Token = newID()
 	drift.Network.Token = newID()
-	err = state.saveShared(drift)
+	err = state.saveSharedFixture(drift)
 	_ = state.db.Close()
 	if err != nil {
 		t.Fatal(err)
@@ -298,7 +302,7 @@ func TestSharedMariaDBForceCrash(t *testing.T) {
 				t.Error(repairErr)
 				return
 			}
-			if repairErr = state.startShared(context.Background(), &record); repairErr != nil {
+			if repairErr = state.startShared(context.Background(), &record, "explicit_shared_start"); repairErr != nil {
 				t.Error(repairErr)
 				return
 			}

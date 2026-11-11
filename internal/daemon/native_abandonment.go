@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/containerd/errdefs"
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/native"
 	bolt "go.etcd.io/bbolt"
@@ -40,6 +41,12 @@ func abandonmentWarnings(history []nativeAbandonment) []v1.NativeOwnershipWarnin
 	return warnings
 }
 
+// previousBoot is independent absence proof; it never contacts retained process authority.
+func (a nativeAbandonment) previousBoot() bool {
+	previous, err := native.PreviousBoot(a.Boot)
+	return err == nil && previous
+}
+
 // guardAbandonedData requires independent resource proof, never waiver itself,
 // before deleting data an unknown survivor might still consume. History is kept.
 func (s *store) guardAbandonedData(id string) error {
@@ -48,7 +55,7 @@ func (s *store) guardAbandonedData(id string) error {
 		return err
 	}
 	for _, a := range history {
-		if previous, err := native.PreviousBoot(a.Boot); err == nil && previous {
+		if a.previousBoot() {
 			continue
 		}
 		if a.Pending || len(a.Groups) == 0 {
@@ -75,8 +82,11 @@ func (s *service) stopRuntimeRequest(ctx context.Context, request v1.StopRequest
 	if err != nil {
 		return before, err
 	}
-	if request.Force && ((before.Execution != nil && request.ExpectedAttempt != before.Execution.Attempt) || (before.Execution == nil && request.ExpectedAttempt != "")) {
-		return before, problem("conflict", "selected execution attempt changed; inspect before issuing a new force stop")
+	if (request.Force || request.ExpectedAttempt != "") && ((before.Execution != nil && request.ExpectedAttempt != before.Execution.Attempt) || (before.Execution == nil && request.ExpectedAttempt != "")) {
+		return before, problem("conflict", "selected execution attempt changed; inspect before issuing a new stop")
+	}
+	if before.Task != nil && request.Force {
+		return before, problem("invalid_arguments", "task cleanup cannot be waived; retain parent and output fences until authenticated cleanup succeeds")
 	}
 	instance, err := s.stopExecution(request.InstanceID)
 	var detail *v1.PlanError
@@ -117,6 +127,9 @@ func (s *service) stopRuntimeRequest(ctx context.Context, request v1.StopRequest
 // Ordinary route/container cleanup must succeed; only native obligations can be
 // waived. Commit history, public warning, result and released claims atomically.
 func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Instance, error) {
+	if err := s.guardDependentTasks(id); err != nil {
+		return v1.Instance{}, err
+	}
 	var instance v1.Instance
 	journal, err := s.runtime(id)
 	if err != nil {
@@ -128,6 +141,12 @@ func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Insta
 	}
 	if instance.Execution == nil || instance.Execution.Attempt != attempt || journal.Attempt != attempt {
 		return instance, problem("conflict", "native waiver target attempt changed or journal mismatched; preserved")
+	}
+	var networkFailure *v1.PlanError
+	for _, detail := range instance.Execution.CleanupDetails {
+		if detail.Field == "resources.network" {
+			networkFailure = &detail
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return instance, err
@@ -141,8 +160,58 @@ func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Insta
 	if err != nil {
 		return instance, err
 	}
-	if err := s.recoverContainers(id, &resources); err != nil {
-		return instance, err
+	collection, containerCleanup := s.recoverContainers(id, &resources)
+	if collection != nil && instance.Execution.CollectionFailure == "" {
+		result := *instance.Execution
+		result.CollectionFailure = collection.Error()
+		instance, err = s.execution(id, instance.Status, &result)
+		if err != nil {
+			return instance, err
+		}
+	}
+	if containerCleanup != nil {
+		return instance, containerCleanup
+	}
+	// A native waiver cannot erase an independent network cleanup failure.
+	networks := resourceGeneration{Resources: map[string]ownedResource{}}
+	for name, r := range resources.Resources {
+		if r.Kind == "network" && !r.Removed {
+			networks.Resources[name] = r
+		}
+	}
+	if len(networks.Resources) > 0 {
+		d, err := newDocker(resources.Endpoint)
+		if err != nil {
+			return instance, err
+		}
+		defer func() { _ = d.Close() }()
+		for name, r := range networks.Resources {
+			if r.ID == "" {
+				r.ID, err = recoverResourceEffect(cleanupCtx, d, r)
+			} else {
+				err = verifyDockerResource(cleanupCtx, d, r)
+			}
+			if err != nil && !errdefs.IsNotFound(err) {
+				return instance, err
+			}
+			r.Removed = errdefs.IsNotFound(err)
+			networks.Resources[name] = r
+		}
+		if err := d.noConsumers(cleanupCtx, networks); err != nil {
+			return instance, err
+		}
+		if networkFailure != nil {
+			for name, r := range networks.Resources {
+				// Only independent absence can settle this failure beneath uncertain native work.
+				if !r.Removed {
+					return instance, networkFailure
+				}
+				resources.Resources[name] = r
+			}
+			if err := s.saveResources(id, resources); err != nil {
+				return instance, err
+			}
+		}
 	}
 	var unknown []native.Identity
 	for _, group := range journal.Groups {
@@ -216,6 +285,14 @@ func (s *store) abandonNative(ctx context.Context, id, attempt string) (v1.Insta
 		if err := put(tx, "runtime", id, current); err != nil {
 			return err
 		}
+		if err := put(tx, "instances", id, r); err != nil {
+			return err
+		}
+		settlement, err := consumerEligibility(tx, r, boot)
+		if err != nil {
+			return err
+		}
+		result.Settlement = &settlement
 		if err := put(tx, "instances", id, r); err != nil {
 			return err
 		}

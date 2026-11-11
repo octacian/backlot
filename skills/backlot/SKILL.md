@@ -14,6 +14,10 @@ and the help for commands/flags you will use. `dev`/`dev-dirty` are allowed. Use
 of global development builds must refresh installed skills with their runtime;
 capability/help presence is not semantic or provider-readiness proof.
 
+Use explicit `format.template` (`%s` and `%%` only), `host_port`, `url_path` and `file_path`
+values for endpoint/argv assembly; see [value composition](references/manifest.md#compose-explicit-values).
+Keep each argv entry intact and credentials in sensitive environment assignments.
+
 1. From the checkout, read its instructions and discover `scene list --json`,
    `scene describe NAME --json`, then `config show --json`. Use declared names and
    the project's existing tests. Do not rewrite adoption just to run them. If no
@@ -36,24 +40,51 @@ capability/help presence is not semantic or provider-readiness proof.
    ordinary run uses `instance`, named startup nests it under `result.instance`.
    A repeated ordinary start may reuse existing work; returned identity alone does
    not make that work task-owned. See [CLI results](references/cli.md#interpreting-machine-results).
+   For an enabled administrative task, use `task run TASK --scene NAME --json -- ARGS`
+   or `--instance PARENT_ID` against an already-ready accepted parent. Record the
+   returned independent task ID; `instance.id` references inside the task still
+   mean the parent. Do not retrieve credentials to reconstruct its environment.
+   Read [task invocation](references/cli.md#declared-task-invocation) first. Relevant
+   drift requires explicit parent restart; held outputs reject immediately. Task
+   cancellation/lease expiry leaves the parent running. Stop only the task ID;
+   task cleanup cannot be waived, and parent teardown must join dependent consumers.
 4. Check the original test exit separately from orchestration, collection, cleanup,
    kept resources and any last-observed error. Status exit 0 can describe a failed
    execution. A missing mutation reply means unknown acceptance, not rejection or
    permission to retry. Investigate recorded identity/scope; keep uncertainty visible.
+   Use `activity --json` for one bounded scope-wide view only after checking
+   `activity/v1` in installed and daemon contracts. Follow `next_after` without
+   treating incomplete/changing pages as global absence. Ports/origins/server
+   status are recorded intent, not probes. `stop --all` requires explicit scope-wide
+   authorization: it reaches peer projects/worktrees and is not task-owned cleanup.
+   It retains bulk-cancelled disposable data and infrastructure, has no force mode,
+   and returns nonzero partial results with per-target settlement. Disconnect stops
+   waiting, not accepted cleanup; inspect activity/known IDs before explicit recovery.
+   See [bulk scope and limits](references/cli.md#scope-wide-activity-and-workload-stop).
 5. For edits, consult [identity/lifecycle](references/daemon.md#identity-and-lifecycle)
    and [drift](references/containers.md#generations-jobs-and-drift). Repeated start
-   reports old-snapshot drift; explicit `restart ID` applies compatible changes.
+   joins starting/ready work with unapplied drift, or requests one compatible new
+   attempt after eligible stopped/failed work and cleanup. New starts use current
+   explicit/default config; `scene restart NAME` (or `restart ID`) deliberately replaces healthy work.
+   Native cwd changes keep the other project path anchors; consult
+   [working directories](references/manifest.md#native-working-directories) before
+   adjusting relative arguments or interpreting symlink drift.
+   On `startup_conflict`, inspect the bound attempt's retained history/logs/export;
+   never retry a missing mutation reply automatically.
    Protected drift needs a deliberate reset/destroy data-removal decision. Do not
    destroy retained data or stop a reused/peer execution to force your change.
-6. Bound diagnostics: `status ID --json`, `logs ID --page --limit 100 --json`,
+6. Bound diagnostics: `history ID --limit 100 --json`, `inspect ID --last-completed --json`,
+   exact `inspect ID --attempt ATTEMPT --json`, `status ID --json`, `logs ID --page --limit 100 --json`,
    `fixtures ID --json`, or `doctor --instance ID --json`. Preserve page filters
    and continuation, and bound follow by duration/record limit. Read
    [evidence](references/evidence.md) for partial capture and export. A kept failure
    retains healthy dependencies; stop its authorized runtime before export to a new
    destination under a private parent, outside daemon state. Keep the original
    failure and evidence; do not claim successful tests from successful export.
-7. End only authorized task-owned work in the same daemon scope, using the recorded
-   ID: stop preserves data; destroy removes that instance's owned data after stop.
+7. End only authorized task-owned work in the same daemon scope, using a recorded
+   ID or an explicitly selected persistent scene: stop preserves data/history; destroy removes owned data after stop and erases
+   attempts/logs/artifacts. Export needed exact-attempt evidence before destroy;
+   caller-owned bundles survive. History prune removes selected evidence, never data.
    Preserve uncertain resources/journals and report residuals. Do not prune by name,
    hostname or observed PID, stop peer worktrees, or routinely stop shared daemons,
    gateways or servers. Cancellation of observation does not stop runtime.

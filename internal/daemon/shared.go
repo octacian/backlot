@@ -19,6 +19,7 @@ import (
 	"github.com/moby/moby/client"
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/manager"
+	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 	bolt "go.etcd.io/bbolt"
 )
@@ -40,6 +41,8 @@ type sharedServiceRecord struct {
 	Status        string                `json:"status"`
 	Destroying    bool                  `json:"destroying"`
 	Failure       string                `json:"failure,omitempty"`
+
+	LastTransition *v1.SharedTransition `json:"last_transition,omitempty"`
 }
 type sharedAllocation struct {
 	ServiceID string            `json:"service_id"`
@@ -116,6 +119,11 @@ func decodeSharedService(data []byte, id string) (sharedServiceRecord, error) {
 	if err := json.Unmarshal(data, &record); err != nil {
 		return record, problem("state_corrupt", "shared service cannot be decoded; preserved")
 	}
+	switch record.Status {
+	case "intent", "running", "stopped", "uncertain", "destroying", "destroyed":
+	default:
+		return record, problem("state_corrupt", "invalid shared service status; preserved")
+	}
 	if record.ID != id || !validID(id) || !validID(record.Project.ID) || !validID(record.AdminPassword) || !validID(record.Server.Token) || !validID(record.Network.Token) || !validID(record.Volume.Token) || record.Configuration != sharedDigest(record.Declaration, record.Endpoint) {
 		return record, problem("state_corrupt", "shared service contract incomplete; preserved")
 	}
@@ -123,6 +131,9 @@ func decodeSharedService(data []byte, id string) (sharedServiceRecord, error) {
 		if err := validateSharedResourceHandle(resource); err != nil {
 			return record, err
 		}
+	}
+	if record.LastTransition != nil && (record.LastTransition.Validate() != nil || record.LastTransition.To != record.Status) {
+		return record, problem("state_corrupt", "invalid shared status transition; preserved")
 	}
 	return record, nil
 }
@@ -144,13 +155,39 @@ func validateSharedResourceHandle(r ownedResource) error {
 	}
 	return problem("state_corrupt", "invalid acknowledged shared resource handle; preserved")
 }
-func (s *store) saveShared(record sharedServiceRecord) error {
+
+// saveSharedTx is the single shared-service writer, including first intent admission.
+// Nonstatus updates retain the committed transition rather than a stale caller copy.
+func saveSharedTx(tx *bolt.Tx, record *sharedServiceRecord, cause string) error {
+	if record.Status == "" {
+		return problem("state_corrupt", "shared status missing; preserved")
+	}
 	for _, resource := range []ownedResource{record.Server, record.Network, record.Volume} {
 		if err := validateSharedResourceHandle(resource); err != nil {
 			return err
 		}
 	}
-	return s.db.Update(func(tx *bolt.Tx) error { return put(tx, "shared_services", record.ID, record) })
+	var previous sharedServiceRecord
+	if data := tx.Bucket([]byte("shared_services")).Get([]byte(record.ID)); data != nil {
+		var err error
+		previous, err = decodeSharedService(data, record.ID)
+		if err != nil {
+			return err
+		}
+	}
+	record.LastTransition = previous.LastTransition
+	if previous.Status != record.Status {
+		transition := &v1.SharedTransition{From: previous.Status, To: record.Status, Cause: cause, At: time.Now().UTC().Format(time.RFC3339Nano)}
+		if transition.Validate() != nil {
+			return problem("state_corrupt", "invalid shared status transition; preserved")
+		}
+		record.LastTransition = transition
+	}
+	return put(tx, "shared_services", record.ID, record)
+}
+
+func (s *store) saveShared(record *sharedServiceRecord, cause string) error {
+	return s.db.Update(func(tx *bolt.Tx) error { return saveSharedTx(tx, record, cause) })
 }
 func decodeSharedAllocations(data []byte) (map[string]sharedAllocation, error) {
 	out := map[string]sharedAllocation{}
@@ -205,7 +242,7 @@ func (s *store) ensureSharedResource(ctx context.Context, d *dockerEngine, recor
 		if r.ID == "" {
 			r.ID, err = recoverResourceEffect(ctx, d, *r)
 			if err == nil {
-				err = s.saveShared(*record)
+				err = s.saveShared(record, "")
 			}
 		}
 		return err
@@ -223,7 +260,7 @@ func (s *store) ensureSharedResource(ctx context.Context, d *dockerEngine, recor
 	if err = s.sharedPoint("create-effect:" + r.Kind); err != nil {
 		return err
 	}
-	return s.saveShared(*record)
+	return s.saveShared(record, "")
 }
 
 func (s *store) verifySharedServer(ctx context.Context, d *dockerEngine, record sharedServiceRecord) error {
@@ -286,14 +323,14 @@ func (s *store) verifySharedServerMode(ctx context.Context, d *dockerEngine, rec
 	return nil
 }
 
-func (s *store) startShared(ctx context.Context, record *sharedServiceRecord) error {
-	return s.startSharedMode(ctx, record, false)
+func (s *store) startShared(ctx context.Context, record *sharedServiceRecord, cause string) error {
+	return s.startSharedMode(ctx, record, false, cause)
 }
 
 // startSharedMode may waive shared capability labels only for existing targets.
 // Configuration and current binding verification still precede SQL connection.
-func (s *store) startSharedMode(ctx context.Context, record *sharedServiceRecord, force bool) (resultErr error) {
-	defer func() { resultErr = s.sharedOperationResult(record, resultErr) }()
+func (s *store) startSharedMode(ctx context.Context, record *sharedServiceRecord, force bool, cause string) (resultErr error) {
+	defer func() { resultErr = s.sharedOperationResult(record, cause, resultErr) }()
 	if record.Destroying || record.Server.Removed || record.Volume.Removed || record.Network.Removed {
 		return problem("shared_cleanup_pending", "shared service destruction is incomplete; retry shared destroy")
 	}
@@ -321,7 +358,7 @@ func (s *store) startSharedMode(ctx context.Context, record *sharedServiceRecord
 		if len(record.EffectiveArgs) == 0 && image.Config != nil {
 			record.EffectiveArgs = slices.Clone(image.Config.Cmd)
 		}
-		if err = s.saveShared(*record); err != nil {
+		if err = s.saveShared(record, cause); err != nil {
 			return err
 		}
 	}
@@ -335,7 +372,7 @@ func (s *store) startSharedMode(ctx context.Context, record *sharedServiceRecord
 				if err != nil {
 					return sharedProviderError(err)
 				}
-				if err = s.saveShared(*record); err != nil {
+				if err = s.saveShared(record, cause); err != nil {
 					return err
 				}
 			}
@@ -374,7 +411,7 @@ func (s *store) startSharedMode(ctx context.Context, record *sharedServiceRecord
 		if err = s.sharedPoint("create-effect:container"); err != nil {
 			return err
 		}
-		if err = s.saveShared(*record); err != nil {
+		if err = s.saveShared(record, cause); err != nil {
 			return err
 		}
 	} else if err != nil {
@@ -385,7 +422,7 @@ func (s *store) startSharedMode(ctx context.Context, record *sharedServiceRecord
 		}
 		if record.Server.ID == "" {
 			record.Server.ID = out.Container.ID
-			if err = s.saveShared(*record); err != nil {
+			if err = s.saveShared(record, cause); err != nil {
 				return err
 			}
 		}
@@ -412,7 +449,7 @@ func (s *store) startSharedMode(ctx context.Context, record *sharedServiceRecord
 	if err != nil || record.Port <= 0 {
 		return problem("shared_uncertain", "shared binding invalid")
 	}
-	if err = s.saveShared(*record); err != nil {
+	if err = s.saveShared(record, cause); err != nil {
 		return err
 	}
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -453,7 +490,7 @@ func (s *store) startSharedMode(ctx context.Context, record *sharedServiceRecord
 	}
 	record.Status = "running"
 	record.Failure = ""
-	return s.saveShared(*record)
+	return s.saveShared(record, cause)
 }
 func sharedDB(record sharedServiceRecord) (*sql.DB, error) {
 	if record.Declaration.Manager == "postgresql" {
@@ -481,10 +518,30 @@ func (s *service) ensureSharedAllocations(ctx context.Context, id string, snap p
 	if len(snap.Plan.SharedServices) == 0 {
 		return nil
 	}
+	allocations, err := s.store.sharedAllocations(id)
+	if err != nil {
+		return err
+	}
+	// A partial multi-allocation cleanup must not provision any new effects.
+	for _, allocation := range allocations {
+		if allocation.Request.Operation == "release" || allocation.Released {
+			return problem("allocation_conflict", "allocation release is pending; explicit reset/destroy required")
+		}
+	}
 	project, err := identifyShared(entry.source.source, snap.Plan.Project)
 	if err != nil {
 		return err
 	}
+	var owner sharedProjectIdentity
+	if err := s.store.db.View(func(tx *bolt.Tx) error {
+		var e error
+		owner, e = checkSharedBinding(tx, entry.source.checkout, project)
+		return e
+	}); err != nil {
+		return err
+	}
+	currentProject := project
+	project = owner
 	var ids []string
 	for _, resource := range snap.Plan.Resources {
 		if resource.Kind == "allocation" {
@@ -496,18 +553,49 @@ func (s *service) ensureSharedAllocations(ctx context.Context, id string, snap p
 		return err
 	}
 	defer release()
-	if err = s.store.db.Update(func(tx *bolt.Tx) error { return registerSharedProject(tx, project) }); err != nil {
-		return err
-	}
-	allocations, err := s.store.sharedAllocations(id)
+	// Admit first service intents with the binding check so repair cannot miss their locks.
+	s.store.bindingGate.Lock()
+	err = s.store.db.Update(func(tx *bolt.Tx) error {
+		if _, e := checkSharedBinding(tx, entry.source.checkout, currentProject); e != nil {
+			return e
+		}
+		if e := s.store.sharedPoint("allocation-admission"); e != nil {
+			return e
+		}
+		var e error
+		allocations, e = decodeSharedAllocations(tx.Bucket([]byte("shared_allocations")).Get([]byte(id)))
+		if e != nil {
+			return e
+		}
+		for name, resource := range snap.Plan.Resources {
+			if resource.Kind != "allocation" {
+				continue
+			}
+			serviceID := hash(project.ID + "/" + resource.SharedService)
+			if a, exists := allocations[name]; exists && (a.ServiceID != serviceID || a.Released || a.Request.Operation == "release") {
+				return problem("allocation_conflict", "retained allocation differs or was partially released; runtime preserved")
+			}
+			if tx.Bucket([]byte("shared_services")).Get([]byte(serviceID)) != nil {
+				continue
+			}
+			if snap.Docker == nil {
+				return problem("missing_provider", "shared allocations require configured Docker")
+			}
+			newResource := func(kind string) ownedResource {
+				token := newID()
+				return ownedResource{Kind: kind, Token: token, Name: "backlot-" + token}
+			}
+			declaration := snap.Plan.SharedServices[resource.SharedService]
+			record := sharedServiceRecord{ID: serviceID, Project: project, Name: resource.SharedService, Declaration: declaration, Endpoint: snap.Docker.Endpoint, Configuration: sharedDigest(declaration, snap.Docker.Endpoint), AdminPassword: newID(), Volume: newResource("volume"), Network: newResource("network"), Server: newResource("container"), Status: "intent"}
+			if e := saveSharedTx(tx, &record, "consumer_start"); e != nil {
+				return e
+			}
+		}
+		return ctx.Err()
+	})
+	s.store.bindingGate.Unlock()
 	if err != nil {
 		return err
-	}
-	// A partial multi-allocation cleanup must not provision any new effects.
-	for _, allocation := range allocations {
-		if allocation.Request.Operation == "release" || allocation.Released {
-			return problem("allocation_conflict", "allocation release is pending; explicit reset/destroy required")
-		}
 	}
 	for name, resource := range snap.Plan.Resources {
 		if resource.Kind != "allocation" {
@@ -519,15 +607,6 @@ func (s *service) ensureSharedAllocations(ctx context.Context, id string, snap p
 		}
 		serviceID := hash(project.ID + "/" + resource.SharedService)
 		record, err := s.store.sharedService(serviceID)
-		var detail *v1.PlanError
-		if errors.As(err, &detail) && detail.Code == "not_found" {
-			newResource := func(kind string) ownedResource {
-				token := newID()
-				return ownedResource{Kind: kind, Token: token, Name: "backlot-" + token}
-			}
-			record = sharedServiceRecord{ID: serviceID, Project: project, Name: resource.SharedService, Declaration: declaration, Endpoint: snap.Docker.Endpoint, Configuration: sharedDigest(declaration, snap.Docker.Endpoint), AdminPassword: newID(), Volume: newResource("volume"), Network: newResource("network"), Server: newResource("container"), Status: "intent"}
-			err = s.store.saveShared(record)
-		}
 		if err != nil {
 			return err
 		}
@@ -539,7 +618,7 @@ func (s *service) ensureSharedAllocations(ctx context.Context, id string, snap p
 		if record.Project != project || record.Configuration != sharedDigest(declaration, snap.Docker.Endpoint) {
 			return problem("shared_conflict", "retained shared server configuration differs; peer server preserved; use a distinct shared service name")
 		}
-		if err = s.store.startShared(ctx, &record); err != nil {
+		if err = s.store.startShared(ctx, &record, "consumer_start"); err != nil {
 			return err
 		}
 		allocation, exists := allocations[name]
@@ -680,6 +759,7 @@ func (s *store) sharedIDs() ([]string, error) {
 	return ids, err
 }
 func (s *store) sharedDependents(serviceID string, all bool) (int, error) {
+	boot, _ := native.CurrentBoot()
 	count := 0
 	err := s.db.View(func(tx *bolt.Tx) error {
 		return tx.Bucket([]byte("shared_allocations")).ForEach(func(key, data []byte) error {
@@ -697,7 +777,12 @@ func (s *store) sharedDependents(serviceID string, all bool) (int, error) {
 					if err != nil {
 						return err
 					}
-					if active(r.Instance.Status) || r.Instance.Execution != nil && (r.Instance.Execution.Kept || r.Instance.Execution.CleanupFailure != "") {
+					settlement, err := consumerEligibility(tx, r, boot)
+					if err != nil {
+						return err
+					}
+					// Prepared allocations reserve their server for the accepted startup.
+					if sharedConsumerBlocked(r.Instance, settlement) {
 						count++
 					}
 				}
@@ -707,10 +792,10 @@ func (s *store) sharedDependents(serviceID string, all bool) (int, error) {
 	})
 	return count, err
 }
-func (s *store) stopShared(ctx context.Context, record *sharedServiceRecord) (resultErr error) {
-	defer func() { resultErr = s.sharedOperationResult(record, resultErr) }()
+func (s *store) stopShared(ctx context.Context, record *sharedServiceRecord, cause string) (resultErr error) {
+	defer func() { resultErr = s.sharedOperationResult(record, cause, resultErr) }()
 	if record.Server.Removed {
-		return nil
+		return s.sharedStopped(record, cause)
 	}
 	d, err := newDocker(record.Endpoint)
 	if err != nil {
@@ -719,7 +804,7 @@ func (s *store) stopShared(ctx context.Context, record *sharedServiceRecord) (re
 	defer func() { _ = d.Close() }()
 	if err = s.verifySharedServer(ctx, d, *record); err != nil {
 		if errdefs.IsNotFound(err) && (record.Server.ID == "" || record.Destroying) {
-			return nil
+			return s.sharedStopped(record, cause)
 		}
 		return err
 	}
@@ -737,13 +822,18 @@ func (s *store) stopShared(ctx context.Context, record *sharedServiceRecord) (re
 	if out.Container.State == nil || out.Container.State.Running {
 		return problem("cleanup_failed", "shared server remains live; preserved")
 	}
+	return s.sharedStopped(record, cause)
+}
+
+func (s *store) sharedStopped(record *sharedServiceRecord, cause string) error {
 	record.Status = "stopped"
 	record.Failure = ""
 	if record.Destroying {
 		record.Status = "destroying"
 	}
-	return s.saveShared(*record)
+	return s.saveShared(record, cause)
 }
+
 func (s *service) sharedControl(ctx context.Context, action string, request v1.SharedRequest) (v1.SharedResponse, error) {
 	return s.sharedControlWithForce(ctx, action, request, false)
 }
@@ -752,6 +842,7 @@ func (s *service) sharedDestroy(ctx context.Context, request v1.SharedDestroyReq
 }
 func (s *service) sharedControlWithForce(ctx context.Context, action string, request v1.SharedRequest, force bool) (v1.SharedResponse, error) {
 	response := v1.SharedResponse{APIVersion: v1.Version, Services: []v1.SharedStatus{}}
+	cause := "explicit_shared_" + action
 	if force && action != "destroy" {
 		return response, problem("invalid_request", "force is supported only for shared destroy")
 	}
@@ -792,14 +883,14 @@ func (s *service) sharedControlWithForce(ctx context.Context, action string, req
 			if action == "destroy" {
 				record.Destroying = true
 				record.Status = "destroying"
-				if err = s.store.saveShared(record); err != nil {
+				if err = s.store.saveShared(&record, cause); err != nil {
 					return response, err
 				}
 			}
 			if force {
-				err = s.store.stopForcedShared(ctx, &record)
+				err = s.store.stopForcedShared(ctx, &record, cause)
 			} else {
-				err = s.store.stopShared(ctx, &record)
+				err = s.store.stopShared(ctx, &record, cause)
 			}
 			if err != nil {
 				return response, err
@@ -807,7 +898,7 @@ func (s *service) sharedControlWithForce(ctx context.Context, action string, req
 		}
 		switch action {
 		case "start", "restart":
-			if err = s.store.startShared(ctx, &record); err != nil {
+			if err = s.store.startShared(ctx, &record, cause); err != nil {
 				return response, err
 			}
 		case "destroy":
@@ -816,7 +907,7 @@ func (s *service) sharedControlWithForce(ctx context.Context, action string, req
 				return response, err
 			}
 			record.Status = "destroying"
-			err = s.store.saveShared(record)
+			err = s.store.saveShared(&record, cause)
 			for _, resource := range []*ownedResource{&record.Server, &record.Volume, &record.Network} {
 				if err != nil || resource.Removed {
 					continue
@@ -838,7 +929,7 @@ func (s *service) sharedControlWithForce(ctx context.Context, action string, req
 						continue
 					}
 					resource.Removed = true
-					err = s.store.saveShared(record)
+					err = s.store.saveShared(&record, cause)
 				}
 			}
 			_ = d.Close()
@@ -848,6 +939,7 @@ func (s *service) sharedControlWithForce(ctx context.Context, action string, req
 			if err = s.store.db.Update(func(tx *bolt.Tx) error { return tx.Bucket([]byte("shared_services")).Delete([]byte(id)) }); err != nil {
 				return response, err
 			}
+			record.LastTransition = &v1.SharedTransition{From: record.Status, To: "destroyed", Cause: cause, At: time.Now().UTC().Format(time.RFC3339Nano)}
 			record.Status = "destroyed"
 			record.Failure = ""
 		case "list", "inspect", "stop":
@@ -862,28 +954,28 @@ func (s *service) sharedControlWithForce(ctx context.Context, action string, req
 		if err != nil {
 			return response, err
 		}
-		response.Services = append(response.Services, v1.SharedStatus{ID: id, ProjectID: record.Project.ID, Name: record.Name, Configuration: record.Configuration, Status: record.Status, Allocations: count, PendingReleases: pending, Failure: record.Failure})
+		response.Services = append(response.Services, v1.SharedStatus{ID: id, ProjectID: record.Project.ID, Name: record.Name, Configuration: record.Configuration, Status: record.Status, Allocations: count, PendingReleases: pending, Failure: record.Failure, LastTransition: record.LastTransition})
 	}
 	return response, nil
 }
 
 // stopSharedServices follows consumer join during shutdown/recovery. It never
 // releases allocations or storage, and never restarts application execution.
-func (s *store) stopSharedServices(ctx context.Context) error {
+func (s *store) stopSharedServices(ctx context.Context, cause string) error {
 	ids, err := s.sharedIDs()
 	if err != nil {
 		return err
 	}
 	var failures error
 	for _, id := range ids {
-		failures = errors.Join(failures, s.stopSharedService(ctx, id))
+		failures = errors.Join(failures, s.stopSharedService(ctx, id, cause))
 	}
 
 	return failures
 }
 
 // The shutdown/recovery budget includes waiting for the current effect owner.
-func (s *store) stopSharedService(ctx context.Context, id string) error {
+func (s *store) stopSharedService(ctx context.Context, id, cause string) error {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	release, err := s.lockShared(ctx, id)
@@ -900,12 +992,15 @@ func (s *store) stopSharedService(ctx context.Context, id string) error {
 		err = problem("shared_in_use", "shared consumers are active or cleanup is uncertain; server preserved")
 	}
 	if err == nil {
-		err = s.stopShared(ctx, &record)
+		err = s.stopShared(ctx, &record, cause)
 	}
 	if err != nil {
 		record.Status = "uncertain"
+		if record.Destroying {
+			record.Status = "destroying"
+		}
 		record.Failure = "shared shutdown/recovery could not verify stop; restore provider/ownership and retry explicit shared stop or destroy"
-		err = errors.Join(err, s.saveShared(record))
+		err = errors.Join(err, s.saveShared(&record, cause))
 	}
 	return err
 }
@@ -931,7 +1026,7 @@ func (s *store) sharedPoint(point string) error {
 
 // Store only controlled diagnostics; engine/SQL errors can contain authority.
 // Destruction intent is independent from observation and cannot be cleared here.
-func (s *store) sharedOperationResult(record *sharedServiceRecord, err error) error {
+func (s *store) sharedOperationResult(record *sharedServiceRecord, cause string, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -940,7 +1035,7 @@ func (s *store) sharedOperationResult(record *sharedServiceRecord, err error) er
 		record.Status = "destroying"
 	}
 	record.Failure = "shared operation incomplete; resources preserved; restore provider/ownership and retry explicit control or cleanup"
-	return errors.Join(err, s.saveShared(*record))
+	return errors.Join(err, s.saveShared(record, cause))
 }
 
 // markSharedRelease records destructive intent before generic provider cleanup

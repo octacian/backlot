@@ -260,7 +260,7 @@ func (g *Group) sessionListenerRequest(ctx context.Context, address string) (boo
 	defer cancel()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", g.Identity.Control)
 	if err != nil {
-		return false, false, errors.New("session listener authority unavailable")
+		return false, false, &authorityError{message: "session listener authority unavailable", cause: errors.Join(err, ctx.Err())}
 	}
 	defer func() { _ = conn.Close() }()
 	deadline := time.Now().Add(listenerRequestBudget)

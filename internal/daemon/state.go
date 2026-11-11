@@ -14,13 +14,16 @@ import (
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/localipc"
+	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
 	bolt "go.etcd.io/bbolt"
 )
 
 var stateNineBuckets = []string{"meta", "instances", "checkouts", "paths", "persistent", "snapshots", "secrets", "runtime", "resources"}
 var sharedBuckets = []string{"shared_projects", "shared_paths", "shared_services", "shared_allocations"}
-var bucketNames = append(append([]string{}, stateNineBuckets...), sharedBuckets...)
+var stateElevenBuckets = append(append([]string{}, stateNineBuckets...), sharedBuckets...)
+var stateTwelveBuckets = append(append([]string{}, stateElevenBuckets...), "attempts", "attempt_sequences", "evidence_deletions")
+var bucketNames = append(append([]string{}, stateTwelveBuckets...), bindingBuckets...)
 
 type record struct {
 	Instance           v1.Instance         `json:"instance"`
@@ -34,6 +37,7 @@ type store struct {
 	sharedCheckpoint func(string) error
 	// waiverCheckpoint is a test-only failure seam after transactional writes.
 	waiverCheckpoint func() error
+	bindingGate      sync.Mutex
 	db               *bolt.DB
 	directory        string
 }
@@ -112,6 +116,11 @@ func openStateVersion(tx *bolt.Tx, target int, steps []stateMigration) error {
 	if err := validateStateAuthority(tx); err != nil {
 		return statePreflightError(err)
 	}
+	if target == v1.StateVersion {
+		if err := validateBindings(tx); err != nil {
+			return statePreflightError(err)
+		}
+	}
 	return tx.Bucket([]byte("meta")).Put([]byte("version"), []byte(strconv.Itoa(target)))
 }
 
@@ -131,6 +140,17 @@ func jsonObject(data []byte) bool {
 }
 
 func put(tx *bolt.Tx, bucket, key string, value any) error {
+	if r, ok := value.(record); ok && bucket == "instances" {
+		r.Instance.Association = nil
+		value = r
+	}
+	if bucket == "instances" && tx.Bucket([]byte("attempts")) != nil {
+		if r, ok := value.(record); ok {
+			if err := syncAttempt(tx, key, r); err != nil {
+				return err
+			}
+		}
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -144,6 +164,9 @@ func load(tx *bolt.Tx, id string) (record, error) {
 		return r, problem("not_found", "instance not found; use its recorded instance ID")
 	}
 	if err := decodeRecord(data, id, &r); err != nil {
+		return r, err
+	}
+	if err := associateInstance(tx, &r.Instance); err != nil {
 		return r, err
 	}
 	return r, nil
@@ -171,12 +194,12 @@ func decodeRecord(data []byte, id string, r *record) error {
 }
 
 func (s *store) begin(snapshot plan.Snapshot, checkout v1.CheckoutIdentity, lease time.Duration) (v1.InstanceResponse, bool, error) {
-	return s.beginSelected(snapshot, checkout, lease, false)
+	return s.beginSelected(snapshot, checkout, lease, false, nil)
 }
 
 // beginSelected keeps the existing logical key but fences named-scene location
 // collisions in the same transaction as deduplication, before any accepted intent.
-func (s *store) beginSelected(snapshot plan.Snapshot, checkout v1.CheckoutIdentity, lease time.Duration, sceneOnly bool) (v1.InstanceResponse, bool, error) {
+func (s *store) beginSelected(snapshot plan.Snapshot, checkout v1.CheckoutIdentity, lease time.Duration, sceneOnly bool, observed *startObservation) (v1.InstanceResponse, bool, error) {
 	response := v1.InstanceResponse{APIVersion: v1.Version}
 	created := false
 	if sceneOnly {
@@ -190,22 +213,34 @@ func (s *store) beginSelected(snapshot plan.Snapshot, checkout v1.CheckoutIdenti
 				return err
 			}
 		}
-		paths := tx.Bucket([]byte("paths"))
-		if id := paths.Get([]byte(checkout.Path)); id != nil && string(id) != checkout.ID {
-			return problem("checkout_replaced", "checkout path now identifies different files; old records preserved; use a separate checkout")
+		parent, err := locateCheckout(tx, checkout)
+		if err != nil {
+			return err
 		}
-		checkouts := tx.Bucket([]byte("checkouts"))
-		if data := checkouts.Get([]byte(checkout.ID)); data != nil {
-			var previous v1.CheckoutIdentity
-			if err := json.Unmarshal(data, &previous); err != nil {
-				return problem("state_corrupt", "cannot decode checkout record")
+		if tx.Bucket([]byte("checkout_bindings")).Get([]byte(parent)) == nil {
+			if err := put(tx, "checkout_bindings", parent, checkoutBinding{Current: checkout}); err != nil {
+				return err
 			}
-			if previous.Path != checkout.Path || previous.GitDirectory != checkout.GitDirectory {
-				return problem("checkout_moved", "checkout moved; old records preserved; use a separate checkout")
+			if err := put(tx, "checkouts", parent, checkout); err != nil {
+				return err
+			}
+			if err := tx.Bucket([]byte("paths")).Put([]byte(checkout.Path), []byte(parent)); err != nil {
+				return err
+			}
+		} else if checkout.Registration.CheckoutID != "" {
+			binding, err := readCheckoutBinding(tx, parent)
+			if err != nil {
+				return err
+			}
+			if binding.Current.Registration.CheckoutID == "" {
+				binding.Current.Registration = checkout.Registration
+				if err := put(tx, "checkout_bindings", parent, binding); err != nil {
+					return err
+				}
 			}
 		}
 		p := snapshot.Plan
-		key := p.Project + "/" + checkout.ID + "/" + p.Scene
+		key := p.Project + "/" + parent + "/" + p.Scene
 		if p.Lifetime == v1.Persistent {
 			if id := tx.Bucket([]byte("persistent")).Get([]byte(key)); id != nil {
 				r, err := load(tx, string(id))
@@ -213,7 +248,7 @@ func (s *store) beginSelected(snapshot plan.Snapshot, checkout v1.CheckoutIdenti
 					return err
 				}
 				if sceneOnly {
-					if r.Instance.Plan.Project != p.Project || r.Instance.Plan.Scene != p.Scene || r.Instance.Plan.Lifetime != v1.Persistent || !sameCheckout(&r.Instance.Checkout, &checkout) {
+					if r.Instance.Plan.Project != p.Project || r.Instance.Plan.Scene != p.Scene || r.Instance.Plan.Lifetime != v1.Persistent || !sameCheckoutValue(associatedCheckout(r.Instance), checkout) {
 						return problem("state_corrupt", "persistent index and recorded scene identity disagree")
 					}
 					if err := requireSceneLocation(r.Instance, filepath.Dir(p.ManifestPath)); err != nil {
@@ -221,14 +256,20 @@ func (s *store) beginSelected(snapshot plan.Snapshot, checkout v1.CheckoutIdenti
 					}
 				}
 				response.Instance = r.Instance
-				response.ManifestDrift = r.Instance.Plan.ManifestDigest != p.ManifestDigest
+				if observed != nil {
+					*observed, err = observeStart(tx, r.Instance)
+					if err != nil {
+						return err
+					}
+				}
+				response.ManifestDrift = plan.ManifestDrift(r.Instance.Plan, p)
 				response.ConfigDrift = plan.ConfigurationDrift(r.Instance.Plan, p)
 				return nil
 			}
 		}
 		now := time.Now().UTC()
 		id := newID()
-		instance := v1.Instance{ID: id, Checkout: checkout, Status: v1.Preparing, Plan: p, CreatedAt: now.Format(time.RFC3339Nano), Operation: v1.Operation{ID: newID(), Status: v1.Preparing, Allocations: []v1.AllocationRecord{{ID: newID(), Kind: "private_snapshot", OwnershipToken: newID(), Phase: "intent"}}}}
+		instance := v1.Instance{ID: id, CheckoutParent: parent, Checkout: checkout, Status: v1.Preparing, Plan: p, CreatedAt: now.Format(time.RFC3339Nano), Operation: v1.Operation{ID: newID(), Status: v1.Preparing, Allocations: []v1.AllocationRecord{{ID: newID(), Kind: "private_snapshot", OwnershipToken: newID(), Phase: "intent"}}}}
 		r := record{Instance: instance}
 		if p.Lifetime == v1.Disposable {
 			response.LeaseToken = newID()
@@ -236,12 +277,6 @@ func (s *store) beginSelected(snapshot plan.Snapshot, checkout v1.CheckoutIdenti
 			r.Instance.LeaseExpiresAt = now.Add(lease).Format(time.RFC3339Nano)
 		}
 		if err := put(tx, "instances", id, r); err != nil {
-			return err
-		}
-		if err := put(tx, "checkouts", checkout.ID, checkout); err != nil {
-			return err
-		}
-		if err := paths.Put([]byte(checkout.Path), []byte(checkout.ID)); err != nil {
 			return err
 		}
 		if p.Lifetime == v1.Persistent {
@@ -297,9 +332,33 @@ func (s *store) complete(id string) (v1.Instance, error) {
 }
 func (s *store) inspect(id string) (v1.Instance, error) {
 	var instance v1.Instance
-	err := s.db.View(func(tx *bolt.Tx) error { r, err := load(tx, id); instance = r.Instance; return err })
+	boot, _ := native.CurrentBoot()
+	err := s.db.View(func(tx *bolt.Tx) error {
+		r, err := load(tx, id)
+		if err != nil {
+			return err
+		}
+		instance, err = inspectRecord(tx, r, boot)
+		return err
+	})
 	return instance, err
 }
+
+// inspectRecord projects current diagnostics from the caller's selection transaction.
+func inspectRecord(tx *bolt.Tx, r record, boot string) (v1.Instance, error) {
+	instance := r.Instance
+	if instance.Execution != nil {
+		result := *instance.Execution
+		settlement, err := consumerEligibility(tx, r, boot)
+		if err != nil {
+			return v1.Instance{}, err
+		}
+		result.Settlement = &settlement
+		instance.Execution = &result
+	}
+	return instance, nil
+}
+
 func terminal(r *record, status v1.InstanceStatus, reason string) {
 	r.Instance.Status = status
 	r.Instance.Operation.Status = status

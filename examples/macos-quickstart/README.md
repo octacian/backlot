@@ -1,7 +1,7 @@
 # macOS HTTPS quickstart
 
 Run this self-contained frontend, API, native Node SSR and disposable test through
-one trusted HTTPS origin. Target: macOS ARM64, stock Caddy 2.11.6 and Node 26.
+one trusted HTTPS origin. Target: macOS ARM64, stock Caddy 2.11.7 and Node 26.
 No Docker, public domain or DNS/resolver configuration is needed. Node/npm and
 `ws` are dependencies of this example application; Backlot contributor tooling
 remains Go-only. `ws` is pinned in the lockfile and is [MIT licensed](https://github.com/websockets/ws/blob/master/LICENSE).

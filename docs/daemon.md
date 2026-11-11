@@ -12,7 +12,7 @@ for Docker execution and retained resource lifecycle; Publication and retained e
 | Term | Meaning |
 | --- | --- |
 | Project | Stable manifest `project` identifier and project-directory location; a label alone is not ownership |
-| Checkout | Canonical filesystem/Git-directory identity; linked worktrees are distinct runtime scopes; branch/HEAD are provenance |
+| Checkout | Local registration marker plus canonical location; linked worktrees have distinct checkout roles and share a common role; physical observations and branch/HEAD are provenance |
 | Scene | Named manifest selection of components/resources with explicit persistent or disposable lifetime |
 | Instance | Recorded runtime/metadata identity; persistent project + checkout + scene converges on one instance, disposable invocations get new IDs |
 | Attempt | One accepted execution within an instance; separates logs, results, attachment and build-image provenance across starts |
@@ -28,12 +28,12 @@ See [private configuration](manifest.md#registered-private-project-configuration
 | Discover declarations / resolve current prerequisites | `scene list`, `scene describe` / `plan` | No runtime mutation; plan resolves caller-side tools, inputs and seeds |
 | Record metadata only | `prepare SCENE` | Snapshot/identity, no application readiness or provider allocation |
 | First persistent start | `scene start SCENE` or `run SCENE` | Accept snapshot/attempt, allocate selected resources, await readiness |
-| Join running scene; or resume stopped scene | Repeat start/run | Existing identity, retained snapshot/data/credentials; report drift without applying edits |
-| Changed ordinary command, probe or non-sensitive environment | `restart ID` | Capture current sources and apply compatible drift; retain identity/data/paired credentials |
-| Changed protected resource/initialization/sensitive contract | `reset ID`, or `destroy ID` then start | Explicit destructive replacement required; reset keeps logical ID but replaces generation; later start after destroy gets a new ID |
-| Failed/interrupted persistent attempt | Inspect then `restart ID` | No implicit retry; compatibility/ownership fences apply before old work is stopped |
-| Stop development runtime | `scene stop SCENE` or `stop ID` | Stop owned consumers/routes, retain data, credentials, history and evidence |
-| Remove this instance's owned data | `destroy ID` | Stop/join before removal; history/evidence remain subject to retention |
+| Join starting/ready scene | Repeat start/run | Same attempt and recorded configuration; report unapplied changes |
+| Start prepared/stopped/failed/cancelled/interrupted scene | Repeat start/run after diagnosis/repair | One new attempt using compatible current configuration after cleanup; retain identity/data/paired credentials |
+| Apply command, probe or non-sensitive environment edits to healthy work | `scene restart SCENE` or `restart ID` | Capture current sources and apply compatible drift; retain identity/data/paired credentials |
+| Changed protected resource/initialization/sensitive contract | `scene reset SCENE` / `reset ID`, or destroy then start | Explicit destructive replacement required; reset keeps logical ID but replaces generation; later start after destroy gets a new ID |
+| Stop development runtime | `scene stop SCENE` or `stop ID` | Stop owned consumers/routes, release verified-unused instance networks, retain data, credentials, history and evidence |
+| Remove this instance's owned data | `scene destroy SCENE` or `destroy ID` | Stop/join and remove data, then erase attempt results/logs/artifacts; export first |
 | Change daemon PATH/environment or policy | Explicit daemon stop/start in same state directory | Future daemon context changes; retained data/CA remain; no automatic scene restart |
 | Inspect or follow | `status`, `logs`, `export` | Observation only; no attachment, lease renewal or lifecycle ownership |
 | Own one new persistent attempt until client ends | `scene start --attached SCENE` or `run --attached SCENE` | Refuse existing runtime; signal/loss stops only the accepted attempt and retains data |
@@ -51,6 +51,10 @@ manifest. Use recorded IDs if checkout identity is unavailable or selection is
 ambiguous. [Selection rules](#recorded-selection-and-stop) define the exact boundary.
 For the daily command sequence see [operations](operations.md#daily-loop); current
 flags/defaults and output framing live in the [CLI reference](cli.md).
+
+For a scope-wide recorded view and workload-only bulk stop, use
+[`activity` and `stop --all`](cli.md#scope-wide-activity-and-workload-stop).
+Their temporary admission fence leaves administration running and retains bulk-cancelled disposable data.
 
 ## Commands
 
@@ -115,17 +119,21 @@ that environment, stop and explicitly start the daemon from the intended context
 
 Persistent duplicates converge on project + checkout + scene, including concurrent
 requests and symlink aliases. Every disposable preparation gets a new instance and
-operation ID. Canonical checkout identity combines filesystem identity for the
-checkout and its Git directory (when present); two real Git worktrees differ.
-Snapshot reads bind to canonical project/checkout identities captured before reading
-manifest, configuration or seed inputs. Acceptance rechecks both identities and
-paths; an in-flight replacement is rejected before any durable intent is recorded.
-Branch/HEAD text is provenance, never ownership. A moved checkout or replaced
-checkout path is rejected with a typed error, preserving old records; use a
-separate checkout rather than implicitly adopting old state. Non-Git projects use
-the project directory's filesystem identity.
+operation ID. Local checkout/common markers and registered canonical locations select
+immutable retained owners across device-number changes. Recognition does not rewrite
+launch history, rekey allocations, change binding revisions or stop/recompose peers.
+An unavailable sibling checkout does not prevent recognition. Non-Git and projects
+without shared SQL use the same registration boundary.
 
-Repeated persistent preparation reports manifest/config digest drift and returns
+Snapshot reads still capture physical project, checkout/admin and common-directory
+identity before reading inputs. Acceptance and launch recheck those objects, Git
+links and markers; in-flight replacement refuses the snapshot. Branch/HEAD text is
+provenance, never ownership. Missing or conflicting marker claims preserve records
+and direct you to [explicit repair](cli.md#reassociate-retained-project-data).
+Exact-ID cleanup continues to use recorded capabilities independently of current sources.
+
+Repeated persistent preparation reports manifest/config drift, including effective
+working-directory target changes, and returns
 the original record without overwriting its snapshot, including cancelled or
 interrupted records. Metadata preparation itself never restarts runtime; native restart is described
 below. Reset/destroy are documented in the [private-state guide](containers.md);
@@ -160,12 +168,12 @@ recorded-ID commands work outside a checkout. Finite `status ID` keeps its exist
 `InstanceResponse` output. ID observation includes persistent, disposable and
 historical instances; use `run` to execute disposable scenes.
 
-Start accepts `--startup-timeout`, `--job-timeout` and `--stop-grace`. Repeated or
-concurrent starts converge on the existing instance and report manifest/config
-drift without reconciling retained data. Unhealthy execution needs explicit
-restart. A logical project/checkout/scene key recorded at a different canonical
-project directory conflicts before start/join. Cancelling startup uses existing
-run cleanup; cancelling observation leaves execution alone.
+Start accepts `--startup-timeout`, `--job-timeout` and `--stop-grace` and follows
+[the start rules](cli.md#commands-and-defaults) for configuration, overlapping
+requests and missing replies.
+A logical project/checkout/scene key recorded at a different canonical project
+directory conflicts before start/join. Cancelling startup stops and waits for only
+its accepted attempt; cancelling observation leaves execution alone.
 
 ### Attached execution
 
@@ -173,7 +181,9 @@ run cleanup; cancelling observation leaves execution alone.
 new persistent execution attempt. They stay alive at readiness and show aggregate
 startup/service logs until the attempt ends. `--json` emits typed NDJSON lifecycle
 and log records (`starting`, `ready`, `stopping`, `stopped`, `failure`, `log`, and
-explicit gap/warning records); private attachment authority is never command output.
+explicit gap/warning records). The ready result includes declared
+[startup details](manifest.md#components-and-scenes); private attachment authority
+is never command output.
 Default starts still return at readiness and leave runtime running. Disposable
 scenes, terminal arguments, `--keep-on-failure`, restart and reset reject attached mode.
 
@@ -204,19 +214,20 @@ not hide recorded instances while the directory and checkout identity remain usa
 
 Multiple non-destroyed persistent records at that location/scene produce
 `ambiguous_target`; use `backlot status ID` or `backlot stop ID`. Failed and
-metadata-only records participate; destroyed history is available by ID only.
+metadata-only records participate; destroyed identity tombstones are available by ID only.
 Malformed recorded selectors or disagreement with existing persistent slots produce
 `state_corrupt` before discovery filtering. Preserve state for diagnosis; existing
 ID inspection/cleanup remains independent of named selection.
 
-Moved/replaced checkouts or unavailable project/Git identity fail selection; use
+Before explicit reassociation, moved/identity-changed checkouts or unavailable
+project/Git registration fail selection; use
 recorded IDs. No force or path-only adoption exists. Project subdirectories within
 an unchanged Git checkout have no separately persisted inode identity; selection
 uses their recorded canonical location. Non-Git projects use the recorded project
 root as checkout identity; before any record exists, supply `--project` explicitly.
 See the [selection rationale and stored-state boundaries](adr/20261021T000615495Z-resolve-persistent-scenes-from-recorded-identity-and-sample-status.md).
 
-Finite named results are `SceneResponse`: API/daemon generation, outcome, optional
+Finite named start/status/stop results are `SceneResponse`: API/daemon generation, outcome, optional
 `result: InstanceResponse`, and canonical checkout/selector metadata. `not_found`
 omits `result` but includes checkout identity. Runtime failures are snapshot data
 and status exits zero; selection, validation and transport errors are nonzero.
@@ -228,6 +239,15 @@ conflict rather than redirecting cleanup. Successful outcomes are `stopped`,
 failed records retain truthful status; cleanup/collection uncertainty stays
 nonzero. Stop shares mutation serialization with restart/reset/destroy and has no
 attempt-specific attachment authority.
+
+Named restart/reset/destroy use the same recorded selection, but missing or
+non-persistent targets fail nonzero with bounded candidate-ID guidance. They
+return the root lifecycle `InstanceResponse`, including success-only startup
+summaries for restart/reset. Restart retains data, reset replaces its generation,
+and destroy erases owned data and evidence; export first. Selectors are frozen to
+canonical locations and revalidated under existing lifecycle locks before effects,
+including preparation. Workload admission and destroy's evidence-before-instance
+lock ordering remain unchanged. See [named lifecycle options](cli.md#named-lifecycle-mutations).
 
 ### Sampled status follow
 
@@ -302,6 +322,7 @@ format and rejection/cleanup rules.
 | `POST /v1/shared/list`, `/v1/shared/inspect`, `/v1/shared/start`, `/v1/shared/stop`, `/v1/shared/restart` | `SharedRequest` | `SharedResponse` (durable status; no credentials/ownership authority) |
 | `POST /v1/shared/destroy` | `SharedDestroyRequest` | `SharedResponse` |
 | `POST /v1/doctor` | `DoctorRequest` | `DoctorResponse` |
+| `POST /v1/projects/reassociate` | `ReassociationRequest` | `ReassociationResponse` (preview or explicit apply) |
 | `POST /v1/instances` | `ListRequest` | `ListResponse` (at most 100 summaries) |
 | `POST /v1/stop` | `ControlRequest` | `DaemonStatusResponse` (`stopping`) |
 | `POST /v1/prepare` | `PrepareRequest` | `InstanceResponse` |
@@ -309,18 +330,33 @@ format and rejection/cleanup rules.
 | `POST /v1/cancel` | `InstanceRequest` | `InstanceResponse` |
 | `POST /v1/renew` | `LeaseRequest` | `InstanceResponse` |
 | `POST /v1/run`, `/v1/restart`, `/v1/reset` | `RunRequest` | `InstanceResponse` |
+| `POST /v1/activity` | `ActivityRequest` | `ActivityResponse` (bounded recorded page, owner/settlement provenance) |
+| `POST /v1/runtime/stop-all` | `StopAllRequest` (`all: true`, no ID/force) | `StopAllResponse` (finite selection; partial error retains target results) |
 | `POST /v1/runtime/stop` | `StopRequest` (force requires selected `expected_attempt`) | `InstanceResponse` |
-| `POST /v1/destroy` | `DestroyRequest` | `InstanceResponse` |
+| `POST /v1/destroy` | `DestroyRequest` (required `contract: "erase-attempt-history/v1"`) | `InstanceResponse` (execution-free destroyed identity) |
+| `POST /v1/attempts/list` | `HistoryRequest` | `HistoryResponse` (at most 100 summaries) |
+| `POST /v1/attempts/inspect` | `AttemptRequest` | `AttemptResponse` |
+| `POST /v1/attempts/prune` | `HistoryPruneRequest` | `HistoryPruneResponse` |
+| `POST /v1/export` | `ExportRequest` (optional exact attempt) | `ExportResponse` |
 | `POST /v1/attached/renew`, `/v1/attached/cancel` | `AttachedRequest` | `SceneResponse` |
 | `POST /v1/logs` | `LogsRequest` | `LogsResponse` |
 
-Restart/reset require a recorded `instance_id`; run does not accept one.
+Restart/reset and destroy require either a recorded `instance_id` or a named
+`target: SceneTarget`, never both. Named targets cannot contain an instance ID.
+Named restart/reset take only config in `plan`; the daemon derives scene/project
+from the selected record and retains its recorded config default. Run accepts
+neither selector. Older strict peers reject the new selector before effects;
+upgrade rather than retrying without the fence.
 Destroy force uses command-specific destroy requests; native stop force retains its
 independent attempt-bound `StopRequest` contract.
 
 `list` uses `ListRequest` (`after_id`, `limit`; zero means default 100, maximum
 100) and returns identity-ordered summaries with a `next_after_id` continuation.
 Empty lists contain an empty array. Historical/destroyed targets remain discoverable.
+Filtered list requests may opt into `include_checkout` with an absolute location
+or `cwd` (enclosing Git checkout). The response then includes resolved `checkout`
+metadata independently of rows; legacy requests retain their old shape. Reads do
+not enroll or repair checkout registration. See [list scope](cli.md#recorded-list-filters).
 `status` is a CLI alias for `inspect`. Every instance response removes snapshot
 ownership tokens while preserving the private durable recovery authority. Stop
 the old daemon before upgrading; use its matching binary for an incompatible
@@ -352,6 +388,10 @@ startup error in foreground output or the private `daemon.log` for background st
 
 ## Native execution
 
+Native commands and host readiness commands use the selected
+[working directory](manifest.md#native-working-directories). Retained snapshots
+preserve its canonical target and launch rechecks it before activation.
+
 Build with `make build`, then explicitly start a private daemon as above. Native
 commands and descendants, including readiness commands, may create groups within
 their live guardian-owned session. Do not use `setsid`, change privileges or delegate
@@ -370,7 +410,7 @@ bin/backlot restart INSTANCE_ID --state-dir /absolute/private/backlot --json
 ```
 
 `run` and `restart` accept flags before or after the target. Arguments after `--`
-are forwarded only to a disposable terminal job. The finite JSON result is one
+are forwarded to a disposable terminal job; `task run` forwards them to its selected task. The finite JSON result is one
 `InstanceResponse`; the original terminal-job exit code is under
 `instance.execution.components[].exit_code`. Any orchestration, cancellation,
 collection or cleanup failure returns nonzero. Following logs emits one typed
@@ -466,6 +506,20 @@ or abandoned-data deletion guards. Doctor keeps an incomplete historical-observa
 check failed and explains the recorded resource release independently from launch eligibility. Root exit, EOF or closed listeners alone never
 establish cleanup. No raw process/session identities are public results.
 
+`execution.settlement` separates current release from these historical observations.
+A verified current cleanup covers every exact launch, including readiness helpers,
+pending effects, containers, publication, networks and dependent tasks. One successful
+sibling receipt cannot release another launch. Legacy per-component cleanup summaries
+remain historical observations; without exact current proof or independently verified
+all-launch previous-boot absence, native eligibility remains unknown. A new attempt or changed effect
+invalidates its private release proof; status reads reevaluate the records without
+writing or refreshing observation time. Explicit stop retries ownerless interrupted
+effects and can report settled while preserving `interrupted`, original completion,
+worst native confidence and collection gaps. Doctor reports current consumer
+settlement separately from its historical native-observation check. Unknown or
+partially surviving effects remain fenced; no application or server starts during
+recovery. Retained data still requires its independent destructive-cleanup safeguards.
+
 All native launch intents/effects, including command probes, record kernel boot
 identity before allocation. A different boot releases obsolete process claims,
 never collection gaps. The guardian-only pipe lets a live anchor terminate its own
@@ -497,6 +551,32 @@ The CLI waits for persistent ready or disposable terminal status through inspect
 raw API callers must renew disposable capabilities while polling. Logs pages use
 an absolute unfiltered record offset, so component filtering preserves cursor
 progress. Inspect and cancel remain shared across metadata and runtime execution.
+
+## Tasks borrowing a ready parent
+
+[Declared tasks](manifest.md#declared-native-tasks) bind to an already-ready persistent
+parent in this daemon. Admission rechecks its exact instance, attempt and resource
+generation, including resource-free scenes. Tasks use accepted native endpoints and
+paired credentials, with independent guardian, log and result identities. They never
+replace the parent result or start missing dependencies or allocations.
+
+Admission atomically reserves declared outputs before activation. A group held by
+the parent or a peer, or overlapping accepted/current canonical paths, rejects
+immediately, including aliases and renamed groups. Disjoint tasks may run together;
+task output locks never queue. Terminal consumers with unknown current release still
+reserve overlapping outputs; independently verified current release frees those
+reservations while retaining historical cleanup observations. The final directory
+clearing check uses the same current proof. Undeclared writes and hostile concurrent filesystem mutation
+retain the existing cooperative limits.
+
+Parent stop/restart/reset/destroy, attached cancellation, failure teardown and daemon
+shutdown fence admission, then cancel and join dependent owners and collectors
+before releasing services, networks or data. Uncertain cleanup preserves parent and
+output fences; a collection gap alone does not imply a live consumer. Task exit,
+cancellation or lease expiry cleans only task-owned work. Recovery reconciles and
+interrupts tasks before parent effects, never resumes them, and uses private
+attempt-bound journals rather than public history as authority. Reassociation
+requires dependent consumers independently settled too.
 
 ## Managed gateway control
 
@@ -579,7 +659,7 @@ Docker endpoint; Backlot inspects and pins its image ID and never pulls/builds i
 The image contract requires executable `/bin/sh`, `/bin/bash`, `getent hosts`,
 GNU-compatible `timeout` (exit 124 on timeout), and OpenSSL `s_client` supporting
 `-connect`, `-servername`, `-verify_hostname`, `-verify_return_error` and `-CAfile`.
-For example a preexisting Debian-based `golang:1.27.1` image provides these tools;
+For example a preexisting Debian-based `golang:1.27.3` image provides these tools;
 operators select their own compatible image. Missing tools are `unsupported`.
 Images declaring volumes are unsupported. Image/app entrypoint and command are
 replaced by the bounded probe script and image healthchecks are explicitly disabled;
@@ -668,12 +748,19 @@ Status and shutdown responses require matching API/state versions. Stop an
 incompatible daemon using its matching binary before upgrading; a stopping
 acknowledgment does not prove process exit or lock release or trigger automatic startup.
 Existing snapshots remain authoritative for recorded cleanup; missing historical
-private/effective provenance stays unrecorded. Eligible historical prepared/stopped starts capture
+private/effective provenance stays unrecorded. Eligible persistent starts capture
 current project-only values with existing retained-resource/sensitive-drift fences
-and adopt them atomically with execution acceptance. Ordinary version 9 stop/start
-retains its immutable snapshot. The independent project registry remains format 1.
+and adopt them with execution acceptance; rejected starts preserve old provenance.
+Starting/ready joins retain their recorded configuration. The independent project
+registry reads legacy format 1 and writes format 2.
 See [state upgrade and operation](containers.md#state-compatibility) and
 [private setup, provenance and retention](manifest.md#registered-private-project-configuration).
+
+Current associations are separate from launch provenance: `instance.association`
+selects the current checkout/project while `instance.checkout` and its plan describe
+the accepted launch. Stable checkout parents retain scene slots across repair.
+Exact-ID restart/reset uses the current association; recorded cleanup and historical
+export keep their original authority. See the [repair workflow](cli.md#reassociate-retained-project-data).
 
 ## Declared startup details
 
@@ -700,7 +787,8 @@ backlot list --checkout /absolute/worktree --project-id my-project --json
 backlot daemon config --state-dir /private/backlot --json
 ```
 
-Unfiltered list remains global retained history, including destroyed instances.
+Unfiltered list remains global recorded identity discovery, including destroyed
+tombstones; successful destroy retains no execution result or attempt evidence.
 `--project` and `--checkout` are mutually exclusive explicit location selectors;
 project selects the exact recorded directory (a deleted recognized manifest path
 also works), while checkout selects all projects in that existing directory's
@@ -709,6 +797,10 @@ scene, lifetime and exact instance state intersect the location selection; state
 is `Instance.Status`, not historical execution outcome. Explicit IDs remain the
 inspection/cleanup fallback for unavailable, moved or replaced identity. Named
 scene lifecycle selection retains its nearest-project/ambiguity rules.
+
+After explicit reassociation, location filters use the current binding. Summary
+`checkout` remains launch provenance; inspect the instance for its current
+`association`.
 
 Filters apply before the 1–100 page limit. Resume using `--after NEXT_AFTER_ID`
 with identical filters; the cursor is the last returned match only when another

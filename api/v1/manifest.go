@@ -78,15 +78,23 @@ type Environment struct {
 	Required    []string         `json:"required,omitempty" yaml:"required,omitempty" jsonschema_description:"Environment keys that must be present after layering."`
 }
 
-// Value is exactly one literal or bounded discriminated reference.
+// Value is exactly one literal, reference or bounded composition.
 type Value struct {
-	Literal *string    `json:"literal,omitempty" yaml:"literal,omitempty" jsonschema:"oneof_required=literal" jsonschema_description:"Literal string, including an empty string; mutually exclusive with ref."`
-	Ref     *Reference `json:"ref,omitempty" yaml:"ref,omitempty" jsonschema:"oneof_required=reference" jsonschema_description:"Bounded symbolic reference; mutually exclusive with literal."`
-	Secret  bool       `json:"secret,omitempty" yaml:"secret,omitempty" jsonschema_description:"Treat the value as sensitive in ordinary plan output."`
+	Literal *string    `json:"literal,omitempty" yaml:"literal,omitempty" jsonschema_description:"Literal string, including an empty string; one of literal, ref, format, host_port, url_path or file_path."`
+	Ref     *Reference `json:"ref,omitempty" yaml:"ref,omitempty" jsonschema_description:"Bounded symbolic reference; one of literal, ref, format, host_port, url_path or file_path."`
+	// Format substitutes sequential string operands without reinterpreting them.
+	Format *FormatValue `json:"format,omitempty" yaml:"format,omitempty" jsonschema_description:"Sequential %s substitution and %% literal percent; at most 1 MiB rendered bytes."`
+	// HostPort constructs an IPv6-safe host and numeric port pair.
+	HostPort *HostPortValue `json:"host_port,omitempty" yaml:"host_port,omitempty" jsonschema_description:"IPv6-safe hostname/IP and decimal port in 1..65535; at most 1 MiB rendered bytes."`
+	// URLPath appends a path beneath an absolute HTTP(S) base.
+	URLPath *URLPathValue `json:"url_path,omitempty" yaml:"url_path,omitempty" jsonschema_description:"Append beneath a credential-free absolute HTTP(S) base without query, fragment or traversal; at most 1 MiB rendered bytes."`
+	// FilePath joins and cleans paths for the actual native or container consumer.
+	FilePath *FilePathValue `json:"file_path,omitempty" yaml:"file_path,omitempty" jsonschema_description:"Join and clean filesystem base and parts; traversal is allowed without containment or path conversion; at most 1 MiB rendered bytes."`
+	Secret   bool           `json:"secret,omitempty" yaml:"secret,omitempty" jsonschema_description:"Treat the value as sensitive in ordinary plan output."`
 }
 
 // Reference identifies a value without expression evaluation or interpolation.
-// An origin supports url and ca_cert_path; ca_cert_path is the explicitly mapped managed
+// An origin supports url, hostname and ca_cert_path; ca_cert_path is the explicitly mapped managed
 // public root certificate path, only for explicit environment assignments.
 // Allocation-dependent values remain symbolic during offline planning.
 type Reference struct {
@@ -109,14 +117,19 @@ type Resource struct {
 
 // Output declares a checkout-relative mutable path and serialization group.
 type Output struct {
-	Path             string `json:"path" yaml:"path" jsonschema:"minLength=1" jsonschema_description:"Safe checkout-relative mutable output path."`
-	ConcurrencyGroup string `json:"concurrency_group" yaml:"concurrency_group" jsonschema:"minLength=1" jsonschema_description:"Named serialization group for overlapping checkout outputs."`
+	// EmptyBeforeExecution authorizes emptying this scratch directory before each new execution.
+	EmptyBeforeExecution bool   `json:"empty_before_execution,omitempty" yaml:"empty_before_execution,omitempty" jsonschema_description:"Irreversibly empty and recreate this scratch directory under output locks or task reservations before each new execution; omitted or false preserves existing contents."`
+	Path                 string `json:"path" yaml:"path" jsonschema:"minLength=1" jsonschema_description:"Safe checkout-relative mutable output path."`
+	ConcurrencyGroup     string `json:"concurrency_group" yaml:"concurrency_group" jsonschema:"minLength=1" jsonschema_description:"Named serialization group for overlapping checkout outputs."`
 }
 
 // Command declares an executable tool and direct argument vector.
 type Command struct {
-	Tool string   `json:"tool" yaml:"tool" jsonschema:"minLength=1" jsonschema_description:"Name from the project tools map; no implicit shell interpretation."`
-	Args []string `json:"args,omitempty" yaml:"args,omitempty" jsonschema_description:"Direct argument vector; shell expansion requires an explicit shell command."`
+	// WorkingDirectory selects a manifest-relative cwd; omitted readiness commands inherit native service cwd.
+	WorkingDirectory string `json:"working_directory,omitempty" yaml:"working_directory,omitempty" jsonschema_description:"Existing manifest-relative directory for native execution; dot selects the manifest directory. Native service readiness commands inherit service cwd when omitted; other commands default to the manifest directory."`
+
+	Tool string     `json:"tool" yaml:"tool" jsonschema:"minLength=1" jsonschema_description:"Name from the project tools map; no implicit shell interpretation."`
+	Args []Argument `json:"args,omitempty" yaml:"args,omitempty" jsonschema_description:"Scalar strings or explicit values; each resolves to one argument without shell expansion or splitting. Sensitive arguments are rejected."`
 }
 
 // Dependency gates execution on another selected component.
@@ -163,7 +176,7 @@ type Component struct {
 	Runtime         Runtime                   `json:"runtime" yaml:"runtime" jsonschema_description:"Native command or generic container; selects command versus image."`
 	Command         *Command                  `json:"command,omitempty" yaml:"command,omitempty" jsonschema_description:"Explicit native executable tool and argument vector."`
 	Image           *Value                    `json:"image,omitempty" yaml:"image,omitempty" jsonschema_description:"Container image literal, declared input or build_image id reference."`
-	Args            []string                  `json:"args,omitempty" yaml:"args,omitempty" jsonschema_description:"Direct argument vector; shell expansion requires an explicit shell command."`
+	Args            []Argument                `json:"args,omitempty" yaml:"args,omitempty" jsonschema_description:"Scalar strings or explicit values; each resolves to one argument without shell expansion or splitting. Sensitive arguments are rejected."`
 	Policy          JobPolicy                 `json:"policy,omitempty" yaml:"policy,omitempty" jsonschema_description:"Job scheduling policy; services omit this field."`
 	Initializes     []string                  `json:"initializes,omitempty" yaml:"initializes,omitempty" jsonschema_description:"Attached volume/directory/allocation generations initialized by a fresh-only job."`
 	DependsOn       []Dependency              `json:"depends_on,omitempty" yaml:"depends_on,omitempty" jsonschema_description:"Explicit ready-service or completed-job dependencies."`
@@ -197,6 +210,8 @@ type Publication struct {
 
 // Scene explicitly selects all work and resources for one workflow.
 type Scene struct {
+	// Tasks enables finite native each-start jobs for explicit invocation.
+	Tasks          []string                 `json:"tasks,omitempty" yaml:"tasks,omitempty" jsonschema_description:"Native each-start jobs explicitly enabled on a persistent scene; never added to startup work."`
 	StartupDetails []StartupDetailSelection `json:"startup_details,omitempty" yaml:"startup_details,omitempty" jsonschema_description:"Ordered fixtures automatically displayed after persistent startup, including selected sensitive values."`
 	Lifetime       Lifetime                 `json:"lifetime" yaml:"lifetime" jsonschema_description:"Persistent retains data; disposable runs finish at a terminal job."`
 	Components     []string                 `json:"components" yaml:"components" jsonschema_description:"Explicit nonempty selection of component names; dependencies are never included implicitly."`

@@ -98,15 +98,7 @@ func TestInstallCLIResponseBoundary(t *testing.T) {
 		})
 	}
 }
-func TestInstallDescriptionEscapesTerminal(t *testing.T) {
-	i := v1.Instance{ID: strings.Repeat("a", 64), Status: v1.Failed, Plan: v1.PlanResponse{Project: "evil\x1b[2J\n", Scene: strings.Repeat("s", 1000)}, Execution: &v1.ExecutionResult{CleanupFailure: "pending"}}
-	text := InstallDescription(i)
-	if strings.ContainsAny(text, "\x1b\n") || len(text) > 400 || !strings.Contains(text, "unresolved cleanup") {
-		t.Fatalf("unsafe description %q", text)
-	}
-}
-
-func TestInstallInspectionPagination(t *testing.T) {
+func TestInstallActivityPagination(t *testing.T) {
 	root := t.TempDir()
 	binary := filepath.Join(root, "old")
 	write := func(name string, value any) {
@@ -120,59 +112,46 @@ func TestInstallInspectionPagination(t *testing.T) {
 		}
 	}
 	idA, idB := strings.Repeat("a", 64), strings.Repeat("b", 64)
-	// Named public snapshots mirror the existing client's minimal persistent fixture.
-	instance := func(id string, kept bool) v1.InstanceResponse {
-		i := v1.Instance{ID: id, Checkout: v1.CheckoutIdentity{ID: id, Path: "/tmp/fixture"}, Status: v1.Prepared, CreatedAt: "2026-10-07T12:00:00Z", Operation: v1.Operation{ID: id, Status: v1.Prepared, Allocations: []v1.AllocationRecord{{ID: id, Kind: "private_snapshot", Phase: "effect"}}}, Plan: v1.PlanResponse{APIVersion: v1.Version, Project: "fixture", Scene: "test", Lifetime: v1.Persistent, Components: []v1.PlannedComponent{}}}
-		if kept {
-			i.Status = v1.Failed
-			i.Operation.Status = v1.Failed
-			i.Execution = &v1.ExecutionResult{Attempt: id, Kept: true, Components: []v1.ComponentResult{}}
-		}
-		return v1.InstanceResponse{APIVersion: v1.Version, Instance: i}
+	entry := func(id string) v1.ActivityEntry {
+		return v1.ActivityEntry{Key: "workload/" + id, ID: id, Project: "fixture", Checkout: "/tmp/fixture", Scene: "test", Status: "interrupted", Owner: "absent", Settlement: &v1.ConsumerSettlement{InstanceID: id, State: v1.ConsumerUnknown, Cause: v1.SettlementUnproven, Blockers: []v1.ConsumerBlocker{{Code: "metadata_unproven", InstanceID: id}}}, Blockers: []v1.ActivityBlocker{}}
 	}
-	first := v1.ListResponse{APIVersion: v1.Version, Instances: []v1.InstanceSummary{{ID: idA, Project: "fixture", Scene: "test", Checkout: "/tmp/fixture", Lifetime: v1.Persistent, Status: v1.Prepared, CreatedAt: "2026-10-07T12:00:00Z"}}, NextAfterID: idA}
-	last := v1.ListResponse{APIVersion: v1.Version, Instances: []v1.InstanceSummary{{ID: idB, Project: "fixture", Scene: "test", Checkout: "/tmp/fixture", Lifetime: v1.Persistent, Status: v1.Failed, CreatedAt: "2026-10-07T12:00:00Z"}}}
-	write("first", first)
-	write("last", last)
-	write(idA, instance(idA, false))
-	write(idB, instance(idB, true))
-	script := "#!/bin/sh\ncd '" + root + "'\ncase $1 in\nlist) if [ \"$7\" = \"\" ]; then cat first; else cat last; fi;;\ninspect) cat \"$4\";;\nesac\n"
+	first := v1.ActivityResponse{APIVersion: v1.Version, DaemonGeneration: idA, GatewayStatus: "unconfigured", Entries: []v1.ActivityEntry{entry(idA)}, NextAfter: "workload/" + idA}
+	last := v1.ActivityResponse{APIVersion: v1.Version, DaemonGeneration: idA, GatewayStatus: "unconfigured", Entries: []v1.ActivityEntry{entry(idB)}, Complete: true}
+	script := "#!/bin/sh\ncd '" + root + "'\n[ \"$1\" = activity ] || exit 1\nif [ \"$7\" = \"\" ]; then cat first; else cat last; fi\n"
 	if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	got, err := installInstances(context.Background(), binary, "/tmp/state")
-	if err != nil || len(got) != 1 || got[0].ID != idB {
-		t.Fatalf("kept pagination: %+v %v", got, err)
-	}
-	for _, mode := range []string{"repeated-id", "bad-cursor", "partial-inspect", "wrong-id", "unknown-status", "last-observed", "missing-execution", "partial-page"} {
+	for _, mode := range []string{"success", "repeated-id", "bad-cursor", "generation", "unknown-status", "missing-settlement", "partial-page", "page-limit", "empty-page"} {
 		t.Run(mode, func(t *testing.T) {
-			a, b, i := first, last, instance(idB, true)
-			b.Instances = append([]v1.InstanceSummary(nil), last.Instances...)
+			a, b := first, last
+			a.Entries = append([]v1.ActivityEntry(nil), first.Entries...)
+			b.Entries = append([]v1.ActivityEntry(nil), last.Entries...)
 			switch mode {
-			case "partial-page":
-				b.Instances[0].Project = ""
 			case "repeated-id":
-				b.Instances[0].ID = idA
+				b.Entries[0] = entry(idA)
 			case "bad-cursor":
-				a.NextAfterID = idB
-			case "partial-inspect":
-				i.Instance.Operation = v1.Operation{}
-			case "wrong-id":
-				i.Instance.ID = idA
+				a.NextAfter = "workload/" + idB
+			case "generation":
+				b.DaemonGeneration = idB
 			case "unknown-status":
-				i.Instance.Status = "invented"
-			case "last-observed":
-				i.Error = &v1.PlanError{Code: "observation_failed", Message: "partial"}
-			case "missing-execution":
-				i.Instance.Status = v1.RuntimeReady
-				i.Instance.Operation.Status = v1.RuntimeReady
-				i.Instance.Execution = nil
+				b.Entries[0].Status = "invented"
+			case "missing-settlement":
+				b.Entries[0].Settlement = nil
+			case "partial-page":
+				b.Entries[0].Project = ""
+			case "page-limit":
+				a.NextAfter = "workload/" + idA
+				b.Complete = false
+				b.NextAfter = "workload/" + idB
+			case "empty-page":
+				a.Entries = []v1.ActivityEntry{}
 			}
 			write("first", a)
 			write("last", b)
-			write(idB, i)
-			if _, err := installInstances(context.Background(), binary, "/tmp/state"); err == nil {
-				t.Fatal("accepted uncertain inspection")
+			got, err := installActivity(context.Background(), binary, "/tmp/state")
+			ok := mode == "success" || mode == "empty-page"
+			if (err == nil) != ok || ok && (len(got) != 2 || got[1].Entries[0].ID != idB) {
+				t.Fatalf("%s: %+v %v", mode, got, err)
 			}
 		})
 	}

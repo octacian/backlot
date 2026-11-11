@@ -28,7 +28,7 @@ func installCommand() *urfave.Command {
 		}
 		ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 		defer cancel()
-		return daemon.Install(ctx, daemon.InstallOptions{Directory: directory, Stage: c.String("stage"), Destination: c.String("destination"), Version: c.String("version"), Consent: func(instances []v1.Instance) error {
+		return daemon.Install(ctx, daemon.InstallOptions{Directory: directory, Stage: c.String("stage"), Destination: c.String("destination"), Version: c.String("version"), Consent: func(pages []v1.ActivityResponse) error {
 			// Canonical tty reads must not block past the reader's cancellation check.
 			tty, err := os.OpenFile("/dev/tty", os.O_RDWR|syscall.O_NONBLOCK, 0)
 			if err != nil {
@@ -39,8 +39,8 @@ func installCommand() *urfave.Command {
 				return fmt.Errorf("shutdown requires a terminal")
 			}
 			reader := bufio.NewReader(terminalInput{ctx: ctx, fd: int(tty.Fd())})
-			running, unresolved := installCounts(instances)
-			if _, err := fmt.Fprintf(tty, "Warning: selected daemon is running; %d running/kept instances; %d unresolved cleanup records observed. Shutdown stops its resources.\n", running, unresolved); err != nil {
+			running, unresolved, preparing := installCounts(pages)
+			if _, err := fmt.Fprintf(tty, "Warning: selected daemon is running; %d running/kept instances; %d unsettled/unknown workloads; up to %d preparing admissions observed. Shutdown stops its resources. Counts are changing observations.\n", running, unresolved, preparing); err != nil {
 				return err
 			}
 			choices := "y/n/l"
@@ -59,8 +59,8 @@ func installCommand() *urfave.Command {
 					return fmt.Errorf("installation cancelled")
 				case "l":
 					if choices == "y/n/l" {
-						for _, i := range instances {
-							if _, err := fmt.Fprintln(tty, daemon.InstallDescription(i)); err != nil {
+						for _, page := range pages {
+							if err := activityOutput(tty, page); err != nil {
 								return err
 							}
 						}
@@ -72,15 +72,20 @@ func installCommand() *urfave.Command {
 	}}
 }
 
-func installCounts(instances []v1.Instance) (running, unresolved int) {
-
-	for _, i := range instances {
-		if i.Status == v1.Starting || i.Status == v1.RuntimeReady || i.Status == v1.Stopping || i.Execution != nil && i.Execution.Kept {
-			running++
-		}
-		if i.Execution != nil && i.Execution.CleanupFailure != "" {
-			unresolved++
+func installCounts(pages []v1.ActivityResponse) (running, unresolved, preparing int) {
+	for _, page := range pages {
+		preparing = max(preparing, page.PreparingAdmissions)
+		for _, entry := range page.Entries {
+			if entry.Settlement == nil {
+				continue
+			}
+			if entry.Owner == "running" || entry.Kept {
+				running++
+			}
+			if entry.Settlement.State != v1.ConsumerSettled {
+				unresolved++
+			}
 		}
 	}
-	return running, unresolved
+	return running, unresolved, preparing
 }

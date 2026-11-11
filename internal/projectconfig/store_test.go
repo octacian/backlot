@@ -122,7 +122,7 @@ func TestManagedSafetyAndRegisteredFailure(t *testing.T) {
 			case "missing-version":
 				err = os.WriteFile(p.Path, []byte(`{"inputs":{"token":"private"}}`), 0600)
 			case "unknown-version":
-				err = os.WriteFile(filepath.Join(s.root, "projects.json"), []byte(`{"version":2,"revision":"x","projects":{}}`), 0600)
+				err = os.WriteFile(filepath.Join(s.root, "projects.json"), []byte(`{"version":3,"revision":"x","projects":{}}`), 0600)
 			}
 			if err != nil {
 				t.Fatal(err)

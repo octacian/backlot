@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -37,7 +38,7 @@ func sceneFixture(t *testing.T) (*service, string, string) {
 			t.Error(err)
 		}
 	})
-	return &service{store: store, lease: time.Minute, generation: newID()}, root, config
+	return &service{store: store, directory: store.directory, lease: time.Minute, generation: newID()}, root, config
 }
 
 func scenePrepare(t *testing.T, s *service, root, config string) v1.InstanceResponse {
@@ -148,13 +149,13 @@ func TestRecordedSceneIdentityAndExplicitEscape(t *testing.T) {
 		}
 	})
 	_, err := s.scene(v1.SceneTarget{CWD: moved, Scene: "dev"}, false)
-	code(t, err, "checkout_moved")
+	code(t, err, "project_registration")
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
 	}
 	git(t, root, "init", "-q")
 	_, err = s.scene(v1.SceneTarget{CWD: root, Scene: "dev"}, true)
-	code(t, err, "checkout_replaced")
+	code(t, err, "project_registration")
 	r, err := s.scene(v1.SceneTarget{InstanceID: prepared.Instance.ID}, true)
 	if err != nil || r.Outcome != v1.SceneAlreadyStopped || r.Result.Instance.Status != v1.Prepared {
 		t.Fatal(r, err)
@@ -226,6 +227,19 @@ func TestSceneStopRechecksSelectionAndReportsCollectionFailure(t *testing.T) {
 	s.beforeSceneMutation = nil
 	_, err = s.store.execution(replacement.Instance.ID, v1.Failed, &v1.ExecutionResult{Attempt: newID(), Components: []v1.ComponentResult{}, CollectionFailure: "collection failed"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	// This collection-only fixture never launched work. Publish that known
+	// current-owner fact; missing legacy runtime bytes cannot prove cleanup.
+	current, err = s.store.inspect(replacement.Instance.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := runtimeRecord{Attempt: current.Execution.Attempt}
+	if err := s.store.saveRuntime(current.ID, journal); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.recordConsumerRelease(context.Background(), current.ID, journal, v1.SettlementExecutionCleanup, true); err != nil {
 		t.Fatal(err)
 	}
 	_, err = s.scene(v1.SceneTarget{InstanceID: replacement.Instance.ID}, true)
@@ -580,5 +594,136 @@ func TestSceneExactIDDisposableStatusKeepsStopRestriction(t *testing.T) {
 	current, err := s.store.inspect(prepared.Instance.ID)
 	if err != nil || current.Status != v1.Prepared || current.LeaseExpiresAt != prepared.Instance.LeaseExpiresAt {
 		t.Fatal(current, err)
+	}
+}
+
+func TestNamedLifecycleSelectionRaceBeforePreparation(t *testing.T) {
+	for _, action := range []string{"restart", "reset", "destroy"} {
+		t.Run(action, func(t *testing.T) {
+			s, root, config := sceneFixture(t)
+			selected := scenePrepare(t, s, root, config)
+			reached, proceed := make(chan struct{}), make(chan struct{})
+			s.beforeSceneMutation = func(string) { close(reached); <-proceed }
+			result := make(chan error, 1)
+			target := &v1.SceneTarget{CWD: root, Scene: "dev"}
+			go func() {
+				var err error
+				if action == "destroy" {
+					_, err = s.destroySelected(context.Background(), "", false, target)
+				} else {
+					_, err = s.runMode(context.Background(), v1.RunRequest{APIVersion: v1.Version, Target: target}, action == "reset")
+				}
+				result <- err
+			}()
+			<-reached
+			if _, err := s.destroy(context.Background(), selected.Instance.ID); err != nil {
+				close(proceed)
+				t.Fatal(err)
+			}
+			replacement := scenePrepare(t, s, root, config)
+			close(proceed)
+			code(t, <-result, "conflict")
+			current, err := s.store.inspect(replacement.Instance.ID)
+			if err != nil || current.Status != v1.Prepared || current.Execution != nil {
+				t.Fatal("replacement touched", current, err)
+			}
+			all, err := s.store.list(v1.ListRequest{APIVersion: v1.Version})
+			if err != nil || len(all.Instances) != 2 {
+				t.Fatal("stale request created replacement", all, err)
+			}
+		})
+	}
+}
+
+func TestNamedMutationCandidateDiagnosticsAreBounded(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	_, err := s.selectMutation(v1.SceneTarget{CWD: root, Scene: "unknown"})
+	code(t, err, "not_found")
+	first, err := s.prepare(context.Background(), request(root, config, "test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 7 {
+		if _, _, err := s.store.begin(plan.Snapshot{Plan: first.Instance.Plan}, first.Instance.Checkout, time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err = s.selectMutation(v1.SceneTarget{CWD: root, Scene: "test"})
+	code(t, err, "not_found")
+	if !strings.Contains(err.Error(), "incomplete sample") || !strings.Contains(err.Error(), "list --scene test") || strings.Count(strings.Split(err.Error(), "candidate IDs: ")[1], ", ") != 4 {
+		t.Fatal("unbounded or unactionable diagnostic", err)
+	}
+	// Persistent ambiguity remains fail-closed and gives exact candidates too.
+	scenePrepare(t, s, root, config)
+	if err := os.WriteFile(filepath.Join(root, "backlot.json"), []byte(strings.Replace(fixtureManifest, `"project":"fixture"`, `"project":"changed"`, 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	scenePrepare(t, s, root, config)
+	_, err = s.selectMutation(v1.SceneTarget{CWD: root, Scene: "dev"})
+	code(t, err, "ambiguous_target")
+	if !strings.Contains(err.Error(), "candidate IDs:") {
+		t.Fatal(err)
+	}
+}
+
+func TestNamedRestartRechecksSelectionAfterSourceResolution(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	selected := scenePrepare(t, s, root, config)
+	var replacement v1.InstanceResponse
+	s.resolve = func(source plan.Source, q v1.PlanRequest) (plan.Snapshot, error) {
+		snapshot, err := plan.Prepare(source, q)
+		if err != nil {
+			return snapshot, err
+		}
+		// A parallel prepare can add another logical project at this recorded location
+		// without taking the selected instance's mutation lock.
+		p := selected.Instance.Plan
+		p.Project = "other"
+		replacement, _, err = s.store.begin(plan.Snapshot{Plan: p}, selected.Instance.Checkout, time.Minute)
+		return snapshot, err
+	}
+	_, err := s.runMode(context.Background(), v1.RunRequest{APIVersion: v1.Version, Target: &v1.SceneTarget{CWD: root, Scene: "dev"}}, false)
+	code(t, err, "ambiguous_target")
+	for _, id := range []string{selected.Instance.ID, replacement.Instance.ID} {
+		current, err := s.store.inspect(id)
+		if err != nil || current.Execution != nil || id == selected.Instance.ID && current.Status != v1.Prepared {
+			t.Fatal("ambiguous selection admitted runtime", id, current.Status, err)
+		}
+	}
+}
+
+func TestRestartResetRejectCurrentDisposableBeforePreparation(t *testing.T) {
+	for _, named := range []bool{true, false} {
+		for _, action := range []string{"restart", "reset"} {
+			t.Run(fmt.Sprintf("%s/named=%t", action, named), func(t *testing.T) {
+				s, root, config := sceneFixture(t)
+				selected := scenePrepare(t, s, root, config)
+				var manifest v1.Manifest
+				if err := json.Unmarshal([]byte(fixtureManifest), &manifest); err != nil {
+					t.Fatal(err)
+				}
+				dev := manifest.Scenes["dev"]
+				dev.Lifetime, dev.TerminalJob = v1.Disposable, "check"
+				manifest.Scenes["dev"] = dev
+				data, err := json.Marshal(manifest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, "backlot.json"), data, 0600); err != nil {
+					t.Fatal(err)
+				}
+				before := stateContents(t, s.store)
+				q := v1.RunRequest{APIVersion: v1.Version, InstanceID: selected.Instance.ID, Plan: request(root, config, "dev").Plan}
+				if named {
+					q.InstanceID, q.Plan = "", v1.PlanRequest{}
+					q.Target = &v1.SceneTarget{CWD: root, Scene: "dev"}
+				}
+				_, err = s.runMode(context.Background(), q, action == "reset")
+				code(t, err, "conflict")
+				if !reflect.DeepEqual(before, stateContents(t, s.store)) {
+					t.Fatal("rejected lifetime change added state or changed original instance/private snapshot")
+				}
+			})
+		}
 	}
 }

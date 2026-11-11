@@ -2,24 +2,20 @@ package daemon
 
 import (
 	"encoding/json"
+	v1 "github.com/octacian/backlot/api/v1"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/octacian/backlot/internal/plan"
+	"github.com/octacian/backlot/internal/projectconfig"
 	bolt "go.etcd.io/bbolt"
 )
 
 // sharedProjectIdentity separates sharing authority from per-checkout ownership.
 // Paths and filesystem identities are both retained: moves and replacements fail
 // closed instead of automatically relinking existing services.
-type sharedProjectIdentity struct {
-	ID         string `json:"id"`
-	Anchor     string `json:"anchor"`
-	Filesystem string `json:"filesystem"`
-	Relative   string `json:"relative"`
-	Project    string `json:"project"`
-}
+type sharedProjectIdentity = v1.ProjectIdentity
 
 func identifyShared(source plan.Source, project string) (sharedProjectIdentity, error) {
 	checkout, err := identify(source.CheckoutPath)
@@ -29,24 +25,9 @@ func identifyShared(source plan.Source, project string) (sharedProjectIdentity, 
 	anchor := source.ProjectPath
 	relative := "."
 	if checkout.GitDirectory != "" {
-		anchor = checkout.GitDirectory
-		commonPath := filepath.Join(anchor, "commondir")
-		_, readErr := os.Stat(commonPath)
-		if readErr == nil {
-			common, err := readSmall(commonPath)
-			if err != nil {
-				return sharedProjectIdentity{}, err
-			}
-			value := strings.TrimSpace(string(common))
-			if value == "" {
-				return sharedProjectIdentity{}, problem("project_identity", "empty Git common-directory marker")
-			}
-			if !filepath.IsAbs(value) {
-				value = filepath.Join(anchor, value)
-			}
-			anchor = value
-		} else if !os.IsNotExist(readErr) {
-			return sharedProjectIdentity{}, readErr
+		anchor, err = projectconfig.GitCommonDirectory(checkout.GitDirectory)
+		if err != nil {
+			return sharedProjectIdentity{}, problem("project_identity", "invalid or ambiguous Git common-directory metadata; repair linked Git metadata before project association")
 		}
 		relative, err = filepath.Rel(source.CheckoutPath, source.ProjectPath)
 		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
@@ -65,10 +46,27 @@ func identifyShared(source plan.Source, project string) (sharedProjectIdentity, 
 	if err != nil {
 		return sharedProjectIdentity{}, err
 	}
-	return sharedProjectIdentity{ID: hash(fs + "/" + relative + "/" + project), Anchor: anchor, Filesystem: fs, Relative: relative, Project: project}, nil
+	return sharedProjectIdentity{ID: hash(fs + "/" + relative + "/" + project), Anchor: anchor, Filesystem: fs, Relative: relative, Project: project, Registration: checkout.Registration}, nil
 }
 
 func registerSharedProject(tx *bolt.Tx, next sharedProjectIdentity) error {
+	if tx.Bucket([]byte("project_bindings")) != nil {
+		owner, err := boundShared(tx, next)
+		if err != nil {
+			return err
+		}
+		if owner != next {
+			binding, err := readProjectBinding(tx, owner.ID)
+			if err != nil {
+				return err
+			}
+			if binding.Current.Registration.CommonID == "" && sameProjectPhysical(binding.Current, next) {
+				binding.Current.Registration = next.Registration
+				return put(tx, "project_bindings", owner.ID, binding)
+			}
+			return nil
+		}
+	}
 	identities := tx.Bucket([]byte("shared_projects"))
 	paths := tx.Bucket([]byte("shared_paths"))
 	key := next.Anchor + "/" + next.Relative + "/" + next.Project
@@ -87,5 +85,11 @@ func registerSharedProject(tx *bolt.Tx, next sharedProjectIdentity) error {
 	if err := put(tx, "shared_projects", next.ID, next); err != nil {
 		return err
 	}
-	return paths.Put([]byte(key), []byte(next.ID))
+	if err := paths.Put([]byte(key), []byte(next.ID)); err != nil {
+		return err
+	}
+	if tx.Bucket([]byte("project_bindings")) != nil && tx.Bucket([]byte("project_bindings")).Get([]byte(next.ID)) == nil {
+		return put(tx, "project_bindings", next.ID, projectBinding{Current: next})
+	}
+	return nil
 }

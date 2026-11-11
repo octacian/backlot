@@ -2,7 +2,7 @@
 title: "Allow bounded declared value composition in fixtures"
 date: 2026-11-11
 status: accepted
-implementation: in-progress
+implementation: implemented
 summary: "Extend existing bounded composition to fixtures without widening reference permissions or sensitive disclosure."
 tags:
   - manifest
@@ -12,7 +12,7 @@ related: [/docs/adr/20261104T030614332Z-compose-bounded-declared-values-for-expl
 supersedes: [/docs/adr/20261104T030614332Z-compose-bounded-declared-values-for-explicit-consumers.md]
 superseded_by: []
 tracking: ["https://github.com/octacian/backlot/issues/138"]
-implemented_by: []
+implemented_by: ["https://github.com/octacian/backlot/pull/139"]
 ---
 
 # Allow bounded declared value composition in fixtures

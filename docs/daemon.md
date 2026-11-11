@@ -331,7 +331,7 @@ format and rejection/cleanup rules.
 | `POST /v1/renew` | `LeaseRequest` | `InstanceResponse` |
 | `POST /v1/run`, `/v1/restart`, `/v1/reset` | `RunRequest` | `InstanceResponse` |
 | `POST /v1/activity` | `ActivityRequest` | `ActivityResponse` (bounded recorded page, owner/settlement provenance) |
-| `POST /v1/runtime/stop-all` | `StopAllRequest` (`all: true`, no ID/force) | `StopAllResponse` (finite selection; partial error retains target results) |
+| `POST /v1/runtime/stop-all` | `StopAllRequest` (`all: true`, required `contract: "stop-all-stream/v1"`, no ID/force) | `StopAllRecord` NDJSON (`accepted`, compact `target` outcomes, `summary`) |
 | `POST /v1/runtime/stop` | `StopRequest` (force requires selected `expected_attempt`) | `InstanceResponse` |
 | `POST /v1/destroy` | `DestroyRequest` (required `contract: "erase-attempt-history/v1"`) | `InstanceResponse` (execution-free destroyed identity) |
 | `POST /v1/attempts/list` | `HistoryRequest` | `HistoryResponse` (at most 100 summaries) |
@@ -372,8 +372,12 @@ snapshots contain no capability. Never persist or emit the capability as logs or
 ordinary command results. Attachment does not change durable state format 9.
 
 Failures use `ErrorResponse` with safe code/field/message values and an HTTP error
-status. Request/response documents are bounded to 1 MiB, with strict types, exact
-field names, no duplicates, nulls, unknown fields or trailing input. Oversized
+status. Finite request/response documents are bounded to 1 MiB, with strict types,
+exact field names, no duplicates, nulls, unknown fields or trailing input.
+Bulk-stop success uses `application/x-ndjson`: compact accepted/target records
+are bounded individually, while the final summary's ID lists and total stream
+size grow with validated target count. HTTP output cannot block accepted cleanup;
+a blocked writer ends observation. See the [bulk-stop contract](cli.md#scope-wide-activity-and-workload-stop). Oversized
 resolved public plans are rejected before recording intent. Future-compatible
 versions require an explicit contract change; clients reject incompatible API/state
 versions and invalid response identities/statuses/lifetimes.

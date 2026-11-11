@@ -5,7 +5,9 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -104,13 +106,40 @@ func TestActivityBulkPublicNative(t *testing.T) {
 			if strings.Contains(string(data), secret.Fixtures[0].Value) {
 				t.Fatal("activity leaked private fixture")
 			}
-			data, err = run("stop", "--all", "--state-dir", h.dir, "--json")
-			var stopped v1.StopAllResponse
-			if json.Unmarshal(data, &stopped) != nil || stopped.Validate() != nil || len(stopped.Targets) != 1 || stopped.Targets[0].Settlement.State != v1.ConsumerSettled {
-				t.Fatalf("bulk: %v %s", err, data)
+			command := exec.Command(binary, "stop", "--all", "--state-dir", h.dir, "--json")
+			command.Dir = h.project
+			stream, err := command.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := command.Start(); err != nil {
+				t.Fatal(err)
+			}
+			decoder := json.NewDecoder(stream)
+			stopped := v1.StopAllResponse{Targets: []v1.StopAllTarget{}}
+			var kinds []string
+			for {
+				var event v1.StopAllRecord
+				if e := decoder.Decode(&event); errors.Is(e, io.EOF) {
+					break
+				} else if e != nil || event.Validate() != nil {
+					t.Fatalf("stream: %v %#v", e, event)
+				}
+				kinds = append(kinds, event.Type)
+				stopped.APIVersion, stopped.OperationID, stopped.DaemonGeneration = event.APIVersion, event.OperationID, event.DaemonGeneration
+				if event.Target != nil {
+					stopped.Targets = append(stopped.Targets, *event.Target)
+				}
+				if summary := event.Summary; summary != nil {
+					stopped.AdmissionsJoined, stopped.SelectionComplete, stopped.SelectionFailure, stopped.Error = summary.AdmissionsJoined, summary.SelectionComplete, summary.SelectionFailure, summary.Error
+				}
+			}
+			err = command.Wait()
+			if !reflect.DeepEqual(kinds, []string{"accepted", "target", "summary"}) || stopped.Validate() != nil || len(stopped.Targets) != 1 || stopped.Targets[0].Settlement != v1.ConsumerSettled {
+				t.Fatalf("bulk: %v %#v %#v", err, kinds, stopped)
 			}
 			if (err != nil) != partial || (stopped.Error != nil) != partial || stopped.Targets[0].CollectionFailed != partial {
-				t.Fatalf("partial framing: %v %s", err, data)
+				t.Fatalf("partial framing: %v %#v", err, stopped)
 			}
 			if stopped.Targets[0].Attempt != accepted.Instance.Execution.Attempt {
 				t.Fatal("wrong selected attempt")
@@ -153,7 +182,7 @@ func TestActivityBulkPublicNative(t *testing.T) {
 			if err != nil || len(empty.Entries) != 0 || !empty.Complete {
 				t.Fatal("erased history reported as current work", err)
 			}
-			t.Logf("public CLI flow: partial=%t outcome=%s settlement=%s data+credentials retained", partial, stopped.Targets[0].Outcome, stopped.Targets[0].Settlement.State)
+			t.Logf("public CLI flow: partial=%t outcome=%s settlement=%s data+credentials retained", partial, stopped.Targets[0].Outcome, stopped.Targets[0].Settlement)
 		})
 	}
 }
@@ -167,7 +196,7 @@ func TestBulkOwnerlessAcceptedRecovery(t *testing.T) {
 	}
 	out, err := s.stopAll(context.Background(), bulkRequest())
 	checkBulk(t, out, err)
-	if len(out.Targets) != 1 || out.Targets[0].Settlement.State != v1.ConsumerSettled || !out.Targets[0].CollectionFailed || out.Error == nil {
+	if len(out.Targets) != 1 || out.Targets[0].Settlement != v1.ConsumerSettled || !out.Targets[0].CollectionFailed || out.Error == nil {
 		t.Fatal(out)
 	}
 	observed, err := s.store.inspect(id)
@@ -286,7 +315,7 @@ func TestBulkAcceptedTaskJoinsBeforeParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitComponentLog(t, h, task.Instance.ID, "job", "task-started")
-	out, err := h.cli.StopAll(context.Background(), bulkRequest())
+	out, err := h.cli.StopAll(context.Background(), bulkRequest(), nil)
 	if err != nil || out.Validate() != nil || len(out.Targets) != 2 || out.Targets[0].ID != task.Instance.ID || out.Targets[1].ID != parent.Instance.ID {
 		t.Fatal("task ordering or settlement", out, err)
 	}
@@ -307,4 +336,17 @@ func TestBulkAcceptedTaskJoinsBeforeParent(t *testing.T) {
 	if _, err := os.Stat(dataPath); !os.IsNotExist(err) {
 		t.Fatal("explicit fixture cleanup retained data", err)
 	}
+	// Valid parent/task tombstones must not poison a later scope-wide stop.
+	h.manifest.Scenes["other"] = h.manifest.Scenes["dev"]
+	h.write()
+	other := h.run("other")
+	h.state(other.Instance.ID, v1.RuntimeReady)
+	out, err = h.cli.StopAll(context.Background(), bulkRequest(), nil)
+	if err != nil || out.Validate() != nil || !out.SelectionComplete || len(out.Targets) != 1 || out.Targets[0].ID != other.Instance.ID || out.Targets[0].Outcome != "stopped" {
+		t.Fatal("erased scene/task tombstones blocked unrelated stop", out, err)
+	}
+	if _, err := h.cli.Destroy(context.Background(), other.Instance.ID); err != nil {
+		t.Fatal("authenticated unrelated fixture cleanup", err)
+	}
+
 }

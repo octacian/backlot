@@ -33,3 +33,34 @@ func TestActivityHumanOutputKeepsProvenanceAndEscapes(t *testing.T) {
 		t.Fatal("unsafe or incomplete human provenance", stdout.String())
 	}
 }
+
+func TestBulkHumanOutputShowsCompactProgressAndFailureSummary(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	c := NewCommand(v1.VersionResponse{}, &stdout, &stderr)
+	id, failed := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	event := v1.StopAllRecord{APIVersion: v1.Version, Type: "accepted", DaemonGeneration: id, OperationID: id}
+	if err := stopAllRecord(c, event); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []v1.StopAllTarget{{ID: id, Outcome: "stopped", Settlement: v1.ConsumerSettled}, {ID: failed, Outcome: "failed", Reason: "collection_failed", Settlement: v1.ConsumerSettled, CollectionFailed: true}} {
+		event.Type, event.Target = "target", &target
+		if err := stopAllRecord(c, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !strings.Contains(stdout.String(), id+": stopped\n") || !strings.Contains(stdout.String(), failed+": failed (collection_failed); inspect: backlot inspect "+failed) {
+		t.Fatal("missing live outcome or inspection guidance", stdout.String())
+	}
+	beforeSummary := stdout.Len()
+	summary := v1.StopAllSummary{Stopped: 1, Failed: 1, FailedIDs: []string{failed}, UnresolvedIDs: []string{}, SelectionComplete: true, AdmissionsJoined: true}
+	event.Type, event.Target, event.Summary = "summary", nil, &summary
+	if err := stopAllRecord(c, event); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String()[beforeSummary:], "1 stopped, 1 failed, 0 unresolved") || !strings.Contains(stdout.String()[beforeSummary:], "Inspect: "+failed) {
+		t.Fatal("missing final summary", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "settlement") || strings.Contains(stdout.String(), "blockers") {
+		t.Fatal("default output dumped detailed diagnostics", stdout.String())
+	}
+}

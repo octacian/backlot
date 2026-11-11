@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -42,14 +44,15 @@ func stopAllAction(ctx context.Context, c *urfave.Command) error {
 	defer cli.Close()
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	out, err := cli.StopAll(ctx, v1.StopAllRequest{APIVersion: v1.Version, All: true})
-	if out.OperationID == "" {
+	_, err = cli.StopAll(ctx, v1.StopAllRequest{APIVersion: v1.Version, All: true, Contract: v1.StopAllContract}, func(event v1.StopAllRecord) error { return stopAllRecord(c, event) })
+	var partial *v1.PlanError
+	if errors.As(err, &partial) && partial.Code == "partial_failure" {
+		return err
+	}
+	if err != nil {
 		return output(c, nil, err)
 	}
-	if writeErr := output(c, out, nil); writeErr != nil {
-		return writeErr
-	}
-	return err
+	return nil
 }
 
 func activityOutput(writer io.Writer, r v1.ActivityResponse) error {
@@ -104,17 +107,33 @@ func activityOutput(writer io.Writer, r v1.ActivityResponse) error {
 	}
 	return nil
 }
-func stopAllOutput(c *urfave.Command, r v1.StopAllResponse) error {
-	if _, err := fmt.Fprintf(c.Writer, "Bulk stop %s (daemon %s); selection complete: %t (%s); preceding admissions joined: %t\n", r.OperationID, r.DaemonGeneration, r.SelectionComplete, r.SelectionFailure, r.AdmissionsJoined); err != nil {
+func stopAllRecord(c *urfave.Command, r v1.StopAllRecord) error {
+	if c.Bool("json") {
+		return json.NewEncoder(c.Writer).Encode(r)
+	}
+	if r.Type == "accepted" {
+		_, err := fmt.Fprintf(c.Writer, "Bulk stop %s (daemon %s)\n", r.OperationID, r.DaemonGeneration)
 		return err
 	}
-	for _, t := range r.Targets {
-		if _, err := fmt.Fprintf(c.Writer, "%s: %s; settlement %s (%s); collection failed: %t\n", t.ID, t.Outcome, t.Settlement.State, t.SettlementObservation, t.CollectionFailed); err != nil {
+	if t := r.Target; t != nil {
+		if t.Outcome == "stopped" {
+			_, err := fmt.Fprintf(c.Writer, "%s: stopped\n", t.ID)
+			return err
+		}
+		_, err := fmt.Fprintf(c.Writer, "%s: %s (%s); inspect: backlot inspect %s\n", t.ID, t.Outcome, t.Reason, t.ID)
+		return err
+	}
+	s := r.Summary
+	if _, err := fmt.Fprintf(c.Writer, "%d stopped, %d failed, %d unresolved; selection complete: %t; preceding admissions joined: %t\n", s.Stopped, s.Failed, s.Unresolved, s.SelectionComplete, s.AdmissionsJoined); err != nil {
+		return err
+	}
+	if len(s.FailedIDs)+len(s.UnresolvedIDs) > 0 {
+		if _, err := fmt.Fprintln(c.Writer, "Inspect:", strings.Join(append(append([]string{}, s.FailedIDs...), s.UnresolvedIDs...), ", ")); err != nil {
 			return err
 		}
 	}
-	if r.Error != nil {
-		_, err := fmt.Fprintln(c.Writer, r.Error.Message)
+	if s.Error != nil {
+		_, err := fmt.Fprintln(c.Writer, s.Error.Message)
 		return err
 	}
 	return nil

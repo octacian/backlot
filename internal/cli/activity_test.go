@@ -26,7 +26,7 @@ func TestActivityHumanOutputKeepsProvenanceAndEscapes(t *testing.T) {
 	c := NewCommand(v1.VersionResponse{}, &stdout, &stderr)
 	id := strings.Repeat("a", 64)
 	r := v1.ActivityResponse{GatewayStatus: "running", Entries: []v1.ActivityEntry{{Key: "workload/" + id, ID: id, Project: "project\n\x1b", Checkout: "/recorded/project", Scene: "dev", Status: "failed", Owner: "joined", Kept: true, Blockers: []v1.ActivityBlocker{{Kind: "gateway", Stop: true}}}}, Complete: true}
-	if err := activityOutput(c, r); err != nil {
+	if err := activityOutput(c.Writer, r); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(stdout.String(), "project\n") || strings.ContainsRune(stdout.String(), '\x1b') || !strings.Contains(stdout.String(), "owner joined; kept true") || !strings.Contains(stdout.String(), "next: backlot stop "+id) {

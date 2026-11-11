@@ -58,6 +58,9 @@ Their temporary admission fence leaves administration running and retains bulk-c
 
 ## Commands
 
+For binary maintenance, use the [release installer](operations.md#release-installer-and-updates).
+`daemon stop` still acknowledges stopping, not final exit or lock release.
+
 Use an [installed executable](operations.md) (or `make build` for `bin/backlot`):
 
 ```sh

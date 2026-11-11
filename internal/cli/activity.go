@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -51,33 +52,33 @@ func stopAllAction(ctx context.Context, c *urfave.Command) error {
 	return err
 }
 
-func activityOutput(c *urfave.Command, r v1.ActivityResponse) error {
-	if _, err := fmt.Fprintf(c.Writer, "Gateway recorded status: %s; preparing admissions: %d; admission closed: %t\n", r.GatewayStatus, r.PreparingAdmissions, r.AdmissionClosed); err != nil {
+func activityOutput(writer io.Writer, r v1.ActivityResponse) error {
+	if _, err := fmt.Fprintf(writer, "Gateway recorded status: %s; preparing admissions: %d; admission closed: %t\n", r.GatewayStatus, r.PreparingAdmissions, r.AdmissionClosed); err != nil {
 		return err
 	}
 	for _, e := range r.Entries {
 		kind, _, _ := strings.Cut(e.Key, "/")
-		if _, err := fmt.Fprintf(c.Writer, "%s %s: %s; project %q, checkout %q, scene %q; owner %s; kept %t\n", kind, e.ID, e.Status, e.Project, e.Checkout, e.Scene, e.Owner, e.Kept); err != nil {
+		if _, err := fmt.Fprintf(writer, "%s %s: %s; project %q, checkout %q, scene %q; owner %s; kept %t\n", kind, e.ID, e.Status, e.Project, e.Checkout, e.Scene, e.Owner, e.Kept); err != nil {
 			return err
 		}
 		if e.Settlement != nil {
-			if _, err := fmt.Fprintf(c.Writer, "  Settlement: %s (%s); details: backlot inspect %s\n", e.Settlement.State, e.Settlement.Cause, e.ID); err != nil {
+			if _, err := fmt.Fprintf(writer, "  Settlement: %s (%s); details: backlot inspect %s\n", e.Settlement.State, e.Settlement.Cause, e.ID); err != nil {
 				return err
 			}
 		}
 		if e.Origin != "" {
-			if _, err := fmt.Fprintf(c.Writer, "  Recorded origin: %q\n", e.Origin); err != nil {
+			if _, err := fmt.Fprintf(writer, "  Recorded origin: %q\n", e.Origin); err != nil {
 				return err
 			}
 		}
 		for name, port := range e.Ports {
-			if _, err := fmt.Fprintf(c.Writer, "  Recorded port %s: %d\n", name, port); err != nil {
+			if _, err := fmt.Fprintf(writer, "  Recorded port %s: %d\n", name, port); err != nil {
 				return err
 			}
 		}
 		if e.LastTransition != nil {
 			t := e.LastTransition
-			if _, err := fmt.Fprintf(c.Writer, "  Transition: %s -> %s (%s at %s)\n", t.From, t.To, t.Cause, t.At); err != nil {
+			if _, err := fmt.Fprintf(writer, "  Transition: %s -> %s (%s at %s)\n", t.From, t.To, t.Cause, t.At); err != nil {
 				return err
 			}
 		}
@@ -92,13 +93,13 @@ func activityOutput(c *urfave.Command, r v1.ActivityResponse) error {
 			if b.Destroy && !b.Stop {
 				next = "backlot destroy " + e.ID + " (explicitly removes retained data)"
 			}
-			if _, err := fmt.Fprintf(c.Writer, "  Blocks %s %s %s; next: %s\n", b.Kind, b.ServiceID, action, next); err != nil {
+			if _, err := fmt.Fprintf(writer, "  Blocks %s %s %s; next: %s\n", b.Kind, b.ServiceID, action, next); err != nil {
 				return err
 			}
 		}
 	}
 	if !r.Complete {
-		_, err := fmt.Fprintf(c.Writer, "Incomplete observation; continue: backlot activity --after %s\n", r.NextAfter)
+		_, err := fmt.Fprintf(writer, "Incomplete observation; continue: backlot activity --after %s\n", r.NextAfter)
 		return err
 	}
 	return nil

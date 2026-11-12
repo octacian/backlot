@@ -372,6 +372,10 @@ func (s *service) pruneHistory(ctx context.Context, q v1.HistoryPruneRequest) (v
 		return response, err
 	}
 	defer finish()
+	if err := lockExportEvidence(ctx, &s.evidence.deletion); err != nil {
+		return response, err
+	}
+	defer s.evidence.deletion.Unlock()
 	if err := lockExportEvidence(ctx, &s.evidence.mu); err != nil {
 		return response, err
 	}

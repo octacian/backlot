@@ -24,6 +24,8 @@ import (
 // Evidence operations serialize readers and pruning; producers are protected by
 // active instance status until collection and runtime cleanup have joined.
 type evidencePolicy struct {
+	// deletion keeps sweep byte accounting stable across explicit prune/destroy.
+	deletion sync.Mutex
 	mu       sync.Mutex
 	age      time.Duration
 	bytes    int64
@@ -166,12 +168,16 @@ func extractArtifact(input io.Reader, destination string) error {
 }
 
 func (s *service) pruneEvidence() error {
-	s.evidence.mu.Lock()
-	defer s.evidence.mu.Unlock()
-	if err := s.retryEvidenceDeletions(); err != nil {
-		return err
-	}
-	if err := s.observeLegacyEvidence(); err != nil {
+	s.evidence.deletion.Lock()
+	defer s.evidence.deletion.Unlock()
+	if err := func() error {
+		s.evidence.mu.Lock()
+		defer s.evidence.mu.Unlock()
+		if err := s.retryEvidenceDeletions(); err != nil {
+			return err
+		}
+		return s.observeLegacyEvidence()
+	}(); err != nil {
 		return err
 	}
 	age, limit := s.evidenceLimits()
@@ -192,62 +198,73 @@ func (s *service) pruneEvidence() error {
 	if count == 0 {
 		count = DefaultRetentionAttempts
 	}
+	// Release the evidence fence between instances so live log readers do not
+	// wait for the entire daemon-wide retention sweep.
 	for _, id := range ids {
-		instance, err := s.store.inspect(id)
-		if err != nil {
-			return err
-		}
-		if instance.Task != nil {
-			continue
-		}
-		entries, err := s.store.retentionScope(id)
-		if err != nil {
-			return err
-		}
-		completed := 0
-		for _, a := range entries {
-			if retentionStart(&a.Result) != "" {
-				completed++
-			}
-			protection, err := s.store.attemptProtection(a)
+		if err := func() error {
+			s.evidence.mu.Lock()
+			defer s.evidence.mu.Unlock()
+			instance, err := s.store.inspect(id)
 			if err != nil {
 				return err
 			}
-			lock := s.mutationLock(a.InstanceID)
-			if !lock.TryLock() {
-				continue
+			if instance.Task != nil {
+				return nil
 			}
-			if completed > count && protection == "" {
-				err = s.deleteAttempt(a, true)
-			} else {
-				if protection == "" {
-					start, err := time.Parse(time.RFC3339Nano, retentionStart(&a.Result))
-					if err != nil {
-						lock.Unlock()
-						return err
+			entries, err := s.store.retentionScope(id)
+			if err != nil {
+				return err
+			}
+			completed := 0
+			for _, a := range entries {
+				if retentionStart(&a.Result) != "" {
+					completed++
+				}
+				protection, err := s.store.attemptProtection(a)
+				if err != nil {
+					return err
+				}
+				lock := s.mutationLock(a.InstanceID)
+				if !lock.TryLock() {
+					continue
+				}
+				if completed > count && protection == "" {
+					err = s.deleteAttempt(a, true)
+				} else {
+					if protection == "" {
+						start, err := time.Parse(time.RFC3339Nano, retentionStart(&a.Result))
+						if err != nil {
+							lock.Unlock()
+							return err
+						}
+						all = append(all, candidate{id: a.InstanceID, attempt: a.Result.Attempt, start: start, expired: a.Result.EvidenceExpired})
 					}
-					all = append(all, candidate{id: a.InstanceID, attempt: a.Result.Attempt, start: start, expired: a.Result.EvidenceExpired})
+				}
+				lock.Unlock()
+				if err != nil {
+					return err
 				}
 			}
-			lock.Unlock()
+			i, err := s.store.inspect(id)
 			if err != nil {
 				return err
 			}
-		}
-		i, err := s.store.inspect(id)
-		if err != nil {
+			if e := i.Execution; e != nil && retentionStart(e) != "" {
+				start, err := time.Parse(time.RFC3339Nano, retentionStart(e))
+				if err != nil {
+					return err
+				}
+				all = append(all, candidate{id: id, start: start})
+			}
+			return nil
+		}(); err != nil {
 			return err
-		}
-		if e := i.Execution; e != nil && retentionStart(e) != "" {
-			start, err := time.Parse(time.RFC3339Nano, retentionStart(e))
-			if err != nil {
-				return err
-			}
-			all = append(all, candidate{id: id, start: start})
 		}
 	}
 	for _, id := range ids {
+		s.evidence.mu.Lock()
 		size, err := s.evidenceSize(id)
+		s.evidence.mu.Unlock()
 		if err != nil {
 			return err
 		}
@@ -263,29 +280,36 @@ func (s *service) pruneEvidence() error {
 		if !c.expired && time.Since(c.start) < age && total <= limit {
 			continue
 		}
-		lock := s.mutationLock(c.id)
-		if !lock.TryLock() {
-			continue
-		}
-		var size int64
-		var err error
-		if c.attempt == "" {
-			size, err = s.expireUnknownEvidence(c.id, age, total > limit)
-		} else {
-			selected, selectErr := s.store.attempt(v1.AttemptRequest{InstanceID: c.id, Attempt: c.attempt})
-			err = selectErr
-			if err == nil {
-				size, err = s.attemptEvidenceSize(c.id, c.attempt)
+		if err := func() error {
+			s.evidence.mu.Lock()
+			defer s.evidence.mu.Unlock()
+			lock := s.mutationLock(c.id)
+			if !lock.TryLock() {
+				return nil
+			}
+			var size int64
+			var err error
+			if c.attempt == "" {
+				size, err = s.expireUnknownEvidence(c.id, age, total > limit)
+			} else {
+				selected, selectErr := s.store.attempt(v1.AttemptRequest{InstanceID: c.id, Attempt: c.attempt})
+				err = selectErr
 				if err == nil {
-					err = s.deleteAttempt(selected.Attempt, false)
+					size, err = s.attemptEvidenceSize(c.id, c.attempt)
+					if err == nil {
+						err = s.deleteAttempt(selected.Attempt, false)
+					}
 				}
 			}
-		}
-		lock.Unlock()
-		if err != nil {
+			lock.Unlock()
+			if err != nil {
+				return err
+			}
+			total -= size
+			return nil
+		}(); err != nil {
 			return err
 		}
-		total -= size
 	}
 
 	return nil

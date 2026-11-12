@@ -132,13 +132,17 @@ func TestSceneCorruptLocationCannotHideNearestProject(t *testing.T) {
 		"checkout-omitted":         func(i *v1.Instance) { i.Checkout.Path = "" },
 		"checkout-relative":        func(i *v1.Instance) { i.Checkout.Path = "relative" },
 		"checkout-map-incoherent":  func(i *v1.Instance) { i.Checkout.Path = "/"; i.Plan.Checkout = "/" },
-		"checkout-id-unrecorded":   func(i *v1.Instance) { i.Checkout.ID = strings.Repeat("a", 64) },
-		"git-omitted":              func(i *v1.Instance) { i.Checkout.GitDirectory = "" },
-		"git-relative":             func(i *v1.Instance) { i.Checkout.GitDirectory = "relative/.git" },
-		"project-omitted":          func(i *v1.Instance) { i.Plan.Project = "" },
-		"project-invalid":          func(i *v1.Instance) { i.Plan.Project = "Invalid" },
-		"scene-omitted":            func(i *v1.Instance) { i.Plan.Scene = "" },
-		"scene-invalid":            func(i *v1.Instance) { i.Plan.Scene = "../dev" },
+		"legacy-checkout-id-unrecorded": func(i *v1.Instance) {
+			i.Checkout.ID = strings.Repeat("a", 64)
+			i.Checkout.Registration = v1.RegistrationIdentity{}
+		},
+		"checkout-registration-mismatch": func(i *v1.Instance) { i.Checkout.Registration.CheckoutID = strings.Repeat("a", 64) },
+		"git-omitted":                    func(i *v1.Instance) { i.Checkout.GitDirectory = "" },
+		"git-relative":                   func(i *v1.Instance) { i.Checkout.GitDirectory = "relative/.git" },
+		"project-omitted":                func(i *v1.Instance) { i.Plan.Project = "" },
+		"project-invalid":                func(i *v1.Instance) { i.Plan.Project = "Invalid" },
+		"scene-omitted":                  func(i *v1.Instance) { i.Plan.Scene = "" },
+		"scene-invalid":                  func(i *v1.Instance) { i.Plan.Scene = "../dev" },
 		"destroyed-history": func(i *v1.Instance) {
 			i.Status = v1.Destroyed
 			i.Operation.Status = v1.Destroyed

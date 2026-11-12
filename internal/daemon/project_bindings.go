@@ -194,7 +194,8 @@ func associateInstance(tx *bolt.Tx, i *v1.Instance) error {
 	}
 	if b.Revision == "" {
 		var origin v1.CheckoutIdentity
-		if json.Unmarshal(tx.Bucket([]byte("checkouts")).Get([]byte(checkoutParent(*i))), &origin) != nil || !sameCheckoutPhysical(origin, i.Checkout) {
+		// Exact legacy enrollment adds markers to the binding, preserving the origin.
+		if json.Unmarshal(tx.Bucket([]byte("checkouts")).Get([]byte(checkoutParent(*i))), &origin) != nil || !sameCheckoutPhysical(origin, b.Current) || !sameCheckout(&b.Current, &i.Checkout) {
 			return problem("state_corrupt", "recorded checkout and stable parent disagree")
 		}
 	}

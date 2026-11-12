@@ -15,6 +15,7 @@ import (
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/client"
 	"github.com/octacian/backlot/internal/plan"
 	"github.com/octacian/backlot/internal/projectconfig"
 	bolt "go.etcd.io/bbolt"
@@ -246,7 +247,51 @@ func TestLinkedCommonReplacementIsOperationLocal(t *testing.T) {
 }
 
 func TestRegistrationSamePathContinuityWithoutPeerOrRevisionChurn(t *testing.T) {
+	for name, legacy := range map[string]bool{"registered": false, "legacy-enrolled": true} {
+		t.Run(name, func(t *testing.T) { testRegistrationSamePathContinuity(t, legacy) })
+	}
+}
+
+func testRegistrationSamePathContinuity(t *testing.T, legacy bool) {
+	t.Helper()
 	f := newRepairFixture(t)
+	if legacy {
+		parent := checkoutParent(f.instance)
+		if err := f.s.store.db.Update(func(tx *bolt.Tx) error {
+			b, err := readCheckoutBinding(tx, parent)
+			if err != nil {
+				return err
+			}
+			b.Current.Registration = v1.RegistrationIdentity{}
+			if err := put(tx, "checkout_bindings", parent, b); err != nil {
+				return err
+			}
+			if err := put(tx, "checkouts", parent, b.Current); err != nil {
+				return err
+			}
+			r, err := load(tx, f.instance.ID)
+			if err != nil {
+				return err
+			}
+			r.Instance.Checkout.Registration = v1.RegistrationIdentity{}
+			return put(tx, "instances", f.instance.ID, r)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.s.prepare(context.Background(), request(f.project, f.config, "dev")); err != nil {
+			t.Fatal("exact legacy enrollment failed", err)
+		}
+		if err := f.s.store.db.View(func(tx *bolt.Tx) error {
+			b, err := readCheckoutBinding(tx, parent)
+			var origin v1.CheckoutIdentity
+			if err != nil || json.Unmarshal(tx.Bucket([]byte("checkouts")).Get([]byte(parent)), &origin) != nil || b.Current.Registration.CheckoutID == "" || origin.Registration.CheckoutID != "" {
+				t.Fatal("legacy enrollment must preserve the original unregistered checkout", err)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	peer := f.preparePeer(t)
 	f.manifest.Inputs = map[string]v1.Input{"token": {Secret: true}}
 	f.write(t)
@@ -290,6 +335,48 @@ func TestRegistrationSamePathContinuityWithoutPeerOrRevisionChurn(t *testing.T) 
 	afterPrivate, err := projectconfig.Load(source.ProjectPath, source.CheckoutPath, source.ManifestPath, f.manifest, false, false)
 	if err != nil || afterPrivate.Provenance != beforePrivate.Provenance || afterPrivate.Config.Inputs["token"] != "owned-continuity-value" {
 		t.Fatal("same-path private continuity changed generation", err)
+	}
+	f.manifest.Scenes["inspect"] = v1.Scene{Lifetime: v1.Disposable, Components: []string{"job"}, Resources: []string{"db"}, TerminalJob: "job"}
+	f.write(t)
+	fresh, err := f.s.prepare(context.Background(), request(f.project, f.config, "inspect"))
+	if err != nil {
+		t.Fatal("new attempt after physical change failed", err)
+	}
+	if fresh.Instance.Checkout.ID != current.ID || checkoutParent(fresh.Instance) != checkoutParent(f.instance) {
+		t.Fatal("new attempt lost physical provenance or stable parent")
+	}
+	if err := f.s.store.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cli, stop := startFixture(t, f.s.directory, time.Minute)
+	target := v1.SceneRequest{APIVersion: v1.Version, Target: v1.SceneTarget{CWD: f.project, Scene: "dev"}}
+	status, err := cli.SceneStatus(context.Background(), target)
+	if err != nil || status.Result == nil || status.Result.Instance.ID != f.instance.ID {
+		t.Fatal("registered scene status lost the original instance", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	snapshots := 0
+	err = cli.FollowScene(ctx, target, client.SceneFollowOptions{Interval: 100 * time.Millisecond, Duration: time.Second}, func(record v1.SceneFollowRecord) error {
+		if record.Type == "snapshot" {
+			snapshots++
+			if record.Snapshot.Result == nil || record.Snapshot.Result.Instance.ID != f.instance.ID {
+				t.Fatal("registered scene follow retargeted the original instance")
+			}
+			cancel()
+		}
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) || snapshots != 1 {
+		t.Fatal("registered scene follow failed", err, snapshots)
+	}
+	stop()
+	f.s.store, err = openStore(f.s.directory)
+	if err != nil {
+		t.Fatal("accepted marker continuity prevented daemon restart", err)
+	}
+	if _, err := f.s.store.inspect(fresh.Instance.ID); err != nil {
+		t.Fatal("accepted attempt unreadable after restart", err)
 	}
 }
 

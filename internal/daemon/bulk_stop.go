@@ -2,7 +2,10 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"sync"
 	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -10,79 +13,160 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-const bulkStopBudget = 2 * time.Minute
-
 type bulkSelection struct {
-	target v1.StopAllTarget
-	parent string
+	target              v1.StopAllTarget
+	parent              string
+	grace               time.Duration
+	dependents          map[string][]string
+	admissionGeneration uint64
 }
 
 func (s *service) selectBulk(ctx context.Context) ([]bulkSelection, error) {
 	boot, _ := native.CurrentBoot()
-	budget := &scanBudget{ctx: ctx}
 	selected := []bulkSelection{}
+	var failure error
+	var generation uint64
+	s.mu.Lock()
+	if s.bulkStopping {
+		generation = s.admissionGeneration
+	}
+	s.mu.Unlock()
 	err := s.store.db.View(func(tx *bolt.Tx) error {
-		if err := boundActivityState(tx, budget); err != nil {
-			return err
-		}
-		return tx.Bucket([]byte("instances")).ForEach(func(key, raw []byte) error {
+		budget := &scanBudget{ctx: ctx, unbounded: true, dependents: map[string][]string{}}
+		// The index is private to this transaction. Unknown bindings must retain
+		// the ordinary full-scan corruption fences, never imply no dependents.
+		if err := tx.Bucket([]byte("instances")).ForEach(func(key, raw []byte) error {
 			if err := chargeScan([]*scanBudget{budget}, len(raw)); err != nil {
 				return err
 			}
 			var r record
 			if err := decodeRecord(raw, string(key), &r); err != nil {
-				return err
-			}
-			erased, err := consumerErased(tx, r, budget)
-			if err != nil || erased {
-				return err
-			}
-			settled, err := consumerEligibility(tx, r, boot, budget)
-			if err != nil {
-				return err
-			}
-			if settled.State == v1.ConsumerSettled {
+				failure = err
 				return nil
 			}
-			if len(selected) == v1.BulkStopTargetLimit {
-				return problem("scope_too_large", "bulk stop exceeds 25 targets; use explicit recorded stops")
-			}
-			target := v1.StopAllTarget{ID: string(key), Attempt: settled.Attempt, Generation: settled.Generation, Outcome: "unresolved", Settlement: settled, SettlementObservation: "selected"}
-			parent := ""
 			if r.Instance.Task != nil {
-				parent = r.Instance.Task.InstanceID
+				parent := r.Instance.Task.InstanceID
+				budget.dependents[parent] = append(budget.dependents[parent], string(key))
 			}
-			if r.Instance.Execution != nil {
-				target.CollectionFailed = r.Instance.Execution.CollectionFailure != ""
+			return nil
+		}); err != nil {
+			return err
+		}
+		if failure != nil {
+			budget.dependents = nil
+		}
+		return tx.Bucket([]byte("instances")).ForEach(func(key, raw []byte) error {
+			if err := chargeScan([]*scanBudget{budget}, len(raw)); err != nil {
+				return err
 			}
-			selected = append(selected, bulkSelection{target: target, parent: parent})
+			chosen := bulkSelection{target: v1.StopAllTarget{ID: string(key), Outcome: "unresolved", Reason: "ownership_unproven", Settlement: v1.ConsumerUnknown}, dependents: budget.dependents, admissionGeneration: generation}
+			var r record
+			readErr := decodeRecord(raw, string(key), &r)
+			if readErr == nil {
+				// Erased task tombstones retain lineage but no execution authority.
+				var erased bool
+				erased, readErr = consumerErased(tx, r, budget)
+				if readErr == nil && erased {
+					return nil
+				}
+			}
+			if readErr == nil {
+				if r.Instance.Task != nil {
+					chosen.parent = r.Instance.Task.InstanceID
+				}
+				var facts consumerFacts
+				facts, readErr = consumerRecords(tx, r, budget)
+				if readErr == nil {
+					chosen.target.Attempt = executionAttempt(r.Instance)
+					if chosen.target.Attempt != "" {
+						chosen.target.Generation = consumerGeneration(facts)
+					}
+					chosen.grace = mustGrace(facts.runtime.Options)
+					if r.Instance.Execution != nil {
+						chosen.target.CollectionFailed = r.Instance.Execution.CollectionFailure != ""
+					}
+					var settled v1.ConsumerSettlement
+					settled, readErr = consumerEligibility(tx, r, boot, budget)
+					if readErr == nil {
+						if settled.State == v1.ConsumerSettled {
+							return nil
+						}
+						chosen.target.Settlement = settled.State
+					}
+				}
+			}
+			if readErr != nil {
+				failure = readErr
+				chosen.target.Reason = "state_unreadable"
+			}
+			// Corrupt keys cannot become public target identities or cleanup authority.
+			if validID(chosen.target.ID) {
+				selected = append(selected, chosen)
+			}
 			return nil
 		})
 	})
-	return selected, err
+	return selected, errors.Join(failure, err)
 }
 
-func (s *service) stopAll(ctx context.Context, q v1.StopAllRequest) (v1.StopAllResponse, error) {
+// bulkOperation retains compact observations independently of the HTTP observer.
+// Its lifetime is the coordinator plus its current observer, without durable replay.
+type bulkOperation struct {
+	mu      sync.Mutex
+	records []v1.StopAllRecord
+	changed chan struct{}
+}
+
+func (o *bulkOperation) emit(r v1.StopAllRecord) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.records = append(o.records, r)
+	close(o.changed)
+	o.changed = make(chan struct{})
+}
+
+func (o *bulkOperation) next(ctx context.Context, index int) (v1.StopAllRecord, error) {
+	for {
+		o.mu.Lock()
+		if index < len(o.records) {
+			r := o.records[index]
+			o.mu.Unlock()
+			return r, nil
+		}
+		changed := o.changed
+		o.mu.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return v1.StopAllRecord{}, ctx.Err()
+		}
+	}
+}
+
+func bulkFailure() *v1.PlanError {
+	return &v1.PlanError{Code: "partial_failure", Message: "bulk stop incomplete; inspect activity and selected targets before explicit recovery"}
+}
+
+func (s *service) startBulk(q v1.StopAllRequest) (*bulkOperation, error) {
 	if err := q.Validate(); err != nil {
-		return v1.StopAllResponse{}, err
+		return nil, err
 	}
 	owned, finish, err := s.beginMutation(context.Background())
 	if err != nil {
-		return v1.StopAllResponse{}, err
+		return nil, err
 	}
 	s.mu.Lock()
 	if s.closing || s.bulkStopping {
 		s.mu.Unlock()
 		finish()
-		return v1.StopAllResponse{}, problem("admission_closed", "bulk stop or daemon shutdown is already in progress; inspect activity")
-	}
-	if len(s.mutationOwners) > 10000 {
-		s.mu.Unlock()
-		finish()
-		return v1.StopAllResponse{}, problem("scope_too_large", "bulk stop exceeds 10000 lifecycle owners; inspect activity and use explicit targets")
+		return nil, problem("admission_closed", "bulk stop or daemon shutdown is already in progress; inspect activity")
 	}
 	s.bulkStopping = true
 	s.admissionGeneration++
+	// Retention must win before any cancellation can trigger disposable teardown.
+	for _, entry := range s.executions {
+		entry.bulkCancelled = true
+	}
 	preceding := []*mutationOwner{}
 	for owner := range s.mutationOwners {
 		if owner.workload {
@@ -91,16 +175,12 @@ func (s *service) stopAll(ctx context.Context, q v1.StopAllRequest) (v1.StopAllR
 		}
 	}
 	s.mu.Unlock()
-	done := make(chan v1.StopAllResponse, 1)
-	settled := make(chan struct{})
+	o := &bulkOperation{changed: make(chan struct{})}
+	accepted := v1.StopAllRecord{APIVersion: v1.Version, Type: "accepted", DaemonGeneration: s.generation, OperationID: newID()}
+	o.emit(accepted)
 	go func() {
-		defer close(settled)
-		defer finish()
-		defer func() { s.mu.Lock(); s.bulkStopping = false; s.mu.Unlock() }()
-		bounded, cancel := context.WithTimeout(owned, bulkStopBudget)
-		defer cancel()
-		out := v1.StopAllResponse{APIVersion: v1.Version, DaemonGeneration: s.generation, OperationID: newID(), Targets: []v1.StopAllTarget{}, AdmissionsJoined: true}
-		joinCtx, joinCancel := context.WithTimeout(bounded, 20*time.Second)
+		out := v1.StopAllResponse{APIVersion: v1.Version, DaemonGeneration: accepted.DaemonGeneration, OperationID: accepted.OperationID, Targets: []v1.StopAllTarget{}, AdmissionsJoined: true}
+		joinCtx, joinCancel := context.WithTimeout(owned, 20*time.Second)
 		for _, owner := range preceding {
 			select {
 			case <-owner.done:
@@ -109,166 +189,256 @@ func (s *service) stopAll(ctx context.Context, q v1.StopAllRequest) (v1.StopAllR
 			}
 		}
 		joinCancel()
-		// Protect the complete selected set before any target join. The same mutex
-		// serializes disposable teardown's final decision to destroy data.
-		s.mu.Lock()
-		selected, selectionErr := s.selectBulk(bounded)
-		if selectionErr == nil {
-			for _, chosen := range selected {
-				if entry := s.executions[chosen.target.ID]; entry != nil && entry.attempt == chosen.target.Attempt {
-					entry.bulkCancelled = true
-				}
-			}
-		}
-		s.mu.Unlock()
+		selected, selectionErr := s.selectBulk(owned)
+		out.SelectionComplete = selectionErr == nil
 		if selectionErr != nil {
-			// No target stop has been issued; admission invalidation may already have effects.
-			out.Error = &v1.PlanError{Code: "partial_failure", Message: "bulk stop incomplete; inspect activity and selected targets before explicit recovery"}
 			out.SelectionFailure = "state_unreadable"
-			var detail *v1.PlanError
-			if errors.As(selectionErr, &detail) && detail.Code == "scope_too_large" {
-				out.SelectionFailure = "scope_too_large"
-			}
-			if bounded.Err() != nil {
-				out.SelectionFailure = "budget_exhausted"
-			}
-			done <- out
-			return
-		}
-		out.SelectionComplete = true
-		// Children first. A parent never starts cleanup after an unresolved selected child.
-		ordered := make([]bulkSelection, 0, len(selected))
-		for _, t := range selected {
-			if t.parent != "" {
-				ordered = append(ordered, t)
-			}
-		}
-		for _, t := range selected {
-			if t.parent == "" {
-				ordered = append(ordered, t)
+			if owned.Err() != nil {
+				out.SelectionFailure = "cancelled"
 			}
 		}
 		blockedParents := map[string]bool{}
-		exhausted := false
-		for _, chosen := range ordered {
-			result := chosen.target
-			if !exhausted && !blockedParents[result.ID] && bounded.Err() == nil {
-				result, exhausted = s.stopBulkTarget(bounded, result)
-			}
-			if chosen.parent != "" && result.Settlement.State != v1.ConsumerSettled {
-				blockedParents[chosen.parent] = true
-			}
-			out.Targets = append(out.Targets, result)
-			if result.Outcome != "completed" {
-				out.Error = &v1.PlanError{Code: "partial_failure", Message: "bulk stop incomplete; inspect activity and selected targets before explicit recovery"}
+		// Tasks borrow scenes, never other tasks. Two passes preserve their ordering
+		// without a second selection or a second copy of target diagnostics.
+		for _, children := range []bool{true, false} {
+			for _, chosen := range selected {
+				if (chosen.parent != "") != children {
+					continue
+				}
+				result := chosen.target
+				switch {
+				case owned.Err() != nil:
+					result.Reason = "shutting_down"
+				case result.Reason == "state_unreadable":
+				case blockedParents[result.ID]:
+					result.Reason = "dependent_unsettled"
+				default:
+					wait, cancel := context.WithTimeout(owned, OwnerJoin(chosen.grace))
+					result, _ = s.stopBulkTarget(wait, chosen)
+					cancel()
+				}
+				if chosen.parent != "" && result.Settlement != v1.ConsumerSettled {
+					blockedParents[chosen.parent] = true
+				}
+				out.Targets = append(out.Targets, result)
+				event := accepted
+				event.Type, event.Target = "target", &result
+				o.emit(event)
+				if result.Outcome != "stopped" {
+					out.Error = bulkFailure()
+				}
 			}
 		}
-		if !out.AdmissionsJoined {
-			out.Error = &v1.PlanError{Code: "partial_failure", Message: "bulk stop incomplete; inspect activity and selected targets before explicit recovery"}
+		if !out.AdmissionsJoined || !out.SelectionComplete {
+			out.Error = bulkFailure()
 		}
-		done <- out
+		summary := out.Summary()
+		// Reopen before final observation: receiving the summary means coordination
+		// settled, while existing execution owners can still retain cleanup authority.
+		s.mu.Lock()
+		s.bulkStopping = false
+		s.mu.Unlock()
+		finish()
+		event := accepted
+		event.Type, event.Summary = "summary", &summary
+		o.emit(event)
 	}()
-	select {
-	case result := <-done:
-		<-settled
-		return result, nil
-	case <-ctx.Done():
-		return v1.StopAllResponse{}, problem("result_unknown", "bulk stop accepted; waiting ended, cleanup continues; inspect activity in the same scope before explicit recovery; do not automatically retry")
+	return o, nil
+}
+
+func (s *service) stopAll(ctx context.Context, q v1.StopAllRequest) (v1.StopAllResponse, error) {
+	o, err := s.startBulk(q)
+	if err != nil {
+		return v1.StopAllResponse{}, err
+	}
+	out := v1.StopAllResponse{Targets: []v1.StopAllTarget{}}
+	for index := 0; ; index++ {
+		r, err := o.next(ctx, index)
+		if err != nil {
+			return out, problem("result_unknown", "bulk stop accepted; waiting ended, cleanup continues; inspect activity in the same scope before explicit recovery; do not automatically retry")
+		}
+		out.APIVersion, out.DaemonGeneration, out.OperationID = r.APIVersion, r.DaemonGeneration, r.OperationID
+		if r.Target != nil {
+			out.Targets = append(out.Targets, *r.Target)
+		}
+		if r.Summary != nil {
+			out.AdmissionsJoined, out.SelectionComplete, out.SelectionFailure, out.Error = r.Summary.AdmissionsJoined, r.Summary.SelectionComplete, r.Summary.SelectionFailure, r.Summary.Error
+			return out, nil
+		}
 	}
 }
 
-// stopBulkTarget never waits for a busy lock. Started cleanup owns both registration
-// and serialization until completion, even when coordination stops waiting.
-func (s *service) stopBulkTarget(ctx context.Context, selected v1.StopAllTarget) (v1.StopAllTarget, bool) {
-	lock := s.mutationLock(selected.ID)
-	if !lock.TryLock() {
-		return selected, false
+// waitBulkLock never leaves a lock waiter behind after its individual deadline.
+func waitBulkLock(ctx context.Context, lock *sync.Mutex) bool {
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if ctx.Err() != nil {
+			return false
+		}
+		if lock.TryLock() {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-tick.C:
+		}
 	}
+}
+
+// stopBulkTarget reuses individually bounded lifecycle cleanup synchronously.
+// Execution owners retain their authority if their existing join deadline expires.
+func (s *service) stopBulkTarget(ctx context.Context, chosen bulkSelection) (v1.StopAllTarget, bool) {
+	selected := chosen.target
+	lock := s.mutationLock(selected.ID)
+	if !waitBulkLock(ctx, lock) {
+		selected.Reason = "busy"
+		return selected, true
+	}
+	defer lock.Unlock()
 	_, finish, err := s.beginMutation(context.Background())
 	if err != nil {
-		lock.Unlock()
+		selected.Reason = "shutting_down"
 		return selected, false
 	}
-	done := make(chan v1.StopAllTarget, 1)
-	go func() {
-		defer finish()
-		defer lock.Unlock()
-		result := selected
-		boot, _ := native.CurrentBoot()
-		err := s.store.db.View(func(tx *bolt.Tx) error {
-			r, err := load(tx, selected.ID)
-			if err != nil {
-				return err
-			}
-			facts, err := consumerRecords(tx, r)
-			if err != nil {
-				return err
-			}
-			if executionAttempt(r.Instance) != selected.Attempt || selected.Attempt != "" && consumerGeneration(facts) != selected.Generation {
-				return problem("conflict", "bulk target attempt or generation changed; no cleanup issued")
-			}
-			return nil
-		})
+	defer finish()
+	result := selected
+	boot, _ := native.CurrentBoot()
+	err = s.store.db.View(func(tx *bolt.Tx) error {
+		r, err := load(tx, selected.ID)
 		if err != nil {
-			done <- result
+			return err
+		}
+		facts, err := consumerRecords(tx, r)
+		if err != nil {
+			return err
+		}
+		if executionAttempt(r.Instance) != selected.Attempt || selected.Attempt != "" && consumerGeneration(facts) != selected.Generation {
+			return problem("conflict", "bulk target changed")
+		}
+		return nil
+	})
+	if err != nil {
+		result.Reason = "target_changed"
+		return result, false
+	}
+	s.mu.Lock()
+	entry := s.executions[selected.ID]
+	if entry != nil && entry.attempt == selected.Attempt {
+		entry.bulkCancelled = true
+	}
+	s.mu.Unlock()
+	if entry != nil {
+		if !waitBulkLock(ctx, &entry.mu) {
+			result.Reason = "busy"
+			return result, true
+		}
+		entry.mu.Unlock()
+	}
+	if selected.Attempt == "" {
+		_, err = s.store.cancel(selected.ID)
+	} else {
+		_, err = s.stopExecution(selected.ID)
+	}
+	if entry != nil {
+		select {
+		case <-entry.done:
+			entry.mu.Lock()
+			kept := entry.kept
+			entry.mu.Unlock()
+			if kept {
+				_, err = s.stopKept(selected.ID, entry)
+			}
+		default:
+		}
+	}
+	ownerRunning := false
+	if entry != nil {
+		select {
+		case <-entry.done:
+		default:
+			ownerRunning = true
+		}
+	}
+	// invariant: no admission can add a child while this same fence is held.
+	// Only metadata leaves reuse that private absence proof; known children and
+	// reopened generations retain the full fresh dependency guards.
+	s.mu.Lock()
+	metadataLeaf := selected.Attempt == "" && chosen.dependents != nil && len(chosen.dependents[selected.ID]) == 0 && chosen.admissionGeneration != 0 && s.bulkStopping && s.admissionGeneration == chosen.admissionGeneration
+	if !metadataLeaf {
+		s.mu.Unlock()
+	}
+	readErr := s.store.db.View(func(tx *bolt.Tx) error {
+		r, e := load(tx, selected.ID)
+		if e != nil {
+			return e
+		}
+		var budgets []*scanBudget
+		if metadataLeaf {
+			if r.Instance.Execution != nil || r.Instance.Task != nil {
+				return problem("conflict", "bulk metadata target changed")
+			}
+			budgets = []*scanBudget{{ctx: ctx, unbounded: true, dependents: chosen.dependents}}
+		}
+		settled, e := consumerEligibility(tx, r, boot, budgets...)
+		if e != nil {
+			return e
+		}
+		if settled.Attempt != selected.Attempt || settled.Generation != selected.Generation {
+			return problem("conflict", "bulk target changed")
+		}
+		result.Settlement = settled.State
+		if r.Instance.Execution != nil {
+			result.CollectionFailed = r.Instance.Execution.CollectionFailure != ""
+		}
+		return nil
+	})
+	if metadataLeaf {
+		s.mu.Unlock()
+	}
+	switch {
+	case ownerRunning:
+		result.Reason = "stop_timeout"
+	case readErr != nil:
+		result.Reason = "state_unreadable"
+	case result.CollectionFailed:
+		result.Outcome, result.Reason = "failed", "collection_failed"
+	case result.Settlement == v1.ConsumerSettled && err == nil:
+		result.Outcome, result.Reason = "stopped", ""
+	case result.Settlement != v1.ConsumerUnknown && err != nil:
+		result.Outcome, result.Reason = "failed", "cleanup_failed"
+	default:
+		result.Reason = "ownership_unproven"
+	}
+	return result, false
+}
+
+// writeBulk observes compact outcomes without lending HTTP backpressure to cleanup.
+func (s *service) writeBulk(w http.ResponseWriter, r *http.Request, operation *bulkOperation) {
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	controller := http.NewResponseController(w)
+	for index := 0; ; index++ {
+		event, err := operation.next(r.Context(), index)
+		if err != nil {
 			return
 		}
-		s.mu.Lock()
-		entry := s.executions[selected.ID]
-		if entry != nil && entry.attempt == selected.Attempt {
-			entry.bulkCancelled = true
+		// A blocked observer releases its connection; mutation ownership is independent.
+		if err := controller.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return
 		}
-		s.mu.Unlock()
-		if selected.Attempt == "" {
-			_, err = s.store.cancel(selected.ID)
-		} else {
-			_, err = s.stopExecution(selected.ID)
+		if err := json.NewEncoder(w).Encode(event); err != nil {
+			return
 		}
-		// An owner may have made its keep decision immediately before bulk cancellation.
-		if entry != nil {
-			select {
-			case <-entry.done:
-				entry.mu.Lock()
-				kept := entry.kept
-				entry.mu.Unlock()
-				if kept {
-					_, err = s.stopKept(selected.ID, entry)
-				}
-			default:
-			}
+		if err := controller.Flush(); err != nil {
+			return
 		}
-		readErr := s.store.db.View(func(tx *bolt.Tx) error {
-			r, e := load(tx, selected.ID)
-			if e != nil {
-				return e
-			}
-			settled, e := consumerEligibility(tx, r, boot)
-			if e != nil {
-				return e
-			}
-			if settled.Attempt != selected.Attempt || settled.Generation != selected.Generation {
-				return problem("conflict", "bulk target changed")
-			}
-			result.Settlement = settled
-			result.SettlementObservation = "after_stop"
-			if r.Instance.Execution != nil {
-				result.CollectionFailed = r.Instance.Execution.CollectionFailure != ""
-			}
-			return nil
-		})
-		if readErr == nil {
-			if result.Settlement.State == v1.ConsumerSettled && err == nil && !result.CollectionFailed {
-				result.Outcome = "completed"
-			} else if result.Settlement.State != v1.ConsumerUnknown && err != nil || result.CollectionFailed {
-				result.Outcome = "failed"
-			}
+		// No write deadline may run while waiting for workload cleanup.
+		if err := controller.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return
 		}
-		done <- result
-	}()
-	select {
-	case result := <-done:
-		return result, false
-	case <-ctx.Done():
-		return selected, true
+		if event.Type == "summary" {
+			return
+		}
 	}
 }

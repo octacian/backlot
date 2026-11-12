@@ -1,7 +1,7 @@
 ---
 title: "Fence workload admission during bounded bulk stop"
 date: 2026-11-06
-status: accepted
+status: superseded
 implementation: in-progress
 summary: "Expose bounded recorded activity and stop selected workloads behind a temporary admission fence while retaining data and administrative services."
 tags:
@@ -9,7 +9,7 @@ tags:
   - admission
   - api
 supersedes: []
-superseded_by: []
+superseded_by: [/docs/adr/20261111T214921188Z-stream-workload-wide-stop-outcomes-without-a-fixed-scope-ceiling.md]
 related: [/docs/adr/20261105T063300829Z-run-declared-native-tasks-against-accepted-ready-scenes.md, /docs/adr/20261028T234445000Z-release-stopped-instance-networks-while-retaining-application-data.md, /docs/adr/20261027T215913789Z-separate-declaration-discovery-from-bounded-recorded-inspection.md, /docs/adr/20261106T230242771Z-recover-device-only-bindings-after-verified-consumer-settlement.md]
 tracking: ["https://github.com/octacian/backlot/issues/98"]
 implemented_by: ["https://github.com/octacian/backlot/pull/136"]

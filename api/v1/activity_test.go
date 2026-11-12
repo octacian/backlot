@@ -23,7 +23,7 @@ func TestActivityContracts(t *testing.T) {
 			t.Fatal("implicit all accepted")
 		}
 	}
-	if (StopAllRequest{APIVersion: Version, All: true}).Validate() != nil {
+	if (StopAllRequest{APIVersion: Version, All: true, Contract: StopAllContract}).Validate() != nil {
 		t.Fatal("explicit all refused")
 	}
 	good := ActivityResponse{APIVersion: Version, DaemonGeneration: id, GatewayStatus: "unconfigured", Complete: true, Entries: []ActivityEntry{{Key: "workload/" + id, ID: id, Project: "fixture", Checkout: "/recorded/project", Scene: "dev", Status: "interrupted", Owner: "absent", Settlement: &ConsumerSettlement{InstanceID: id, State: ConsumerUnknown, Cause: SettlementUnproven, Blockers: []ConsumerBlocker{{Code: "metadata_unproven", InstanceID: id}}}, Blockers: []ActivityBlocker{}}}}
@@ -63,7 +63,7 @@ func TestActivityContracts(t *testing.T) {
 
 func TestStopAllResultBindings(t *testing.T) {
 	id, attempt := strings.Repeat("a", 64), strings.Repeat("b", 64)
-	good := StopAllResponse{APIVersion: Version, DaemonGeneration: id, OperationID: attempt, AdmissionsJoined: true, SelectionComplete: true, Targets: []StopAllTarget{{ID: id, Outcome: "completed", SettlementObservation: "after_stop", Settlement: ConsumerSettlement{InstanceID: id, State: ConsumerSettled, Cause: SettlementNotStarted, Blockers: []ConsumerBlocker{}}}}}
+	good := StopAllResponse{APIVersion: Version, DaemonGeneration: id, OperationID: attempt, AdmissionsJoined: true, SelectionComplete: true, Targets: []StopAllTarget{{ID: id, Outcome: "stopped", Settlement: ConsumerSettled}}}
 	if err := good.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestStopAllResultBindings(t *testing.T) {
 		func(r *StopAllResponse) { r.AdmissionsJoined = false },
 		func(r *StopAllResponse) { r.SelectionComplete = false },
 		func(r *StopAllResponse) { r.Targets = append(r.Targets, r.Targets[0]) },
-		func(r *StopAllResponse) { r.Targets = make([]StopAllTarget, BulkStopTargetLimit+1) },
+		func(r *StopAllResponse) { r.Targets[0].Reason = "private-diagnostic" },
 	}
 	data, _ := json.Marshal(good)
 	for _, change := range tests {
@@ -87,6 +87,7 @@ func TestStopAllResultBindings(t *testing.T) {
 	}
 	good.Targets[0].Outcome = "failed"
 	good.Targets[0].CollectionFailed = true
+	good.Targets[0].Reason = "collection_failed"
 	good.Error = &PlanError{Code: "partial_failure", Message: "bulk stop incomplete; inspect activity and selected targets before explicit recovery"}
 	if err := good.Validate(); err != nil {
 		t.Fatal("settled collection failure rejected", err)

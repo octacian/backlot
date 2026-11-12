@@ -124,6 +124,20 @@ func consumerRecords(tx *bolt.Tx, selected record, budget ...*scanBudget) (f con
 	return f, nil
 }
 
+// forEachConsumerChild reuses transaction-local bulk relationships; ordinary callers
+// retain the complete scan and its corruption checks.
+func forEachConsumerChild(tx *bolt.Tx, id string, budgets []*scanBudget, visit func([]byte, []byte) error) error {
+	if len(budgets) > 0 && budgets[0].dependents != nil {
+		for _, child := range budgets[0].dependents[id] {
+			if err := visit([]byte(child), tx.Bucket([]byte("instances")).Get([]byte(child))); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return tx.Bucket([]byte("instances")).ForEach(visit)
+}
+
 // consumerErased recognizes completed scene/task erasure without assigning a
 // no-launch history. Pending deletion still fences the selected owner.
 func consumerErased(tx *bolt.Tx, r record, budget ...*scanBudget) (bool, error) {
@@ -160,7 +174,7 @@ func consumerErased(tx *bolt.Tx, r record, budget ...*scanBudget) (bool, error) 
 			return false, problem("state_corrupt", "erased dependent consumer retains resource authority")
 		}
 	}
-	if err := tx.Bucket([]byte("instances")).ForEach(func(key, raw []byte) error {
+	if err := forEachConsumerChild(tx, i.ID, budget, func(key, raw []byte) error {
 		if err := chargeScan(budget, len(raw)); err != nil {
 			return err
 		}
@@ -347,7 +361,11 @@ func consumerEligibility(tx *bolt.Tx, r record, currentBoot string, budget ...*s
 	// Tasks borrow only a scene, never another task: reject nesting instead of traversing a graph.
 	var tasks []record
 	parents := map[string]bool{}
-	err = tx.Bucket([]byte("instances")).ForEach(func(key, raw []byte) error {
+	hasChildren := func(id string) bool { return parents[id] }
+	if len(budget) > 0 && budget[0].dependents != nil {
+		hasChildren = func(id string) bool { return len(budget[0].dependents[id]) > 0 }
+	}
+	err = forEachConsumerChild(tx, s.InstanceID, budget, func(key, raw []byte) error {
 		if err := chargeScan(budget, len(raw)); err != nil {
 			return err
 		}
@@ -380,7 +398,7 @@ func consumerEligibility(tx *bolt.Tx, r record, currentBoot string, budget ...*s
 		}
 	}
 	for _, child := range tasks {
-		if parents[child.Instance.ID] {
+		if hasChildren(child.Instance.ID) {
 			return s, problem("state_corrupt", "nested dependent consumer authority")
 		}
 		facts, err := consumerRecords(tx, child, budget...)
@@ -457,7 +475,7 @@ func consumerEffectRevision(tx *bolt.Tx, r record, budget ...*scanBudget) (strin
 	for _, a := range f.record.NativeAbandonments {
 		effects.Abandoned = append(effects.Abandoned, abandoned{a.Attempt, a.Boot, a.PendingBoot, a.Pending, a.Groups})
 	}
-	err = tx.Bucket([]byte("instances")).ForEach(func(key, raw []byte) error {
+	err = forEachConsumerChild(tx, effects.ID, budget, func(key, raw []byte) error {
 		if err := chargeScan(budget, len(raw)); err != nil {
 			return err
 		}

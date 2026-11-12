@@ -20,6 +20,9 @@ type scanBudget struct {
 	ctx          context.Context
 	scans, bytes int
 	err          error
+	// Bulk selection accepts proportional work and caches relationships in one transaction.
+	unbounded  bool
+	dependents map[string][]string
 }
 
 func chargeScan(budgets []*scanBudget, size int) error {
@@ -32,42 +35,12 @@ func chargeScan(budgets []*scanBudget, size int) error {
 	}
 	b.scans++
 	b.bytes += size
-	if b.scans > 10000 || b.bytes > 64<<20 {
+	if !b.unbounded && (b.scans > 10000 || b.bytes > 64<<20) {
 		b.err = problem("scope_too_large", "recorded selection exceeds 10000 scans or 64 MiB; use explicit recorded targets")
 	} else if b.ctx.Err() != nil {
 		b.err = problem("cancelled", "recorded observation cancelled")
 	}
 	return b.err
-}
-
-// boundActivityState includes direct journal reads in the aggregate byte budget.
-// Subsequent dependent scans are charged again for the actual work they perform.
-func boundActivityState(tx *bolt.Tx, b *scanBudget) error {
-	for _, name := range []string{"instances", "runtime", "resources", "shared_allocations", "shared_services"} {
-		if err := tx.Bucket([]byte(name)).ForEach(func(key, raw []byte) error {
-			if err := chargeScan([]*scanBudget{b}, len(raw)); err != nil {
-				return err
-			}
-			var err error
-			switch name {
-			case "instances":
-				var r record
-				err = decodeRecord(raw, string(key), &r)
-			case "runtime":
-				_, err = decodeRuntime(raw)
-			case "resources":
-				_, err = decodeResources(raw)
-			case "shared_allocations":
-				_, err = decodeSharedAllocations(raw)
-			case "shared_services":
-				_, err = decodeSharedService(raw, string(key))
-			}
-			return err
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // gatewayConsumerBlocked is shared with the actual gateway lifecycle guard.

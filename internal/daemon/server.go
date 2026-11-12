@@ -258,12 +258,12 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			if !decode(w, r, &q) || !compatible(w, q.APIVersion) {
 				return
 			}
-			response, err := s.stopAll(r.Context(), q)
+			operation, err := s.startBulk(q)
 			if err != nil {
 				writeError(w, err)
 				return
 			}
-			writeJSON(w, response)
+			s.writeBulk(w, r, operation)
 
 		case "/v1/scenes/start":
 			var request v1.SceneStartRequest

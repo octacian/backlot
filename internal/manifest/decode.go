@@ -21,12 +21,21 @@ const MaxBytes = 1 << 20
 // Aliases, merge keys, complex keys, non-string keys, and custom tags are forbidden.
 // Parser diagnostics are deliberately sanitized because documents may hold secrets.
 func Decode(data []byte, format string, target any) error {
+	if len(data) > MaxBytes {
+		return &v1.PlanError{Code: "invalid_document", Message: "document exceeds 1 MiB limit"}
+	}
+	return DecodeWithLimit(data, format, target, MaxBytes)
+}
+
+// DecodeWithLimit applies the same strict document rules with a caller's byte
+// budget, for stream summaries whose size follows already-validated identities.
+func DecodeWithLimit(data []byte, format string, target any, maxBytes int) error {
 	fail := func(message string) error { return &v1.PlanError{Code: "invalid_document", Message: message} }
 	if format != ".json" && format != ".yaml" && format != ".yml" {
 		return fail("use a .yaml, .yml or .json document")
 	}
-	if len(data) > MaxBytes {
-		return fail("document exceeds 1 MiB limit")
+	if maxBytes < 1 || len(data) > maxBytes {
+		return fail("document exceeds byte limit")
 	}
 	if format == ".json" && !json.Valid(data) {
 		return fail("expected one valid JSON document")

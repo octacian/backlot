@@ -148,92 +148,209 @@ func (s InstanceStatus) validActivityStatus() bool {
 	return false
 }
 
-// BulkStopTargetLimit keeps worst-case settlement results within the 1 MiB wire budget.
-const BulkStopTargetLimit = 25
+// StopAllContract requires streaming peers to agree before any mutation effects.
+const StopAllContract = "stop-all-stream/v1"
 
-// StopAllRequest requires explicit scope-wide intent; force and IDs are unsupported.
+// StopAllRequest requires explicit scope-wide intent and a supported result contract.
 type StopAllRequest struct {
 	// APIVersion selects the shared contract.
 	APIVersion string `json:"api_version"`
-	// All must be true to authorize the finite selection.
+	// All authorizes the finite scope-wide selection.
 	All bool `json:"all"`
+	// Contract requires live compact outcomes instead of the older finite response.
+	Contract string `json:"contract"`
 }
 
-// Validate requires explicit all intent.
+// Validate rejects unsupported peers before accepting a stop.
 func (q StopAllRequest) Validate() error {
-	if q.APIVersion != Version || !q.All {
-		return &PlanError{Code: "invalid_request", Message: "bulk stop requires explicit all intent and a compatible version"}
+	if q.APIVersion != Version || !q.All || q.Contract != StopAllContract {
+		return &PlanError{Code: "invalid_request", Message: "bulk stop requires explicit all intent and the stop-all-stream/v1 contract; use matching client and daemon binaries"}
 	}
 	return nil
 }
 
-// StopAllTarget retains the selected authority and final current observation.
+// StopAllTarget is the coordinator's compact terminal observation of one target.
 type StopAllTarget struct {
-	// ID is the selected immutable workload identity.
+	// ID identifies the recorded workload.
 	ID string `json:"id"`
-	// Attempt is the selected execution, absent for metadata preparation.
+	// Attempt identifies selected execution, absent for unreadable or metadata-only work.
 	Attempt string `json:"attempt,omitempty"`
-	// Generation is the selected resource authority, absent for metadata preparation.
+	// Generation binds the selected resources, absent with Attempt.
 	Generation string `json:"generation,omitempty"`
-	// Outcome is completed, failed or unresolved.
+	// Outcome is stopped, failed or unresolved; timeout never proves release.
 	Outcome string `json:"outcome"`
-	// Settlement is the latest observed diagnostic, never cleanup authority.
-	Settlement ConsumerSettlement `json:"settlement"`
-	// SettlementObservation distinguishes selection from a completed cleanup observation.
-	SettlementObservation string `json:"settlement_observation"`
-	// CollectionFailed preserves collection gaps separately from runtime settlement.
+	// Reason is a controlled diagnosis; details remain available through inspect.
+	Reason string `json:"reason,omitempty"`
+	// Settlement reports last observed release eligibility separately from execution history.
+	Settlement ConsumerSettlementState `json:"settlement"`
+	// CollectionFailed preserves diagnostic collection gaps even after runtime release.
 	CollectionFailed bool `json:"collection_failed,omitempty"`
 }
 
-// StopAllResponse reports a finite operation, without a durable replay contract.
-type StopAllResponse struct {
-	// APIVersion identifies the shared contract.
-	APIVersion string `json:"api_version"`
-	// DaemonGeneration scopes this transient operation identity.
-	DaemonGeneration string `json:"daemon_generation"`
-	// OperationID identifies accepted coordination, without a cancellation endpoint.
-	OperationID string `json:"operation_id"`
-	// Targets is the complete bounded selection, including unresolved targets.
-	Targets []StopAllTarget `json:"targets"`
-	// SelectionComplete distinguishes a complete selection from refusal before target stops.
-	SelectionComplete bool `json:"selection_complete"`
-	// SelectionFailure is scope_too_large, state_unreadable or budget_exhausted on refusal.
-	SelectionFailure string `json:"selection_failure,omitempty"`
-	// AdmissionsJoined distinguishes bounded invalidation from successful joining.
-	AdmissionsJoined bool `json:"admissions_joined"`
-	// Error reports partial failure alongside usable target results.
-	Error *PlanError `json:"error,omitempty"`
-}
-
-// Validate rejects inconsistent bulk results before presentation.
-func (r StopAllResponse) Validate() error {
-	bad := func() error { return &PlanError{Code: "invalid_response", Message: "invalid bulk stop response"} }
-	if r.APIVersion != Version || !buildImageHex(r.DaemonGeneration) || !buildImageHex(r.OperationID) || r.Targets == nil || len(r.Targets) > BulkStopTargetLimit {
+// Validate rejects malformed target observations without trusting diagnostic strings.
+func (t StopAllTarget) Validate() error {
+	bad := func() error { return &PlanError{Code: "invalid_response", Message: "invalid bulk target outcome"} }
+	if !buildImageHex(t.ID) || (t.Attempt == "") != (t.Generation == "") || t.Attempt != "" && (!buildImageHex(t.Attempt) || !buildImageHex(t.Generation)) {
 		return bad()
 	}
-	if !r.SelectionComplete && (len(r.Targets) != 0 || r.SelectionFailure != "scope_too_large" && r.SelectionFailure != "state_unreadable" && r.SelectionFailure != "budget_exhausted") || r.SelectionComplete && r.SelectionFailure != "" {
+	if t.Settlement != ConsumerSettled && t.Settlement != ConsumerUnsettled && t.Settlement != ConsumerUnknown {
 		return bad()
 	}
-	failed := !r.AdmissionsJoined || !r.SelectionComplete
-	seen := map[string]bool{}
-	for _, t := range r.Targets {
-		if t.SettlementObservation != "selected" && t.SettlementObservation != "after_stop" || seen[t.ID] || !buildImageHex(t.ID) || t.Settlement.InstanceID != t.ID || t.Settlement.Attempt != t.Attempt || t.Settlement.Generation != t.Generation || t.Settlement.Validate() != nil {
+	switch t.Outcome {
+	case "stopped":
+		if t.Reason != "" || t.Settlement != ConsumerSettled || t.CollectionFailed {
 			return bad()
 		}
-		seen[t.ID] = true
-		switch t.Outcome {
-		case "completed":
-			if t.SettlementObservation != "after_stop" || t.Settlement.State != ConsumerSettled || t.CollectionFailed {
-				return bad()
-			}
-		case "failed", "unresolved":
-			failed = true
+	case "failed", "unresolved":
+		switch t.Reason {
+		case "state_unreadable", "stop_timeout", "busy", "target_changed", "dependent_unsettled", "cleanup_failed", "collection_failed", "ownership_unproven", "shutting_down":
 		default:
 			return bad()
 		}
-	}
-	if failed != (r.Error != nil) || r.Error != nil && (r.Error.Code != "partial_failure" || r.Error.Message != "bulk stop incomplete; inspect activity and selected targets before explicit recovery") {
+	default:
 		return bad()
 	}
 	return nil
+}
+
+// StopAllSummary closes a finite operation; identity lists grow with its targets.
+type StopAllSummary struct {
+	// Stopped counts targets with verified successful completion.
+	Stopped int `json:"stopped"`
+	// Failed counts known failures, including collection failures.
+	Failed int `json:"failed"`
+	// Unresolved counts unfinished or unprovable target outcomes.
+	Unresolved int `json:"unresolved"`
+	// FailedIDs lists exactly the failed target identities in event order.
+	FailedIDs []string `json:"failed_ids"`
+	// UnresolvedIDs lists exactly the unresolved identities in event order.
+	UnresolvedIDs []string `json:"unresolved_ids"`
+	// SelectionComplete means the entire recorded selection was readable.
+	SelectionComplete bool `json:"selection_complete"`
+	// SelectionFailure explains an incomplete selection independently of target outcomes.
+	SelectionFailure string `json:"selection_failure,omitempty"`
+	// AdmissionsJoined reports whether every preceding admission owner joined.
+	AdmissionsJoined bool `json:"admissions_joined"`
+	// Error preserves partial failure alongside useful target outcomes.
+	Error *PlanError `json:"error,omitempty"`
+}
+
+// Validate checks counts, identity lists and aggregate success truthfulness.
+func (s StopAllSummary) Validate() error {
+	bad := func() error { return &PlanError{Code: "invalid_response", Message: "invalid bulk stop summary"} }
+	if s.Stopped < 0 || s.Failed < 0 || s.Unresolved < 0 || s.FailedIDs == nil || s.UnresolvedIDs == nil || s.Failed != len(s.FailedIDs) || s.Unresolved != len(s.UnresolvedIDs) {
+		return bad()
+	}
+	seen := map[string]bool{}
+	for _, ids := range [][]string{s.FailedIDs, s.UnresolvedIDs} {
+		for _, id := range ids {
+			if !buildImageHex(id) || seen[id] {
+				return bad()
+			}
+			seen[id] = true
+		}
+	}
+	if s.SelectionComplete && s.SelectionFailure != "" || !s.SelectionComplete && s.SelectionFailure != "state_unreadable" && s.SelectionFailure != "cancelled" {
+		return bad()
+	}
+	failed := !s.SelectionComplete || !s.AdmissionsJoined || s.Failed > 0 || s.Unresolved > 0
+	if failed != (s.Error != nil) || s.Error != nil && (s.Error.Code != "partial_failure" || s.Error.Message != "bulk stop incomplete; inspect activity and selected targets before explicit recovery") {
+		return bad()
+	}
+	return nil
+}
+
+// StopAllRecord is one typed NDJSON event, ordered acceptance, targets, summary.
+type StopAllRecord struct {
+	// APIVersion identifies the shared API.
+	APIVersion string `json:"api_version"`
+	// Type is accepted, target or summary.
+	Type string `json:"type"`
+	// DaemonGeneration binds every event to the accepting daemon.
+	DaemonGeneration string `json:"daemon_generation"`
+	// OperationID identifies this transient operation without authorizing replay.
+	OperationID string `json:"operation_id"`
+	// Target is present only for a target observation.
+	Target *StopAllTarget `json:"target,omitempty"`
+	// Summary is present only for the final event.
+	Summary *StopAllSummary `json:"summary,omitempty"`
+}
+
+// Validate checks individual events; clients also validate ordering and totals.
+func (r StopAllRecord) Validate() error {
+	bad := func() error { return &PlanError{Code: "invalid_response", Message: "invalid bulk stop event"} }
+	if r.APIVersion != Version || !buildImageHex(r.DaemonGeneration) || !buildImageHex(r.OperationID) {
+		return bad()
+	}
+	switch r.Type {
+	case "accepted":
+		if r.Target != nil || r.Summary != nil {
+			return bad()
+		}
+	case "target":
+		if r.Target == nil || r.Summary != nil || r.Target.Validate() != nil {
+			return bad()
+		}
+	case "summary":
+		if r.Target != nil || r.Summary == nil || r.Summary.Validate() != nil {
+			return bad()
+		}
+	default:
+		return bad()
+	}
+	return nil
+}
+
+// StopAllResponse collects compact stream observations for programmatic callers.
+// It is not the HTTP response framing; StopAllRecord defines that stream.
+type StopAllResponse struct {
+	// APIVersion identifies the shared API.
+	APIVersion string
+	// DaemonGeneration binds the operation to a daemon lifetime.
+	DaemonGeneration string
+	// OperationID identifies the transient operation.
+	OperationID string
+	// Targets contains validated compact outcomes in event order.
+	Targets []StopAllTarget
+	// SelectionComplete reports complete selection.
+	SelectionComplete bool
+	// SelectionFailure explains incomplete selection.
+	SelectionFailure string
+	// AdmissionsJoined reports preceding admission settlement.
+	AdmissionsJoined bool
+	// Error reports partial failure with retained outcomes.
+	Error *PlanError
+}
+
+// Summary derives totals without retaining detailed diagnostics.
+func (r StopAllResponse) Summary() StopAllSummary {
+	s := StopAllSummary{FailedIDs: []string{}, UnresolvedIDs: []string{}, SelectionComplete: r.SelectionComplete, SelectionFailure: r.SelectionFailure, AdmissionsJoined: r.AdmissionsJoined, Error: r.Error}
+	for _, t := range r.Targets {
+		switch t.Outcome {
+		case "stopped":
+			s.Stopped++
+		case "failed":
+			s.Failed++
+			s.FailedIDs = append(s.FailedIDs, t.ID)
+		case "unresolved":
+			s.Unresolved++
+			s.UnresolvedIDs = append(s.UnresolvedIDs, t.ID)
+		}
+	}
+	return s
+}
+
+// Validate checks a collected stream without imposing an aggregate scope ceiling.
+func (r StopAllResponse) Validate() error {
+	if r.APIVersion != Version || !buildImageHex(r.DaemonGeneration) || !buildImageHex(r.OperationID) || r.Targets == nil {
+		return &PlanError{Code: "invalid_response", Message: "invalid bulk stop response"}
+	}
+	seen := map[string]bool{}
+	for _, t := range r.Targets {
+		if seen[t.ID] || t.Validate() != nil {
+			return &PlanError{Code: "invalid_response", Message: "invalid bulk stop response"}
+		}
+		seen[t.ID] = true
+	}
+	return r.Summary().Validate()
 }

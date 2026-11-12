@@ -33,7 +33,7 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `reset ID [--config PATH]` / `scene reset SCENE [--project PATH] [--config PATH]` | Persistent only; stop, remove old owned generation, then start fresh; destructive |
 | `stop ID` / `scene stop SCENE [--project PATH]` | Stop selected runtime/routes, release verified-unused instance networks and retain data; named stop uses recorded selection |
 | `activity [--limit 100] [--after CURSOR]` | One bounded scope-wide activity page, exact infrastructure blockers and recorded/observed provenance |
-| `stop --all` | Temporarily fence workload admission, select at most 25 targets completely, stop/join without deleting data or stopping infrastructure; no ID or force |
+| `stop --all` | Fence workload admission and attempt all safely identifiable workloads with live compact outcomes; retain data and infrastructure; no ID or force |
 | `destroy ID` / `scene destroy SCENE [--project PATH]` | Remove owned runtime/data, then erase attempt results/logs/artifacts; export first |
 | `history ID [--limit 100] [--after CURSOR]` | Newest-first retained attempt summaries |
 | `inspect ID --attempt ATTEMPT` / `inspect ID --last-completed` | Exact retained result/provenance; mutually exclusive selectors |
@@ -140,28 +140,44 @@ permanently invalidates earlier prepare/run/attached/scene/task/restart/reset
 tickets, including requests resolving inputs or waiting for a lifecycle lock.
 Reopening cannot revive an old ticket. Already-registered queued execution is
 selected too. Reads, renewal, ordinary cleanup and explicit infrastructure
-controls remain usable. Preceding admissions have a 20-second join budget within
-the two-minute coordination budget; an unjoined owner remains unresolved.
+controls remain usable. Preceding admissions have a 20-second join budget;
+an unjoined owner remains unresolved and cannot launch through a revoked ticket.
 
-Before acceptance, bulk stop refuses more than 10,000 current lifecycle owners.
-The complete selection must fit 25 targets, 10,000 charged scans and 64 MiB before
-any target stop is issued. Selection corruption/overflow refuses target stops;
-prior admission invalidation may already have effects. The target limit reserves
-space for worst-case settlement diagnostics under the existing 1 MiB wire limit.
-`selection_complete` and `selection_failure` distinguish refusal from an empty
-successful selection. Busy targets are unresolved without a new cleanup attempt.
-Dependent tasks join before parents; uncertain ownership is never a force bypass.
+Bulk stop has no fixed target/owner count, aggregate scan/byte ceiling or total
+timeout. Compact bookkeeping and total output grow with the selected scope.
+Cleanup is serial and uses individual lock waits, configured stop grace and
+existing owner/provider deadlines. A busy target gets a bounded wait, then an
+unresolved result; independent targets still receive their own stop attempts.
+Dependent tasks join before parent resources are released. Unknown ownership is
+never a force bypass. Unreadable state makes selection incomplete; safely
+identifiable independent targets can still stop, but an unreadable task binding
+can prevent proving which parent resources are safe to release.
 
-The finite `StopAllResponse` contains a transient `operation_id`, daemon generation,
-complete selected target identities/attempts/generations, and each `completed`,
-`failed` or `unresolved` outcome. `settlement_observation` labels selection-time
-versus after-stop evidence. Collection failure is separate from surviving
-consumers: a failed target can be settled. Partial failure returns nonzero with
-this usable response and its `partial_failure` error, rather than replacing it
-with an error-only envelope. Uncertain targets and unjoined admissions preclude
-all-success. The temporary fence reopens when coordination settles unless daemon
-shutdown has permanently closed admission. Completion describes this finite
-selection; it does not promise that the daemon stays idle.
+Human output prints one compact outcome as each target wraps up, then a summary
+of stopped, failed and unresolved counts plus failed/unresolved IDs for inspection.
+Detailed diagnostics remain available through `inspect ID` and `activity` in the
+same state directory. `stopped` means successful verified runtime cleanup;
+`failed` includes collection failures even when runtime settlement is complete;
+`unresolved` means cleanup could not finish or release could not be proved.
+
+`--json` emits typed `StopAllRecord` NDJSON: `accepted`, one `target` event per
+selected identity, then `summary`. Every event carries `api_version`,
+`daemon_generation` and a transient `operation_id`. Target events carry the
+identity, selected attempt/generation when readable, outcome, short controlled
+reason and last observed settlement state; they do not embed detailed blocker lists.
+The summary carries counts, failed/unresolved ID lists, `admissions_joined`,
+`selection_complete`, optional `selection_failure` and a `partial_failure` error
+when incomplete. ID lists grow with the operation. Partial failure returns nonzero
+without replacing useful target events with an error-only result. Missing the
+final summary leaves overall completion unknown; earlier target observations
+remain useful. Never automatically retry a lost stream.
+
+Client and daemon require the `stop-all-stream/v1` request contract. Older strict
+daemons reject the new request; new daemons reject the old request before effects.
+Use matching binaries; there is no silent fallback to the former finite result.
+The temporary fence reopens when coordination settles unless daemon shutdown has
+permanently closed admission. Completion describes this finite selection; it
+does not promise that the daemon stays idle afterward.
 
 Bulk cancellation suppresses investigation keep and retains persistent **and
 bulk-cancelled disposable** data, allocations, paired credentials, history and
@@ -170,7 +186,8 @@ consumers. Idle retained data, shared servers, gateway and daemon are left alone
 Previously accepted destructive cleanup and application writes cannot be undone.
 Ordinary disposable completion/cancellation keeps its existing cleanup policy.
 
-SIGINT/SIGTERM, timeout or disconnect ends waiting, not accepted cleanup. Existing
+SIGINT/SIGTERM, caller timeout, a slow output pipe or disconnect ends observation,
+not accepted cleanup. Existing
 execution owners can continue after bounded joining. Started kept/recovery cleanup
 retains its registered shutdown-joined owner and exact-attempt serialization until
 it finishes, including after the fence reopens. There is no operation journal,
@@ -410,6 +427,7 @@ See [results and evidence](evidence.md) for exit and cancellation rules.
 | ID or named status with `--follow` | `SceneFollowRecord` NDJSON |
 | Attached starts | `AttachedRecord` NDJSON |
 | `install-replace` | Terminal/text only; `--json` rejected with `invalid_arguments`, no successful JSON document |
+| `stop --all` | `StopAllRecord` NDJSON: accepted, target outcomes, final summary |
 | `daemon serve` | Foreground service; no successful JSON document; normal error framing on failure |
 | `schema` | Raw finite JSON Schema in all modes |
 | Explicit help, no-action root/group help, `licenses` | Human text even with `--json`; canonical license bytes |
@@ -536,7 +554,7 @@ until `next_after_id` is absent; additions/changed membership can be missed acro
 live pages. Neither pagination mode is a snapshot or durable subscription.
 
 NDJSON consumers parse each line independently and discriminate record `type`
-where defined (follow/attached). Ordinary logs contain `LogRecord` lines with
+where defined (follow/attached/bulk stop). Ordinary logs contain `LogRecord` lines with
 instance/component/attempt/time/stream and `message` or base64 `data`; chunks need
 not be complete application lines. An error line can follow valid records, and
 a closed pipe may prevent a final record. Stderr retains diagnostics, ownership

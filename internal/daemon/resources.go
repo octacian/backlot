@@ -596,6 +596,8 @@ func (s *service) destroySelected(ctx context.Context, id string, force bool, ta
 			s.beforeSceneMutation(id)
 		}
 	}
+	s.evidence.deletion.Lock()
+	defer s.evidence.deletion.Unlock()
 	s.evidence.mu.Lock()
 	defer s.evidence.mu.Unlock()
 	unlock := s.lockMutation(id)

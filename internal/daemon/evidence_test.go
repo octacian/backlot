@@ -6,9 +6,11 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -306,5 +308,147 @@ func TestLegacyEvidenceObservationSurvivesRestart(t *testing.T) {
 		if err != nil || got.Execution.EvidenceExpired {
 			t.Fatal("protected legacy evidence expired", got.Execution, err)
 		}
+	}
+}
+
+func TestRetentionLetsLogReadersProgressBeforeSweepCompletes(t *testing.T) {
+	s, instance, _ := exportFixture(t)
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		template, err := load(tx, instance.ID)
+		if err != nil {
+			return err
+		}
+		template.Instance.Status, template.Instance.Operation.Status = v1.Starting, v1.Starting
+		template.Instance.Execution.CompletedAt = ""
+		for n := 1; n <= 64; n++ {
+			template.Instance.ID = fmt.Sprintf("%064x", n)
+			if err := put(tx, "instances", template.Instance.ID, template); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Hold the initial retention update so the log reader queues behind the sweep.
+	writer, err := s.store.db.Begin(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var release sync.Once
+	unlock := func() {
+		release.Do(func() {
+			if err := writer.Rollback(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	defer unlock()
+	done := make(chan struct{})
+	var sweepErr error
+	go func() { defer close(done); sweepErr = s.pruneEvidence() }()
+	t.Cleanup(func() {
+		unlock()
+		<-done
+		if sweepErr != nil {
+			t.Error(sweepErr)
+		}
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	for s.evidence.mu.TryLock() {
+		s.evidence.mu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("retention did not acquire evidence fence")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	read := make(chan error, 1)
+	started := make(chan struct{})
+	go func() {
+		close(started)
+		page, err := s.logs(v1.LogsRequest{InstanceID: instance.ID})
+		if err == nil && (len(page.Records) != 1 || page.Records[0].Message != "original output") {
+			err = fmt.Errorf("lost retained output: %+v", page)
+		}
+		select {
+		case <-done:
+			err = fmt.Errorf("log reader waited for the entire retention sweep: %v", err)
+		default:
+		}
+		read <- err
+	}()
+	<-started
+	unlock()
+	select {
+	case err := <-read:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		<-done
+		<-read
+		t.Fatal("retention blocked live log delivery")
+	}
+}
+
+func TestRetentionSerializesDeletionWithoutBlockingLogs(t *testing.T) {
+	for _, action := range []string{"prune", "destroy"} {
+		t.Run(action, func(t *testing.T) {
+			s, instance, _ := exportFixture(t)
+			s.evidence.deletion.Lock()
+			var release sync.Once
+			unlock := func() { release.Do(s.evidence.deletion.Unlock) }
+			defer unlock()
+			done, started := make(chan struct{}), make(chan struct{})
+			var actionErr error
+			go func() {
+				defer close(done)
+				close(started)
+				if action == "prune" {
+					keep := 0
+					_, actionErr = s.pruneHistory(context.Background(), v1.HistoryPruneRequest{APIVersion: v1.Version, InstanceID: instance.ID, Keep: &keep})
+				} else {
+					_, actionErr = s.destroy(context.Background(), instance.ID)
+				}
+			}()
+			t.Cleanup(func() {
+				unlock()
+				<-done
+				if actionErr != nil {
+					t.Error(actionErr)
+				}
+			})
+			<-started
+			select {
+			case <-done:
+				t.Fatal("destructive operation bypassed retention accounting fence")
+			case <-time.After(20 * time.Millisecond):
+			}
+			read := make(chan error, 1)
+			go func() {
+				page, err := s.logs(v1.LogsRequest{InstanceID: instance.ID})
+				if err == nil && len(page.Records) != 1 {
+					err = fmt.Errorf("evidence changed during sweep: %+v", page)
+				}
+				read <- err
+			}()
+			select {
+			case err := <-read:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(time.Second):
+				unlock()
+				<-read
+				t.Fatal("pending deletion blocked log reader")
+			}
+			unlock()
+			<-done
+			lock := s.mutationLock(instance.ID)
+			if !lock.TryLock() {
+				t.Fatal("destructive operation leaked mutation fence")
+			}
+			lock.Unlock()
+		})
 	}
 }

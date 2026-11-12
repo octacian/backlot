@@ -22,6 +22,63 @@ func sceneInstance(id string) *v1.InstanceResponse {
 	return &v1.InstanceResponse{APIVersion: v1.Version, Instance: v1.Instance{ID: strings.Repeat(id, 64), Checkout: *sceneResponse().Checkout, Status: v1.Prepared, CreatedAt: "2026-10-07T12:00:00Z", Operation: v1.Operation{ID: strings.Repeat("c", 64), Status: v1.Prepared, Allocations: []v1.AllocationRecord{{ID: strings.Repeat("d", 64), Kind: "private_snapshot", Phase: "effect"}}}, Plan: v1.PlanResponse{APIVersion: v1.Version, Project: "fixture", Scene: "dev", Checkout: "/tmp/scene", ManifestPath: "/tmp/scene/backlot.json", Lifetime: v1.Persistent, Components: []v1.PlannedComponent{}}}}
 }
 
+func TestSceneRegisteredCheckoutContinuity(t *testing.T) {
+	response := sceneResponse()
+	response.Outcome = v1.SceneFound
+	response.Result = sceneInstance("e")
+	registration := v1.RegistrationIdentity{CommonID: strings.Repeat("1", 64), CheckoutID: strings.Repeat("2", 64), CheckoutPath: "/tmp/scene", AdminPath: "/tmp/scene/.git", CommonPath: "/tmp/scene/.git", Git: true}
+	response.Checkout.Registration = registration
+	response.Result.Instance.Checkout.Registration = registration
+	response.Checkout.ID = strings.Repeat("f", 64)
+	target := v1.SceneTarget{CWD: "/tmp/scene", Scene: "dev"}
+	if err := validateScene(response, target, true); err != nil {
+		t.Fatal("matching registration rejected changed physical identity", err)
+	}
+	response.Result.Instance.Association = &v1.ProjectAssociation{CheckoutParent: response.Result.Instance.Checkout.ID, Checkout: response.Result.Instance.Checkout, ProjectPath: "/tmp/scene"}
+	response.Result.Instance.Checkout.Registration = v1.RegistrationIdentity{}
+	if err := validateScene(response, target, true); err != nil {
+		t.Fatal("enrolled legacy association rejected changed physical identity", err)
+	}
+	response.Result.Instance.Association = nil
+	if err := validateScene(response, target, true); err == nil {
+		t.Fatal("unassociated legacy physical mismatch accepted")
+	}
+	response.Result.Instance.Checkout.Registration = registration
+	for _, field := range []string{"checkout", "admin", "git"} {
+		invalid := registration
+		switch field {
+		case "checkout":
+			invalid.CheckoutPath = "/tmp/elsewhere"
+		case "admin":
+			invalid.AdminPath = "/tmp/elsewhere/.git"
+		case "git":
+			invalid.Git = false
+		}
+		response.Checkout.Registration = invalid
+		response.Result.Instance.Checkout.Registration = invalid
+		if err := validateScene(response, target, true); err == nil {
+			t.Fatal("registration disagrees with checkout", field)
+		}
+	}
+	response.Checkout.Registration = registration
+	response.Result.Instance.Checkout.Registration = registration
+	response.Checkout.Registration.CheckoutID = strings.Repeat("3", 64)
+	if err := validateScene(response, target, true); err == nil {
+		t.Fatal("different registration accepted")
+	}
+	registration.CheckoutID = "invalid"
+	response.Checkout.Registration = registration
+	response.Result.Instance.Checkout.Registration = registration
+	if err := validateScene(response, target, true); err == nil {
+		t.Fatal("malformed registration accepted")
+	}
+	response.Checkout.Registration = v1.RegistrationIdentity{}
+	response.Result.Instance.Checkout.Registration = v1.RegistrationIdentity{}
+	if err := validateScene(response, target, true); err == nil {
+		t.Fatal("legacy physical mismatch accepted")
+	}
+}
+
 func sceneWire(t *testing.T, r *http.Request, response v1.SceneResponse) *http.Response {
 	t.Helper()
 	if r.URL.Path != "/v1/scenes/status" {

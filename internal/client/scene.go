@@ -108,6 +108,10 @@ func validateScene(response v1.SceneResponse, target v1.SceneTarget, persistentO
 			return err
 		}
 		i := response.Result.Instance
+		checkout := i.Checkout
+		if i.Association != nil {
+			checkout = i.Association.Checkout
+		}
 		if persistentOnly {
 			if err := i.ValidateSceneLocation(); err != nil {
 				return responseError()
@@ -123,7 +127,7 @@ func validateScene(response v1.SceneResponse, target v1.SceneTarget, persistentO
 		if persistentOnly && i.Plan.Lifetime != v1.Persistent || response.Result.LeaseToken != "" || target.InstanceID != "" && i.ID != target.InstanceID || target.Scene != "" && i.Plan.Scene != target.Scene {
 			return responseError()
 		}
-		if response.Checkout != nil && !checkoutEqual(*response.Checkout, i.Checkout) {
+		if response.Checkout != nil && !checkoutEqual(*response.Checkout, checkout) {
 			return responseError()
 		}
 	}
@@ -131,6 +135,13 @@ func validateScene(response v1.SceneResponse, target v1.SceneTarget, persistentO
 }
 
 func checkoutEqual(a, b v1.CheckoutIdentity) bool {
+	if a.Registration.CheckoutID != "" && b.Registration.CheckoutID != "" {
+		registration := a.Registration
+		if registration.Validate() != nil || registration.CheckoutPath != a.Path || registration.Git != (a.GitDirectory != "") || registration.Git && registration.AdminPath != a.GitDirectory {
+			return false
+		}
+		return a.Path == b.Path && a.GitDirectory == b.GitDirectory && registration == b.Registration
+	}
 	return a.ID == b.ID && a.Path == b.Path && a.GitDirectory == b.GitDirectory
 }
 

@@ -75,7 +75,7 @@ multi-commit pushes.
 | Changed files | Jobs that run |
 | --- | --- |
 | Every change, including code-only changes | Docs workflow: Corestack record and local file-link verification |
-| Go/runtime sources, schemas, non-CI examples, `install.sh`, module/build/lint configuration | macOS/Ubuntu repository checks, Linux runtime, current-head scenes and project inputs |
+| Go/runtime sources, schemas, non-CI examples, `install.sh`, module/build/lint configuration | macOS/Ubuntu repository and owned host trust checks, Linux runtime, current-head scenes and project inputs |
 | `THIRD_PARTY_NOTICES.md` | Repository and Linux installation checks, plus Docs |
 | `actions/` implementation | Current-head scenes and project inputs |
 | `examples/ci-scenes/` implementation | Scenes |
@@ -135,6 +135,34 @@ workload activation environment cannot enable it. Full receiver identity and
 capability checks precede self-fault. Capability data stays in private temporary
 state and is excluded from reports. Failure paths join owners and prove absence,
 or preserve diagnostic state and report residuals.
+
+## Disposable host trust acceptance
+
+The Check workflow's `Owned host trust` jobs run `TestOwnedHostTrust` serially
+on GitHub-hosted macOS ARM64 and Ubuntu 24.04 amd64. They install stock Caddy
+2.11.7 into runner temporary storage and exercise the production foreground CLI
+with ordinary sudo, a private unprivileged daemon and dynamic gateway ports.
+The test requires both `BACKLOT_HOST_TRUST_TEST=install-status-retire` and
+`BACKLOT_DISPOSABLE_HOST_GRANT=github-hosted-ephemeral`, and rejects other runner
+identities/platforms. **Never set these on a normal workstation.** Default
+`make check` skips this test before allocating resources or changing host trust.
+
+Acceptance checks root-specific OS rejection/acceptance, live daemon observation
+refresh without restart, wrong-pin and missing-impact-acknowledgement rejection,
+receipt-only retirement, exact owned withdrawal and identical external-root
+preservation. macOS retirement must report its preserved public entry; fixture
+cleanup removes only the retained exact DER/hash. Linux uses one uniquely owned
+update hook with invocation/change logging and a bounded exit-7 case. Stock
+refresh can accept a failing hook: that does not establish a failed command or
+partial product result. A later normal refresh checks hook recovery. Other distro
+hooks stay enabled. Cleanup is registered before effects and reports uncertain
+residuals as failures. Only public test diagnostics are uploaded, never private
+state, keys or capabilities.
+
+Fixture code and skipped/local checks are not platform evidence. Both published
+jobs must actually pass, including cleanup, before claiming these OS effects.
+Interactive authorization denial/interruption and rare partial failures remain
+separate acceptance gaps; this fixture does not simulate them as operational proof.
 
 ## Release packaging and publication
 

@@ -33,20 +33,22 @@ Edit that private machine file to use the absolute path from `command -v caddy`;
 if necessary add `tools: {node: /absolute/path/to/node}`. Defaults use loopback
 ports 2020 and 8443; check `lsof -nP -iTCP:2020 -iTCP:8443 -sTCP:LISTEN` before
 starting. If occupied, select two other unprivileged ports in the file, without
-stopping their owner. Use the configured admin port in the trust command below.
+stopping their owner. Gateway start reports the exact state-scoped trust command.
 
 ```sh
 backlot daemon start --state-dir "$HOME/.backlot" --json
 backlot gateway start --state-dir "$HOME/.backlot" --config "$HOME/.config/backlot/machine.yaml" --json
-/opt/homebrew/bin/caddy trust --address 127.0.0.1:2020 --ca local
+backlot gateway trust status --state-dir "$HOME/.backlot" --json
+backlot gateway trust install --state-dir "$HOME/.backlot" --fingerprint ROOT_SHA256_FROM_STATUS --json
 ```
 
-Run that **stock trust command yourself** against your owned gateway; it can ask
-for administrator authorization. Backlot never installs trust. System trust is
-needed by the daemon's aggregate HTTPS readiness, independently of application
-and browser trust. If the daemon has already attempted an untrusted HTTPS request,
-refresh its trust cache: `backlot daemon stop --state-dir "$HOME/.backlot"`, then
-repeat daemon start and gateway start above (CA identity is retained).
+Authorize the displayed exact fingerprint in the foreground; stock macOS tools
+can request administrator authorization. The daemon never installs trust.
+System trust is needed by aggregate HTTPS readiness independently of application
+and browser trust. Fresh verification observes trust changes without restarting
+the daemon; retained certificate-file environment overrides remain explicit.
+See [host trust and retirement](../../docs/https.md#explicit-host-trust-and-retirement)
+for receipts, known/unknown consumer impact, replacement and manual recovery.
 
 A browser with a separate certificate store also needs the public certificate
 `$HOME/.backlot/gateway/data/pki/authorities/local/root.crt` imported as a trusted
@@ -196,7 +198,7 @@ logical origin persist. Backlot selects fresh available service ports as needed.
 
 | Symptom | Action |
 | --- | --- |
-| Certificate error / `publication_unreachable` | Verify normal hostname resolution and trust in each consumer. Install the owned CA explicitly, refresh daemon trust as above, then restart the failed instance by ID. `NODE_EXTRA_CA_CERTS` only trusts Node applications. |
+| Certificate error / `publication_unreachable` | Verify normal hostname resolution and trust in each consumer. Install the owned CA explicitly, inspect host versus daemon-effective trust, then restart the failed instance by ID. `NODE_EXTRA_CA_CERTS` only trusts Node applications. |
 | Gateway port conflict | Inspect the listener with `lsof`; choose free explicit ports before first start. Never kill the unrelated owner. Retained gateway configuration must match; see [HTTPS recovery](../../docs/https.md). |
 | Managed gateway unavailable | `backlot gateway status --state-dir "$HOME/.backlot" --json`, then explicit `gateway start` with your private config. Inspect the protected gateway log; restore access before retrying scene cleanup/restart. |
 | Node unavailable | Configure an absolute `tools.node`; the daemon cannot inherit later shell/version-manager changes. |

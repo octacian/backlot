@@ -87,15 +87,15 @@ caddy:
 ```sh
 backlot daemon start --json
 backlot gateway start --json
-/absolute/path/to/caddy trust --address 127.0.0.1:2020 --ca local
+backlot gateway trust status --json
+backlot gateway trust install --fingerprint ROOT_SHA256_FROM_STATUS --json
 backlot scene start dev --json
 ```
 
-Run stock `caddy trust` yourself against **your owned gateway**; it may request
-administrator authorization. Backlot never installs system/browser trust.
+Run the fingerprint-scoped trust command reported by gateway start explicitly;
+it may request normal administrator authorization. The daemon stays unprivileged.
 Applications and some browsers need separate explicit public-root settings.
-If the daemon attempted TLS before trust installation, stop/start it and start
-the gateway again to refresh cached roots. The CA survives this restart.
+Backlot observes system roots afresh without a daemon trust-cache restart.
 Follow [HTTPS and application trust](docs/https.md#managed-local-https) and
 [Linux resolver/listener setup](docs/platforms.md#linux-https-and-bridge-consumers).
 The [runnable macOS HTTPS example](examples/macos-quickstart/README.md) includes

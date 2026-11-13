@@ -169,3 +169,11 @@ Before successful destroy, export anything you need to keep: destroy erases the
 instance's results/logs/artifacts. Ordinary disposable completion still retains
 diagnostics under [age/byte/count retention](evidence.md#logs-and-retention).
 Manual history pruning removes selected evidence, never application data or credentials.
+
+For managed HTTPS, gateway start reports the root fingerprint, host trust and
+exact explicit install command. Authorize `gateway trust install` separately;
+application and browser trust remain consumer choices. Use
+[host trust and retirement](https.md#explicit-host-trust-and-retirement) for
+replacement, public receipts and known/unknown consumer impact. Gateway startup
+never offers or performs installation, and missing host trust does not block it;
+published readiness still verifies HTTPS.

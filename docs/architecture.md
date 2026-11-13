@@ -8,7 +8,10 @@ private resource generations and managed/external HTTPS publication. See the [HT
 ## Boundaries
 
 One executable exposes the human/agent CLI and daemon commands. The daemon is the
-single owner of machine state and runtime mutations. Runtime CLI actions use the
+single owner of daemon machine state and runtime mutations. Foreground `gateway
+trust` commands separately own explicit OS trust effects and public provisioning
+receipts outside daemon erasure; the daemon exposes only a validated read-only
+public CA snapshot. See [host trust](https.md#explicit-host-trust-and-retirement). Runtime CLI actions use the
 typed local client; they must not independently allocate ports, mutate Caddy, or
 clean up Docker state.
 

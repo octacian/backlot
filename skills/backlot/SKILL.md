@@ -96,3 +96,9 @@ also contain secrets. Protect/review evidence before sharing. Load
 [HTTPS](references/https.md) and [platforms](references/platforms.md) only for the
 selected topology. Report test outcome, independent failures, retained work and
 cleanup uncertainty without equating discovery, planning or doctor with execution.
+
+For managed HTTPS, inspect `gateway trust status` and authorize only the exact
+fingerprint-scoped foreground install command when the task permits host effects.
+Retirement requires receipt-proven Backlot effects and explicit consumer-impact
+acknowledgement; browser/application stores remain separate. Follow
+[host trust](references/https.md#explicit-host-trust-and-retirement).

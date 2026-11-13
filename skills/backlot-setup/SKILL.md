@@ -48,7 +48,9 @@ Keep each argv entry intact and credentials in sensitive environment assignments
    Read [private configuration](references/manifest.md#registered-private-project-configuration)
    before editing registrations: linked worktrees share them. Machine providers and
    absolute tool overrides stay outside the manifest. Missing prerequisites need an
-   actionable next step; Backlot never installs dependencies, pulls images or trust.
+   actionable next step; Backlot never installs dependencies or pulls images. Host trust requires an
+   explicit fingerprint-scoped foreground `gateway trust install` authorization;
+   browser/application trust stays separate.
 4. Run `plan NAME --json -- ACTUAL_TEST_ARGS` (omit the tail when unneeded).
    Plan checks caller tools/inputs, not daemon/provider readiness. Before daemon
    operations follow the daemon compatibility check. Explicitly start a missing

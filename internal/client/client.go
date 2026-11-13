@@ -167,14 +167,7 @@ func (c *Client) call(ctx context.Context, method, path string, request, respons
 	case *v1.DoctorResponse:
 		return value.Validate()
 	case *v1.GatewayResponse:
-		if value.APIVersion != v1.Version || value.Mode != "managed" {
-			return responseError()
-		}
-		switch value.Status {
-		case "unconfigured", "running", "stopped", "interrupted", "unavailable", "uncertain":
-		default:
-			return responseError()
-		}
+		return value.Validate()
 	case *v1.ListResponse:
 		if value.APIVersion != v1.Version || len(value.Instances) > 100 || value.Instances == nil {
 			return responseError()

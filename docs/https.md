@@ -43,29 +43,106 @@ Docker may supply dependencies or loopback-mapped HTTP upstreams. Explicitly
 configured Docker Desktop bridge consumers can use the same canonical HTTPS
 hostname; see [container trust and mapping](#public-root-file-mounts-for-containers).
 
-Start the daemon and gateway explicitly, then install trust as a separate operator
-action using the configured stock executable and **owned managed admin endpoint**:
+Start the daemon and gateway explicitly, then authorize host trust separately:
 
 ```sh
 backlot daemon start --json
 backlot gateway start --json
-/opt/homebrew/bin/caddy trust --address 127.0.0.1:2020 --ca local
-backlot gateway status --json
+backlot gateway trust status --json
+backlot gateway trust install --fingerprint ROOT_SHA256_FROM_STATUS --json
 ```
 
-[Caddy trust](https://caddyserver.com/docs/command-line#caddy-trust) fetches the CA
-from that running endpoint and may request administrator authorization. Approve
-this separate command according to your machine policy. Do not point it at an
-unrelated Caddy server. The daemon runs unprivileged and sets `install_trust:false`;
-it never changes system/browser trust. Configure trust explicitly for each consumer; native applications can use the
-[public CA reference](#explicit-application-trust), while standard system/browser
-trust setup is a separate operator action. Browsers can use different trust stores: verify your
-browser accepts the origin without a warning; no universal browser guarantee is
-made. Missing/wrong trust fails normal TLS readiness, never invokes a bypass. The daemon
-aggregate probe also needs system trust independently of Node/browser settings. If
-it attempted HTTPS before trust installation, stop/start the daemon and explicitly
-start the gateway again to refresh cached certificate roots; retained CA identity
-is preserved.
+Gateway start reports the actual pinned root fingerprint, an informational host
+trust observation and the exact state-scoped install command. Missing or unknown
+trust does not fail an otherwise valid gateway start or offer an interactive
+installation. Published-scene readiness still requires normally verified HTTPS.
+
+### Explicit host trust and retirement
+
+`gateway trust status` obtains a read-only public root snapshot validated against
+the selected daemon's protected managed configuration, CA key pairs and DER
+SHA-256 pin. It reports `trusted`, `untrusted` or `unknown` for that exact root in
+the selected OS store, separately from a fresh observation under the daemon's
+retained environment. Unavailable observations mean unknown. Neither certificate
+presence, stock-tool success nor a successful request through another root is
+proof of trust. The public snapshot contains no signing keys or private scope
+capabilities. External gateways retain operator-owned trust management.
+
+`install` requires the displayed fingerprint and runs stock OS tools in the
+foreground with normal administrator authorization. On macOS it selects the
+System keychain and admin TLS trust domain, using `security`; on Ubuntu/Debian it
+uses `/usr/local/share/ca-certificates/backlot-FINGERPRINT.crt` and stock
+`update-ca-certificates`, including normal distribution hooks. Retirement also
+uses stock OpenSSL to refresh derived certificate indices when owned links are
+removed. Preserved external/legacy links can retain dangling references for
+explicit manual review. These hooks can
+have effects beyond one root. Backlot preserves pre-existing identical entries
+and settings, rejects conflicts and verifies exact postconditions. Unsupported or
+ambiguous macOS policy/settings require manual handling. The daemon remains
+unprivileged and configures Caddy with `install_trust:false`.
+
+Permissioned version-1 public receipts live in
+`~/Library/Application Support/backlot/trust` on macOS or
+`${XDG_CONFIG_HOME:-$HOME/.config}/backlot/trust` on Linux. Only foreground trust
+commands write them, using atomic replacement and a narrow cooperative lock.
+They retain the validated public snapshot, exact store/effects, pre-existing versus
+new effects and useful known source observations. Linux-owned source receipts
+also bind filesystem identity and change time for newly created sources and
+exact generated `.pem` links; replacing an identical entry does not transfer its
+old removal authority. Pre-existing or legacy links stay preserved. They contain no keys and survive
+daemon-state erasure. Status lists bounded retained-root summaries; source
+observations are incomplete consumer information, not enrollment or a guarantee
+that no application still depends on a root. Status and gateway startup do not
+acquire the trust mutation lock. Receipt damage does not prevent ordinary starts.
+
+To replace a root, first install the new selected daemon's root and verify its OS
+trust, then select the old receipt fingerprint:
+
+```sh
+backlot gateway trust retire --fingerprint OLD_ROOT_SHA256 \
+  --replacement --state-dir /absolute/new-daemon-state --acknowledge-impact --json
+```
+
+`--replacement` revalidates the selected replacement root and proves OS trust
+before removing old effects. Standalone removal omits `--replacement` and still
+requires `--acknowledge-impact`. Review known sources and accept possible breakage
+of unknown scopes, browsers and applications. Acknowledgement never waives
+ownership: only verifiably Backlot-provisioned CAs **and exact Backlot-provisioned
+trust effects** can be retired. Certificate names, arbitrary paths and manual
+imports grant no retirement authority. Pre-existing external entries/settings
+remain preserved even for the same root. Retained public identity can authorize
+retirement after the source daemon/keys are gone or the old certificate expires.
+Use `status --fingerprint OLD_ROOT_SHA256` to observe a retained root without its
+daemon. Legacy/manual effects without sufficient receipts require manual OS work.
+
+Interrupted/denied operations report partial or unknown effects and preserve
+intent/evidence. Do not blindly retry them. Changed targets/settings stop further
+destructive work. Restore compatible tracking or deliberately use
+`install --new-tracking --fingerprint ROOT_SHA256_FROM_STATUS` to preserve old
+receipts and track only newly validated future effects. This never adopts old
+unknown effects. Unsupported writers preserve evidence unchanged, even with `--new-tracking`;
+use a compatible executable or a separate clean tracking location. Receipt backup
+restoration can make authority stale: use manual recovery or clean tracking when
+restoration is known. The lock coordinates Backlot commands, not unrelated
+administrators; use a controlled maintenance window. Exact pre/post checks cannot
+make OS effects atomic against an external path or policy change.
+
+Retirement distinguishes trust withdrawal, entry deletion/preservation and current
+root trust. On macOS it withdraws only proven admin TLS settings and preserves the
+public certificate entry for manual review: stock observations cannot prove stable
+entry identity after an identical external re-import. Residual trust in another store/domain or an explicit application
+root can remain after the selected owned effects are removed. Browser/application
+trust is separate: configure it explicitly and verify the actual origin without
+warnings. Backlot does not automate browser stores, DNS, CA regeneration or a
+privileged service.
+
+Publication readiness, doctor system TLS and HTTPS probes use bounded, joined,
+unprivileged invocations of the same executable to refresh Go trust policy.
+No daemon restart is needed merely to refresh system roots. `SSL_CERT_FILE` and
+`SSL_CERT_DIR` retained by the daemon still apply to its effective TLS; the separate
+OS observation removes these overrides. If they disagree, deliberately update
+consumer configuration (and restart a daemon to change its retained environment),
+then retry the failed scene. No CA injection or TLS bypass is used.
 
 Run a published scene using the existing scene contract below. Its canonical
 origin is `https://bl-<instance-label>.backlot.localhost:8443`; different worktrees

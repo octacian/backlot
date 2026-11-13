@@ -21,6 +21,12 @@ type GatewayResponse struct {
 	Endpoint                string                   `json:"endpoint,omitempty"`
 	HTTPSPort               int                      `json:"https_port,omitempty"`
 	Message                 string                   `json:"message,omitempty"`
+	// RootFingerprint identifies the actual retained public root DER SHA-256.
+	RootFingerprint string `json:"root_fingerprint,omitempty"`
+	// HostTrust is informational OS trust, independent of gateway readiness.
+	HostTrust *TrustObservation `json:"host_trust,omitempty"`
+	// TrustCommand selects this state and exact root for explicit authorization.
+	TrustCommand string `json:"trust_command,omitempty"`
 	// ConfigSource describes this selection: explicit, default, or retained.
 	ConfigSource string `json:"config_source,omitempty"`
 }

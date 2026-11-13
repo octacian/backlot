@@ -642,10 +642,13 @@ saved configuration and the actual `public_ca_certificate` file are locatable.
 A printed path may be absent/unavailable; its status is explicit.
 
 For a managed gateway, `public_ca_certificate` is the actual public PEM root file
-under private daemon state, usable for a separate explicit manual trust action.
+under private daemon state. Use `gateway trust status` for validated provenance,
+root-specific OS trust and the daemon's retained-environment observation, then
+authorize the exact fingerprint in a separate foreground install action.
+See [host trust](https.md#explicit-host-trust-and-retirement).
 No key path/content, provider credential, ownership token or application environment
 is emitted. Preserve private state; do not publish raw database/log files.
-`daemon/host system trust` and `daemon/host explicit public CA` are separate TLS
+Fresh `daemon/host system trust` and `daemon/host explicit public CA` are separate TLS
 observations. Neither establishes browser or application trust. Doctor never
 installs trust, changes DNS/resolver/router settings, repairs providers, replaces
 foreign routes, or bypasses certificate/hostname verification.

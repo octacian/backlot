@@ -52,7 +52,9 @@ managed consumer is the [Go/Alpine application](../examples/container-https/READ
 Build/install using [operations](operations.md), then start with a short private
 state directory and run `doctor`. Directory mode must be 0700 and private files and
 IPC 0600; existing unsafe permissions are rejected. Do not place private state in
-a shared checkout. No root daemon, system trust changes or elevated ports are needed.
+a shared checkout. No root daemon or elevated ports are needed. Host trust is an explicit foreground
+[stock-tool operation](https.md#explicit-host-trust-and-retirement), separate from
+application/browser trust.
 
 ## Linux HTTPS and bridge consumers
 
@@ -101,7 +103,8 @@ force `.localhost` to container loopback (including curl versions with this
 behavior) need separate compatibility work and are outside this tested consumer
 contract. Do not replace TLS verification or use a different URL to hide failures.
 
-Browser trust is separately configured by the operator. Linux CI uses a disposable
+Host installation uses stock distro refresh and its configured hooks; it does not
+establish browser acceptance. Browser trust is separately configured by the operator. Linux CI uses a disposable
 browser HOME/profile/NSS database containing only the public fixture root and
 checks rejection before import and trusted canonical HTTPS/SSR after import.
 This bounded browser evidence does not install system trust or promise every browser.

@@ -12,7 +12,7 @@ import (
 )
 
 func gatewayCommand() *urfave.Command {
-	var children []*urfave.Command
+	children := []*urfave.Command{gatewayTrustCommand()}
 	for _, name := range []string{"start", "stop", "restart", "status"} {
 		flags := daemonFlags(false)
 		if name == "stop" {

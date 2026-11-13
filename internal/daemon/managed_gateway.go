@@ -27,6 +27,7 @@ import (
 	"github.com/octacian/backlot/internal/manifest"
 	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
+	"github.com/octacian/backlot/internal/trust"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -280,6 +281,20 @@ func (s *service) gatewayControl(ctx context.Context, action string, request v1.
 		response := s.gatewayStatus(ctx, r)
 		if response.ConfigSource != "" {
 			response.ConfigSource = source
+		}
+		if action == "start" || action == "restart" {
+			observation := trust.Observe(ctx, v1.GatewayCA{}, true)
+			if ca, err := s.managedPublicCA(r); err == nil {
+				observation = trust.Observe(ctx, ca, true)
+			} else {
+				observation.Message = "managed CA snapshot could not be revalidated; preserve original state and inspect gateway trust status before installation"
+			}
+			response.RootFingerprint = r.RootHash
+			response.HostTrust = &observation
+			response.TrustCommand = trustInstallCommand(s.directory, r.RootHash)
+			if observation.Status != "trusted" {
+				response.Message = "host trust is " + observation.Status + "; " + observation.Message + "; trust_command requires explicit foreground OS authorization; verify application/browser trust separately; retained SSL_CERT_FILE/SSL_CERT_DIR may differ"
+			}
 		}
 		return response
 	}

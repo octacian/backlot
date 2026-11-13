@@ -314,6 +314,17 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				return
 			}
 			writeJSON(w, response)
+		case "/v1/gateway/ca":
+			var request v1.GatewayCARequest
+			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {
+				return
+			}
+			response, err := s.gatewayCA(r.Context())
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, response)
 		case "/v1/gateway/start", "/v1/gateway/stop", "/v1/gateway/restart", "/v1/gateway/status":
 			var request v1.GatewayRequest
 			if !decode(w, r, &request) || !compatible(w, request.APIVersion) {

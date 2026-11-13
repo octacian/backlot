@@ -12,7 +12,9 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"github.com/gofrs/flock"
 	"github.com/octacian/backlot/internal/native"
+	hosttrust "github.com/octacian/backlot/internal/trust"
 	"io"
 	"math/big"
 	"net"
@@ -112,7 +114,31 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	if err := blocker.Close(); err != nil {
 		t.Fatal(err)
 	}
-	command(true, "gateway", "start", "--config", configPath)
+	tracking, err := hosttrust.Directory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(tracking, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(tracking, "damaged.json"), []byte("damaged fixture evidence"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	trustLock := flock.New(filepath.Join(tracking, "trust.lock"), flock.SetPermissions(0600))
+	if acquired, err := trustLock.TryLock(); err != nil || !acquired {
+		t.Fatal("fixture trust lock", err)
+	}
+	t.Cleanup(func() {
+		if err := trustLock.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	startedGateway := command(true, "gateway", "start", "--config", configPath)
+	var startedStatus v1.GatewayResponse
+	if err = json.Unmarshal(startedGateway, &startedStatus); err != nil || startedStatus.HostTrust == nil || len(startedStatus.RootFingerprint) != 64 || !strings.Contains(startedStatus.TrustCommand, h.dir) {
+		t.Fatal("missing bounded trust hint despite damaged/locked receipts", string(startedGateway), err)
+	}
+
 	root, _, storage := managedPaths(h.dir)
 	ca, err := os.ReadFile(filepath.Join(storage, "pki", "authorities", "local", "root.crt"))
 	if err != nil {
@@ -441,14 +467,15 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	command(true, "stop", id)
 	command(true, "gateway", "stop")
 
-	// Production aggregate readiness also rejects wrong trust. Changing the
-	// fixture daemon's explicit trust file needs a new process, because Go caches
-	// root pools; this is test setup, never a product trust-injection mechanism.
-	h.close()
+	// Fresh aggregate verification sees changes in the daemon's retained file
+	// override without restarting it; this is explicit private fixture trust.
+	originalDaemon, err := h.cli.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(trust, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600); err != nil {
 		t.Fatal(err)
 	}
-	h.start()
 	command(true, "gateway", "start")
 	failedOutput := command(false, "restart", "--config", configPath, id)
 	var failed v1.InstanceResponse
@@ -458,15 +485,17 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	if failed.Instance.Execution.FailureDetail == nil || failed.Instance.Execution.FailureDetail.Code != "publication_unreachable" || failed.Instance.Execution.CleanupFailure != "" {
 		t.Fatal("wrong trust produced false readiness or hid cleanup", failed)
 	}
-	h.close()
 	if err := os.WriteFile(trust, ca, 0600); err != nil {
 		t.Fatal(err)
 	}
-	h.start()
 	command(true, "gateway", "start")
 	command(true, "restart", "--config", configPath, id)
 	command(true, "stop", id)
 	command(true, "gateway", "stop")
+	currentDaemon, err := h.cli.Status(context.Background())
+	if err != nil || originalDaemon.PID != currentDaemon.PID {
+		t.Fatal("trust refresh required daemon replacement", err)
+	}
 
 	// Missing saved state must not resurrect stale bootstrap over retained routes.
 	_, saved, _ := managedPaths(h.dir)
@@ -490,6 +519,17 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	command(true, "gateway", "start")
+	if err = os.Rename(keyPath, keyPath+".fixture-held"); err != nil {
+		t.Fatal(err)
+	}
+	observed := command(true, "gateway", "start")
+	var missingSnapshot v1.GatewayResponse
+	if err = json.Unmarshal(observed, &missingSnapshot); err != nil || missingSnapshot.HostTrust == nil || missingSnapshot.HostTrust.Status != "unknown" || missingSnapshot.RootFingerprint != startedStatus.RootFingerprint || missingSnapshot.TrustCommand == "" {
+		t.Fatal("missing snapshot dropped honest startup hint", string(observed), err)
+	}
+	if err = os.Rename(keyPath+".fixture-held", keyPath); err != nil {
+		t.Fatal(err)
+	}
 	command(true, "gateway", "stop")
 	t.Log("real managed CLI/native HTTPS, normal host DNS, private trust, API/SSR/WebSocket/redirect/cookie, conflict/busy/unavailable gates, stop/start, daemon crash, CA/saved-state persistence verified; browser trust remains a separate gate", root)
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/octacian/backlot/internal/manifest"
 	"github.com/octacian/backlot/internal/plan"
 	"github.com/octacian/backlot/internal/projectconfig"
+	"github.com/octacian/backlot/internal/tlsverify"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -327,7 +328,7 @@ func (s *service) doctorGateway(ctx context.Context, r *v1.DoctorResponse, snap 
 		addPath(r, "gateway_saved_config", saved, "")
 		caPath = filepath.Join(storage, "pki", "authorities", "local", "root.crt")
 		addPath(r, "public_ca_certificate", caPath, "")
-		diagnosticAdd(r, "manual_trust", "operator", v1.DoctorDeferred, "public_ca_certificate is the actual public root file for explicit manual trust; no browser/application trust is inferred or installed")
+		diagnosticAdd(r, "manual_trust", "operator", v1.DoctorDeferred, fmt.Sprintf("inspect backlot gateway trust status --state-dir %q; explicitly install the displayed fingerprint with normal OS authorization; browser/application trust remains separate", s.directory))
 		for _, name := range []string{"root", "intermediate"} {
 			_, err := diagnosticCA(filepath.Join(storage, "pki", "authorities", "local", name+".crt"))
 			diagnosticResult(r, name+"_certificate_dates", "daemon/host public CA", err, "public CA certificate is readable, valid now and contains no key material", "public CA is unreadable, malformed, expired or not yet valid; inspect public_ca_certificate and preserve retained CA state")
@@ -422,6 +423,14 @@ func diagnosticHTTPSAddress(origin *url.URL) string {
 	return net.JoinHostPort(origin.Hostname(), port)
 }
 func doctorTLS(ctx context.Context, r *v1.DoctorResponse, origin *url.URL, roots *x509.CertPool, name, execution string) {
+	if roots == nil {
+		verified, err := tlsverify.Run(ctx, tlsverify.Request{URL: origin.String(), TLSOnly: true}, false)
+		if err == nil && !verified.Verified {
+			err = errors.New("fresh system TLS verification failed")
+		}
+		diagnosticResult(r, name, execution, err, "canonical hostname TLS chain and certificate dates verified in fresh retained environment only", "normal fresh TLS validation failed; check DNS, listener, certificate dates/hostname and retained certificate-file overrides")
+		return
+	}
 	dialer := tls.Dialer{NetDialer: &net.Dialer{Timeout: 3 * time.Second}, Config: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, ServerName: origin.Hostname()}}
 	conn, err := dialer.DialContext(ctx, "tcp", diagnosticHTTPSAddress(origin))
 	if err == nil {

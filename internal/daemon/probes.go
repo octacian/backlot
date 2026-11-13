@@ -6,6 +6,7 @@ import (
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/native"
 	"github.com/octacian/backlot/internal/plan"
+	"github.com/octacian/backlot/internal/tlsverify"
 	"net"
 	"net/http"
 	"net/netip"
@@ -189,6 +190,13 @@ func probeDestination(ctx context.Context, kind, target, pinned string) (bool, e
 	request, err := http.NewRequestWithContext(attempt, http.MethodGet, target, nil)
 	if err != nil {
 		return false, err
+	}
+	if request.URL.Scheme == "https" {
+		verified, err := tlsverify.Run(attempt, tlsverify.Request{URL: target, Pinned: pinned}, false)
+		if err != nil {
+			return false, nil
+		}
+		return verified.Verified && verified.StatusCode >= 200 && verified.StatusCode < 400, nil
 	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, network, pinned)

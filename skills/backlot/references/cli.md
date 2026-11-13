@@ -576,3 +576,41 @@ Protect outputs: ordinary inspection redacts secrets, but explicit `secret`/loca
 reveal and declared successful persistent `startup_details` can disclose them.
 Applications can print secrets into logs/artifacts; no arbitrary content filter
 is promised. Share reviewed exports, never raw daemon state or private generations.
+
+## Gateway host trust
+
+`gateway trust status [--fingerprint ROOT_SHA256]`,
+`gateway trust install --fingerprint ROOT_SHA256 [--new-tracking]` and
+`gateway trust retire --fingerprint OLD_ROOT_SHA256 --acknowledge-impact [--replacement]`
+take flags only, inherit `--json` and accept `--state-dir`. Status/install use a
+validated public snapshot of the selected managed daemon; status with a fingerprint
+and standalone retirement use retained public receipts without a live daemon.
+`--replacement` selects the new managed root through `--state-dir` and requires
+its verified OS trust before old retirement. No arbitrary certificate path/name
+can authorize effects. Status does not start providers or acquire mutation locks.
+
+Gateway start/restart add `root_fingerprint`, `host_trust` and an exact scoped
+`trust_command`; untrusted/unknown host trust remains informational. The daemon
+read-only `/v1/gateway/ca` POST accepts the API version and returns validated public
+certificate/pin/source provenance and a fresh daemon-effective observation.
+
+Trust JSON is one `GatewayTrustResult` document with `action`, public `ca`,
+`host`, `effective`, `outcome`, optional `receipt`, `entry`, `retained`, `warnings`
+and `error`. Host/effective statuses are trusted/untrusted/unknown and identify
+store, context and observation time. OS proof excludes file overrides; effective
+proof uses the daemon's retained environment. These observations do not attest
+published readiness or browser/application trust. Retained source observations
+are incomplete and historical. Failed observations remain unknown.
+
+Argument and pre-selection failures use the usual typed error envelope. Once
+foreground processing has a result, partial/unknown effects remain in that result
+with an actionable `error` and nonzero exit; stock-tool diagnostics/authorization
+use stderr. Status/successful effects exit zero. Interrupted/denied/uncertain
+operations never imply permission to retry destructive work. Entry deletion,
+trust withdrawal and residual trust are separate outcomes. Normal administrator
+authorization can prompt only in the explicit foreground mutation, never at
+startup. No browser automation or implicit elevation occurs.
+
+The [HTTPS guide](https.md#explicit-host-trust-and-retirement) owns target stores,
+permissioned receipt placement, ownership limits, distro-hook effects,
+replacement/removal impact and damaged/legacy/partial recovery.

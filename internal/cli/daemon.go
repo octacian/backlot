@@ -62,6 +62,11 @@ func output(c *urfave.Command, value any, err error) error {
 			}
 		}
 		_, err = fmt.Fprintf(c.Writer, "Gateway %s (%s, HTTPS port %d)\n%s\n", result.Status, result.Mode, result.HTTPSPort, result.Message)
+		if err == nil && result.HostTrust != nil {
+			_, err = fmt.Fprintf(c.Writer, "Root SHA-256: %s\nHost trust: %s (%s)\n%s\n", result.RootFingerprint, result.HostTrust.Status, result.HostTrust.Store, result.TrustCommand)
+		}
+	case v1.GatewayTrustResult:
+		return gatewayTrustOutput(c.Writer, result)
 	case v1.SharedResponse:
 		for _, service := range result.Services {
 			if _, err = fmt.Fprintf(c.Writer, "Shared %s (%s/%s): %s\nAllocations: %d; pending releases: %d\n", service.ID, service.ProjectID, service.Name, service.Status, service.Allocations, service.PendingReleases); err != nil {

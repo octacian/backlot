@@ -7,7 +7,7 @@ summary: 'Retain attempt-scoped public outcomes and evidence under bounded daemo
 tags: [daemon, lifecycle, evidence, state, api, retention]
 supersedes: [/docs/adr/20261018T233600000Z-publish-daemon-owned-portable-run-reports.md, /docs/adr/20261027T215913789Z-separate-declaration-discovery-from-bounded-recorded-inspection.md, /docs/adr/20261025T202510851Z-pin-execution-scoped-build-images-from-native-jobs.md, /docs/adr/20261020T001700474Z-recover-absent-native-sessions-without-cleanup-receipts.md]
 superseded_by: []
-related: []
+related: [/docs/adr/20261113T010112807Z-manage-host-ca-trust-through-explicit-foreground-authorization.md]
 tracking: ["https://github.com/octacian/backlot/issues/99"]
 implemented_by: ["https://github.com/octacian/backlot/commit/13d9a3b76ff1b9d06d00f49b8fa3be6ed4059f35"]
 ---
@@ -89,3 +89,8 @@ first. Native cleanup confidence and unseen-descendant limits remain unchanged.
 [History and export](/docs/evidence.md#retained-attempt-history),
 [retention policy](/docs/evidence.md#logs-and-retention),
 [destruction](/docs/evidence.md#investigation-and-destruction).
+
+The [foreground host-trust decision](/docs/adr/20261113T010112807Z-manage-host-ca-trust-through-explicit-foreground-authorization.md)
+narrowly amends the inherited prohibition on Backlot-driven host trust changes.
+Foreground public provisioning receipts live outside daemon erasure; this does
+not change this record's instance-history retention or successful-destroy rules.

@@ -46,5 +46,9 @@ func (s *service) managedPublicCA(r managedRecord) (v1.GatewayCA, error) {
 }
 
 func trustInstallCommand(directory, fingerprint string) string {
-	return "backlot gateway trust install --state-dir '" + strings.ReplaceAll(directory, "'", "'\\''") + "' --fingerprint " + fingerprint
+	return "backlot gateway trust install --state-dir " + shellQuote(directory) + " --fingerprint " + fingerprint
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }

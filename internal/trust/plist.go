@@ -21,7 +21,7 @@ func (v plistValue) dictionary() bool {
 	}
 	seen := make(map[string]bool, len(v.Children)/2)
 	for i := 0; i < len(v.Children); i += 2 {
-		if v.Children[i].XMLName.Local != "key" || seen[v.Children[i].Text] {
+		if v.Children[i].XMLName.Local != "key" || len(v.Children[i].Children) != 0 || seen[v.Children[i].Text] {
 			return false
 		}
 		seen[v.Children[i].Text] = true
@@ -91,17 +91,21 @@ func exactSSLSettings(entry string) bool {
 		return false
 	}
 	item := settings.Children[0]
-	if item.XMLName.Local != "dict" || len(item.Children) != 6 {
+	if !item.dictionary() || (len(item.Children) != 4 && len(item.Children) != 6) {
 		return false
 	}
 	policy, ok := item.member("kSecTrustSettingsPolicy")
-	if !ok || policy.XMLName.Local != "data" || !bytes.Equal([]byte(policy.Text), []byte("KoZIhvdjZAED")) {
+	if !ok || policy.XMLName.Local != "data" || len(policy.Children) != 0 || !bytes.Equal([]byte(policy.Text), []byte("KoZIhvdjZAED")) {
 		return false
 	}
 	name, ok := item.member("kSecTrustSettingsPolicyName")
-	if !ok || name.XMLName.Local != "string" || name.Text != "sslServer" {
+	if !ok || name.XMLName.Local != "string" || len(name.Children) != 0 || name.Text != "sslServer" {
 		return false
 	}
 	result, ok := item.member("kSecTrustSettingsResult")
-	return ok && result.XMLName.Local == "integer" && result.Text == "1"
+	// Stock security omits the default trustRoot result; no other policy members are allowed.
+	if !ok {
+		return len(item.Children) == 4
+	}
+	return result.XMLName.Local == "integer" && len(result.Children) == 0 && result.Text == "1"
 }

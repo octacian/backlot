@@ -19,6 +19,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/plan"
 )
 
 func TestGatewayPublicCAProvenance(t *testing.T) {
@@ -65,10 +68,32 @@ func TestGatewayPublicCAProvenance(t *testing.T) {
 
 func TestTrustHintShellScope(t *testing.T) {
 	directory := "/state/user's $(printf expanded) daemon"
-	command := trustInstallCommand(directory, strings.Repeat("a", 64))
-	output, err := exec.Command("/bin/sh", "-c", `backlot() { printf '%s' "$5"; }; `+command).Output()
-	if err != nil || string(output) != directory {
-		t.Fatal("hint changed scope in actual shell", string(output), err)
+	state, _, _ := caReferenceState(t)
+	svc := service{store: state, directory: directory}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	record, err := state.managed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response v1.DoctorResponse
+	svc.doctorGateway(ctx, &response, plan.Snapshot{Caddy: &record.Config}, v1.Instance{})
+	commands := map[string]string{"install": trustInstallCommand(directory, strings.Repeat("a", 64))}
+	for _, check := range response.Checks {
+		if check.Name == "manual_trust" {
+			commands["doctor"] = strings.SplitN(strings.TrimPrefix(check.Message, "inspect "), ";", 2)[0]
+		}
+	}
+	if commands["doctor"] == "" {
+		t.Fatal("missing doctor trust hint")
+	}
+	for name, command := range commands {
+		t.Run(name, func(t *testing.T) {
+			output, err := exec.Command("/bin/sh", "-c", `backlot() { printf '%s' "$5"; }; `+command).Output()
+			if err != nil || string(output) != directory {
+				t.Fatal("hint changed scope in actual shell", string(output), err)
+			}
+		})
 	}
 }
 

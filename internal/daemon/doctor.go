@@ -328,7 +328,7 @@ func (s *service) doctorGateway(ctx context.Context, r *v1.DoctorResponse, snap 
 		addPath(r, "gateway_saved_config", saved, "")
 		caPath = filepath.Join(storage, "pki", "authorities", "local", "root.crt")
 		addPath(r, "public_ca_certificate", caPath, "")
-		diagnosticAdd(r, "manual_trust", "operator", v1.DoctorDeferred, fmt.Sprintf("inspect backlot gateway trust status --state-dir %q; explicitly install the displayed fingerprint with normal OS authorization; browser/application trust remains separate", s.directory))
+		diagnosticAdd(r, "manual_trust", "operator", v1.DoctorDeferred, fmt.Sprintf("inspect backlot gateway trust status --state-dir %s; explicitly install the displayed fingerprint with normal OS authorization; browser/application trust remains separate", shellQuote(s.directory)))
 		for _, name := range []string{"root", "intermediate"} {
 			_, err := diagnosticCA(filepath.Join(storage, "pki", "authorities", "local", name+".crt"))
 			diagnosticResult(r, name+"_certificate_dates", "daemon/host public CA", err, "public CA certificate is readable, valid now and contains no key material", "public CA is unreadable, malformed, expired or not yet valid; inspect public_ca_certificate and preserve retained CA state")

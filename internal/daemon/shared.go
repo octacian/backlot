@@ -75,12 +75,17 @@ func (s *store) lockShared(ctx context.Context, ids ...string) (func(), error) {
 		candidate := make(chan struct{}, 1)
 		value, _ := s.sharedLocks.LoadOrStore(id, candidate)
 		lock := value.(chan struct{})
+		wait, cancel := cleanupCallContext(ctx, 20*time.Second)
 		select {
 		case lock <- struct{}{}:
 			acquired = append(acquired, lock)
-		case <-ctx.Done():
+		case <-wait.Done():
+		}
+		err := wait.Err()
+		cancel()
+		if err != nil {
 			release()
-			return nil, ctx.Err()
+			return nil, err
 		}
 	}
 	// A ready lock and cancellation can both win select; never begin effects
@@ -712,6 +717,9 @@ func (s *store) releaseSharedAllocationsWithForce(ctx context.Context, id string
 		if allocation.Released {
 			continue
 		}
+		if err = cleanupBefore(ctx); err != nil {
+			return err
+		}
 		// Destructive intent survives every SQL/Engine failure and acknowledgment gap.
 		if err = s.sharedPoint("release-intent"); err != nil {
 			return err
@@ -741,6 +749,12 @@ func (s *store) releaseSharedAllocationsWithForce(ctx context.Context, id string
 		if err = s.saveSharedAllocations(id, allocations); err != nil {
 			return err
 		}
+		if allocation.Released {
+			cleanupRemoved(ctx, name, "allocation")
+		} else {
+			cleanupResourceOutcome(ctx, name, "allocation", "unresolved")
+		}
+
 		if effectErr != nil {
 			return effectErr
 		}

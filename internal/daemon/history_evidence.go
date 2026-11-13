@@ -468,6 +468,12 @@ func (s *service) retryEvidenceDeletions() error {
 }
 
 func (s *service) eraseDestroyed(id string) (v1.Instance, error) {
+	return s.eraseDestroyedContext(context.Background(), id)
+}
+func (s *service) eraseDestroyedContext(ctx context.Context, id string) (v1.Instance, error) {
+	if err := cleanupBefore(ctx); err != nil {
+		return v1.Instance{}, err
+	}
 	children, err := s.store.dependentTasks(id)
 	if err != nil {
 		return v1.Instance{}, err
@@ -494,9 +500,12 @@ func (s *service) eraseDestroyed(id string) (v1.Instance, error) {
 		return v1.Instance{}, err
 	}
 	for _, child := range children {
-		if _, err := s.eraseDestroyed(child); err != nil {
+		if _, err := s.eraseDestroyedContext(ctx, child); err != nil {
 			return v1.Instance{}, err
 		}
+	}
+	if err := cleanupBefore(ctx); err != nil {
+		return v1.Instance{}, err
 	}
 	var instance v1.Instance
 	err = s.store.db.Update(func(tx *bolt.Tx) error {

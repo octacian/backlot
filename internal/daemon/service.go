@@ -33,7 +33,11 @@ type service struct {
 	mu                    sync.Mutex
 	closing               bool
 	bulkStopping          bool
+	cleanupFences         map[string]bool
+	checkoutRevocations   map[string]uint64
+	cleanupOperations     map[string]*cleanupOperation
 	admissionGeneration   uint64
+	admissionSequence     uint64
 	directory             string
 	executions            map[string]*execution
 	outputs               map[string]chan struct{}
@@ -107,7 +111,11 @@ func (s *service) enrollSource(ctx context.Context, source plan.Source) error {
 	if err != nil {
 		return err
 	}
-	if err := s.store.db.View(func(tx *bolt.Tx) error { _, err := locateCheckout(tx, checkout); return err }); err != nil {
+	var parent string
+	if err := s.store.db.View(func(tx *bolt.Tx) error { var err error; parent, err = locateCheckout(tx, checkout); return err }); err != nil {
+		return err
+	}
+	if err := s.bindCheckout(ctx, parent); err != nil {
 		return err
 	}
 	err = projectconfig.EnrollSource(ctx, source.ProjectPath, source.CheckoutPath, source.ManifestPath)

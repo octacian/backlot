@@ -889,8 +889,11 @@ func TestNamedDestroyRetryPreservesExportsAndPeer(t *testing.T) {
 	target := &v1.SceneTarget{CWD: original.Checkout.Path, Scene: original.Plan.Scene}
 	a := acceptHistory(t, s, id, v1.Stopped, 0)
 	writeAttemptLog(t, s, a, false)
-	data := shortTemp(t)
 	token := newID()
+	data := filepath.Join(s.directory, "data", token)
+	if err := os.MkdirAll(data, 0700); err != nil {
+		t.Fatal(err)
+	}
 	sentinel := filepath.Join(data, "sentinel")
 	if err := os.WriteFile(sentinel, []byte("owned data"), 0600); err != nil {
 		t.Fatal(err)

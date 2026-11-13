@@ -253,6 +253,23 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 				return
 			}
 			writeJSON(w, response)
+		case "/v1/cleanup":
+			var q v1.CleanupRequest
+			if !decode(w, r, &q) || !compatible(w, q.APIVersion) {
+				return
+			}
+			s.writeCleanup(w, r, q)
+		case "/v1/cleanup/cancel":
+			var q v1.CleanupCancelRequest
+			if !decode(w, r, &q) || !compatible(w, q.APIVersion) {
+				return
+			}
+			out, err := s.cancelCleanup(q)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, out)
 		case "/v1/runtime/stop-all":
 			var q v1.StopAllRequest
 			if !decode(w, r, &q) || !compatible(w, q.APIVersion) {

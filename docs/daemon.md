@@ -334,12 +334,20 @@ format and rejection/cleanup rules.
 | `POST /v1/runtime/stop-all` | `StopAllRequest` (`all: true`, required `contract: "stop-all-stream/v1"`, no ID/force) | `StopAllRecord` NDJSON (`accepted`, compact `target` outcomes, `summary`) |
 | `POST /v1/runtime/stop` | `StopRequest` (force requires selected `expected_attempt`) | `InstanceResponse` |
 | `POST /v1/destroy` | `DestroyRequest` (required `contract: "erase-attempt-history/v1"`) | `InstanceResponse` (execution-free destroyed identity) |
+| `POST /v1/cleanup` | `CleanupRequest` (required `contract: "checkout-cleanup/v1"`; optional `apply_preview`) | `CleanupRecord` NDJSON preview or accepted destructive progress |
+| `POST /v1/cleanup/cancel` | `CleanupCancelRequest` (contract, exact daemon generation and operation ID) | `CleanupCancelResponse` acknowledges cancellation intent, not completed cleanup |
 | `POST /v1/attempts/list` | `HistoryRequest` | `HistoryResponse` (at most 100 summaries) |
 | `POST /v1/attempts/inspect` | `AttemptRequest` | `AttemptResponse` |
 | `POST /v1/attempts/prune` | `HistoryPruneRequest` | `HistoryPruneResponse` |
 | `POST /v1/export` | `ExportRequest` (optional exact attempt) | `ExportResponse` |
 | `POST /v1/attached/renew`, `/v1/attached/cancel` | `AttachedRequest` | `SceneResponse` |
 | `POST /v1/logs` | `LogsRequest` | `LogsResponse` |
+
+The [batch cleanup contract](cli.md#checkout-and-orphan-cleanup) scopes admission
+fences to recorded checkout parents. Previously invalidated tickets cannot publish
+after reopening, while unrelated admissions remain usable. Registered cleanup
+owners retain private authority through cancellation and shutdown; temporary stream
+observations end with coordination and its current observer.
 
 Restart/reset and destroy require either a recorded `instance_id` or a named
 `target: SceneTarget`, never both. Named targets cannot contain an instance ID.

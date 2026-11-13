@@ -75,12 +75,17 @@ func (s *store) lockShared(ctx context.Context, ids ...string) (func(), error) {
 		candidate := make(chan struct{}, 1)
 		value, _ := s.sharedLocks.LoadOrStore(id, candidate)
 		lock := value.(chan struct{})
+		wait, cancel := cleanupCallContext(ctx, 20*time.Second)
 		select {
 		case lock <- struct{}{}:
 			acquired = append(acquired, lock)
-		case <-ctx.Done():
+		case <-wait.Done():
+		}
+		err := wait.Err()
+		cancel()
+		if err != nil {
 			release()
-			return nil, ctx.Err()
+			return nil, err
 		}
 	}
 	// A ready lock and cancellation can both win select; never begin effects

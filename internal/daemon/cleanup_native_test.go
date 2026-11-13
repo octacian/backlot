@@ -406,7 +406,12 @@ func TestCleanupRuntimeResourceOutcomes(t *testing.T) {
 				records = append(records, record)
 				return nil
 			})
-			if err != nil || failure && out.Failed != 1 || !failure && out.Done != 1 {
+			if failure {
+				code(t, err, "partial_failure")
+				if out.Failed != 1 {
+					t.Fatal(out)
+				}
+			} else if err != nil || out.Done != 1 {
 				t.Fatal(out, err)
 			}
 			requireCleanupRuntimeOutcomes(t, records, reviewed)

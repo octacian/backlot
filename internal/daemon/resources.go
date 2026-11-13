@@ -709,6 +709,8 @@ func (s *service) destroyLocked(ctx context.Context, id string, force, cancellab
 // recoverResourceEffect records an already-existing effect only after exact
 // ownership proof. It never creates or repairs missing retained storage.
 func recoverResourceEffect(ctx context.Context, d *dockerEngine, r ownedResource) (string, error) {
+	ctx, cancel := cleanupCallContext(ctx, 30*time.Second)
+	defer cancel()
 	if !validID(r.Token) {
 		return "", problem("state_corrupt", "resource capability missing")
 	}

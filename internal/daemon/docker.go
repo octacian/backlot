@@ -129,6 +129,8 @@ func createDockerResource(ctx context.Context, d *dockerEngine, r ownedResource)
 	return "", problem("unsupported_runtime", "unsupported Docker resource")
 }
 func verifyDockerResource(ctx context.Context, d *dockerEngine, r ownedResource) error {
+	ctx, cancel := cleanupCallContext(ctx, 30*time.Second)
+	defer cancel()
 	if d == nil {
 		return problem("missing_provider", "recorded Docker engine required for resource verification")
 	}
@@ -165,6 +167,8 @@ func verifyDockerResource(ctx context.Context, d *dockerEngine, r ownedResource)
 	return problem("state_corrupt", "unknown Docker allocation kind")
 }
 func removeDockerResource(ctx context.Context, d *dockerEngine, r ownedResource) error {
+	ctx, cancel := cleanupCallContext(ctx, 30*time.Second)
+	defer cancel()
 	if err := verifyDockerResource(ctx, d, r); err != nil {
 		if errdefs.IsNotFound(err) {
 			return nil
@@ -182,13 +186,17 @@ func removeDockerResource(ctx context.Context, d *dockerEngine, r ownedResource)
 	return problem("state_corrupt", "unsupported resource removal")
 }
 func (d *dockerEngine) noConsumers(ctx context.Context, g resourceGeneration) error {
-	list, err := d.ContainerList(ctx, client.ContainerListOptions{All: true})
+	call, cancel := cleanupCallContext(ctx, 30*time.Second)
+	list, err := d.ContainerList(call, client.ContainerListOptions{All: true})
+	cancel()
 	if err != nil {
 		return err
 	}
 	desktop, checkedDesktop := false, false
 	for _, item := range list.Items {
-		inspect, err := d.ContainerInspect(ctx, item.ID, client.ContainerInspectOptions{})
+		call, cancel := cleanupCallContext(ctx, 30*time.Second)
+		inspect, err := d.ContainerInspect(call, item.ID, client.ContainerInspectOptions{})
+		cancel()
 		if errdefs.IsNotFound(err) {
 			continue
 		}
@@ -208,7 +216,9 @@ func (d *dockerEngine) noConsumers(ctx context.Context, g resourceGeneration) er
 					if desktopBindSource(m.Source) && !checkedDesktop {
 						checkedDesktop = true
 						if runtime.GOOS == "darwin" {
-							info, err := d.Info(ctx, client.InfoOptions{})
+							call, cancel := cleanupCallContext(ctx, 30*time.Second)
+							info, err := d.Info(call, client.InfoOptions{})
+							cancel()
 							// Unavailable provenance leaves translation unverified. The raw
 							// host identity can still positively identify a consumer.
 							desktop = err == nil && info.Info.OperatingSystem == "Docker Desktop" && info.Info.OSType == "linux"
@@ -695,6 +705,8 @@ func contains(values []string, value string) bool {
 	return false
 }
 func removeContainer(ctx context.Context, d *dockerEngine, r ownedResource) error {
+	ctx, cancel := cleanupCallContext(ctx, 30*time.Second)
+	defer cancel()
 	// Pin pending names before effects; later name reuse never authorizes a target.
 	if r.ID == "" {
 		var err error

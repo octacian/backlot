@@ -8,13 +8,13 @@ import (
 // Accepted lifecycle mutations participate in daemon cancellation and storage ownership just
 // like executions. The closing fence and registration are atomic under service.mu.
 type mutationOwner struct {
-	cancel        context.CancelFunc
-	done          chan struct{}
-	workload      bool
-	generation    uint64
-	id            string
-	checkout      string
-	checkoutEpoch uint64
+	cancel     context.CancelFunc
+	done       chan struct{}
+	workload   bool
+	generation uint64
+	id         string
+	checkout   string
+	admittedAt uint64
 }
 
 func (s *service) beginMutation(ctx context.Context) (context.Context, func(), error) {
@@ -58,7 +58,11 @@ func (s *service) beginOwnedMutation(ctx context.Context, workload bool) (contex
 		return nil, nil, problem("admission_closed", "workload admission is closed; inspect activity before starting again")
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	owner := &mutationOwner{id: newID(), cancel: cancel, done: make(chan struct{}), workload: workload, generation: s.admissionGeneration}
+	// invariant: discovery cannot renew a ticket admitted before scoped revocation.
+	if workload {
+		s.admissionSequence++
+	}
+	owner := &mutationOwner{id: newID(), cancel: cancel, done: make(chan struct{}), workload: workload, generation: s.admissionGeneration, admittedAt: s.admissionSequence}
 	if s.mutationOwners == nil {
 		s.mutationOwners = map[*mutationOwner]struct{}{}
 	}
@@ -84,7 +88,7 @@ func (s *service) workloadAllowed(ctx context.Context) error {
 	if s.bulkStopping || owner != nil && owner.generation != s.admissionGeneration {
 		return problem("admission_closed", "workload admission was invalidated; inspect activity before starting again")
 	}
-	if owner != nil && owner.checkout != "" && (s.cleanupFences[owner.checkout] || owner.checkoutEpoch != s.checkoutEpochs[owner.checkout]) {
+	if owner != nil && owner.checkout != "" && (s.cleanupFences[owner.checkout] || owner.admittedAt < s.checkoutRevocations[owner.checkout]) {
 		return problem("admission_closed", "checkout admission was invalidated by cleanup")
 	}
 	if ctx.Err() != nil {

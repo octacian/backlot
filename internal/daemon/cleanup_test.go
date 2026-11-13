@@ -5,6 +5,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -33,9 +34,13 @@ func cleanupPrepared(t *testing.T, s *service, root, config string, disposable b
 	}
 	return out.Instance
 }
-func awaitCleanup(t *testing.T, o *cleanupOperation) []v1.CleanupRecord {
+func awaitCleanup(t *testing.T, o *cleanupOperation, timeout ...time.Duration) []v1.CleanupRecord {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	budget := 10 * time.Second
+	if len(timeout) > 0 {
+		budget = timeout[0]
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	records := []v1.CleanupRecord{}
 	for i := 0; ; i++ {
@@ -647,5 +652,272 @@ func requireCleanupRuntimeOutcomes(t *testing.T, records []v1.CleanupRecord, rev
 		if count != 1 {
 			t.Fatal("missing or duplicate runtime removal", resource, count)
 		}
+	}
+}
+
+func TestCleanupDelayedDiscoveryAdmission(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	instance := cleanupPrepared(t, s, root, config, false)
+	otherRoot := shortTemp(t)
+	git(t, otherRoot, "init", "-q")
+	otherConfig := writeFixture(t, otherRoot)
+	cleanupPrepared(t, s, otherRoot, otherConfig, false)
+	// All workload entry points acquire this ticket before locating their checkout.
+	selected, finish, err := s.beginWorkload(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer finish()
+	unrelated, otherFinish, err := s.beginWorkload(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer otherFinish()
+	q := cleanupRequest(checkoutParent(instance))
+	preview, err := s.cleanupPreview(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.ApplyPreview = preview.digest
+	op, err := s.startCleanup(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitCleanup(t, op)
+	// Resume the real discovery-to-publication path only after cleanup reopens.
+	_, err = s.prepareSelected(selected, request(root, config, "dev"), false)
+	code(t, err, "admission_closed")
+	if _, err = s.prepareSelected(unrelated, request(otherRoot, otherConfig, "test"), false); err != nil {
+		t.Fatal("unrelated pre-discovery ticket invalidated", err)
+	}
+	fresh, done, err := s.beginWorkload(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer done()
+	if _, err = s.prepareSelected(fresh, request(root, config, "test"), false); err != nil {
+		t.Fatal("fresh admission after reopening rejected", err)
+	}
+}
+
+func TestCleanupBusyTargetDoesNotStarveNext(t *testing.T) {
+	for _, runtime := range []bool{false, true} {
+		t.Run(map[bool]string{false: "instance-lock", true: "runtime-lock"}[runtime], func(t *testing.T) {
+			s, root, config := sceneFixture(t)
+			cleanupPrepared(t, s, root, config, true)
+			cleanupPrepared(t, s, root, config, true)
+			q := v1.CleanupRequest{APIVersion: v1.Version, Contract: v1.CleanupContract, CheckoutPath: root}
+			preview, err := s.cleanupPreview(context.Background(), q)
+			if err != nil || len(preview.targets) != 2 {
+				t.Fatal(preview, err)
+			}
+			first, second := preview.targets[0].target.ID, preview.targets[1].target.ID
+			lock := s.mutationLock(first)
+			if runtime {
+				entry := &execution{done: make(chan struct{}), cancel: func() {}}
+				close(entry.done)
+				s.executions = map[string]*execution{first: entry}
+				lock = &entry.mu
+			}
+			lock.Lock()
+			defer lock.Unlock()
+			q.ApplyPreview = preview.digest
+			op, err := s.startCleanup(context.Background(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer op.cancel()
+			records := awaitCleanup(t, op, 35*time.Second)
+			summary := records[len(records)-1].Summary
+			if summary.Failed != 1 || summary.Done != 1 || summary.Cancelled {
+				t.Fatal(summary)
+			}
+			for id, want := range map[string]v1.InstanceStatus{first: v1.Prepared, second: v1.Destroyed} {
+				current, err := s.store.inspect(id)
+				if err != nil || current.Status != want {
+					t.Fatal("busy target affected independent cleanup", id, current.Status, err)
+				}
+			}
+		})
+	}
+}
+
+func TestCleanupStalledProviderBodyDoesNotStarveNext(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	cleanupPrepared(t, s, root, config, true)
+	cleanupPrepared(t, s, root, config, true)
+	q := v1.CleanupRequest{APIVersion: v1.Version, Contract: v1.CleanupContract, CheckoutPath: root}
+	preview, err := s.cleanupPreview(context.Background(), q)
+	if err != nil || len(preview.targets) != 2 {
+		t.Fatal(preview, err)
+	}
+	first, second := preview.targets[0].target.ID, preview.targets[1].target.ID
+	entered, finished := make(chan struct{}), make(chan struct{})
+	engine := forceEngine(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Error("unauthenticated destructive provider call", r.Method)
+			w.WriteHeader(403)
+			return
+		}
+		if r.URL.Path == "/containers/json" {
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/volumes/") {
+			// Headers arrive immediately; only a bounded body read can terminate this call.
+			_, _ = w.Write([]byte(`{"Name":"owned","Labels":`))
+			w.(http.Flusher).Flush()
+			close(entered)
+			<-r.Context().Done()
+			close(finished)
+			return
+		}
+		t.Error("unexpected provider target", r.URL.Path)
+		http.NotFound(w, r)
+	})
+	resource := ownedResource{Kind: "volume", Name: "owned", ID: "owned", Token: newID()}
+	g := resourceGeneration{ID: newID(), Endpoint: engine.DaemonHost(), Resources: map[string]ownedResource{"data": resource}, Initialized: map[string]bool{}}
+	if err = s.store.saveResources(first, g); err != nil {
+		t.Fatal(err)
+	}
+	preview, err = s.cleanupPreview(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.ApplyPreview = preview.digest
+	op, err := s.startCleanup(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer op.cancel()
+	records := awaitCleanup(t, op, 45*time.Second)
+	summary := records[len(records)-1].Summary
+	if summary.Failed != 1 || summary.Done != 1 || summary.Cancelled {
+		t.Fatal(summary)
+	}
+	select {
+	case <-entered:
+	default:
+		t.Fatal("provider body did not stall")
+	}
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("provider call retained in-flight ownership after reporting completion")
+	}
+	remaining, err := s.store.resources(first)
+	if err != nil || remaining.Resources["data"].Removed {
+		t.Fatal("unverified provider effect committed", remaining, err)
+	}
+	current, err := s.store.inspect(second)
+	if err != nil || current.Status != v1.Destroyed {
+		t.Fatal("later target not attempted", current.Status, err)
+	}
+	found := false
+	for _, record := range records {
+		if record.Resource != nil && record.InstanceID == first && record.Resource.Name == "data" {
+			found = true
+			if record.Resource.Outcome != "unresolved" {
+				t.Fatal(record)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("unresolved effect missing")
+	}
+}
+
+func TestCleanupUnjoinedAdmissionPreservesParent(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	instance := cleanupPrepared(t, s, root, config, false)
+	parent := checkoutParent(instance)
+	selected, finish, err := s.beginWorkload(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer finish()
+	if err = s.bindCheckout(selected, parent); err != nil {
+		t.Fatal(err)
+	}
+	otherRoot := shortTemp(t)
+	git(t, otherRoot, "init", "-q")
+	otherConfig := writeFixture(t, otherRoot)
+	unrelated, otherFinish, err := s.beginWorkload(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer otherFinish()
+	q := cleanupRequest(parent)
+	preview, err := s.cleanupPreview(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.ApplyPreview = preview.digest
+	op, err := s.startCleanup(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer op.cancel()
+	records := awaitCleanup(t, op, 35*time.Second)
+	summary := records[len(records)-1].Summary
+	if summary.Unresolved != 1 || summary.Done != 0 || summary.Cancelled {
+		t.Fatal(summary)
+	}
+	current, err := s.store.inspect(instance.ID)
+	if err != nil || current.Status != v1.Prepared {
+		t.Fatal("unjoined owner lost parent", current.Status, err)
+	}
+	code(t, s.checkWorkload(context.WithoutCancel(selected)), "admission_closed")
+	if _, err = s.prepareSelected(unrelated, request(otherRoot, otherConfig, "test"), false); err != nil {
+		t.Fatal("independent target blocked after timed-out join", err)
+	}
+}
+
+func TestCleanupBusyDependentPreservesParent(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	f := &controlledExpiry{s: s, root: root, config: config}
+	parent, child := taskRecordFixture(t, f)
+	instance, err := f.s.store.inspect(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := cleanupRequest(checkoutParent(instance))
+	preview, err := f.s.cleanupPreview(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected cleanupSelection
+	for _, target := range preview.targets {
+		if target.target.ID == parent {
+			selected = target
+		}
+	}
+	if selected.target.ID == "" || len(selected.dependents[parent]) != 1 {
+		t.Fatal("dependent not captured", preview)
+	}
+	entry := &execution{done: make(chan struct{}), cancel: func() {}}
+	close(entry.done)
+	f.s.executions = map[string]*execution{child: entry}
+	entry.mu.Lock()
+	var unlock sync.Once
+	defer unlock.Do(entry.mu.Unlock)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	ctx = context.WithValue(ctx, cleanupStepsKey{}, &cleanupSteps{reviewed: selected.resources, before: func() error { return nil }, emit: func(string, string, string) {}})
+	joined := make(chan error, 1)
+	go func() { joined <- f.s.destroyCleanupTarget(ctx, preview.scope, selected) }()
+	select {
+	case err = <-joined:
+	case <-time.After(2 * time.Second):
+		unlock.Do(entry.mu.Unlock)
+		<-joined
+		t.Fatal("parent teardown bypassed bounded dependent-owner wait")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("busy dependent not preserved", err)
+	}
+	current, err := f.s.store.inspect(parent)
+	if err != nil || current.Status != instance.Status || current.Execution.Attempt != instance.Execution.Attempt {
+		t.Fatal("parent changed behind unresolved dependent", current, err)
 	}
 }

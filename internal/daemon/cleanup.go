@@ -417,12 +417,13 @@ func (s *service) startCleanup(ctx context.Context, q v1.CleanupRequest) (*clean
 	if s.cleanupFences == nil {
 		s.cleanupFences = map[string]bool{}
 	}
-	if s.checkoutEpochs == nil {
-		s.checkoutEpochs = map[string]uint64{}
+	if s.checkoutRevocations == nil {
+		s.checkoutRevocations = map[string]uint64{}
 	}
+	s.admissionSequence++
 	for parent := range parents {
 		s.cleanupFences[parent] = true
-		s.checkoutEpochs[parent]++
+		s.checkoutRevocations[parent] = s.admissionSequence
 	}
 	preceding := []*mutationOwner{}
 	for owner := range s.mutationOwners {
@@ -453,11 +454,15 @@ func (s *service) startCleanup(ctx context.Context, q v1.CleanupRequest) (*clean
 		defer cancel()
 		defer finish()
 		summary := v1.CleanupSummary{Preview: preview.digest, Targets: len(preview.targets)}
+		unjoined := map[string]bool{}
 		for _, owner := range preceding {
+			wait, cancel := context.WithTimeout(owned, 20*time.Second)
 			select {
 			case <-owner.done:
-			case <-owned.Done():
+			case <-wait.Done():
+				unjoined[owner.checkout] = true
 			}
+			cancel()
 		}
 		for _, selected := range preview.targets {
 			target := selected.target
@@ -469,6 +474,11 @@ func (s *service) startCleanup(ctx context.Context, q v1.CleanupRequest) (*clean
 				event.Outcome = "unattempted"
 				event.Reason = "cancelled"
 				summary.Unattempted++
+			case unjoined[target.CheckoutID]:
+				// A timed-out owner retains its resources; never release its parent.
+				event.Outcome = "unresolved"
+				event.Reason = "blocked"
+				summary.Unresolved++
 			case len(target.Blockers) > 0:
 				event.Outcome = "unresolved"
 				event.Reason = "blocked"
@@ -550,19 +560,32 @@ func (s *service) startCleanup(ctx context.Context, q v1.CleanupRequest) (*clean
 }
 
 func (s *service) destroyCleanupTarget(ctx context.Context, q v1.CleanupRequest, selected cleanupSelection) error {
-	if err := lockExportEvidence(ctx, &s.evidence.deletion); err != nil {
+	if err := lockCleanup(ctx, &s.evidence.deletion); err != nil {
 		return err
 	}
 	defer s.evidence.deletion.Unlock()
-	if !waitBulkLock(ctx, &s.evidence.mu) {
-		return ctx.Err()
+	if err := lockCleanup(ctx, &s.evidence.mu); err != nil {
+		return err
 	}
 	defer s.evidence.mu.Unlock()
 	lock := s.mutationLock(selected.target.ID)
-	if !waitBulkLock(ctx, lock) {
-		return ctx.Err()
+	if err := lockCleanup(ctx, lock); err != nil {
+		return err
 	}
 	defer lock.Unlock()
+	owners := append([]string{selected.target.ID}, selected.dependents[selected.target.ID]...)
+	for _, id := range owners {
+		s.mu.Lock()
+		entry := s.executions[id]
+		s.mu.Unlock()
+		if entry != nil {
+			// Parent teardown joins direct dependents; a busy child must not bypass this bound.
+			if err := lockCleanup(ctx, &entry.mu); err != nil {
+				return err
+			}
+			entry.mu.Unlock()
+		}
+	}
 	s.mu.Lock()
 	fresh, err := s.cleanupPreviewLocked(ctx, q, selected)
 	s.mu.Unlock()
@@ -704,7 +727,6 @@ func (s *service) bindCheckout(ctx context.Context, parent string) error {
 		}
 		if owner.checkout == "" {
 			owner.checkout = parent
-			owner.checkoutEpoch = s.checkoutEpochs[parent]
 		}
 	}
 	return s.workloadAllowed(ctx)
@@ -756,4 +778,19 @@ func cleanupPathAbsent(path string) (bool, error) {
 		return true, nil
 	}
 	return false, err
+}
+
+// cleanupCallContext bounds one batch lock acquisition or provider effect, never
+// a target or operation. Other lifecycle callers retain their existing budgets.
+func cleanupCallContext(ctx context.Context, budget time.Duration) (context.Context, context.CancelFunc) {
+	if step, _ := ctx.Value(cleanupStepsKey{}).(*cleanupSteps); step != nil {
+		return context.WithTimeout(ctx, budget)
+	}
+	return ctx, func() {}
+}
+
+func lockCleanup(ctx context.Context, lock *sync.Mutex) error {
+	wait, cancel := cleanupCallContext(ctx, 20*time.Second)
+	defer cancel()
+	return lockExportEvidence(wait, lock)
 }

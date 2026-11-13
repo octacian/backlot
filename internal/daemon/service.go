@@ -34,9 +34,10 @@ type service struct {
 	closing               bool
 	bulkStopping          bool
 	cleanupFences         map[string]bool
-	checkoutEpochs        map[string]uint64
+	checkoutRevocations   map[string]uint64
 	cleanupOperations     map[string]*cleanupOperation
 	admissionGeneration   uint64
+	admissionSequence     uint64
 	directory             string
 	executions            map[string]*execution
 	outputs               map[string]chan struct{}

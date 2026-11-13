@@ -29,7 +29,7 @@ func (c *Client) GatewayCA(ctx context.Context) (v1.GatewayCA, error) {
 	if err := response.Validate(); err != nil {
 		return response, err
 	}
-	if err := response.DaemonEffective.Validate(); err != nil {
+	if err := response.DaemonEffective.Validate(); err != nil || response.DaemonEffective.Context != "effective-environment" {
 		return response, responseError()
 	}
 	return response, nil

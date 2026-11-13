@@ -1,5 +1,11 @@
 package v1
 
+import (
+	"encoding/hex"
+	"path/filepath"
+	"strings"
+)
+
 // GatewayRequest controls the daemon-owned gateway; configuration is needed at start.
 type GatewayRequest struct {
 	ExpectedClaimRevision string `json:"expected_claim_revision,omitempty"`
@@ -29,4 +35,38 @@ type GatewayResponse struct {
 	TrustCommand string `json:"trust_command,omitempty"`
 	// ConfigSource describes this selection: explicit, default, or retained.
 	ConfigSource string `json:"config_source,omitempty"`
+}
+
+// Validate checks gateway readiness and optional, scoped host-trust guidance.
+func (r GatewayResponse) Validate() error {
+	bad := func() error { return &PlanError{Code: "invalid_response", Message: "invalid gateway response"} }
+	if r.APIVersion != Version || r.Mode != "managed" {
+		return bad()
+	}
+	switch r.Status {
+	case "unconfigured", "running", "stopped", "interrupted", "unavailable", "uncertain":
+	default:
+		return bad()
+	}
+	if r.HostTrust == nil && r.RootFingerprint == "" && r.TrustCommand == "" {
+		return nil
+	}
+	if r.HostTrust == nil || r.HostTrust.Validate() != nil || r.HostTrust.Context != "os" {
+		return bad()
+	}
+	pin, err := hex.DecodeString(r.RootFingerprint)
+	if err != nil || len(pin) != 32 || hex.EncodeToString(pin) != r.RootFingerprint {
+		return bad()
+	}
+	quoted, ok := strings.CutPrefix(r.TrustCommand, "backlot gateway trust install --state-dir '")
+	if !ok {
+		return bad()
+	}
+	quoted, ok = strings.CutSuffix(quoted, "' --fingerprint "+r.RootFingerprint)
+	// Only the producer's single-quoted literal and apostrophe escape are allowed.
+	directory := strings.ReplaceAll(quoted, "'\\''", "'")
+	if !ok || !filepath.IsAbs(directory) || strings.ContainsRune(directory, 0) || strings.ReplaceAll(directory, "'", "'\\''") != quoted {
+		return bad()
+	}
+	return nil
 }

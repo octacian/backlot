@@ -9,7 +9,7 @@ supersedes: []
 superseded_by: []
 related: [/docs/adr/20261110T181436860Z-organize-management-by-daemon-checkout-and-persistent-scene.md, /docs/adr/20261111T214921188Z-stream-workload-wide-stop-outcomes-without-a-fixed-scope-ceiling.md, /docs/adr/20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md, /docs/adr/20261106T230242771Z-recover-device-only-bindings-after-verified-consumer-settlement.md]
 tracking: [https://github.com/octacian/backlot/issues/132]
-implemented_by: []
+implemented_by: [https://github.com/octacian/backlot/pull/147]
 ---
 
 # Confirm recorded checkout cleanup before streaming destruction

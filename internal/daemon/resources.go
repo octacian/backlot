@@ -645,6 +645,7 @@ func (s *service) destroyLocked(ctx context.Context, id string, force, cancellab
 		return instance, err
 	}
 	instance, err = s.stopExecution(id)
+	var keptStopErr error
 	// Cancellation may create a kept owner while the finite executor joins.
 	// Destroy must join that retained owner before removing its consumers' data.
 	if instance.Execution != nil && instance.Execution.Kept {
@@ -654,10 +655,19 @@ func (s *service) destroyLocked(ctx context.Context, id string, force, cancellab
 		if entry != nil {
 			var stopErr error
 			instance, stopErr = s.stopKept(id, entry)
-			if stopErr != nil {
-				return instance, stopErr
-			}
+			keptStopErr = stopErr
 		}
+	}
+	// Stop owners use their own bounded teardown contexts. Observe their durable
+	// removal commits after joining, even when teardown or a later step fails.
+	if step, _ := ctx.Value(cleanupStepsKey{}).(*cleanupSteps); step != nil {
+		observeErr := s.store.observeStoppedResources(ctx, id, step.reviewed)
+		if observeErr != nil {
+			return instance, errors.Join(err, keptStopErr, observeErr)
+		}
+	}
+	if keptStopErr != nil {
+		return instance, keptStopErr
 	}
 	if err != nil {
 		var typed *v1.PlanError
@@ -781,4 +791,41 @@ func (s *store) recordCleanupFailure(id string, cause error) error {
 	result.CleanupDetails = cleanupDetails(cause)
 	_, err = s.execution(id, instance.Status, result)
 	return errors.Join(cause, err)
+}
+
+// observeStoppedResources reports only durable removal of the same capabilities
+// captured by the approved preview. In-memory teardown flags are not proof.
+func (s *store) observeStoppedResources(ctx context.Context, id string, before resourceGeneration) error {
+	after, err := s.resources(id)
+	if err != nil {
+		return err
+	}
+	if before.ID != after.ID {
+		return problem("target_changed", "resource generation changed during stop; preserved")
+	}
+	removed := func(a, b ownedResource) bool {
+		if a.Removed || !b.Removed {
+			return false
+		}
+		b.Removed = false
+		// A pending capability may acquire its provider ID during owned recovery.
+		if a.ID == "" {
+			b.ID = ""
+		}
+		return a == b
+	}
+	for name, a := range before.Resources {
+		if removed(a, after.Resources[name]) {
+			cleanupRemoved(ctx, name, a.Kind)
+		}
+	}
+	for _, a := range before.Containers {
+		for _, b := range after.Containers {
+			if removed(a, b) {
+				cleanupRemoved(ctx, a.Component, "container")
+				break
+			}
+		}
+	}
+	return nil
 }

@@ -5,9 +5,11 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -452,5 +454,198 @@ func TestCleanupNativeAbandonmentProofParity(t *testing.T) {
 				t.Fatal("preview is stricter than the existing independent absence proof", preview.targets[0].target.Blockers)
 			}
 		})
+	}
+}
+
+func TestCleanupLateDanglingCheckoutPreservesData(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	instance := cleanupPrepared(t, s, root, config, true)
+	token := newID()
+	resource := ownedResource{Kind: "directory", Token: token, ID: token}
+	resource.Name = filepath.Join(s.directory, "data", token)
+	if err := os.MkdirAll(resource.Name, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{".backlot-owner": token, "retained": "keep"} {
+		if err := os.WriteFile(filepath.Join(resource.Name, name), []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g := resourceGeneration{ID: newID(), Resources: map[string]ownedResource{"data": resource}, Initialized: map[string]bool{}}
+	if err := s.store.saveResources(instance.ID, g); err != nil {
+		t.Fatal(err)
+	}
+	acceptHistory(t, s, instance.ID, v1.Stopped, 0)
+	releaseZeroLaunchTaskFixture(t, s.store, instance.ID)
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	restored := false
+	s.store.sharedCheckpoint = func(point string) error {
+		if point == "directory-authority-durable" {
+			restored = true
+			return os.Symlink(filepath.Join(t.TempDir(), "absent"), root)
+		}
+		return nil
+	}
+	q := v1.CleanupRequest{APIVersion: v1.Version, Contract: v1.CleanupContract, Orphans: true}
+	preview, err := s.cleanupPreview(context.Background(), q)
+	if err != nil || len(preview.targets) != 1 {
+		t.Fatal(preview, err)
+	}
+	q.ApplyPreview = preview.digest
+	op, err := s.startCleanup(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := awaitCleanup(t, op)
+	if !restored || records[len(records)-1].Summary.Unresolved != 1 {
+		t.Fatal("late restoration was not fenced", records)
+	}
+	if data, err := os.ReadFile(filepath.Join(resource.Name, "retained")); err != nil || string(data) != "keep" {
+		t.Fatal("remaining data deleted", err)
+	}
+	if _, err := os.Lstat(filepath.Join(resource.Name, ".backlot-owner")); err != nil {
+		t.Fatal("authority deleted", err)
+	}
+	current, err := s.store.inspect(instance.ID)
+	if err != nil || current.Status == v1.Destroyed {
+		t.Fatal("evidence erased", err)
+	}
+	// The same presence predicate also excludes the dangling path at preview time.
+	next, err := s.cleanupPreview(context.Background(), q)
+	if err != nil || len(next.targets) != 0 {
+		t.Fatal("dangling checkout treated as absent", next, err)
+	}
+}
+
+func TestCleanupCommittedStopOutcomes(t *testing.T) {
+	for _, scenario := range []struct{ failure, queued bool }{{}, {true, false}, {false, true}, {true, true}} {
+		failure := scenario.failure
+		name := map[bool]string{false: "success", true: "later-data-failure"}[failure]
+		if scenario.queued {
+			name = "queued-" + name
+		}
+		t.Run(name, func(t *testing.T) {
+			s, root, config := sceneFixture(t)
+			engine := forceEngine(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Error("unexpected provider mutation", r.Method, r.URL.Path)
+					w.WriteHeader(403)
+					return
+				}
+				if r.URL.Path == "/containers/json" {
+					_, _ = w.Write([]byte("[]"))
+					return
+				}
+				http.NotFound(w, r)
+			})
+			instance := cleanupPrepared(t, s, root, config, false)
+			token := newID()
+			r := ownedResource{Kind: "directory", Token: token, ID: token}
+			r.Name = filepath.Join(s.directory, "data", r.Token)
+			if err := os.MkdirAll(r.Name, 0700); err != nil {
+				t.Fatal(err)
+			}
+			proof := r.Token
+			if failure {
+				proof = "invalid"
+			}
+			if err := os.WriteFile(filepath.Join(r.Name, ".backlot-owner"), []byte(proof), 0600); err != nil {
+				t.Fatal(err)
+			}
+			attempt := acceptHistory(t, s, instance.ID, v1.Stopped, 0)
+			g := resourceGeneration{ID: newID(), Endpoint: engine.DaemonHost(), Resources: map[string]ownedResource{"data": r, "net": {Kind: "network", Name: "net", Token: newID(), ID: newID()}}, Containers: []ownedResource{{Kind: "container", Name: "owned", Component: "app", Token: newID(), Attempt: attempt.Result.Attempt, ID: newID()}}, Initialized: map[string]bool{}}
+			g.Resources["prior"] = ownedResource{Kind: "network", Name: "prior", Token: newID(), ID: newID(), Removed: true}
+			if err := s.store.saveResources(instance.ID, g); err != nil {
+				t.Fatal(err)
+			}
+			entry := &execution{done: make(chan struct{}), attempt: attempt.Result.Attempt}
+			var stopped sync.Once
+			entry.cancel = func() {
+				stopped.Do(func() {
+					network := g.Resources["net"]
+					network.Removed = true
+					g.Resources["net"] = network
+					g.Containers[0].Removed = true
+					entry.err = s.store.saveResources(instance.ID, g)
+					if entry.err == nil {
+						j, e := s.store.runtime(instance.ID)
+						if e == nil {
+							e = s.store.recordConsumerRelease(context.Background(), instance.ID, j, v1.SettlementExecutionCleanup, true)
+						}
+						entry.err = e
+					}
+					close(entry.done)
+				})
+			}
+			s.executions = map[string]*execution{instance.ID: entry}
+			q := cleanupRequest(checkoutParent(instance))
+			preview, err := s.cleanupPreview(context.Background(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			q.ApplyPreview = preview.digest
+			lock := s.mutationLock(instance.ID)
+			if scenario.queued {
+				lock.Lock()
+			}
+			op, err := s.startCleanup(context.Background(), q)
+			if err != nil {
+				if scenario.queued {
+					lock.Unlock()
+				}
+				t.Fatal(err)
+			}
+			if scenario.queued {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_, err = op.next(ctx, 1)
+				cancel()
+				if err == nil {
+					entry.cancel()
+				}
+				lock.Unlock()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			records := awaitCleanup(t, op)
+			requireCleanupRuntimeOutcomes(t, records, preview.targets[0].target.Resources)
+			for _, record := range records {
+				if record.Resource != nil && record.Resource.Name == "prior" {
+					t.Fatal("reported resource absent from reviewed loss", record)
+				}
+			}
+			summary := records[len(records)-1].Summary
+			if failure && summary.Failed != 1 || !failure && summary.Done != 1 {
+				current, _ := s.store.inspect(instance.ID)
+				raw, _ := json.Marshal(records)
+				t.Fatal(summary, string(raw), current.Execution, entry.err)
+			}
+		})
+	}
+}
+
+func requireCleanupRuntimeOutcomes(t *testing.T, records []v1.CleanupRecord, reviewed []v1.CleanupResource) {
+	t.Helper()
+	for _, resource := range reviewed {
+		if resource.Kind != "container" && resource.Kind != "network" {
+			continue
+		}
+		count := 0
+		for _, record := range records {
+			if record.Resource != nil && record.Resource.Name == resource.Name && record.Resource.Kind == resource.Kind {
+				count++
+				// Exercise the same typed records serialized as NDJSON by the transport.
+				raw, err := json.Marshal(record)
+				var decoded v1.CleanupRecord
+				if err != nil || json.Unmarshal(raw, &decoded) != nil || decoded.Validate() != nil || decoded.Resource.Outcome != "removed" {
+					t.Fatal("committed removal misreported", string(raw), err)
+				}
+			}
+		}
+		if count != 1 {
+			t.Fatal("missing or duplicate runtime removal", resource, count)
+		}
 	}
 }

@@ -2,7 +2,7 @@
 title: "Confirm recorded checkout cleanup before streaming destruction"
 date: 2026-11-13
 status: accepted
-implementation: in-progress
+implementation: implemented
 summary: "Authorize a reviewed recorded target set, fence its checkout admission, and stream cancellable destruction through existing ownership journals."
 tags: [cleanup, lifecycle, ownership, cli, api]
 supersedes: []

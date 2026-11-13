@@ -343,3 +343,81 @@ func TestCleanupCLICancelsBeforeAcceptance(t *testing.T) {
 		t.Fatal("unaccepted cleanup had effects", err, current.Status)
 	}
 }
+
+func TestCleanupRuntimeResourceOutcomes(t *testing.T) {
+	endpoint := os.Getenv("BACKLOT_DOCKER_TEST_ENDPOINT")
+	if endpoint == "" {
+		t.Skip("requires explicit Docker endpoint and pre-pulled alpine:3.21")
+	}
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
+	for _, failure := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "later-data-failure"}[failure], func(t *testing.T) {
+			h := newDockerHarness(t, binary, endpoint)
+			h.alpine()
+			server := h.manifest.Components["server"]
+			server.Fixtures = map[string]v1.Fixture{"directory": {Value: fixtureRef("resource", "directory", "path")}}
+			h.manifest.Components["server"] = server
+			h.write()
+			instance := h.run("dev").Instance
+			h.state(instance.ID, v1.RuntimeReady)
+			var restoreProof func() error
+			if failure {
+				fixtures, err := h.cli.Fixtures(context.Background(), v1.FixturesRequest{APIVersion: v1.Version, InstanceID: instance.ID, Component: "server"})
+				if err != nil || len(fixtures.Fixtures) != 1 {
+					t.Fatal(fixtures, err)
+				}
+				marker := filepath.Join(fixtures.Fixtures[0].Value, ".backlot-owner")
+				proof, err := os.ReadFile(marker)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Restore only this fixture's exact proof before harness reconciliation.
+				restoreProof = func() error { return os.WriteFile(marker, proof, 0600) }
+				t.Cleanup(func() {
+					if err := restoreProof(); err != nil && !os.IsNotExist(err) {
+						t.Error(err)
+					}
+				})
+				if err = os.WriteFile(marker, []byte("injected-uncertainty"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			q := v1.CleanupRequest{APIVersion: v1.Version, Contract: v1.CleanupContract, CheckoutPath: h.project}
+			var reviewed []v1.CleanupResource
+			preview, err := h.cli.Cleanup(context.Background(), q, func(record v1.CleanupRecord) error {
+				if record.Target != nil {
+					reviewed = append(reviewed, record.Target.Resources...)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			kinds := map[string]bool{}
+			for _, resource := range reviewed {
+				kinds[resource.Kind] = true
+			}
+			if !kinds["container"] || !kinds["network"] {
+				t.Fatal("fixture lacks runtime resources", reviewed)
+			}
+			q.ApplyPreview = preview.Preview
+			var records []v1.CleanupRecord
+			out, err := h.cli.Cleanup(context.Background(), q, func(record v1.CleanupRecord) error {
+				records = append(records, record)
+				return nil
+			})
+			if err != nil || failure && out.Failed != 1 || !failure && out.Done != 1 {
+				t.Fatal(out, err)
+			}
+			requireCleanupRuntimeOutcomes(t, records, reviewed)
+			if failure {
+				if err := restoreProof(); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := h.cli.Destroy(context.Background(), instance.ID); err != nil {
+					t.Fatal("exact retry after restored fixture proof", err)
+				}
+			}
+		})
+	}
+}

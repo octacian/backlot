@@ -7,9 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -22,6 +24,7 @@ import (
 )
 
 type cleanupSelection struct {
+	resources  resourceGeneration
 	target     v1.CleanupTarget
 	authority  string
 	dependents map[string][]string
@@ -183,9 +186,8 @@ func (s *service) cleanupPreviewLocked(ctx context.Context, q v1.CleanupRequest,
 			if e != nil {
 				return e
 			}
-			_, statErr := os.Stat(b.Current.Path)
-			missing := os.IsNotExist(statErr)
-			if q.Orphans && statErr == nil {
+			missing, statErr := cleanupPathAbsent(b.Current.Path)
+			if q.Orphans && !missing && statErr == nil {
 				return nil
 			}
 			t := v1.CleanupTarget{ID: string(k), CheckoutID: parent, CheckoutPath: b.Current.Path, Project: r.Instance.Plan.Project, Scene: r.Instance.Plan.Scene, Status: r.Instance.Status, MissingPath: missing, Blockers: []string{}, Resources: []v1.CleanupResource{}}
@@ -199,11 +201,6 @@ func (s *service) cleanupPreviewLocked(ctx context.Context, q v1.CleanupRequest,
 			}
 			if statErr != nil && !missing {
 				block("checkout_unavailable")
-			}
-			if missing {
-				if _, e := os.Lstat(b.Current.Path); e == nil {
-					block("binding_unverified")
-				}
 			}
 			if b.PendingPath != "" {
 				block("binding_unverified")
@@ -287,6 +284,9 @@ func (s *service) cleanupPreviewLocked(ctx context.Context, q v1.CleanupRequest,
 			t.Revision = cleanupHash(s.repairKey, revision)
 			// Stop may settle an existing attempt or remove its network, but never grants
 			// authority over another attempt, generation, allocation or evidence identity.
+			reviewed := g
+			g.Resources = maps.Clone(g.Resources)
+			g.Containers = slices.Clone(g.Containers)
 			for name, resource := range g.Resources {
 				resource.Removed = false
 				g.Resources[name] = resource
@@ -300,7 +300,7 @@ func (s *service) cleanupPreviewLocked(ctx context.Context, q v1.CleanupRequest,
 				allocations[name] = a
 			}
 			authority := cleanupHash(s.repairKey, parent, b, r.Instance.Checkout, r.Instance.Plan, r.Instance.Task, executionAttempt(r.Instance), g, allocations, attempts)
-			out.targets = append(out.targets, cleanupSelection{target: t, authority: authority, dependents: budget.dependents})
+			out.targets = append(out.targets, cleanupSelection{target: t, authority: authority, dependents: budget.dependents, resources: reviewed})
 			return nil
 		})
 	})
@@ -480,17 +480,20 @@ func (s *service) startCleanup(ctx context.Context, q v1.CleanupRequest) (*clean
 				progress.Outcome = "stopping"
 				operation.emit(progress)
 				observed := map[string]bool{}
-				step := &cleanupSteps{before: func() error {
+				step := &cleanupSteps{reviewed: selected.resources, before: func() error {
 					if err := owned.Err(); err != nil {
 						return err
 					}
 					if q.Orphans {
-						if _, err := os.Stat(target.CheckoutPath); !os.IsNotExist(err) {
+						if absent, err := cleanupPathAbsent(target.CheckoutPath); err != nil || !absent {
 							return problem("target_changed", "orphan checkout is no longer absent; preserved")
 						}
 					}
 					return nil
 				}, emit: func(name, kind, outcome string) {
+					if observed[kind+"/"+name] {
+						return
+					}
 					observed[kind+"/"+name] = true
 					e := record
 					e.Type = "resource"
@@ -500,6 +503,8 @@ func (s *service) startCleanup(ctx context.Context, q v1.CleanupRequest) (*clean
 				}}
 				err := s.destroyCleanupTarget(context.WithValue(owned, cleanupStepsKey{}, step), preview.scope, selected)
 				if err != nil {
+					// Prior owners may settle while this target waits for its turn.
+					_ = s.store.observeStoppedResources(context.WithValue(owned, cleanupStepsKey{}, step), target.ID, selected.resources)
 					for _, resource := range target.Resources {
 						if !observed[resource.Kind+"/"+resource.Name] {
 							step.emit(resource.Name, resource.Kind, "unresolved")
@@ -583,8 +588,9 @@ func (s *service) destroyCleanupTarget(ctx context.Context, q v1.CleanupRequest,
 
 type cleanupStepsKey struct{}
 type cleanupSteps struct {
-	before func() error
-	emit   func(string, string, string)
+	reviewed resourceGeneration
+	before   func() error
+	emit     func(string, string, string)
 }
 
 func cleanupBefore(ctx context.Context) error {
@@ -740,4 +746,14 @@ func (s *service) checkCleanupRegistration(selected string, next v1.Registration
 		}
 		return nil
 	})
+}
+
+// cleanupPathAbsent treats a dangling symlink as a present checkout. All phases
+// use the same proof; an inaccessible path never authorizes orphan destruction.
+func cleanupPathAbsent(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return true, nil
+	}
+	return false, err
 }

@@ -611,6 +611,16 @@ then read only relevant providers. Host-only work does not contact Docker even
 when the machine file or unselected declarations contain Docker settings.
 Offline `plan` remains provider-free and mutation-free.
 
+Scene output explicitly defers retained-consumer settlement, protected compatibility
+with retained snapshots and reassociation eligibility. These are not evaluated,
+even when current registration and inputs pass. Use `project diagnose` to identify
+recorded instances and retained owners, then `doctor --instance INSTANCE_ID` for
+recorded cleanup observations. For protected compatibility and repair blockers,
+use `project reassociate` with the exact retained owner IDs for a read-only preview;
+registration marker IDs are not retained owner IDs. Keep the same `--state-dir`,
+and use the same project/config selection for the preview. Neither scene nor
+instance doctor establishes that a scene will start or reassociation will succeed.
+
 Tool checks show current daemon command/readiness candidates, resolved paths and
 winning manifest/machine/private declaration sources from the same lookup.
 `current_tool_*` paths/checks describe this observation; `recorded_tool_*` paths

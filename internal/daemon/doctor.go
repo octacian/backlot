@@ -108,6 +108,9 @@ func (s *service) doctor(ctx context.Context, request v1.DoctorRequest) (v1.Doct
 		validateRecordedTools(&r, snap)
 	} else {
 		r.Scope = "scene"
+		diagnosticAdd(&r, "retained_consumer_settlement", "scene/retained state", v1.DoctorDeferred, "retained consumer settlement not evaluated for a scene target; use project diagnose to find recorded instance IDs, then doctor --instance INSTANCE_ID for recorded cleanup observations")
+		diagnosticAdd(&r, "protected_compatibility", "scene/retained state", v1.DoctorDeferred, "protected compatibility with retained snapshots not evaluated; use project diagnose, then project reassociate with exact retained owner IDs for a read-only preview")
+		diagnosticAdd(&r, "reassociation_eligibility", "scene/retained state", v1.DoctorDeferred, "reassociation eligibility not evaluated; use project diagnose and an exact-owner project reassociate preview; healthy means no observed diagnostic failure and does not establish start or repair readiness")
 		source, err := plan.Locate(request.ProjectPath)
 		if err != nil {
 			diagnosticAdd(&r, "runtime_inputs", "daemon/host", v1.DoctorFailed, "cannot discover selected manifest; verify --project and retain exactly one supported manifest")

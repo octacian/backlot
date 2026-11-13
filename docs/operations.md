@@ -235,12 +235,13 @@ inputs or local tool overrides are needed, use `backlot project setup` once;
 repeat it to inspect, or use `--edit` to change the private registration.
 See [configuration layers](manifest.md#registered-private-project-configuration).
 
-Start the daemon explicitly from the intended tool/environment context. Start a
-managed gateway only for published scenes, after [HTTPS setup](https.md).
+Start infrastructure explicitly from the intended tool/environment context.
+`infra start` composes the daemon and selected managed gateway after [HTTPS setup](https.md);
+without managed configuration it starts administration alone.
 Use the same `--state-dir` throughout if overriding the default:
 
 ```sh
-backlot daemon start --json
+backlot infra start --json
 backlot plan test --json -- APPLICATION_TEST_ARGS
 backlot doctor --scene test --json
 backlot run test --json -- APPLICATION_TEST_ARGS
@@ -297,7 +298,9 @@ recorded IDs are the fallback when checkout identity is unavailable. Never prune
 by resource name, hostname or observed PID. Preserve state on uncertain cleanup
 and retry through the same daemon scope. See the
 [lifecycle decision table](daemon.md#identity-and-lifecycle).
-`daemon stop` is for deliberate daemon shutdown, not routine scene cleanup.
+Use `infra stop` for deliberate scope-wide infrastructure cleanup with verified
+ownership release. `daemon stop` retains its stopping acknowledgment. Neither is
+routine scene cleanup; both reach peer projects/worktrees in the selected scope.
 
 For activity across projects/worktrees in the selected daemon, run
 `backlot activity --json`. Use `stop --all` only when the entire selected scope

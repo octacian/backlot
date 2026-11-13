@@ -9,7 +9,7 @@ supersedes: []
 superseded_by: []
 related: [/docs/adr/20261028T235219299Z-install-verified-releases-with-bounded-daemon-maintenance.md, /docs/adr/20261111T214921188Z-stream-workload-wide-stop-outcomes-without-a-fixed-scope-ceiling.md, /docs/adr/20261027T183153280Z-use-framework-parsing-and-preserve-truthful-cli-results.md]
 tracking: [https://github.com/octacian/backlot/issues/97]
-implemented_by: []
+implemented_by: [https://github.com/octacian/backlot/pull/146]
 ---
 
 # Compose infrastructure controls with verified shutdown completion

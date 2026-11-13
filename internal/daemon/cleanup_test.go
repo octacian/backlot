@@ -1,0 +1,456 @@
+//go:build darwin || linux
+
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	v1 "github.com/octacian/backlot/api/v1"
+	"github.com/octacian/backlot/internal/native"
+	bolt "go.etcd.io/bbolt"
+)
+
+func cleanupRequest(parent string) v1.CleanupRequest {
+	return v1.CleanupRequest{APIVersion: v1.Version, Contract: v1.CleanupContract, CheckoutID: parent}
+}
+func cleanupPrepared(t *testing.T, s *service, root, config string, disposable bool) v1.Instance {
+	t.Helper()
+	scene := "dev"
+	if disposable {
+		scene = "test"
+	}
+	out, err := s.prepare(context.Background(), request(root, config, scene))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out.Instance
+}
+func awaitCleanup(t *testing.T, o *cleanupOperation) []v1.CleanupRecord {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	records := []v1.CleanupRecord{}
+	for i := 0; ; i++ {
+		r, err := o.next(ctx, i)
+		if err != nil {
+			t.Fatal("unfinished cleanup", err)
+		}
+		if err = r.Validate(); err != nil {
+			t.Fatal("invalid emitted record", r, err)
+		}
+		records = append(records, r)
+		if r.Type == "summary" {
+			return records
+		}
+	}
+}
+func TestCleanupPreviewRevalidationAndScope(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	first := cleanupPrepared(t, s, root, config, false)
+	otherRoot := shortTemp(t)
+	git(t, otherRoot, "init", "-q")
+	otherConfig := writeFixture(t, otherRoot)
+	other := cleanupPrepared(t, s, otherRoot, otherConfig, false)
+	external := filepath.Join(t.TempDir(), "export")
+	if err := os.WriteFile(external, []byte("caller export"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	q := cleanupRequest(checkoutParent(first))
+	before, err := s.cleanupPreview(context.Background(), q)
+	if err != nil || len(before.targets) != 1 {
+		t.Fatal(before, err)
+	}
+	again, err := s.cleanupPreview(context.Background(), q)
+	if err != nil || again.digest != before.digest {
+		t.Fatal("preview has timer/random drift", err)
+	}
+	cleanupPrepared(t, s, root, config, true)
+	q.ApplyPreview = before.digest
+	_, err = s.startCleanup(context.Background(), q)
+	code(t, err, "stale_preview")
+	current, err := s.store.inspect(first.ID)
+	if err != nil || current.Status != v1.Prepared {
+		t.Fatal("stale preview had effects", err, current.Status)
+	}
+	preview, err := s.cleanupPreview(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.ApplyPreview = preview.digest
+	op, err := s.startCleanup(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := awaitCleanup(t, op)
+	summary := records[len(records)-1].Summary
+	if summary.Done != 2 || summary.Failed+summary.Unresolved+summary.Unattempted != 0 {
+		t.Fatal(summary)
+	}
+	current, err = s.store.inspect(other.ID)
+	if err != nil || current.Status != v1.Prepared {
+		t.Fatal("other checkout modified", err, current.Status)
+	}
+	data, err := os.ReadFile(external)
+	if err != nil || string(data) != "caller export" {
+		t.Fatal("caller export modified", err)
+	}
+	s.releaseCleanup(op.id, op, true)
+	s.mu.Lock()
+	remaining := len(s.cleanupOperations)
+	s.mu.Unlock()
+	if remaining != 0 {
+		t.Fatal("finished operation leaked", remaining)
+	}
+}
+func TestCleanupLateOrphanReappearanceAndCancellation(t *testing.T) {
+	for _, cancelled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "reappeared", true: "cancelled"}[cancelled], func(t *testing.T) {
+			s, root, config := sceneFixture(t)
+			cleanupPrepared(t, s, root, config, true)
+			cleanupPrepared(t, s, root, config, true)
+			if err := os.RemoveAll(root); err != nil {
+				t.Fatal(err)
+			}
+			q := v1.CleanupRequest{APIVersion: v1.Version, Contract: v1.CleanupContract, Orphans: true}
+			preview, err := s.cleanupPreview(context.Background(), q)
+			if err != nil || len(preview.targets) != 2 {
+				t.Fatal(preview, err)
+			}
+			first := preview.targets[0].target.ID
+			second := preview.targets[1].target.ID
+			lock := s.mutationLock(first)
+			lock.Lock()
+			q.ApplyPreview = preview.digest
+			op, err := s.startCleanup(context.Background(), q)
+			if err != nil {
+				lock.Unlock()
+				t.Fatal(err)
+			}
+			ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+			defer stop()
+			if _, err = op.next(ctx, 1); err != nil {
+				lock.Unlock()
+				t.Fatal(err)
+			}
+			if cancelled {
+				ack, err := s.cancelCleanup(v1.CleanupCancelRequest{APIVersion: v1.Version, Contract: v1.CleanupContract, DaemonGeneration: s.generation, OperationID: op.id})
+				if err != nil || !ack.Cancelled {
+					lock.Unlock()
+					t.Fatal(ack, err)
+				}
+			} else if err = os.Mkdir(root, 0700); err != nil {
+				lock.Unlock()
+				t.Fatal(err)
+			}
+			lock.Unlock()
+			records := awaitCleanup(t, op)
+			summary := records[len(records)-1].Summary
+			if cancelled {
+				if !summary.Cancelled || summary.Unattempted != 1 || summary.Unresolved != 1 {
+					t.Fatal(summary)
+				}
+			} else if summary.Unresolved != 2 || summary.Done != 0 {
+				t.Fatal("reappeared checkout deleted", summary)
+			}
+			for _, id := range []string{first, second} {
+				current, err := s.store.inspect(id)
+				if err != nil || current.Status != v1.Prepared {
+					t.Fatal("unreviewed deletion", err, current.Status)
+				}
+			}
+			s.mu.Lock()
+			fences := len(s.cleanupFences)
+			s.mu.Unlock()
+			if fences != 0 {
+				t.Fatal("fence not released")
+			}
+		})
+	}
+}
+func TestCleanupScopedTicketsAndRepairFence(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	instance := cleanupPrepared(t, s, root, config, false)
+	parent := checkoutParent(instance)
+	selected, finish, err := s.beginWorkload(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.bindCheckout(selected, parent); err != nil {
+		t.Fatal(err)
+	}
+	unrelated, otherFinish, err := s.beginWorkload(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer otherFinish()
+	if err = s.bindCheckout(unrelated, newID()); err != nil {
+		t.Fatal(err)
+	}
+	q := cleanupRequest(parent)
+	preview, err := s.cleanupPreview(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.ApplyPreview = preview.digest
+	op, err := s.startCleanup(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code(t, s.checkWorkload(context.WithoutCancel(selected)), "admission_closed")
+	if err = s.checkWorkload(unrelated); err != nil {
+		t.Fatal("unrelated ticket invalidated", err)
+	}
+	code(t, s.checkCleanupBindings([]string{parent}), "conflict")
+	code(t, s.checkCleanupRegistration(parent, associatedCheckout(instance).Registration), "conflict")
+	if err = s.checkCleanupBindings([]string{newID()}); err != nil {
+		t.Fatal(err)
+	}
+	finish()
+	awaitCleanup(t, op)
+	code(t, s.checkWorkload(context.WithoutCancel(selected)), "admission_closed")
+	if err = s.checkWorkload(unrelated); err != nil {
+		t.Fatal("unrelated ticket invalidated after reopening", err)
+	}
+}
+func TestCleanupTombstoneEvidenceRetry(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	instance := cleanupPrepared(t, s, root, config, false)
+	if _, err := s.destroy(context.Background(), instance.ID); err != nil {
+		t.Fatal(err)
+	}
+	directory := filepath.Join(s.directory, "artifacts", instance.ID)
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "residual"), []byte("evidence"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		return put(tx, "evidence_deletions", instance.ID+"/", evidenceDeletion{InstanceID: instance.ID})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	q := cleanupRequest(checkoutParent(instance))
+	preview, err := s.cleanupPreview(context.Background(), q)
+	if err != nil || len(preview.targets) != 1 || preview.targets[0].target.Status != v1.Destroyed {
+		t.Fatal("residual tombstone omitted", preview, err)
+	}
+	q.ApplyPreview = preview.digest
+	op, err := s.startCleanup(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := awaitCleanup(t, op)
+	if records[len(records)-1].Summary.Done != 1 {
+		t.Fatal(records)
+	}
+	if _, err := os.Stat(directory); !os.IsNotExist(err) {
+		t.Fatal("residual evidence retained", err)
+	}
+	preview, err = s.cleanupPreview(context.Background(), q)
+	if err != nil || len(preview.targets) != 0 {
+		t.Fatal("completed erasure still selected", err)
+	}
+}
+func TestCleanupOrphanBlockersAndPrivateOutput(t *testing.T) {
+	for _, mode := range []string{"present", "live", "uncertain", "binding"} {
+		t.Run(mode, func(t *testing.T) {
+			s, root, config := sceneFixture(t)
+			instance := cleanupPrepared(t, s, root, config, false)
+			parent := checkoutParent(instance)
+			if mode != "present" {
+				if err := os.RemoveAll(root); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "live" {
+				ctx, finish, err := s.beginWorkload(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer finish()
+				if err = s.bindCheckout(ctx, parent); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "uncertain" {
+				acceptHistory(t, s, instance.ID, v1.Interrupted, time.Hour)
+			}
+			if mode == "binding" {
+				if err := s.store.db.Update(func(tx *bolt.Tx) error {
+					b, err := readCheckoutBinding(tx, parent)
+					if err != nil {
+						return err
+					}
+					b.PendingPath = b.Current.Path
+					return put(tx, "checkout_bindings", parent, b)
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			q := v1.CleanupRequest{APIVersion: v1.Version, Contract: v1.CleanupContract, Orphans: true}
+			preview, err := s.cleanupPreview(context.Background(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "present" {
+				if len(preview.targets) != 0 {
+					t.Fatal("present checkout selected")
+				}
+				return
+			}
+			if len(preview.targets) != 1 || len(preview.targets[0].target.Blockers) == 0 {
+				t.Fatal("unsafe orphan eligible", preview)
+			}
+			data, _ := json.Marshal(preview.targetsPublic())
+			for _, secret := range []string{"resolved-fixture-secret", "seed-fixture-secret", "private-config-sentinel", "ownership_token"} {
+				if strings.Contains(string(data), secret) {
+					t.Fatal("private output leaked")
+				}
+			}
+			q.ApplyPreview = preview.digest
+			op, err := s.startCleanup(context.Background(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			records := awaitCleanup(t, op)
+			if records[len(records)-1].Summary.Unresolved != 1 {
+				t.Fatal(records)
+			}
+			current, err := s.store.inspect(instance.ID)
+			if err != nil || current.Status == v1.Destroyed {
+				t.Fatal("blocked orphan destroyed", err)
+			}
+		})
+	}
+}
+
+func TestCleanupDirectoryWitnessSurvivesStoreReopen(t *testing.T) {
+	s, id := historyFixture(t)
+	acceptHistory(t, s, id, v1.Stopped, 0)
+	token := newID()
+	directory := filepath.Join(s.directory, "data", token)
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{".backlot-owner": token, "data": "retained data"} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g := resourceGeneration{ID: newID(), Resources: map[string]ownedResource{"data": {Kind: "directory", Name: directory, Token: token, ID: token}}, Initialized: map[string]bool{}}
+	if err := s.store.saveResources(id, g); err != nil {
+		t.Fatal(err)
+	}
+	releaseZeroLaunchTaskFixture(t, s.store, id)
+	s.store.sharedCheckpoint = func(point string) error {
+		if point == "directory-marker-removed" {
+			return context.Canceled
+		}
+		return nil
+	}
+	_, err := s.destroy(context.Background(), id)
+	code(t, err, "cleanup_failed")
+	if _, err = os.Stat(filepath.Join(s.directory, "data", ".backlot-delete-"+token)); err != nil {
+		t.Fatal("retry authority missing", err)
+	}
+	if err = s.store.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := openStore(s.directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.store.db = reopened.db
+	s.store.sharedCheckpoint = nil
+	result, err := s.destroy(context.Background(), id)
+	if err != nil || result.Status != v1.Destroyed {
+		t.Fatal("exact-ID retry after interruption failed", err, result.Status)
+	}
+	if _, err = os.Stat(directory); !os.IsNotExist(err) {
+		t.Fatal("directory root remains", err)
+	}
+	if _, err = os.Stat(filepath.Join(s.directory, "data", ".backlot-delete-"+token)); !os.IsNotExist(err) {
+		t.Fatal("witness remains", err)
+	}
+}
+
+func TestCleanupLegacyRegistrationIsolation(t *testing.T) {
+	s, root, config := sceneFixture(t)
+	one := cleanupPrepared(t, s, root, config, false)
+	otherRoot := shortTemp(t)
+	git(t, otherRoot, "init", "-q")
+	otherConfig := writeFixture(t, otherRoot)
+	two := cleanupPrepared(t, s, otherRoot, otherConfig, false)
+	selected, other := checkoutParent(one), checkoutParent(two)
+	if err := s.store.db.Update(func(tx *bolt.Tx) error {
+		for _, parent := range []string{selected, other} {
+			b, err := readCheckoutBinding(tx, parent)
+			if err != nil {
+				return err
+			}
+			b.Current.Registration = v1.RegistrationIdentity{}
+			b.Revision = newID()
+			if err = put(tx, "checkout_bindings", parent, b); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.cleanupFences = map[string]bool{other: true}
+	if err := s.checkCleanupRegistration(selected, v1.RegistrationIdentity{}); err != nil {
+		t.Fatal("unknown common paths related unrelated legacy checkouts", err)
+	}
+	code(t, s.checkCleanupRegistration(other, v1.RegistrationIdentity{}), "conflict")
+}
+func TestCleanupNativeAbandonmentProofParity(t *testing.T) {
+	current, err := native.CurrentBoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := settlementOldBoot
+	if old == current {
+		old = settlementBoot
+	}
+	for _, scenario := range []struct {
+		name, boot string
+		allowed    bool
+	}{{"earlier", old, true}, {"current", current, false}, {"unknown", "", false}} {
+		t.Run(scenario.name, func(t *testing.T) {
+			s, id := historyFixture(t)
+			acceptHistory(t, s, id, v1.Stopped, 0)
+			if err := s.store.db.Update(func(tx *bolt.Tx) error {
+				r, err := load(tx, id)
+				if err != nil {
+					return err
+				}
+				r.NativeAbandonments = []nativeAbandonment{{Attempt: r.Instance.Execution.Attempt, Boot: scenario.boot, Pending: true, PendingBoot: scenario.boot, RecordedAt: time.Now().UTC().Format(time.RFC3339Nano), Reason: "explicit_operator_acknowledgement"}}
+				return put(tx, "instances", id, r)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.store.guardAbandonedData(id); (err == nil) != scenario.allowed {
+				t.Fatal("existing absence proof differs", err)
+			}
+			instance, err := s.store.inspect(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preview, err := s.cleanupPreview(context.Background(), cleanupRequest(checkoutParent(instance)))
+			if err != nil || len(preview.targets) != 1 {
+				t.Fatal(preview, err)
+			}
+			if (len(preview.targets[0].target.Blockers) == 0) != scenario.allowed {
+				t.Fatal("preview is stricter than the existing independent absence proof", preview.targets[0].target.Blockers)
+			}
+		})
+	}
+}

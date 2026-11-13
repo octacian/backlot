@@ -141,6 +141,11 @@ func forEachConsumerChild(tx *bolt.Tx, id string, budgets []*scanBudget, visit f
 // consumerErased recognizes completed scene/task erasure without assigning a
 // no-launch history. Pending deletion still fences the selected owner.
 func consumerErased(tx *bolt.Tx, r record, budget ...*scanBudget) (bool, error) {
+	return consumerErasure(tx, r, false, budget...)
+}
+
+// consumerErasure permits only validated evidence-only retry on an erased identity.
+func consumerErasure(tx *bolt.Tx, r record, pendingAllowed bool, budget ...*scanBudget) (bool, error) {
 	i := r.Instance
 	if i.Status != v1.Destroyed || i.Execution != nil {
 		return false, nil
@@ -186,7 +191,7 @@ func consumerErased(tx *bolt.Tx, r record, budget ...*scanBudget) (bool, error) 
 			if i.Task != nil {
 				return problem("state_corrupt", "erased task cannot retain dependent consumers")
 			}
-			erased, err := consumerErased(tx, child, budget...)
+			erased, err := consumerErasure(tx, child, pendingAllowed, budget...)
 			if err != nil {
 				return err
 			}
@@ -219,6 +224,9 @@ func consumerErased(tx *bolt.Tx, r record, budget ...*scanBudget) (bool, error) 
 		}
 		if next, _ := pending.Next(); bytes.HasPrefix(next, prefix) {
 			return false, problem("state_corrupt", "erased dependent consumer retains attempt deletion")
+		}
+		if pendingAllowed {
+			return true, nil
 		}
 		return false, problem("cleanup_failed", "consumer evidence erasure remains pending")
 	}

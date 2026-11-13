@@ -156,7 +156,7 @@ func (s *service) startBulk(q v1.StopAllRequest) (*bulkOperation, error) {
 		return nil, err
 	}
 	s.mu.Lock()
-	if s.closing || s.bulkStopping {
+	if s.closing || s.bulkStopping || len(s.cleanupFences) > 0 {
 		s.mu.Unlock()
 		finish()
 		return nil, problem("admission_closed", "bulk stop or daemon shutdown is already in progress; inspect activity")

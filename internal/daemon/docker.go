@@ -744,11 +744,20 @@ func (s *store) cleanupContainers(ctx context.Context, id string, g *resourceGen
 		if r.Removed {
 			continue
 		}
+		if err := cleanupBefore(ctx); err != nil {
+			return errors.Join(failures, err)
+		}
 		if err := removeContainer(ctx, d, r); err != nil {
+			cleanupResourceOutcome(ctx, r.Component, "container", "unresolved")
 			failures = errors.Join(failures, err)
 			continue
 		}
-		failures = errors.Join(failures, s.containerRemoved(id, g, i))
+		if err := s.containerRemoved(id, g, i); err != nil {
+			cleanupResourceOutcome(ctx, r.Component, "container", "unresolved")
+			failures = errors.Join(failures, err)
+		} else {
+			cleanupRemoved(ctx, r.Component, "container")
+		}
 	}
 	return failures
 }

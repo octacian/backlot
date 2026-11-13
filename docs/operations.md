@@ -305,6 +305,12 @@ is authorized; it can stop peers belonging to other projects. It retains data
 and administrative services. Read [the scope, bounds and partial-result contract](cli.md#scope-wide-activity-and-workload-stop)
 before bulk cleanup; a lost reply never authorizes an automatic retry.
 
+Before retiring a checkout, run `backlot checkout destroy` to review its permanent
+data/evidence loss, export needed diagnostics and confirm cleanup. For a checkout
+already removed, preview `backlot orphan cleanup` in the same state root. See
+[cleanup consent and recovery](cli.md#checkout-and-orphan-cleanup) for automation,
+missing-volume caveats and explicit retry.
+
 ## Diagnosis and recovery
 
 | Symptom | Diagnosis and next action |

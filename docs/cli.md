@@ -35,6 +35,8 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `activity [--limit 100] [--after CURSOR]` | One bounded scope-wide activity page, exact infrastructure blockers and recorded/observed provenance |
 | `stop --all` | Fence workload admission and attempt all safely identifiable workloads with live compact outcomes; retain data and infrastructure; no ID or force |
 | `destroy ID` / `scene destroy SCENE [--project PATH]` | Remove owned runtime/data, then erase attempt results/logs/artifacts; export first |
+| `checkout destroy [--checkout PATH \| --checkout-id ID]` | Preview checkout-wide destruction; confirm interactively or apply an exact reviewed digest |
+| `orphan cleanup` | Preview eligible missing-checkout cleanup in the selected state root; explicit confirmation required |
 | `history ID [--limit 100] [--after CURSOR]` | Newest-first retained attempt summaries |
 | `inspect ID --attempt ATTEMPT` / `inspect ID --last-completed` | Exact retained result/provenance; mutually exclusive selectors |
 | `history prune ID [--older-than D] [--keep N] [--dry-run]` | Union selection; requires age and/or count; protects runtime/cleanup obligations |
@@ -194,6 +196,71 @@ it finishes, including after the fence reopens. There is no operation journal,
 replay, cancellation endpoint or automatic retry. After a missing reply, inspect
 activity and known targets in the same scope before explicit recovery; operation
 IDs cannot be replayed after a daemon restart.
+
+### Checkout and orphan cleanup
+
+`checkout destroy` selects all recorded instances owned by the enclosing Git
+checkout, or an exact existing `--checkout PATH`. Use `--checkout-id ID` from the
+preview to select an immutable recorded checkout even after its directory is gone.
+`orphan cleanup` discovers missing-checkout candidates in the selected daemon/state
+root. Neither command follows `list` pagination or scans host-wide resources.
+
+Both preview runtime effects and permanent loss of owned data, shared-database
+allocations, attempt results, logs and artifacts. Shared servers, caller-owned
+exports and unowned external data survive. Export first; active producers must
+stop/join before export, and incomplete evidence can require `--allow-partial`.
+Blocked targets remain visible with `inspect ID` guidance; aggregate cleanup has no
+force override. Destroyed identities with pending authorized evidence erasure are
+included for retry.
+
+Human terminal output previews then asks `Apply this cleanup? [y/N]`. Declining,
+EOF or interruption before application performs no deletion. JSON and noninteractive
+human output only preview. Apply with the returned digest:
+
+```sh
+backlot checkout destroy --json
+backlot checkout destroy --apply-preview DIGEST --json
+backlot checkout destroy --checkout-id CHECKOUT_ID --apply-preview DIGEST
+backlot orphan cleanup --state-dir /private/backlot --json
+backlot orphan cleanup --state-dir /private/backlot --apply-preview DIGEST --json
+```
+
+The digest binds the selected daemon, scope, checkout bindings, target set and
+relevant data/evidence facts. State changes invalidate it; time alone does not.
+Stale previews fail before destructive effects. During application, checkout-scoped
+admission fences prevent new work, and each target's identity/eligibility is checked
+again under lifecycle locks. Changed targets remain unresolved; independent targets
+can still complete. Other checkouts and state roots are not selected.
+
+An eligible orphan has a valid recorded association, an absent current bound path,
+no live preparation/execution/expiry owner and proven settled consumers. Permission
+errors, staged identity repair and uncertain runtime/data cleanup block application.
+A missing path can represent an unplugged volume: the preview exposes the path and
+absence evidence, without claiming that Git intentionally removed it. Review this
+before accepting; there is no automatic purge, age threshold or volume-tracking
+subsystem. Reappearance before a target's destructive steps leaves it unresolved.
+
+`--json` streams typed `CleanupRecord` NDJSON. Preview emits `preview_target` records
+and a final `preview` containing the digest/count. Application emits `accepted`,
+`progress`, `resource`, terminal `target` records and a final `summary`. Terminal
+outcomes are `done`, `failed`, `unresolved` and cancellation-`unattempted`; the summary
+counts every reviewed target. Resource observations distinguish committed removals
+from unresolved cleanup. Human output renders the same facts as they arrive.
+
+There is no total operation timeout or fixed target ceiling. SIGINT/SIGTERM requests
+explicit operation cancellation: stop scheduling targets and pause at safe cleanup
+checkpoints; already-started indivisible effects may finish. The CLI reports whether
+cancellation was acknowledged and keeps observing settlement. A slow/disconnected
+observer cannot block daemon cleanup. A lost stream or cancellation acknowledgement
+leaves completion unknown; inspect known targets in the same state root rather than
+automatically retrying. Partial or unresolved cleanup returns nonzero.
+
+Completed deletions cannot be rolled back. Existing per-instance journals retain
+unfinished cleanup through interruption. Explicitly preview/retry residual work;
+there is no durable batch replay. Shared directory cleanup preserves its original
+ownership marker through content deletion and uses a private terminal-removal
+witness for crash-safe empty-root removal. Markerless nonempty replacements remain
+untouched and unresolved.
 
 ### Named lifecycle mutations
 

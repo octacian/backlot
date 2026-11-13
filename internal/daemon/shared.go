@@ -712,6 +712,9 @@ func (s *store) releaseSharedAllocationsWithForce(ctx context.Context, id string
 		if allocation.Released {
 			continue
 		}
+		if err = cleanupBefore(ctx); err != nil {
+			return err
+		}
 		// Destructive intent survives every SQL/Engine failure and acknowledgment gap.
 		if err = s.sharedPoint("release-intent"); err != nil {
 			return err
@@ -741,6 +744,12 @@ func (s *store) releaseSharedAllocationsWithForce(ctx context.Context, id string
 		if err = s.saveSharedAllocations(id, allocations); err != nil {
 			return err
 		}
+		if allocation.Released {
+			cleanupRemoved(ctx, name, "allocation")
+		} else {
+			cleanupResourceOutcome(ctx, name, "allocation", "unresolved")
+		}
+
 		if effectErr != nil {
 			return effectErr
 		}

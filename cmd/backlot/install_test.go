@@ -372,7 +372,7 @@ func TestInstaller(t *testing.T) {
 }
 
 func testInstallHandoff(t *testing.T, fixture func(*testing.T) *installFixture) {
-	for _, mode := range []string{"success", "many-workloads", "cancel", "activity-unsupported", "status-invalid", "stop-failed", "stop-lost", "lock-retained", "stage-changed", "destination-changed", "rename-denied", "downgrade", "context-cancel", "no-socket", "socket-without-lock", "lock-changed"} {
+	for _, mode := range []string{"success", "many-workloads", "cancel", "activity-unsupported", "status-invalid", "stop-failed", "stop-lost", "lock-retained", "stage-changed", "destination-changed", "rename-denied", "downgrade", "context-cancel", "no-socket", "socket-without-lock", "lock-changed", "root-changed"} {
 		t.Run(mode, func(t *testing.T) {
 			f := fixture(t)
 			f.installOld()
@@ -480,6 +480,12 @@ func testInstallHandoff(t *testing.T, fixture func(*testing.T) *installFixture) 
 				case <-stop:
 					time.Sleep(20 * time.Millisecond)
 					_ = server.Close()
+					if mode == "root-changed" {
+						if err := os.Rename(state, state+"-old"); err != nil {
+							t.Error(err)
+						}
+						installPut(t, state+"/daemon.lock", nil, 0600)
+					}
 					_ = lock.Close()
 				case <-done:
 				}

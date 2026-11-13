@@ -61,6 +61,13 @@ Keep each argv entry intact and credentials in sensitive environment assignments
    and returns nonzero partial results with per-target settlement. Disconnect stops
    waiting, not accepted cleanup; inspect activity/known IDs before explicit recovery.
    See [bulk scope and limits](references/cli.md#scope-wide-activity-and-workload-stop).
+   Use `infra start|status|stop` only for explicitly authorized infrastructure work
+   in one selected state root. Start composes the daemon and configured managed
+   gateway; partial startup leaves the daemon available. Stop cleans up all scoped
+   workloads/infrastructure by default, retains data/CA/history, and streams cleanup
+   plus foreground ownership completion without an aggregate deadline. Missing
+   completion means unknown; do not retry automatically. External gateways remain
+   operator-owned. See [infrastructure lifecycle](references/cli.md#infrastructure-lifecycle).
 5. For edits, consult [identity/lifecycle](references/daemon.md#identity-and-lifecycle)
    and [drift](references/containers.md#generations-jobs-and-drift). Repeated start
    joins starting/ready work with unapplied drift, or requests one compatible new

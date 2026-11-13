@@ -83,3 +83,11 @@ ordinary diagnostics should not reveal inputs. Application logs/artifacts can
 contain secrets; review before sharing. An optional short project-owned instruction
 block can record scene names, normal commands and conventions, never credentials
 or a copied manual. Report actual validation, retained work and remaining prerequisites.
+
+For explicit infrastructure setup, `infra start [--config PATH]` composes compatible
+daemon access and selected managed gateway readiness. Missing managed configuration
+permits daemon-only use; external gateways remain operator-owned. Partial failure
+leaves administration available. Use `infra status` for readiness and bounded recorded
+blockers, and `infra stop` only for explicitly authorized scope-wide cleanup. It
+retains data/CA/history and verifies ownership release after streamed cleanup,
+without an aggregate deadline. See [infrastructure lifecycle](references/cli.md#infrastructure-lifecycle).

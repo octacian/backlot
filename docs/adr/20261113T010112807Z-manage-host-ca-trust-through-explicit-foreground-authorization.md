@@ -9,7 +9,7 @@ supersedes: []
 superseded_by: []
 related: [/docs/adr/20261014T033700000Z-support-managed-local-ca-and-external-caddy-gateways.md, /docs/adr/20261014T215536946Z-extend-managed-https-to-explicit-container-consumers.md, /docs/adr/20261016T201500000Z-support-explicit-linux-managed-https-reachability.md, /docs/adr/20261022T201438827Z-retain-cumulative-daemon-state-migrations-from-version-9.md, /docs/adr/20261028T234801079Z-retain-bounded-attempt-history-and-erase-it-on-successful-destroy.md, /docs/adr/20261106T230242771Z-recover-device-only-bindings-after-verified-consumer-settlement.md, /docs/adr/20261007T052013961Z-use-go-with-a-shared-typed-local-api-and-urfave-cli.md]
 tracking: ["https://github.com/octacian/backlot/issues/95"]
-implemented_by: []
+implemented_by: ["https://github.com/octacian/backlot/pull/148"]
 ---
 
 # Manage host CA trust through explicit foreground authorization

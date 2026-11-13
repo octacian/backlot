@@ -93,3 +93,41 @@ jobs:
           export BACKLOT_CADDY_TEST_BINARY="$RUNNER_TEMP/backlot-tools/caddy"
           go test -race ./internal/gateway -count=1 -v -timeout=15m
           go test -race ./internal/daemon -run '^(TestComposeEarlyFlow|TestCompositionSharedSQL|TestDockerRuntime|TestDisposableEvidenceDocker|TestHTTPSRuntime|TestManagedHTTPSRuntime|TestManagedForceRestart|TestGatewayDefaultConfig|TestContainerManagedHTTPSRuntime|TestBuildImagesDocker)$' -count=1 -v -timeout=40m
+
+  host-trust:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.check == 'true') }}
+    name: Owned host trust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install stock Caddy in runner temporary storage
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/backlot-tools"
+          GOBIN="$RUNNER_TEMP/backlot-tools" go install github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.7
+      - name: Accept owned trust effects on disposable host
+        shell: bash
+        env:
+          BACKLOT_HOST_TRUST_TEST: install-status-retire
+          BACKLOT_DISPOSABLE_HOST_GRANT: github-hosted-ephemeral
+        run: |
+          set -o pipefail
+          export BACKLOT_CADDY_TEST_BINARY="$RUNNER_TEMP/backlot-tools/caddy"
+          go test -race ./internal/daemon -run '^TestOwnedHostTrust$' -count=1 -v -timeout=20m 2>&1 | tee "$RUNNER_TEMP/owned-host-trust.log"
+      - name: Retain public acceptance diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: owned-host-trust-${{ matrix.os }}
+          path: ${{ runner.temp }}/owned-host-trust.log
+          if-no-files-found: warn

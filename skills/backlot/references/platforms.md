@@ -16,6 +16,11 @@ project scope due to limited demand. Reconsider with sufficient interest and
 contributors willing to share ongoing maintenance and native Windows testing.
 WSL guidance below is configuration guidance only, with no WSL QA or support guarantee.
 
+Debian 13.4 is the historical target baseline. Issue 95's reported actual-host
+trust run used Debian 13.7 and Caddy 2.11.7; its temporary raw evidence was lost
+in a power interruption. That report does not prove an exact Debian 13.4 run or
+replace retained acceptance evidence. Ubuntu CI results remain distinct.
+
 macOS and Linux use permissioned Unix sockets and authenticated guardians.
 Application native work may create process groups inside its guardian's session,
 with bounded identity-safe cleanup and explicit observed-empty confidence. New

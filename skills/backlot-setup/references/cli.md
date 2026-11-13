@@ -355,6 +355,11 @@ Doctor accepts either `--scene SCENE [--project PATH] [--config PATH]` or
 `--container-probe-image ALREADY_PRESENT_IMAGE` authorizes a bounded owned probe;
 `--probe-public-ca` additionally mounts only the managed public root. Ordinary
 checks are read-only and never pull, repair, install trust or start the application.
+Scene checks explicitly defer retained-consumer settlement, protected compatibility
+and reassociation eligibility. `healthy` means no observed diagnostic failure;
+it does not establish start or repair readiness. Use `project diagnose`, then
+`doctor --instance ID` for recorded cleanup or an exact-owner `project reassociate`
+preview for protected compatibility and repair blockers, in the same daemon scope.
 See [requested scope and diagnostic limits](daemon.md#scoped-provider-diagnostics)
 and the [probe image contract](daemon.md#explicit-owned-container-probe).
 

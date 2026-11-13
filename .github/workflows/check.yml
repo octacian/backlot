@@ -114,7 +114,9 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/backlot-tools"
-          GOBIN="$RUNNER_TEMP/backlot-tools" go install github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.7
+          GOBIN="$RUNNER_TEMP/backlot-tools" go install -ldflags '-X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7' github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.7
+          "$RUNNER_TEMP/backlot-tools/caddy" version
+          go version -m "$RUNNER_TEMP/backlot-tools/caddy"
       - name: Accept owned trust effects on disposable host
         shell: bash
         env:

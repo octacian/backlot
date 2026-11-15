@@ -21,6 +21,7 @@ import (
 )
 
 type service struct {
+	shutdown              *shutdownOperation
 	repairKey             []byte
 	generation            string
 	diagnosticRecoveryErr error
@@ -273,35 +274,43 @@ func validID(id string) bool {
 	}
 	return true
 }
-func (s *service) stop() error {
+func (s *service) shutdownCleanup(o *shutdownOperation) error {
 	s.mu.Lock()
-	s.closing = true
 	var ids []string
 	for id := range s.executions {
 		ids = append(ids, id)
 	}
 	s.mu.Unlock()
-	result := errors.Join(s.stopMutations(), s.stopDiagnostics(), s.stopExecutions(ids))
-	// Shutdown fences acceptance before joining. Expiry coordinators retain their
-	// own channels so storage cannot close while they finish durable results.
-	result = errors.Join(result, s.joinExpiryWorkers())
-	// Recovered executions have no entry in executions. Retry their durable
-	// exact effects before stopping a gateway explicitly resumed for cleanup.
-	result = errors.Join(result, s.recoverUnownedExecutions())
+	result := o.phase("owners", func() error { return errors.Join(s.stopMutations(), s.stopDiagnostics(), s.stopExecutions(ids)) })
+	result = errors.Join(result, o.phase("expiry", s.joinExpiryWorkers))
+	result = errors.Join(result, o.phase("recovery", func() error {
+		if !s.ownersJoined() {
+			return problem("cleanup_failed", "unjoined owners fence recovered workload cleanup")
+		}
+		return s.recoverUnownedExecutions()
+	}))
 	s.mu.Lock()
 	expiryErr := s.expiryErr
 	s.mu.Unlock()
-	s.mu.Lock()
-	gatewayRecord, gatewayErr := s.store.managed()
-	if gatewayErr == nil {
-		gatewayErr = s.store.stopManaged(&gatewayRecord, s.gatewayGroup)
-	}
-	s.mu.Unlock()
-	var sharedErr error
-	if s.ownersJoined() {
-		sharedErr = s.store.stopSharedServices(context.Background(), "daemon_shutdown")
-	}
-	return errors.Join(result, expiryErr, gatewayErr, sharedErr, s.store.reconcile("daemon shutdown interrupted preparation", false), s.store.cleanupFailures())
+	gatewayErr := o.phase("gateway", func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		r, err := s.store.managed()
+		if err == nil {
+			err = s.store.stopManaged(&r, s.gatewayGroup)
+		}
+		return err
+	})
+	sharedErr := o.phase("shared", func() error {
+		if !s.ownersJoined() {
+			return problem("cleanup_failed", "unjoined owners fence shared service cleanup")
+		}
+		return s.store.stopSharedServices(context.Background(), "daemon_shutdown")
+	})
+	recordErr := o.phase("records", func() error {
+		return errors.Join(s.store.reconcile("daemon shutdown interrupted preparation", false), s.store.cleanupFailures())
+	})
+	return errors.Join(result, expiryErr, gatewayErr, sharedErr, recordErr)
 }
 
 func (s *service) recoverUnownedExecutions() error {
@@ -323,7 +332,9 @@ func (s *service) recoverUnownedExecutions() error {
 		// Closing fences new owners; serialize with any explicit cleanup request
 		// already acting on this recovered instance.
 		unlock := s.lockMutation(id)
-		result = errors.Join(result, s.store.recoverExecution(id))
+		err := s.store.recoverExecution(id)
+		result = errors.Join(result, err)
+		s.shutdownTarget(id, err)
 		unlock()
 	}
 	return result
@@ -437,6 +448,7 @@ func (s *service) stopExecutions(ids []string) error {
 				default:
 				}
 			}
+			s.shutdownTarget(id, err)
 			mu.Lock()
 			result = errors.Join(result, err)
 			mu.Unlock()

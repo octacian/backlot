@@ -109,8 +109,8 @@ A verified same-version rerun may no-op without daemon maintenance.
 
 Observed failures require additional recovery or distribution/signing requirements
 change. Revisit shutdown-specific glue when
-[#97](https://github.com/octacian/backlot/issues/97) supplies bounded, verifiable
-infrastructure completion. Completion alone does not replace holding state
+[#97](https://github.com/octacian/backlot/issues/97) supplies verifiable
+infrastructure completion without an aggregate shutdown deadline. Completion alone does not replace holding state
 ownership through executable replacement.
 
 ## References

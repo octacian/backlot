@@ -51,6 +51,9 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 | `doctor` | Daemon access/paths only; selected scopes and opt-in probe described below |
 | `renew ID --lease-token TOKEN` | Explicitly renew disposable lease; capability from initial preparation, never inspection |
 | `cancel ID` | Cancel preparation/execution using recorded identity; no new work |
+| `infra start [--config PATH]` | Start compatible administration, then the selected managed gateway; preserve the daemon on partial failure |
+| `infra status` | Compatible API/listener readiness plus one bounded recorded activity page; no startup or recovery |
+| `infra stop` | Clean up workloads and owned infrastructure by default, stream progress, then verify held state ownership; retain data/CA/history |
 | `daemon start` / `daemon serve` | Background handshake / foreground service; capture startup environment and policy |
 | `daemon status` / `daemon config` | Connectivity/compatibility / active policy; neither reloads configuration |
 | `daemon stop` | Shutdown and owned cleanup; stopping acknowledgment does not prove exit/lock release |
@@ -67,6 +70,57 @@ accept `--state-dir PATH` and operate only in that daemon's scope.
 Stop retries network cleanup even for stopped records; named stop may report
 `already_stopped` after releasing networks. Consumer, provider or ownership failures
 require correction and retry; see [network cleanup](containers.md#ownership-and-recovery).
+
+### Infrastructure lifecycle
+
+`infra start|status|stop` selects exactly one default or explicit `--state-dir`.
+Start reuses retained managed gateway settings when `--config` is omitted; only
+an unconfigured scope considers the default machine file. Missing default or
+machine configuration without Caddy permits daemon-only use. Invalid/unreadable
+configuration fails; explicit settings conflicting with retained managed settings
+are rejected. External Caddy stays operator-owned and is not probed or stopped.
+Host-only use needs no Docker. A failed gateway start leaves compatible
+administration available and returns nonzero with its partial `InfraResponse`.
+No rollback or automatic scene startup occurs.
+
+`infra status` returns `InfraResponse`: selected directory, daemon generation,
+compatible API access, managed process/listener readiness, aggregate `ready`,
+independent error and inspection guidance. `recorded_activity` is one bounded
+recorded page, with its own completeness/cursor and admission fence. Blockers,
+ports, origins and shared-server status in that page are not provider probes;
+incomplete/changing pages never prove absence. An absent daemon leaves retained
+resources and external gateway readiness unknown. Reads do not open the database,
+start administration or recover resources. Infrastructure readiness does not
+establish DNS, application readiness or certificate trust.
+
+`infra stop` needs no cleanup flag, prompt, force or timeout. It permanently fences
+admissions, joins active/kept work, removes owned routes and stops owned dependencies
+and managed gateway through the existing shutdown lifecycle. Data, credentials,
+CA identity and history remain. Human output is live; `--json` emits typed
+`InfraStopRecord` NDJSON: `accepted`, `phase` (running/succeeded/failed), `target`
+(stopped/failed), terminal `cleanup`, then foreground `completion`.
+Phase/target failures stay visible even when independent cleanup continues.
+Detailed workload diagnostics remain in `inspect ID` and `activity` in the same
+scope. Neither a successful cleanup record alone nor a lost connection proves
+completion. Successful `completion.state=complete` follows successful cleanup,
+acquisition of the existing state lock, socket removal and stable private path
+identities; the foreground holds the lock while emitting completion.
+
+There is no fixed or workload-derived total deadline. Existing individual provider,
+stop-grace and owner-join limits remain. Slow or disconnected observers cannot
+block cleanup; SIGINT/SIGTERM ends observation with unknown completion while
+accepted daemon-owned cleanup continues. A missing terminal or completion record
+means unknown, never automatic retry/restart. Known cleanup failure returns
+nonzero without waiting for success-only ownership proof. An unjoined owner keeps
+the serving process, storage and state lock alive until it joins. Already absent
+administration reports `completion.state=absent`, nonzero `cleanup_unknown`;
+it cannot prove retained resources cleaned and performs no provider cleanup.
+Only an actually observed replacement generation is reported, and it is never
+stopped implicitly. Transient observations cannot detect every intervening daemon.
+
+`daemon stop` keeps its finite cleanup acknowledgment/error semantics; `stopping`
+does not prove lock release. `gateway stop` remains gateway-only: when workloads
+block it, inspect `activity` or use explicitly authorized `infra stop` in that scope.
 
 ### Installer replacement
 
@@ -432,6 +486,8 @@ See [results and evidence](evidence.md) for exit and cancellation rules.
 | ID or named status with `--follow` | `SceneFollowRecord` NDJSON |
 | Attached starts | `AttachedRecord` NDJSON |
 | `install-replace` | Terminal/text only; `--json` rejected with `invalid_arguments`, no successful JSON document |
+| `infra start` / `infra status` | `InfraResponse`, including independently available daemon on partial startup |
+| `infra stop` | `InfraStopRecord` NDJSON through cleanup and foreground completion; absent/unknown/failed are not successful cleanup |
 | `stop --all` | `StopAllRecord` NDJSON: accepted, target outcomes, final summary |
 | `daemon serve` | Foreground service; no successful JSON document; normal error framing on failure |
 | `schema` | Raw finite JSON Schema in all modes |

@@ -411,7 +411,8 @@ func TestManagedHTTPSRuntime(t *testing.T) {
 	if err != nil || !strings.Contains(string(savedConfig), host) {
 		t.Fatal("explicit gateway start did not resume retained scene route", err)
 	}
-	h.close()
+	command(true, "infra", "stop")
+	infraJoin(t, h)
 	state, err = openStore(h.dir)
 	if err != nil {
 		t.Fatal(err)

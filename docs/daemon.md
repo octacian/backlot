@@ -56,6 +56,15 @@ For a scope-wide recorded view and workload-only bulk stop, use
 [`activity` and `stop --all`](cli.md#scope-wide-activity-and-workload-stop).
 Their temporary admission fence leaves administration running and retains bulk-cancelled disposable data.
 
+For explicit infrastructure startup, readiness and cleanup with foreground
+ownership verification, use [`infra start|status|stop`](cli.md#infrastructure-lifecycle).
+It composes the existing lifecycles without another cleanup engine. Shutdown has
+one server-owned coordinator outside its joined mutation owners. Legacy stop and
+infra observation consume the same terminal cleanup result. Cleanup failures reach
+observers under the existing individual limits; the serving process retains
+storage and its lock until remaining owners join. Infra progress is transient and
+is not a durable receipt or replay mechanism.
+
 ## Commands
 
 For binary maintenance, use the [release installer](operations.md#release-installer-and-updates).
@@ -581,6 +590,16 @@ cancellation or lease expiry cleans only task-owned work. Recovery reconciles an
 interrupts tasks before parent effects, never resumes them, and uses private
 attempt-bound journals rather than public history as authority. Reassociation
 requires dependent consumers independently settled too.
+
+## Infrastructure API
+
+POST `/v1/infra/start|status` uses named `InfraRequest`/`InfraResponse` contracts.
+POST `/v1/infra/stop` requires `infra-shutdown/v1` plus the observed daemon
+generation before acceptance and streams `InfraStopRecord` NDJSON. The typed
+client retains partial startup and validates stream framing/identities; the
+foreground daemon package performs the final private lock/socket identity check.
+Observation cancellation does not cancel accepted server-owned cleanup. Existing
+`/v1/stop` retains its finite `DaemonStatusResponse` or error envelope.
 
 ## Managed gateway control
 

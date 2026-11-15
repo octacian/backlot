@@ -217,6 +217,10 @@ func (s *store) stopManaged(r *managedRecord, group *native.Group) error {
 }
 
 func (s *service) gatewayControl(ctx context.Context, action string, request v1.GatewayRequest) (v1.GatewayResponse, error) {
+	return s.gatewayControlSelected(ctx, action, request, false)
+}
+
+func (s *service) gatewayControlSelected(ctx context.Context, action string, request v1.GatewayRequest, infra bool) (v1.GatewayResponse, error) {
 	if request.ConfigPath != "" && request.DefaultConfigPath != "" {
 		return v1.GatewayResponse{}, problem("invalid_request", "select either explicit or default gateway configuration")
 	}
@@ -254,6 +258,9 @@ func (s *service) gatewayControl(ctx context.Context, action string, request v1.
 		data, err := os.ReadFile(configPath)
 		if err != nil {
 			if source == "default" && os.IsNotExist(err) {
+				if infra {
+					return s.gatewayStatus(ctx, r), nil
+				}
 				return v1.GatewayResponse{}, problem("gateway_config", fmt.Sprintf("first gateway start requires managed machine configuration; default %q not found; create it with explicit managed mode and native executable or supply --config", configPath))
 			}
 			return v1.GatewayResponse{}, problem("gateway_config", fmt.Sprintf("cannot read machine configuration %q: %v", configPath, err))
@@ -266,6 +273,13 @@ func (s *service) gatewayControl(ctx context.Context, action string, request v1.
 			return v1.GatewayResponse{}, err
 		}
 		if config.Caddy == nil || config.Caddy.Mode != "managed" {
+			if infra && r.Status == "unconfigured" {
+				mode := "external"
+				if config.Caddy == nil {
+					mode = "none"
+				}
+				return v1.GatewayResponse{APIVersion: v1.Version, Mode: mode, Status: "unconfigured", ConfigSource: source, Message: "No managed gateway selected; external gateway readiness and lifecycle remain operator-owned"}, nil
+			}
 			return v1.GatewayResponse{}, problem("gateway_external", "gateway commands require explicit managed mode; external gateway lifecycle belongs to its operator")
 		}
 		c := manifest.CaddyDefaults(*config.Caddy)
@@ -274,6 +288,9 @@ func (s *service) gatewayControl(ctx context.Context, action string, request v1.
 		}
 		r.Config = c
 	} else if r.Status == "unconfigured" && action != "stop" {
+		if infra {
+			return s.gatewayStatus(ctx, r), nil
+		}
 		return v1.GatewayResponse{}, problem("gateway_config", "first gateway start requires --config with explicit managed mode and native executable")
 	}
 	operationStatus := func() v1.GatewayResponse {
@@ -336,7 +353,7 @@ func (s *store) publishedActive() error {
 				return err
 			}
 			if blocked {
-				return problem("gateway_busy", "stop all active published scenes and dependent tasks before gateway stop/restart")
+				return problem("gateway_busy", "gateway-only stop/restart is blocked by published workloads; inspect backlot activity or use backlot infra stop in the same --state-dir to clean up all workloads and infrastructure")
 			}
 			return nil
 		})

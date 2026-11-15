@@ -21,6 +21,8 @@ import (
 
 // Options selects private state placement and the bounded disposable client lease.
 type Options struct {
+	// serviceReady is a process-fixture seam before API admission.
+	serviceReady      func(*service)
 	sharedCheckpoint  func(string) error
 	Directory         string
 	LeaseDuration     time.Duration
@@ -65,11 +67,8 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 		return problem("permissions", "cannot inspect daemon lock")
 	}
 	lock := flock.New(lockPath, flock.SetPermissions(0600))
-	closeOwnership := true
 	defer func() {
-		if closeOwnership {
-			resultErr = errors.Join(resultErr, lock.Close())
-		}
+		resultErr = errors.Join(resultErr, lock.Close())
 	}()
 	acquired, err := lock.TryLock()
 	if err != nil {
@@ -83,9 +82,7 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 		return err
 	}
 	defer func() {
-		if closeOwnership {
-			resultErr = errors.Join(resultErr, state.db.Close())
-		}
+		resultErr = errors.Join(resultErr, state.db.Close())
 	}()
 	// Cancellation after a committed fence is a forward-recoverable startup
 	// failure, never permission to recover resources or roll the version back.
@@ -168,6 +165,9 @@ func Serve(ctx context.Context, options Options) (resultErr error) {
 		return problem("permissions", "cannot protect daemon socket")
 	}
 	svc := &service{generation: newID(), diagnosticRecoveryErr: diagnosticRecoveryErr, store: state, lease: options.LeaseDuration, directory: options.Directory, evidence: evidencePolicy{age: options.RetentionAge, attempts: options.RetentionAttempts, bytes: options.RetentionBytes}}
+	if options.serviceReady != nil {
+		options.serviceReady(svc)
+	}
 	stopping := make(chan struct{})
 	var once sync.Once
 	status := v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion, Status: "running", PID: os.Getpid(), LeaseDuration: options.LeaseDuration.String()}
@@ -197,13 +197,6 @@ loop:
 		}
 	}
 	stopErr := svc.stop()
-	if !svc.ownersJoined() {
-		// A failed finite join must not close storage underneath its owner. Retain
-		// the database and lock until that owner finishes; shutdown remains an error.
-		closeOwnership = false
-		stopErr = errors.Join(stopErr, problem("cleanup_failed", "execution owner remains unjoined; state ownership retained"))
-		go func() { svc.waitOwners(); _ = state.db.Close(); _ = lock.Close() }()
-	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	shutdownErr := server.Shutdown(shutdownCtx)
@@ -218,6 +211,9 @@ loop:
 	} else if errors.Is(serveErr, http.ErrServerClosed) {
 		serveErr = nil
 	}
+	// invariant: a finite cleanup failure reaches observers before this unbounded
+	// ownership join. Returning here would let main's os.Exit discard the owners.
+	svc.waitOwners()
 	return errors.Join(serveErr, stopErr, shutdownErr)
 }
 
@@ -242,6 +238,28 @@ func handler(s *service, status v1.DaemonStatusResponse, stop func()) http.Handl
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/infra/start", "/v1/infra/status", "/v1/infra/stop":
+			var q v1.InfraRequest
+			if !decode(w, r, &q) {
+				return
+			}
+			action := strings.TrimPrefix(r.URL.Path, "/v1/infra/")
+			if err := q.Validate(action); err != nil {
+				writeError(w, err)
+				return
+			}
+			if action == "stop" {
+				if q.DaemonGeneration != s.generation {
+					writeError(w, problem("replacement_daemon", "observed daemon changed; replacement was not stopped"))
+					return
+				}
+				o := s.startShutdown()
+				stop()
+				s.writeShutdown(w, r, o)
+				return
+			}
+			response := s.infra(r.Context(), action, q)
+			writeJSON(w, response)
 		case "/v1/activity":
 			var q v1.ActivityRequest
 			if !decode(w, r, &q) || !compatible(w, q.APIVersion) {

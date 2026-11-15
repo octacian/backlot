@@ -76,6 +76,7 @@ func TestDoctorHostSelectionAndRedaction(t *testing.T) {
 		t.Fatal("secret declaration escaped diagnostic")
 	}
 	assertDoctorCheck(t, r, "upstreams", v1.DoctorDeferred)
+	assertDoctorSceneLimits(t, r)
 	// A selected runtime input failure is a typed failed result without exposing
 	// secret values or raw parser/provider diagnostics.
 	manifest.Components["job"] = v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: &v1.Command{Tool: "missing"}}
@@ -306,5 +307,21 @@ func TestDoctorToolObservationsAreCurrent(t *testing.T) {
 	raw := fmt.Errorf("raw-error-canary")
 	if toolFailureMessage(raw, "safe fallback") != "safe fallback" {
 		t.Fatal("raw lookup error forwarded")
+	}
+}
+
+func assertDoctorSceneLimits(t *testing.T, response v1.DoctorResponse) {
+	t.Helper()
+	for name, guidance := range map[string]string{
+		"retained_consumer_settlement": "doctor --instance INSTANCE_ID",
+		"protected_compatibility":      "project reassociate",
+		"reassociation_eligibility":    "does not establish start or repair readiness",
+	} {
+		assertDoctorCheck(t, response, name, v1.DoctorDeferred)
+		for _, check := range response.Checks {
+			if check.Name == name && (!strings.Contains(check.Message, "not evaluated") || !strings.Contains(check.Message, "project diagnose") || !strings.Contains(check.Message, guidance)) {
+				t.Fatal("missing scope or next command", check)
+			}
+		}
 	}
 }

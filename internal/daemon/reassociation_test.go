@@ -425,6 +425,7 @@ func TestReassociationDoctorBeforePrivateComposition(t *testing.T) {
 			found = true
 		}
 	}
+	assertDoctorSceneLimits(t, response)
 	if !found || response.Healthy {
 		t.Fatal("private failure masked shared identity conflict")
 	}
@@ -831,8 +832,9 @@ func TestReassociationR4DoctorUnverifiedBinding(t *testing.T) {
 			}
 		}
 	}
-	if !found {
-		t.Fatal("shared identity check missing")
+	assertDoctorSceneLimits(t, r)
+	if !found || r.Healthy {
+		t.Fatal("shared identity check missing or failure hidden")
 	}
 	unregistered := filepath.Join(filepath.Dir(f.project), "unregistered")
 	if err := os.Mkdir(unregistered, 0700); err != nil {
@@ -860,6 +862,7 @@ func TestReassociationR4DoctorUnverifiedBinding(t *testing.T) {
 			}
 		}
 	}
+	assertDoctorSceneLimits(t, fresh)
 	if !found || !reflect.DeepEqual(before, stateContents(t, f.s.store)) {
 		t.Fatal("unregistered identity diagnosis missing or mutated registration")
 	}

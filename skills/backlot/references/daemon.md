@@ -49,6 +49,15 @@ For a scope-wide recorded view and workload-only bulk stop, use
 [`activity` and `stop --all`](cli.md#scope-wide-activity-and-workload-stop).
 Their temporary admission fence leaves administration running and retains bulk-cancelled disposable data.
 
+For explicit infrastructure startup, readiness and cleanup with foreground
+ownership verification, use [`infra start|status|stop`](cli.md#infrastructure-lifecycle).
+It composes the existing lifecycles without another cleanup engine. Shutdown has
+one server-owned coordinator outside its joined mutation owners. Legacy stop and
+infra observation consume the same terminal cleanup result. Cleanup failures reach
+observers under the existing individual limits; the serving process retains
+storage and its lock until remaining owners join. Infra progress is transient and
+is not a durable receipt or replay mechanism.
+
 ## Tasks borrowing a ready parent
 
 [Declared tasks](manifest.md#declared-native-tasks) bind to an already-ready persistent
@@ -225,6 +234,16 @@ Scene diagnostics validate selected tools, inputs, seeds and machine declaration
 then read only relevant providers. Host-only work does not contact Docker even
 when the machine file or unselected declarations contain Docker settings.
 Offline `plan` remains provider-free and mutation-free.
+
+Scene output explicitly defers retained-consumer settlement, protected compatibility
+with retained snapshots and reassociation eligibility. These are not evaluated,
+even when current registration and inputs pass. Use `project diagnose` to identify
+recorded instances and retained owners, then `doctor --instance INSTANCE_ID` for
+recorded cleanup observations. For protected compatibility and repair blockers,
+use `project reassociate` with the exact retained owner IDs for a read-only preview;
+registration marker IDs are not retained owner IDs. Keep the same `--state-dir`,
+and use the same project/config selection for the preview. Neither scene nor
+instance doctor establishes that a scene will start or reassociation will succeed.
 
 Tool checks show current daemon command/readiness candidates, resolved paths and
 winning manifest/machine/private declaration sources from the same lookup.

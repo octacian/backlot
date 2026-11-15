@@ -19,12 +19,12 @@ func TestGatewayTrustArgumentsAndPartialOutput(t *testing.T) {
 			t.Fatal(args, err, out.String())
 		}
 	}
-	r := v1.GatewayTrustResult{Action: "install", Outcome: "partial", CA: v1.GatewayCA{Fingerprint: "exact-root", StateDirectory: "/known-state"}, Host: v1.TrustObservation{Status: "unknown", Store: "selected-domain"}, Entry: "external-preserved", Warnings: []string{"known and unknown consumer impact"}, Error: &v1.PlanError{Code: "gateway_trust", Message: "stock effect incomplete"}}
+	r := v1.GatewayTrustResult{Action: "install", Outcome: "partial", CA: v1.GatewayCA{Fingerprint: "exact-root", StateDirectory: "/known-state"}, Host: v1.TrustObservation{Status: "unknown", Store: "selected-domain"}, Effective: v1.TrustObservation{Status: "unknown", Message: "native standalone root acceptance unavailable"}, Entry: "external-preserved", Warnings: []string{"known and unknown consumer impact"}, Error: &v1.PlanError{Code: "gateway_trust", Message: "stock effect incomplete"}}
 	var text bytes.Buffer
 	if err := gatewayTrustOutput(&text, r); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"exact-root", "partial", "unknown", "external-preserved", "known and unknown consumer impact", "stock effect incomplete"} {
+	for _, want := range []string{"exact-root", "partial", "unknown", "external-preserved", "known and unknown consumer impact", "stock effect incomplete", "native standalone root acceptance unavailable"} {
 		if !strings.Contains(text.String(), want) {
 			t.Fatal(want, text.String())
 		}

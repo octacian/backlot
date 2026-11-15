@@ -238,7 +238,12 @@ func TestOwnedHostTrust(t *testing.T) {
 	}
 	command(true, "gateway", "start", "--config", configPath)
 	before := trust(true, "status")
-	if before.CA.Validate() != nil || before.Host.Status != "untrusted" || before.Effective.Status != "untrusted" {
+	beforeEffective, installedEffective := "untrusted", "trusted"
+	if runtime.GOOS == "darwin" {
+		// Native Go SSL policy cannot establish standalone CA acceptance.
+		beforeEffective, installedEffective = "unknown", "unknown"
+	}
+	if before.CA.Validate() != nil || before.Host.Status != "untrusted" || before.Effective.Status != beforeEffective {
 		t.Fatal("fresh owned root unexpectedly trusted", before)
 	}
 	public = filepath.Join(t.TempDir(), "public.crt")
@@ -285,12 +290,12 @@ func TestOwnedHostTrust(t *testing.T) {
 		t.Fatal("wrong pin not rejected", string(out))
 	}
 	installed := trust(true, "install", "--fingerprint", ca.Fingerprint)
-	if installed.Outcome != "installed" || installed.Host.Status != "trusted" || installed.Effective.Status != "trusted" {
+	if installed.Outcome != "installed" || installed.Host.Status != "trusted" || installed.Effective.Status != installedEffective {
 		t.Fatal("actual sudo install/fresh verification failed", installed)
 	}
 	daemon := h.process // Observation must refresh within this same live daemon.
 	live := trust(true, "status")
-	if live.Host.Status != "trusted" || live.Effective.Status != "trusted" || h.process != daemon {
+	if live.Host.Status != "trusted" || live.Effective.Status != installedEffective || h.process != daemon {
 		t.Fatal("live daemon did not refresh", live)
 	}
 	if runtime.GOOS == "linux" {

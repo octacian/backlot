@@ -3,7 +3,7 @@ title: "Manage host CA trust through explicit foreground authorization"
 date: 2026-11-13
 status: accepted
 implementation: in-progress
-summary: "Manage host trust through explicit foreground stock tools, provisioning receipts, best-effort consumer warnings and fresh TLS verification."
+summary: "Manage host trust through explicit foreground stock tools, provisioning receipts, best-effort consumer warnings and bounded platform trust observations."
 tags: [gateway, https, trust, authorization, persistence, platforms]
 supersedes: []
 superseded_by: []
@@ -74,8 +74,8 @@ There is no gateway enrollment, daemon receipt writer, requirement-release
 lifecycle or cross-daemon start lock. Users may acknowledge consumer impact and
 proceed, potentially breaking unobserved scopes or applications; acknowledgement
 cannot waive provenance. Replacement verifies the selected new root's OS trust
-before retiring the old root. Standalone retirement acknowledges loss of dependent
-HTTPS trust.
+before retiring the old root, using the platform proof below. Standalone retirement
+acknowledges loss of dependent HTTPS trust.
 
 ### Effects, receipts and recovery
 
@@ -115,13 +115,25 @@ old roots may therefore require deliberate manual retirement.
 ### Fresh verification
 
 Installation/replacement proof is root-specific in the selected OS domain,
-independent of certificate-file overrides. File presence, a supplied-root pool,
-override-only acceptance or TLS through another root is insufficient. Separately
-report daemon-effective TLS under its retained environment, preserving overrides
-and providing mismatch guidance. Browser and application trust remain independent.
+independent of certificate-file overrides. On macOS, accept configured OS trust:
+exact supported admin TLS root settings, exact System public root entry and
+current CA dates. Native Go SSL evaluation of a standalone CA cannot reliably
+establish root acceptance, even for stock trusted roots. Requiring that evaluation
+would block valid installation; adding a leaf acquisition contract is unnecessary
+for this selected-domain guarantee. Configuration does not establish source-account
+acceptance or dominance over user deny/other stores. Ubuntu/Debian retain fresh
+exact-root Go verification. File presence alone, a supplied-root pool, override-only
+acceptance or TLS through another root is insufficient.
+
+Separately report daemon-effective standalone root acceptance under its retained
+environment, preserving Go's verifier selection and file overrides. Unsupported
+native proof remains unknown, never copied from configured OS trust. Browser and
+application trust remain independent; normal server-leaf TLS readiness is verified
+separately. This accepts a narrower macOS observation instead of new provider,
+private-key or root-loader contracts.
 
 Use bounded, joined, unprivileged invocations of the same executable for fresh
-observations in both contexts, shared with publication readiness, doctor system-TLS
+Go observations, shared with publication readiness, doctor system-TLS
 and daemon HTTPS probes. Preserve hostname/date/chain checks, owned destinations,
 publication markers, redirects, cancellation and readiness semantics. Explicit-root
 diagnostics remain labeled separately. A new transport or clone of

@@ -7,10 +7,12 @@ import (
 	"context"
 	"crypto/sha1" // The stock trust-settings dictionary uses SHA-1 certificate keys.
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
 	"os"
 	"os/exec"
+	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
 )
@@ -72,6 +74,16 @@ func macEntry(ctx context.Context, ca v1.GatewayCA) (bool, error) {
 }
 
 func selectedTrust(ctx context.Context, ca v1.GatewayCA) (bool, error) {
+	// Retained identity survives expiry; configured trust acceptance does not.
+	block, _ := pem.Decode([]byte(ca.CertificatePEM))
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return false, err
+	}
+	now := time.Now()
+	if now.Before(cert.NotBefore) || now.After(cert.NotAfter) {
+		return false, nil
+	}
 	entry, found, err := macSettings(ctx, ca)
 	if err != nil || !found {
 		return false, err

@@ -597,7 +597,11 @@ certificate/pin/source provenance and a fresh daemon-effective observation.
 Trust JSON is one `GatewayTrustResult` document with `action`, public `ca`,
 `host`, `effective`, `outcome`, optional `receipt`, `entry`, `retained`, `warnings`
 and `error`. Host/effective statuses are trusted/untrusted/unknown and identify
-store, context and observation time. OS proof excludes file overrides; effective
+store, context, observation time and a message explaining proof limits (also
+printed in human output). macOS host `trusted` means configured admin TLS settings,
+exact System public entry and current CA dates; native daemon-effective standalone
+root acceptance may remain `unknown`. Verify actual application TLS separately.
+OS proof excludes file overrides; effective
 proof uses the daemon's retained environment. These observations do not attest
 published readiness or browser/application trust. Retained source observations
 are incomplete and historical. Failed observations remain unknown.

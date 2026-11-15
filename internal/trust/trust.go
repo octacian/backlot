@@ -36,7 +36,7 @@ func target() string {
 	return "unsupported"
 }
 
-// Observe performs bounded root-specific fresh verification. Receipt damage and
+// Observe performs bounded root-specific trust observation. Receipt damage and
 // mutation locks cannot affect this informational operation.
 func Observe(ctx context.Context, ca v1.GatewayCA, osTrust bool) v1.TrustObservation {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -44,6 +44,9 @@ func Observe(ctx context.Context, ca v1.GatewayCA, osTrust bool) v1.TrustObserva
 	observation := v1.TrustObservation{Status: "unknown", Store: target(), Context: "os", ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Message: "root-specific OS trust could not be established; browser and application trust are separate"}
 	if !osTrust {
 		observation.Context = "effective-environment"
+		if runtime.GOOS == "darwin" {
+			observation.Message = "standalone root acceptance could not be established under the daemon environment; macOS native Go TLS policy may require a server leaf; verify the actual application origin"
+		}
 	}
 	if ca.Validate() != nil || target() == "unsupported" {
 		return observation
@@ -57,6 +60,14 @@ func Observe(ctx context.Context, ca v1.GatewayCA, osTrust bool) v1.TrustObserva
 		if !selected {
 			observation.Status = "untrusted"
 			observation.Message = "no exact supported TLS trust in selected OS domain; other domains/applications may differ"
+			if runtime.GOOS == "darwin" {
+				observation.Message = "no configured OS trust for a currently valid root with exact admin TLS settings and System public entry; other domains/applications may differ"
+			}
+			return observation
+		}
+		if runtime.GOOS == "darwin" {
+			observation.Status = "trusted"
+			observation.Message = "configured OS trust: exact admin TLS root settings and System public entry with current CA dates; user deny or other stores may override this; source-account and application TLS acceptance are not proven"
 			return observation
 		}
 	}

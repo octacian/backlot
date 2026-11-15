@@ -108,7 +108,7 @@ func gatewayTrustCommand() *urfave.Command {
 }
 
 func gatewayTrustOutput(w io.Writer, r v1.GatewayTrustResult) error {
-	if _, err := fmt.Fprintf(w, "CA SHA-256: %s\nSource: %s\nHost trust: %s (%s)\nEffective trust: %s\nOutcome: %s; entry: %s\nReceipt: %s\n%s\n", r.CA.Fingerprint, r.CA.StateDirectory, r.Host.Status, r.Host.Store, r.Effective.Status, r.Outcome, r.Entry, r.Receipt, r.Host.Message); err != nil {
+	if _, err := fmt.Fprintf(w, "CA SHA-256: %s\nSource: %s\nHost trust: %s (%s)\nEffective trust: %s\n%s\nOutcome: %s; entry: %s\nReceipt: %s\n%s\n", r.CA.Fingerprint, r.CA.StateDirectory, r.Host.Status, r.Host.Store, r.Effective.Status, r.Effective.Message, r.Outcome, r.Entry, r.Receipt, r.Host.Message); err != nil {
 		return err
 	}
 	for _, warning := range r.Warnings {

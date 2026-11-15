@@ -30,15 +30,20 @@ func TestMain(m *testing.M) {
 
 func publicCA(t *testing.T, expired bool) v1.GatewayCA {
 	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
 	end := time.Now().Add(time.Hour)
 	if expired {
 		end = time.Now().Add(-time.Minute)
 	}
-	cert := &x509.Certificate{SerialNumber: big.NewInt(1), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign, NotBefore: time.Now().Add(-time.Hour), NotAfter: end}
+	return publicCAWithDates(t, time.Now().Add(-time.Hour), end)
+}
+
+func publicCAWithDates(t *testing.T, start, end time.Time) v1.GatewayCA {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := &x509.Certificate{SerialNumber: big.NewInt(1), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign, NotBefore: start, NotAfter: end}
 	der, err := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)

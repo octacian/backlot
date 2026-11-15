@@ -147,8 +147,15 @@ The test requires both `BACKLOT_HOST_TRUST_TEST=install-status-retire` and
 identities/platforms. **Never set these on a normal workstation.** Default
 `make check` skips this test before allocating resources or changing host trust.
 
-Acceptance checks root-specific OS rejection/acceptance, live daemon observation
-refresh without restart, wrong-pin and missing-impact-acknowledgement rejection,
+Acceptance checks exact-root selected-domain trust and live daemon observation
+without restart. On macOS, host acceptance means exact supported admin TLS settings,
+exact System public entry and current root dates; native standalone daemon-effective
+acceptance remains unknown. Linux retains positive effective-root verification.
+These root observations do not prove normal leaf TLS or application readiness.
+The gateway-only fixture requests a wildcard certificate, but startup waits for
+admin readiness, not certificate issuance. It does not synchronize issuance or
+test normal-chain OS-root TLS.
+Acceptance also checks wrong-pin and missing-impact-acknowledgement rejection,
 receipt-only retirement, exact owned withdrawal and identical external-root
 preservation. macOS retirement must report its preserved public entry; fixture
 cleanup removes only the retained exact DER/hash. Linux uses one uniquely owned

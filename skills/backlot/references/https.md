@@ -58,6 +58,15 @@ presence, stock-tool success nor a successful request through another root is
 proof of trust. The public snapshot contains no signing keys or private scope
 capabilities. External gateways retain operator-owned trust management.
 
+On macOS, host `trusted` means **configured OS trust**: the exact supported admin
+TLS root settings, exact System public certificate entry and current CA dates.
+It does not prove source-account acceptance, override a user deny or other stores,
+or establish application TLS readiness. Native Go SSL policy may not establish
+standalone CA acceptance, so daemon-effective trust can remain `unknown` after
+successful installation. Verify the actual application origin with normal TLS.
+File overrides still follow Go policy; their presence alone does not select a
+verifier or prove acceptance. Ubuntu/Debian retain fresh exact-root Go verification.
+
 `install` requires the displayed fingerprint and runs stock OS tools in the
 foreground with normal administrator authorization. On macOS it selects the
 System keychain and admin TLS trust domain, using `security`; on Ubuntu/Debian it

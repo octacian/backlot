@@ -63,7 +63,7 @@ func output(c *urfave.Command, value any, err error) error {
 		}
 		_, err = fmt.Fprintf(c.Writer, "Gateway %s (%s, HTTPS port %d)\n%s\n", result.Status, result.Mode, result.HTTPSPort, result.Message)
 		if err == nil && result.HostTrust != nil {
-			_, err = fmt.Fprintf(c.Writer, "Root SHA-256: %s\nHost trust: %s (%s)\n%s\n", result.RootFingerprint, result.HostTrust.Status, result.HostTrust.Store, result.TrustCommand)
+			_, err = fmt.Fprintf(c.Writer, "Root SHA-256: %s\nHost trust: %s (%s)\n%s\n%s\n", result.RootFingerprint, result.HostTrust.Status, result.HostTrust.Store, result.HostTrust.Message, result.TrustCommand)
 		}
 	case v1.GatewayTrustResult:
 		return gatewayTrustOutput(c.Writer, result)

@@ -365,6 +365,10 @@ func (s *service) rotateRegistration(ctx context.Context, request v1.Reassociati
 		return p.result, problem("conflict", "association admission is busy")
 	}
 	defer s.store.bindingGate.Unlock()
+	if err := s.checkCleanupBindings(p.owners); err != nil {
+		return p.result, err
+	}
+
 	fresh, err := s.rotationPreview(request)
 	if err != nil {
 		return p.result, err

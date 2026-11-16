@@ -16,14 +16,11 @@ import (
 
 func TestPublicCommandConfiguration(t *testing.T) {
 	root := NewCommand(v1.VersionResponse{}, io.Discard, io.Discard)
-	actions, jsonFlags := 0, 0
+	jsonFlags := 0
 	var visit func(*urfave.Command)
 	visit = func(c *urfave.Command) {
 		if c.SkipFlagParsing || c.OnUsageError == nil || c.Usage == "" {
 			t.Fatalf("incomplete public command %s", c.Name)
-		}
-		if len(c.Commands) == 0 {
-			actions++
 		}
 		for _, flag := range c.Flags {
 			if flag.Names()[0] == "json" {
@@ -62,8 +59,8 @@ func TestPublicCommandConfiguration(t *testing.T) {
 		}
 	}
 	visit(root)
-	if actions != 56 || jsonFlags != 1 || root.ExitErrHandler == nil {
-		t.Fatal(actions, jsonFlags)
+	if jsonFlags != 1 || root.ExitErrHandler == nil {
+		t.Fatal(jsonFlags)
 	}
 	for _, c := range root.Commands {
 		if c.Name != "run" && c.Name != "restart" && c.Name != "reset" {

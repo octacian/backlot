@@ -159,6 +159,10 @@ backlot logs --state-dir /private/backlot --follow --json INSTANCE_ID
 backlot destroy --state-dir /private/backlot --json INSTANCE_ID
 ```
 
+For a whole checkout or missing-checkout candidates, use the preview/confirmation
+flows in [checkout and orphan cleanup](cli.md#checkout-and-orphan-cleanup). They
+preserve the same export, ownership, shared-server and evidence-erasure boundaries.
+
 Explicit stop or daemon shutdown stops verified kept runtime while retaining data.
 Explicit destroy removes owned runtime/data after verified stop, then irreversibly
 erases this instance's attempt results, logs, artifacts and private original-result

@@ -37,6 +37,9 @@ func (s *service) runTask(ctx context.Context, q v1.TaskRunRequest) (v1.Instance
 		return out, problem("parent_unavailable", "recorded parent must already be ready")
 	}
 	parent := selected.Result.Instance
+	if err := s.bindCheckout(ctx, checkoutParent(parent)); err != nil {
+		return out, err
+	}
 	if parent.Status != v1.RuntimeReady || parent.Execution == nil {
 		return out, problem("parent_unavailable", "recorded parent must already be ready")
 	}

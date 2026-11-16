@@ -18,7 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gofrs/flock"
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/localipc"
 	"github.com/octacian/backlot/internal/manifest"
@@ -93,29 +92,14 @@ func Install(ctx context.Context, o InstallOptions) (result error) {
 			return nil
 		}
 	}
-	if err := localipc.Directory(o.Directory, true); err != nil {
-		return err
-	}
-	lockPath := filepath.Join(o.Directory, "daemon.lock")
-	lockInfo, err := os.Lstat(lockPath)
-	if err == nil {
-		if err := localipc.File(lockPath, false); err != nil {
-			return err
-		}
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	lock := flock.New(lockPath, flock.SetPermissions(0600))
-	defer func() { result = errors.Join(result, lock.Close()) }()
-	held, err := lock.TryLock()
+	ownership, err := openStateOwnership(o.Directory, true)
 	if err != nil {
 		return err
 	}
-	if lockInfo == nil {
-		lockInfo, err = lock.Stat()
-		if err != nil {
-			return err
-		}
+	defer func() { result = errors.Join(result, ownership.lock.Close()) }()
+	held, err := ownership.try()
+	if err != nil {
+		return err
 	}
 	if !held {
 		if old == nil {
@@ -152,25 +136,13 @@ func Install(ctx context.Context, o InstallOptions) (result error) {
 		}
 		deadline, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		held, err = lock.TryLockContext(deadline, 50*time.Millisecond)
+		held, err = ownership.lock.TryLockContext(deadline, 50*time.Millisecond)
 		if err != nil || !held {
 			return fmt.Errorf("daemon ownership not released: %w", errors.Join(err, deadline.Err()))
 		}
 	}
-	// Ownership and absence are both required; a stale or changing socket is ambiguous.
-	if _, err := os.Lstat(SocketPath(o.Directory)); !os.IsNotExist(err) {
-		return fmt.Errorf("daemon socket remains or cannot be inspected; preserve state for diagnosis")
-	}
-	if err := localipc.Directory(o.Directory, false); err != nil {
+	if err := ownership.verify(); err != nil {
 		return err
-	}
-	if err := localipc.File(lockPath, false); err != nil {
-		return err
-	}
-	lockedInfo, err := lock.Stat()
-	pathInfo, pathErr := os.Lstat(lockPath)
-	if err != nil || pathErr != nil || !os.SameFile(lockedInfo, pathInfo) || !os.SameFile(lockInfo, lockedInfo) {
-		return fmt.Errorf("daemon lock changed; preserve state for diagnosis")
 	}
 	if err := installDirectory(parent); err != nil {
 		return err

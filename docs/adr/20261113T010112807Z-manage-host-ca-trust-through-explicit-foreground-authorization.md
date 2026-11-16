@@ -84,9 +84,10 @@ certificate bytes and an explicit keychain/trust domain with macOS `security`;
 a fingerprint-addressed local CA source and `update-ca-certificates` on
 Ubuntu/Debian. Conflicting entries are preserved. Linux authorization includes
 the normal collection refresh and configured distribution hooks, whose effects
-can extend beyond one root. Backlot does not add browser-specific automation,
-DNS changes, CA regeneration, privileged services or
-[issue 97](https://github.com/octacian/backlot/issues/97) infrastructure orchestration.
+can extend beyond one root. Trust commands do not add browser-specific automation,
+DNS changes, CA regeneration, privileged services or infrastructure orchestration.
+The separate [infrastructure lifecycle decision](/docs/adr/20261112T235351793Z-compose-infrastructure-controls-with-verified-shutdown-completion.md)
+composes the existing gateway lifecycle without installing host trust.
 Unavailable authorization produces actionable instructions.
 
 Serialize foreground mutations and receipt updates with the existing file-lock

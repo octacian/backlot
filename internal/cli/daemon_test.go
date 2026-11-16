@@ -105,6 +105,28 @@ func TestDaemonCLIUsesDurableSocketOperations(t *testing.T) {
 	if err := json.Unmarshal(doctor, &diagnostic); err != nil || !diagnostic.Healthy {
 		t.Fatal("doctor failed")
 	}
+	config := filepath.Join(root, "machine.json")
+	if err := os.WriteFile(config, []byte(`{"version":"backlot/v1"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, format := range []string{"--json", ""} {
+		args := []string{"doctor", "--state-dir", state, "--project", project, "--config", config, "--scene", "test"}
+		if format != "" {
+			args = append(args, format)
+		}
+		data, err := run(args...)
+		if err != nil {
+			t.Fatal(err, string(data))
+		}
+		for _, guidance := range []string{"retained_consumer_settlement", "protected_compatibility", "reassociation_eligibility", "not evaluated", "project diagnose", "doctor --instance INSTANCE_ID", "does not establish start or repair readiness"} {
+			if !strings.Contains(string(data), guidance) {
+				t.Fatal("doctor scope guidance missing", guidance, string(data))
+			}
+		}
+		if format != "" && (json.Unmarshal(data, &diagnostic) != nil || !diagnostic.Healthy) {
+			t.Fatal("deferred checks changed healthy aggregation", string(data))
+		}
+	}
 	invalid, err := run("inspect", "--state-dir", state, "--json", "invalid")
 	if err == nil {
 		t.Fatal("invalid target succeeded")

@@ -136,7 +136,7 @@ backlot scene list --json
 backlot scene describe test --json
 backlot config show --json
 backlot plan test --json
-backlot daemon start --json
+backlot infra start --json
 backlot doctor --scene test --json
 backlot scene start dev --json
 backlot run test --json -- APPLICATION_TEST_ARGS

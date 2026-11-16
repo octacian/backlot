@@ -33,17 +33,17 @@ Docker may supply dependencies or loopback-mapped HTTP upstreams. Explicitly
 configured Docker Desktop bridge consumers can use the same canonical HTTPS
 hostname; see [container trust and mapping](https.md#public-root-file-mounts-for-containers).
 
-Start the daemon and gateway explicitly, then authorize host trust separately:
+Start the daemon and configured gateway with `infra start`, then authorize host
+trust separately:
 
 ```sh
-backlot daemon start --json
-backlot gateway start --json
+backlot infra start --json
 backlot gateway trust status --json
 backlot gateway trust install --fingerprint ROOT_SHA256_FROM_STATUS --json
 ```
 
-Gateway start reports the actual pinned root fingerprint, an informational host
-trust observation and the exact state-scoped install command. Missing or unknown
+Gateway start (including through `infra start`) reports the actual pinned root
+fingerprint, an informational host trust observation and the exact state-scoped install command. Missing or unknown
 trust does not fail an otherwise valid gateway start or offer an interactive
 installation. Published-scene readiness still requires normally verified HTTPS.
 
@@ -152,6 +152,11 @@ verify normal host resolution with explicit private client roots; clean-machine
 macOS/browser trust and resolution remain a separate acceptance gate until a
 suitable disposable environment verifies them. Existing operator resolver setup
 can influence local observations.
+
+`infra status` combines compatible daemon access with gateway readiness and bounded
+recorded blocker guidance. `infra stop` cleans up the selected scope, then verifies
+state ownership release; it preserves CA identity. `gateway stop` stays gateway-only
+and reports activity/infra-stop guidance when published workloads block it.
 
 Gateway status reports owned process/listener readiness, independently from
 client trust or scene readiness. Startup errors distinguish configuration,

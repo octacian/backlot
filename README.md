@@ -49,7 +49,7 @@ private inputs, run `backlot project setup` once in a terminal. Configure HTTPS 
 Docker below when the scene requires them, then:
 
 ```sh
-backlot daemon start --json
+backlot infra start --json
 backlot plan dev --json
 backlot scene start dev --json
 ```
@@ -85,8 +85,7 @@ caddy:
 ```
 
 ```sh
-backlot daemon start --json
-backlot gateway start --json
+backlot infra start --json
 backlot gateway trust status --json
 backlot gateway trust install --fingerprint ROOT_SHA256_FROM_STATUS --json
 backlot scene start dev --json

@@ -52,7 +52,11 @@ func TestOwnedHostTrust(t *testing.T) {
 	stock := func(args ...string) ([]byte, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
-		return exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
+		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+		// A descendant may retain output after the command exits.
+		cmd.WaitDelay = time.Second
+		out, err := cmd.CombinedOutput()
+		return out, errors.Join(ctx.Err(), err)
 	}
 	mustStock := func(args ...string) []byte {
 		t.Helper()
@@ -96,11 +100,16 @@ func TestOwnedHostTrust(t *testing.T) {
 		if ca.Fingerprint != "" {
 			out, err := stock(binary, "gateway", "trust", "retire", "--fingerprint", ca.Fingerprint, "--acknowledge-impact", "--json")
 			t.Logf("cleanup product retirement exit=%v: %s", err, out)
+			if err != nil {
+				t.Error("cleanup product retirement failed", err)
+			}
 			if runtime.GOOS == "darwin" {
 				// Product deliberately preserves the public entry; fixture grant permits
 				// exact manual removal, never deletion by certificate name.
 				out, err = stock("/usr/bin/sudo", "-n", "/usr/bin/security", "remove-trusted-cert", "-d", public)
-				if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, exec.ErrWaitDelay) {
+					t.Error("manual settings cleanup timed out", err)
+				} else if err != nil {
 					t.Logf("manual settings cleanup (may already be absent): %s", out)
 				}
 				block, _ := pem.Decode([]byte(ca.CertificatePEM))
@@ -199,6 +208,7 @@ func TestOwnedHostTrust(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, binary, args...)
+		cmd.WaitDelay = time.Second
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		out, err := cmd.Output()
@@ -212,6 +222,9 @@ func TestOwnedHostTrust(t *testing.T) {
 			}
 		}
 		t.Logf("CLI %s exit=%v stderr=%s result=%s", strings.Join(args[:len(args)-4], " "), err, stderr.String(), out)
+		if ctx.Err() != nil || errors.Is(err, exec.ErrWaitDelay) {
+			t.Fatalf("CLI command timed out: %v %v", ctx.Err(), err)
+		}
 		if (err == nil) != ok {
 			t.Fatalf("unexpected CLI outcome: %v %s", err, out)
 		}
@@ -238,10 +251,10 @@ func TestOwnedHostTrust(t *testing.T) {
 	}
 	command(true, "gateway", "start", "--config", configPath)
 	before := trust(true, "status")
-	beforeEffective, installedEffective := "untrusted", "trusted"
+	beforeEffective := "untrusted"
 	if runtime.GOOS == "darwin" {
-		// Native Go SSL policy cannot establish standalone CA acceptance.
-		beforeEffective, installedEffective = "unknown", "unknown"
+		// Native Go SSL policy may not establish standalone CA acceptance.
+		beforeEffective = "unknown"
 	}
 	if before.CA.Validate() != nil || before.Host.Status != "untrusted" || before.Effective.Status != beforeEffective {
 		t.Fatal("fresh owned root unexpectedly trusted", before)
@@ -289,14 +302,32 @@ func TestOwnedHostTrust(t *testing.T) {
 	if out := command(false, "gateway", "trust", "install", "--fingerprint", strings.Repeat("0", 64)); !bytes.Contains(out, []byte("gateway_ca")) {
 		t.Fatal("wrong pin not rejected", string(out))
 	}
+	daemon := h.process // Installation and status must refresh this same live daemon.
 	installed := trust(true, "install", "--fingerprint", ca.Fingerprint)
-	if installed.Outcome != "installed" || installed.Host.Status != "trusted" || installed.Effective.Status != installedEffective {
+	if installed.Outcome != "installed" || installed.Host.Status != "trusted" {
 		t.Fatal("actual sudo install/fresh verification failed", installed)
 	}
-	daemon := h.process // Observation must refresh within this same live daemon.
 	live := trust(true, "status")
-	if live.Host.Status != "trusted" || live.Effective.Status != installedEffective || h.process != daemon {
+	if live.Host.Status != "trusted" || h.process != daemon {
 		t.Fatal("live daemon did not refresh", live)
+	}
+	previous, err := time.Parse(time.RFC3339Nano, before.Effective.ObservedAt)
+	if err != nil {
+		t.Fatal("invalid initial effective observation time", err)
+	}
+	for _, result := range []v1.GatewayTrustResult{installed, live} {
+		if result.CA.Validate() != nil || result.CA.Fingerprint != ca.Fingerprint || result.CA.StateDirectory != h.dir || result.Host.Validate() != nil || result.Host.Context != "os" || result.Effective.Validate() != nil || result.Effective.Context != "effective-environment" {
+			t.Fatal("invalid live trust observation boundary", result)
+		}
+		// macOS can positively verify the root or truthfully report unavailable proof.
+		if result.Effective.Status != "trusted" && (runtime.GOOS != "darwin" || result.Effective.Status != "unknown") {
+			t.Fatal("unexpected installed effective trust", result.Effective)
+		}
+		observed, err := time.Parse(time.RFC3339Nano, result.Effective.ObservedAt)
+		if err != nil || !observed.After(previous) {
+			t.Fatal("daemon effective observation was not refreshed", result.Effective, err)
+		}
+		previous = observed
 	}
 	if runtime.GOOS == "linux" {
 		log, err := os.ReadFile(hookLog)
@@ -363,7 +394,9 @@ func TestOwnedHostTrust(t *testing.T) {
 func ownedHostMacEntry(ca v1.GatewayCA) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "/usr/bin/security", "find-certificate", "-a", "-p", "/Library/Keychains/System.keychain").Output()
+	cmd := exec.CommandContext(ctx, "/usr/bin/security", "find-certificate", "-a", "-p", "/Library/Keychains/System.keychain")
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
 	if err != nil {
 		return false, err
 	}

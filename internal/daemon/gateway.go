@@ -10,6 +10,7 @@ import (
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/gateway"
 	"github.com/octacian/backlot/internal/plan"
+	"github.com/octacian/backlot/internal/tlsverify"
 )
 
 func routesReady(publication v1.Publication, services map[string]workload) bool {
@@ -90,9 +91,6 @@ func awaitPublication(ctx context.Context, origin, timeout string, services map[
 	}
 	ctx, cancel := withDeadline(ctx, duration)
 	defer cancel()
-	transport := &http.Transport{}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 2 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -103,10 +101,12 @@ func awaitPublication(ctx context.Context, origin, timeout string, services map[
 		if err != nil {
 			return err
 		}
-		response, err := client.Do(request)
-		if err == nil {
-			_ = response.Body.Close()
-			if response.Header.Get("Backlot-Instance") == request.URL.Hostname() && (response.StatusCode >= 200 && response.StatusCode < 300 || sameOriginRedirect(response, origin)) {
+		attempt, stop := context.WithTimeout(ctx, 2*time.Second)
+		verified, err := tlsverify.Run(attempt, tlsverify.Request{URL: origin}, false)
+		stop()
+		if err == nil && verified.Verified {
+			response := &http.Response{StatusCode: verified.StatusCode, Header: http.Header{"Location": []string{verified.Location}}, Request: request}
+			if verified.Marker == request.URL.Hostname() && (verified.StatusCode >= 200 && verified.StatusCode < 300 || sameOriginRedirect(response, origin)) {
 				return nil
 			}
 		}

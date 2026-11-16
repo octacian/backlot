@@ -107,3 +107,33 @@ func TestInfraShutdownWire(t *testing.T) {
 		})
 	}
 }
+
+func TestInfraGatewayTrustWireContract(t *testing.T) {
+	pin, generation := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	for _, mode := range []string{"managed", "legacy", "external", "none", "invalid-pin", "invalid-observation", "invalid-hint"} {
+		t.Run(mode, func(t *testing.T) {
+			g := v1.GatewayResponse{APIVersion: v1.Version, Mode: "managed", Status: "running", RootFingerprint: pin, HostTrust: &v1.TrustObservation{Status: "unknown", Context: "os", Store: "selected-store", Message: "configured trust unknown"}, TrustCommand: "backlot gateway trust install --state-dir '/owned/state' --fingerprint " + pin}
+			switch mode {
+			case "legacy", "external", "none":
+				g.RootFingerprint, g.HostTrust, g.TrustCommand = "", nil, ""
+				if mode != "legacy" {
+					g.Mode, g.Status = mode, "unconfigured"
+				}
+			case "invalid-pin":
+				g.RootFingerprint = "invalid"
+			case "invalid-observation":
+				g.HostTrust.Context = "effective-environment"
+			case "invalid-hint":
+				g.TrustCommand = "touch /tmp/unwanted"
+			}
+			want := v1.InfraResponse{APIVersion: v1.Version, DaemonGeneration: generation, Directory: "/owned/state", Daemon: "running", Gateway: &g, Ready: true, Guidance: "inspect selected scope", Activity: &v1.ActivityResponse{APIVersion: v1.Version, DaemonGeneration: generation, GatewayStatus: "running", Entries: []v1.ActivityEntry{}, Complete: true}}
+			c := gatewayWireClient(t, "/v1/infra/status", want, http.StatusOK)
+			got, err := c.Infra(context.Background(), "status", v1.InfraRequest{APIVersion: v1.Version})
+			if strings.HasPrefix(mode, "invalid-") {
+				assertGatewayWireError(t, err, "invalid_response")
+			} else if err != nil || got.Gateway == nil || got.Gateway.RootFingerprint != g.RootFingerprint || got.Gateway.TrustCommand != g.TrustCommand {
+				t.Fatal("nested gateway result changed", got, err)
+			}
+		})
+	}
+}

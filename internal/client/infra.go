@@ -35,7 +35,7 @@ func (c *Client) Infra(ctx context.Context, action string, q v1.InfraRequest) (v
 	}
 	g := out.Gateway
 	if g != nil {
-		if g.APIVersion != v1.Version || g.Mode != "managed" && g.Mode != "external" && g.Mode != "none" {
+		if g.APIVersion != v1.Version || g.Mode != "managed" && g.Mode != "external" && g.Mode != "none" || g.Mode == "managed" && g.Validate() != nil {
 			return v1.InfraResponse{}, responseError()
 		}
 		switch g.Status {

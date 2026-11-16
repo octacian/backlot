@@ -99,13 +99,11 @@ func infraOutput(c *urfave.Command, r v1.InfraResponse) error {
 		return err
 	}
 	if g := r.Gateway; g != nil {
-		if _, err := fmt.Fprintf(c.Writer, "Gateway: %s (%s; managed status probes listeners, external readiness unknown)\n", g.Status, g.Mode); err != nil {
+		if _, err := fmt.Fprintln(c.Writer, "Gateway observation: managed status probes listeners; external readiness unknown"); err != nil {
 			return err
 		}
-		if g.Message != "" {
-			if _, err := fmt.Fprintln(c.Writer, g.Message); err != nil {
-				return err
-			}
+		if err := output(c, *g, nil); err != nil {
+			return err
 		}
 	}
 	if r.Activity != nil {

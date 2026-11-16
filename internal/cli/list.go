@@ -14,7 +14,7 @@ import (
 func listCommand() *urfave.Command { return scopedListCommand(false) }
 
 func checkoutCommand() *urfave.Command {
-	return &urfave.Command{Name: "checkout", Usage: "Discover recorded instances in one checkout", Commands: []*urfave.Command{scopedListCommand(true)}}
+	return &urfave.Command{Name: "checkout", Usage: "Discover recorded instances in one checkout", Commands: []*urfave.Command{scopedListCommand(true), cleanupCommand(false)}}
 }
 
 func scopedListCommand(checkout bool) *urfave.Command {

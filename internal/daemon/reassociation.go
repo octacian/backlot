@@ -418,6 +418,17 @@ func (s *service) reassociate(ctx context.Context, request v1.ReassociationReque
 		return preview, problem("conflict", "association admission busy; take a fresh preview")
 	}
 	defer s.store.bindingGate.Unlock()
+	parents := []string{request.CheckoutID}
+	for _, instance := range preview.Instances {
+		parents = append(parents, instance.Association.CheckoutParent)
+	}
+	if err := s.checkCleanupBindings(parents); err != nil {
+		return preview, err
+	}
+	if err := s.checkCleanupRegistration(request.CheckoutID, preview.Checkout.Registration); err != nil {
+		return preview, err
+	}
+
 	// Only database comparisons occur under the gate/transaction; source reads are complete.
 	key := s.repairKeyBytes()
 	expectedRevision := preview.StateRevision

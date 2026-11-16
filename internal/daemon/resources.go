@@ -547,27 +547,27 @@ func (s *store) removeResourcesWithForce(ctx context.Context, id string, force b
 		if r.Removed {
 			continue
 		}
+		if err = cleanupBefore(ctx); err != nil {
+			return err
+		}
 		switch r.Kind {
 		case "secret":
 		case "directory":
-			if _, err = os.Lstat(r.Name); !os.IsNotExist(err) {
-				if err = verifyResource(ctx, d, r); err != nil {
-					return err
-				}
-				if err = os.RemoveAll(r.Name); err != nil {
-					return err
-				}
-			}
+			err = s.removeOwnedDirectory(ctx, r)
 		default:
-			if err = removeDockerResource(ctx, d, r); err != nil {
-				return err
-			}
+			err = removeDockerResource(ctx, d, r)
+		}
+		if err != nil {
+			cleanupResourceOutcome(ctx, name, r.Kind, "unresolved")
+			return err
 		}
 		r.Removed = true
 		g.Resources[name] = r
 		if err = s.saveResources(id, g); err != nil {
+			cleanupResourceOutcome(ctx, name, r.Kind, "unresolved")
 			return err
 		}
+		cleanupRemoved(ctx, name, r.Kind)
 	}
 	return s.saveResources(id, resourceGeneration{})
 }
@@ -607,7 +607,45 @@ func (s *service) destroySelected(ctx context.Context, id string, force bool, ta
 			return v1.Instance{}, err
 		}
 	}
-	instance, err := s.stopExecution(id)
+	return s.destroyLocked(ctx, id, force, false)
+}
+
+// destroyLocked requires evidence deletion, evidence mutation and instance locks.
+// Batch callers opt into step cancellation; existing ID semantics retain cleanup budgets.
+func (s *service) destroyLocked(ctx context.Context, id string, force, cancellable bool) (v1.Instance, error) {
+	if !cancellable {
+		ctx = context.WithoutCancel(ctx)
+	}
+	if err := cleanupBefore(ctx); err != nil {
+		return v1.Instance{}, err
+	}
+	instance, err := s.store.inspect(id)
+	if err != nil {
+		return instance, err
+	}
+	if instance.Status == v1.Destroyed && instance.Execution == nil {
+		if err = cleanupBefore(ctx); err != nil {
+			return instance, err
+		}
+		err = s.store.db.View(func(tx *bolt.Tx) error {
+			r, e := load(tx, id)
+			if e != nil {
+				return e
+			}
+			_, e = consumerErasure(tx, r, true)
+			return e
+		})
+		if err != nil {
+			return instance, err
+		}
+		instance, err = s.eraseDestroyedContext(ctx, id)
+		if err == nil {
+			cleanupRemoved(ctx, "attempt results, logs and artifacts", "evidence")
+		}
+		return instance, err
+	}
+	instance, err = s.stopExecution(id)
+	var keptStopErr error
 	// Cancellation may create a kept owner while the finite executor joins.
 	// Destroy must join that retained owner before removing its consumers' data.
 	if instance.Execution != nil && instance.Execution.Kept {
@@ -617,10 +655,19 @@ func (s *service) destroySelected(ctx context.Context, id string, force bool, ta
 		if entry != nil {
 			var stopErr error
 			instance, stopErr = s.stopKept(id, entry)
-			if stopErr != nil {
-				return instance, stopErr
-			}
+			keptStopErr = stopErr
 		}
+	}
+	// Stop owners use their own bounded teardown contexts. Observe their durable
+	// removal commits after joining, even when teardown or a later step fails.
+	if step, _ := ctx.Value(cleanupStepsKey{}).(*cleanupSteps); step != nil {
+		observeErr := s.store.observeStoppedResources(ctx, id, step.reviewed)
+		if observeErr != nil {
+			return instance, errors.Join(err, keptStopErr, observeErr)
+		}
+	}
+	if keptStopErr != nil {
+		return instance, keptStopErr
 	}
 	if err != nil {
 		var typed *v1.PlanError
@@ -628,13 +675,29 @@ func (s *service) destroySelected(ctx context.Context, id string, force bool, ta
 			return instance, err
 		}
 	}
-	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
+	if err = cleanupBefore(ctx); err != nil {
+		return instance, err
+	}
+	cleanup := ctx
+	if !cancellable {
+		var cancel context.CancelFunc
+		cleanup, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
 	if err = s.store.removeResourcesWithForce(cleanup, id, force); err != nil {
 		err = s.store.recordCleanupFailure(id, err)
+		if cancellable {
+			return instance, err
+		}
 		return instance, problem("cleanup_failed", fmt.Sprintf("destroy preserved remaining resources: %v", err))
 	}
-	instance, err = s.eraseDestroyed(id)
+	if err = cleanupBefore(ctx); err != nil {
+		return instance, err
+	}
+	instance, err = s.eraseDestroyedContext(ctx, id)
+	if err == nil {
+		cleanupRemoved(ctx, "attempt results, logs and artifacts", "evidence")
+	}
 	if err == nil {
 		s.mu.Lock()
 		delete(s.executions, id)
@@ -646,6 +709,8 @@ func (s *service) destroySelected(ctx context.Context, id string, force bool, ta
 // recoverResourceEffect records an already-existing effect only after exact
 // ownership proof. It never creates or repairs missing retained storage.
 func recoverResourceEffect(ctx context.Context, d *dockerEngine, r ownedResource) (string, error) {
+	ctx, cancel := cleanupCallContext(ctx, 30*time.Second)
+	defer cancel()
 	if !validID(r.Token) {
 		return "", problem("state_corrupt", "resource capability missing")
 	}
@@ -728,4 +793,41 @@ func (s *store) recordCleanupFailure(id string, cause error) error {
 	result.CleanupDetails = cleanupDetails(cause)
 	_, err = s.execution(id, instance.Status, result)
 	return errors.Join(cause, err)
+}
+
+// observeStoppedResources reports only durable removal of the same capabilities
+// captured by the approved preview. In-memory teardown flags are not proof.
+func (s *store) observeStoppedResources(ctx context.Context, id string, before resourceGeneration) error {
+	after, err := s.resources(id)
+	if err != nil {
+		return err
+	}
+	if before.ID != after.ID {
+		return problem("target_changed", "resource generation changed during stop; preserved")
+	}
+	removed := func(a, b ownedResource) bool {
+		if a.Removed || !b.Removed {
+			return false
+		}
+		b.Removed = false
+		// A pending capability may acquire its provider ID during owned recovery.
+		if a.ID == "" {
+			b.ID = ""
+		}
+		return a == b
+	}
+	for name, a := range before.Resources {
+		if removed(a, after.Resources[name]) {
+			cleanupRemoved(ctx, name, a.Kind)
+		}
+	}
+	for _, a := range before.Containers {
+		for _, b := range after.Containers {
+			if removed(a, b) {
+				cleanupRemoved(ctx, a.Component, "container")
+				break
+			}
+		}
+	}
+	return nil
 }

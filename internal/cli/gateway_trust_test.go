@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -28,5 +29,25 @@ func TestGatewayTrustArgumentsAndPartialOutput(t *testing.T) {
 		if !strings.Contains(text.String(), want) {
 			t.Fatal(want, text.String())
 		}
+	}
+}
+
+func TestGatewayTrustRetirementDiagnosticFraming(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var out, diagnostic bytes.Buffer
+	err := NewCommand(v1.VersionResponse{}, &out, &diagnostic).Run(context.Background(), []string{"backlot", "--json", "gateway", "trust", "retire", "--fingerprint", strings.Repeat("a", 64), "--acknowledge-impact"})
+	var result v1.GatewayTrustResult
+	if err == nil || json.Unmarshal(out.Bytes(), &result) != nil || result.Action != "retire" || result.Error == nil {
+		t.Fatal("refusal lost typed JSON result", err, out.String())
+	}
+	if runtime.GOOS == "darwin" {
+		for _, want := range []string{"interactive administrator authentication even under sudo", "headless retirement is unproven", "preserve the receipt"} {
+			if !strings.Contains(diagnostic.String(), want) {
+				t.Fatal("missing foreground warning", want, diagnostic.String())
+			}
+		}
+	} else if diagnostic.Len() != 0 {
+		t.Fatal("macOS warning on another platform", diagnostic.String())
 	}
 }

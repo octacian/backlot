@@ -21,6 +21,14 @@ trust run used Debian 13.7 and Caddy 2.11.7; its temporary raw evidence was lost
 in a power interruption. That report does not prove an exact Debian 13.4 run or
 replace retained acceptance evidence. Ubuntu CI results remain distinct.
 
+macOS host-trust retirement uses normal foreground Security authorization and may
+require interactive administrator authentication even under sudo. Unattended
+headless completion is unproven; retirement has an owner-accepted manual
+acceptance boundary. Normal macOS repository CI remains enabled, while only
+Ubuntu runs unattended owned-host mutation acceptance. See the
+[platform evidence limits](https://github.com/octacian/backlot/blob/6177c64f60654657a914857edbffb69b8316a41b/docs/testing.md#disposable-host-trust-acceptance) and
+[manual macOS sequence](https.md#manual-macos-verification-and-recovery).
+
 macOS and Linux use permissioned Unix sockets and authenticated guardians.
 Application native work may create process groups inside its guardian's session,
 with bounded identity-safe cleanup and explicit observed-empty confidence. New

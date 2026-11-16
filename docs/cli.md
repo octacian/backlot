@@ -739,7 +739,12 @@ use stderr. Status/successful effects exit zero. Interrupted/denied/uncertain
 operations never imply permission to retry destructive work. Entry deletion,
 trust withdrawal and residual trust are separate outcomes. Normal administrator
 authorization can prompt only in the explicit foreground mutation, never at
-startup. No browser automation or implicit elevation occurs.
+startup. On macOS, retirement emits a foreground stderr warning: Security may
+require interactive administrator authentication even under sudo. Use an
+interactive login session; unattended headless retirement is unproven. Interrupted
+operations retain their receipt and require exact-root manual inspection/recovery;
+Ctrl-C does not prove descendant termination. No browser automation or implicit
+elevation occurs.
 
 The [HTTPS guide](https.md#explicit-host-trust-and-retirement) owns target stores,
 permissioned receipt placement, ownership limits, distro-hook effects,

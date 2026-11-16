@@ -75,7 +75,7 @@ multi-commit pushes.
 | Changed files | Jobs that run |
 | --- | --- |
 | Every change, including code-only changes | Docs workflow: Corestack record and local file-link verification |
-| Go/runtime sources, schemas, non-CI examples, `install.sh`, module/build/lint configuration | macOS/Ubuntu repository and owned host trust checks, Linux runtime, current-head scenes and project inputs |
+| Go/runtime sources, schemas, non-CI examples, `install.sh`, module/build/lint configuration | macOS/Ubuntu repository checks, Ubuntu owned host trust checks, Linux runtime, current-head scenes and project inputs |
 | `THIRD_PARTY_NOTICES.md` | Repository and Linux installation checks, plus Docs |
 | `actions/` implementation | Current-head scenes and project inputs |
 | `examples/ci-scenes/` implementation | Scenes |
@@ -138,38 +138,43 @@ or preserve diagnostic state and report residuals.
 
 ## Disposable host trust acceptance
 
-The Check workflow's `Owned host trust` jobs run `TestOwnedHostTrust` serially
-on GitHub-hosted macOS ARM64 and Ubuntu 24.04 amd64. They install stock Caddy
-2.11.7 into runner temporary storage and exercise the production foreground CLI
-with ordinary sudo, a private unprivileged daemon and dynamic gateway ports.
-The test requires both `BACKLOT_HOST_TRUST_TEST=install-status-retire` and
+The Check workflow's `Owned host trust` job runs `TestOwnedHostTrust` serially
+on GitHub-hosted Ubuntu 24.04 amd64. It installs stock Caddy 2.11.7 into runner
+temporary storage and exercises the production foreground CLI with ordinary sudo,
+a private unprivileged daemon and dynamic gateway ports. Linux coverage retains
+install/status/retire, wrong-pin and missing-impact-acknowledgement rejection,
+receipt-only retirement, exact withdrawal, identical external-root preservation,
+positive fresh effective-root verification, distribution hooks and cleanup.
+One uniquely owned update hook logs invocation/change and a bounded exit-7 case.
+Stock refresh can accept a failing hook; this does not establish a failed command
+or partial product result. A later refresh checks hook recovery; other hooks stay
+enabled. Cleanup is registered before effects and reports uncertain residuals as
+failures. Only public diagnostics are uploaded, never private state or keys.
+
+The fixture requires both `BACKLOT_HOST_TRUST_TEST=install-status-retire` and
 `BACKLOT_DISPOSABLE_HOST_GRANT=github-hosted-ephemeral`, and rejects other runner
 identities/platforms. **Never set these on a normal workstation.** Default
-`make check` skips this test before allocating resources or changing host trust.
+`make check` skips it before allocating resources or changing host trust.
+The retained macOS fixture branch still requires a disposable GitHub-hosted
+runner; it is not a usable interactive manual path. Do not spoof its grant.
 
-Acceptance checks exact-root selected-domain trust and live daemon observation
-without restart. On macOS, host acceptance means exact supported admin TLS settings,
-exact System public entry and current root dates; native standalone daemon-effective
-acceptance remains unknown. Linux retains positive effective-root verification.
-These root observations do not prove normal leaf TLS or application readiness.
-The gateway-only fixture requests a wildcard certificate, but startup waits for
-admin readiness, not certificate issuance. It does not synchronize issuance or
-test normal-chain OS-root TLS.
-Acceptance also checks wrong-pin and missing-impact-acknowledgement rejection,
-receipt-only retirement, exact owned withdrawal and identical external-root
-preservation. macOS retirement must report its preserved public entry; fixture
-cleanup removes only the retained exact DER/hash. Linux uses one uniquely owned
-update hook with invocation/change logging and a bounded exit-7 case. Stock
-refresh can accept a failing hook: that does not establish a failed command or
-partial product result. A later normal refresh checks hook recovery. Other distro
-hooks stay enabled. Cleanup is registered before effects and reports uncertain
-residuals as failures. Only public test diagnostics are uploaded, never private
-state, keys or capabilities.
+macOS remains in normal nonmutating repository CI, but is excluded from unattended
+owned-host mutation CI. Stock retirement can require interactive Security
+administrator authentication even under sudo; unattended completion is unproven.
+macOS retirement is an owner-accepted manual acceptance limit. Use the
+[interactive disposable-host sequence](https.md#manual-macos-verification-and-recovery)
+and retain exact settings/entry/receipt and cleanup evidence before claiming
+acceptance. A passing Linux job or macOS repository check is not full macOS trust
+acceptance. The previous hosted macOS removal timeout does not conclusively
+identify its wait cause or prove settings withdrawal.
 
-Fixture code and skipped/local checks are not platform evidence. Both published
-jobs must actually pass, including cleanup, before claiming these OS effects.
+Root observations do not prove normal leaf TLS or application readiness. The
+fixture waits for admin readiness, not wildcard certificate issuance, and does
+not test normal-chain OS-root TLS. Optional application-leaf TLS proof remains
+separate. Fixture code and skipped/local checks are not platform evidence; the
+published Ubuntu job must pass including cleanup before claiming Linux effects.
 Interactive authorization denial/interruption and rare partial failures remain
-separate acceptance gaps; this fixture does not simulate them as operational proof.
+separate acceptance gaps.
 
 ## Release packaging and publication
 

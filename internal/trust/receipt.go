@@ -279,7 +279,7 @@ func Retire(ctx context.Context, dir, fingerprint string, ack bool, replacement 
 		return result, nil
 	}
 	if r.Phase != "installed" {
-		return fail(result, problem("incomplete provisioning evidence cannot authorize automated retirement; preserve receipt and use exact manual OS recovery"))
+		return fail(result, problem("incomplete or interrupted trust operation cannot authorize automated retirement; effects may be partial or unknown; preserve receipt and inspect exact-root OS state for manual recovery"))
 	}
 	if !r.EntryCreated && !r.TrustCreated {
 		result.Outcome = "preserved"

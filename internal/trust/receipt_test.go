@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,8 +92,14 @@ func TestReceiptAuthorityAndPreservation(t *testing.T) {
 		if err = writeReceipt(path, r); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = Retire(context.Background(), dir, ca.Fingerprint, true, nil); err == nil {
-			t.Fatal("incomplete proof authorized removal", phase)
+		before, _ = os.ReadFile(path)
+		result, err = Retire(context.Background(), dir, ca.Fingerprint, true, nil)
+		if err == nil || result.Error == nil || !strings.Contains(result.Error.Message, "interrupted trust operation") || !strings.Contains(result.Error.Message, "preserve receipt") || result.Outcome != "unknown" {
+			t.Fatal("interrupted operation lost recovery guidance", phase, result, err)
+		}
+		after, _ = os.ReadFile(path)
+		if !bytes.Equal(before, after) {
+			t.Fatal("uncertain operation changed retained authority", phase)
 		}
 	}
 	r.Version = 999

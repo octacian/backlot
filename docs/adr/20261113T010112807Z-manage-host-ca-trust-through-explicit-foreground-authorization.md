@@ -88,7 +88,14 @@ can extend beyond one root. Trust commands do not add browser-specific automatio
 DNS changes, CA regeneration, privileged services or infrastructure orchestration.
 The separate [infrastructure lifecycle decision](/docs/adr/20261112T235351793Z-compose-infrastructure-controls-with-verified-shutdown-completion.md)
 composes the existing gateway lifecycle without installing host trust.
-Unavailable authorization produces actionable instructions.
+Unavailable authorization produces actionable instructions. On macOS, normal
+Security authorization may require interactive administrator authentication even
+under sudo. Retain the foreground stock commands and warn before retirement;
+unattended headless completion is unproven. Accept macOS retirement as a manual
+acceptance boundary, with exact-root recovery and preserved receipts after
+interruption, while Ubuntu retains automated owned-host mutation coverage.
+This does not establish the exact cause of a hosted removal wait, promise
+privileged descendant termination on cancellation or authorize broader effects.
 
 Serialize foreground mutations and receipt updates with the existing file-lock
 library. Store permissioned, atomic, versioned receipts and public certificates

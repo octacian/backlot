@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	v1 "github.com/octacian/backlot/api/v1"
@@ -31,7 +32,7 @@ func gatewayTrustCommand() *urfave.Command {
 		if name == "retire" {
 			flags = append(flags, &urfave.BoolFlag{Name: "acknowledge-impact", Usage: "Accept breakage of known and unknown consumers; does not waive ownership"}, &urfave.BoolFlag{Name: "replacement", Usage: "Require verified OS trust in the selected daemon's replacement root first"})
 		}
-		children = append(children, &urfave.Command{Name: name, ArgsUsage: " ", Description: "Example: backlot gateway trust " + name + map[string]string{"status": " --json", "install": " --fingerprint ROOT_SHA256 --json", "retire": " --fingerprint OLD_ROOT_SHA256 --acknowledge-impact --json"}[name], Usage: map[string]string{"status": "Observe exact managed CA host/effective trust without effects", "install": "Explicitly authorize stock host trust installation and distro hooks", "retire": "Retire only exact receipt-proven Backlot effects; preserve external trust"}[name], Flags: flags, Action: func(ctx context.Context, c *urfave.Command) error {
+		children = append(children, &urfave.Command{Name: name, ArgsUsage: " ", Description: "Example: backlot gateway trust " + name + map[string]string{"status": " --json", "install": " --fingerprint ROOT_SHA256 --json", "retire": " --fingerprint OLD_ROOT_SHA256 --acknowledge-impact --json\nmacOS retirement may require interactive Security administrator authentication even under sudo; unattended headless removal is unproven. Preserve receipts and inspect exact OS state after interruption."}[name], Usage: map[string]string{"status": "Observe exact managed CA host/effective trust without effects", "install": "Explicitly authorize stock host trust installation and distro hooks", "retire": "Retire only exact receipt-proven Backlot effects; preserve external trust"}[name], Flags: flags, Action: func(ctx context.Context, c *urfave.Command) error {
 			if c.Args().Len() != 0 {
 				return output(c, nil, &v1.PlanError{Code: "invalid_arguments", Message: "gateway trust commands take flags only"})
 			}
@@ -74,6 +75,11 @@ func gatewayTrustCommand() *urfave.Command {
 				var replacement *v1.GatewayCA
 				if c.Bool("replacement") {
 					replacement = &ca
+				}
+				if runtime.GOOS == "darwin" {
+					if _, warnErr := fmt.Fprintln(c.ErrWriter, "Warning: macOS Security may require interactive administrator authentication even under sudo. Unattended headless retirement is unproven; use an interactive login session. After interruption, preserve the receipt and inspect exact-root OS state before manual recovery."); warnErr != nil {
+						return warnErr
+					}
 				}
 				result, err = trust.Retire(ctx, tracking, c.String("fingerprint"), c.Bool("acknowledge-impact"), replacement)
 			}

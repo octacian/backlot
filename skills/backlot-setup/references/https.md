@@ -114,6 +114,14 @@ retirement after the source daemon/keys are gone or the old certificate expires.
 Use `status --fingerprint OLD_ROOT_SHA256` to observe a retained root without its
 daemon. Legacy/manual effects without sufficient receipts require manual OS work.
 
+On macOS, run retirement in a usable interactive login session. Normal Security
+administrator authentication may be required even under `sudo`, including when
+removing the last admin trust entry. Backlot warns on stderr before retirement;
+JSON stdout remains a single result. Unattended headless removal has not been
+established and is not an automated acceptance guarantee. A waiting command does
+not establish success or failure. Interruption can leave uncertain effects;
+Ctrl-C is not proof that all privileged descendants have terminated.
+
 Interrupted/denied operations report partial or unknown effects and preserve
 intent/evidence. Do not blindly retry them. Changed targets/settings stop further
 destructive work. Restore compatible tracking or deliberately use
@@ -134,6 +142,44 @@ root can remain after the selected owned effects are removed. Browser/applicatio
 trust is separate: configure it explicitly and verify the actual origin without
 warnings. Backlot does not automate browser stores, DNS, CA regeneration or a
 privileged service.
+
+#### Manual macOS verification and recovery
+
+Use an explicitly authorized disposable macOS host with an interactive administrator
+session and a maintenance window. The hosted-only fixture is not an interactive
+manual execution path; do not spoof its runner grant. Record the revision, tool
+versions, exact DER SHA-256 fingerprint, selected admin domain/System keychain,
+pre-existing settings/entry and retained receipt before effects.
+
+1. Start a private managed gateway, inspect `gateway trust status --json`, then
+   install only its pinned root using the foreground command above. Inspect status
+   again from the same live daemon. Configured host trust and daemon-effective
+   observations are separate; neither proves application-leaf TLS.
+2. Check wrong-pin installation and retirement without `--acknowledge-impact`
+   refuse effects. In a controlled maintenance window, retire the receipt-pinned
+   root with acknowledgement and complete normal Security authentication. Verify
+   exact admin TLS settings are absent, the System public entry is preserved and
+   the receipt reports the observed outcome. Check external pre-existing effects
+   remain unchanged. Record failures, unknowns and residuals as such.
+3. If denied, interrupted or still waiting, retain the receipt and public snapshot
+   unchanged. Determine whether the original privileged operation is still active
+   before any further effects; do not infer descendant completion from Ctrl-C.
+   Compare the retained certificate's DER SHA-256 with the pinned fingerprint and
+   inspect `security dump-trust-settings -d` and the exact System keychain entry.
+   A matching name, a missing public entry or an `untrusted` observation alone does
+   not prove admin settings were withdrawn.
+4. Only after separately authorizing manual recovery and establishing that the
+   exact settings were Backlot-created and remain unchanged, an administrator can
+   run `sudo security remove-trusted-cert -d /absolute/verified-public-root.pem`
+   interactively. The file must contain the verified retained public certificate,
+   never a name-selected replacement. Reinspect the exact settings and public
+   entry afterward; stock exit success alone is insufficient. Preserve external
+   or ambiguous effects, including identical re-imports. Keep the public entry
+   for manual review; never delete by name or erase/rewrite the receipt to regain
+   automated authority. Record residuals and preserve evidence if uncertain.
+
+This sequence defines manual acceptance work, not a claim that it has passed.
+Optional normal application-leaf TLS proof remains separate.
 
 Publication readiness, doctor system TLS and HTTPS probes use bounded, joined,
 unprivileged invocations of the same executable to refresh Go trust policy.

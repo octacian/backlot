@@ -2,7 +2,7 @@
 title: "Manage host CA trust through explicit foreground authorization"
 date: 2026-11-13
 status: accepted
-implementation: in-progress
+implementation: implemented
 summary: "Manage host trust through explicit foreground stock tools, provisioning receipts, best-effort consumer warnings and bounded platform trust observations."
 tags: [gateway, https, trust, authorization, persistence, platforms]
 supersedes: []

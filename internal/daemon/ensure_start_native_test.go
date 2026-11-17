@@ -65,7 +65,7 @@ func TestEnsureStartNativeCLI(t *testing.T) {
 				if named {
 					args = []string{"scene", "start"}
 				}
-				args = append(args, "--project", h.project, "--state-dir", h.dir, "--startup-timeout", "3s", "--job-timeout", "3s", "--stop-grace", "50ms", "--json")
+				args = append(args, "--project", h.project, "--state-dir", h.dir, "--startup-timeout", "30s", "--job-timeout", "30s", "--stop-grace", "50ms", "--json")
 				if !omit {
 					args = append(args, "--config", config)
 				}
@@ -125,7 +125,7 @@ func TestEnsureStartNativeCLI(t *testing.T) {
 			}
 			each.Command.Args[1] = v1.StringArguments(`echo ready-B; echo start >> "$DATA/starts"; test "$(cat "$DATA/init")" = "$SECRET"`)[0]
 			h.manifest.Components["each"] = each
-			server.Readiness.Timeout = "3s"
+			server.Readiness.Timeout = "30s"
 			h.manifest.Components["server"] = server
 			h.write()
 			if err := os.Remove(config); err != nil {

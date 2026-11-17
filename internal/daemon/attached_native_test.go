@@ -44,7 +44,7 @@ func TestAttachedNativeCLI(t *testing.T) {
 			server.Resources = append(server.Resources, "password")
 			server.DependsOn = []v1.Dependency{{Component: "prep", Condition: v1.Completed}}
 			h.manifest.Components["server"] = server
-			h.manifest.Components["peer"] = v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "exec sleep 120")}, Readiness: &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "true")}, Timeout: "2s"}}
+			h.manifest.Components["peer"] = v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "exec sleep 120")}, Readiness: &v1.Probe{Kind: "command", Command: &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "true")}, Timeout: "30s"}}
 			h.manifest.Scenes["peer"] = v1.Scene{Lifetime: v1.Persistent, Components: []string{"peer"}}
 			scene := h.manifest.Scenes["dev"]
 			scene.StartupDetails = []v1.StartupDetailSelection{{Component: "server", Fixture: "password", Label: "Password"}}

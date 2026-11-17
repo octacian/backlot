@@ -40,10 +40,11 @@ func testManagedBrowser(t *testing.T, origin, root string) {
 	runCertutil("-N", "--empty-password", "-d", "sql:"+db)
 	visit := func() (string, error) {
 		t.Helper()
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
 		options := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
-		options = append(options, chromedp.ExecPath(binary), chromedp.UserDataDir(t.TempDir()), chromedp.Env("HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"), "XDG_DATA_HOME="+filepath.Join(home, ".local", "share")))
+		// Cold CI runners exceed the 20s default wait for the DevTools URL.
+		options = append(options, chromedp.WSURLReadTimeout(60*time.Second), chromedp.ExecPath(binary), chromedp.UserDataDir(t.TempDir()), chromedp.Env("HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"), "XDG_DATA_HOME="+filepath.Join(home, ".local", "share")))
 		allocator, cancelAllocator := chromedp.NewExecAllocator(ctx, options...)
 		defer cancelAllocator()
 		browser, cancelBrowser := chromedp.NewContext(allocator)

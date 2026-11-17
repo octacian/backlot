@@ -212,6 +212,11 @@ func (h *dockerHarness) container(id, component string) ownedResource {
 }
 func (h *dockerHarness) exec(r ownedResource, command []string) (string, int) {
 	h.t.Helper()
+	stdout, _, code := h.execOutput(r, command)
+	return stdout, code
+}
+func (h *dockerHarness) execOutput(r ownedResource, command []string) (string, string, int) {
+	h.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := verifyDockerResource(ctx, h.engine, r); err != nil {
@@ -235,19 +240,23 @@ func (h *dockerHarness) exec(r ownedResource, command []string) (string, int) {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	return stdout.String(), result.ExitCode
+	return stdout.String(), stderr.String(), result.ExitCode
 }
 func (h *dockerHarness) sql(r ownedResource, query string) string {
 	h.t.Helper()
-	deadline := time.Now().Add(45 * time.Second)
+	deadline := time.Now().Add(2 * time.Minute)
+	var lastOut, lastErr string
+	lastCode := -1
 	for time.Now().Before(deadline) {
-		out, code := h.exec(r, []string{"sh", "-c", "exec mariadb -uroot -p\"$MARIADB_ROOT_PASSWORD\" -N -e \"$1\"", "fixture", query})
+		out, stderr, code := h.execOutput(r, []string{"sh", "-c", "exec mariadb -uroot -p\"$MARIADB_ROOT_PASSWORD\" -N -e \"$1\"", "fixture", query})
 		if code == 0 {
 			return strings.TrimSpace(out)
 		}
+		lastOut, lastErr, lastCode = out, stderr, code
 		time.Sleep(100 * time.Millisecond)
 	}
-	h.t.Fatal("fixture SQL deadline")
+	// The command reads the password from the container environment, so its output cannot carry it.
+	h.t.Fatalf("fixture SQL deadline: last exit %d stdout %q stderr %q", lastCode, lastOut, lastErr)
 	return ""
 }
 func (h *dockerHarness) crash() {

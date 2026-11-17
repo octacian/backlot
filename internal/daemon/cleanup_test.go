@@ -704,6 +704,7 @@ func TestCleanupBusyTargetDoesNotStarveNext(t *testing.T) {
 	for _, runtime := range []bool{false, true} {
 		t.Run(map[bool]string{false: "instance-lock", true: "runtime-lock"}[runtime], func(t *testing.T) {
 			s, root, config := sceneFixture(t)
+			s.cleanupCallBudget = time.Second
 			cleanupPrepared(t, s, root, config, true)
 			cleanupPrepared(t, s, root, config, true)
 			q := v1.CleanupRequest{APIVersion: v1.Version, Contract: v1.CleanupContract, CheckoutPath: root}
@@ -727,7 +728,7 @@ func TestCleanupBusyTargetDoesNotStarveNext(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer op.cancel()
-			records := awaitCleanup(t, op, 35*time.Second)
+			records := awaitCleanup(t, op, 20*time.Second)
 			summary := records[len(records)-1].Summary
 			if summary.Failed != 1 || summary.Done != 1 || summary.Cancelled {
 				t.Fatal(summary)
@@ -744,6 +745,7 @@ func TestCleanupBusyTargetDoesNotStarveNext(t *testing.T) {
 
 func TestCleanupStalledProviderBodyDoesNotStarveNext(t *testing.T) {
 	s, root, config := sceneFixture(t)
+	s.cleanupCallBudget = time.Second
 	cleanupPrepared(t, s, root, config, true)
 	cleanupPrepared(t, s, root, config, true)
 	q := v1.CleanupRequest{APIVersion: v1.Version, Contract: v1.CleanupContract, CheckoutPath: root}
@@ -790,7 +792,7 @@ func TestCleanupStalledProviderBodyDoesNotStarveNext(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer op.cancel()
-	records := awaitCleanup(t, op, 45*time.Second)
+	records := awaitCleanup(t, op, 20*time.Second)
 	summary := records[len(records)-1].Summary
 	if summary.Failed != 1 || summary.Done != 1 || summary.Cancelled {
 		t.Fatal(summary)
@@ -829,6 +831,7 @@ func TestCleanupStalledProviderBodyDoesNotStarveNext(t *testing.T) {
 
 func TestCleanupUnjoinedAdmissionPreservesParent(t *testing.T) {
 	s, root, config := sceneFixture(t)
+	s.ownerJoinWait = 300 * time.Millisecond
 	instance := cleanupPrepared(t, s, root, config, false)
 	parent := checkoutParent(instance)
 	selected, finish, err := s.beginWorkload(context.Background())
@@ -858,7 +861,7 @@ func TestCleanupUnjoinedAdmissionPreservesParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer op.cancel()
-	records := awaitCleanup(t, op, 35*time.Second)
+	records := awaitCleanup(t, op, 20*time.Second)
 	summary := records[len(records)-1].Summary
 	if summary.Unresolved != 1 || summary.Done != 0 || summary.Cancelled {
 		t.Fatal(summary)

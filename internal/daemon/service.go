@@ -59,6 +59,30 @@ type service struct {
 	beforeSceneMutation func(string)
 	// beforeTaskMutation gates tests between parent observation and serialized admission.
 	beforeTaskMutation func(string)
+	// ownerJoinWait, cleanupCallBudget and bulkWriteWait shorten production waits in
+	// tests; zero selects the production value.
+	ownerJoinWait     time.Duration
+	cleanupCallBudget time.Duration
+	bulkWriteWait     time.Duration
+}
+
+const (
+	defaultOwnerJoinWait = 20 * time.Second
+	defaultBulkWriteWait = 5 * time.Second
+)
+
+func (s *service) ownerJoin() time.Duration {
+	if s.ownerJoinWait > 0 {
+		return s.ownerJoinWait
+	}
+	return defaultOwnerJoinWait
+}
+
+func (s *service) bulkWriteDeadline() time.Duration {
+	if s.bulkWriteWait > 0 {
+		return s.bulkWriteWait
+	}
+	return defaultBulkWriteWait
 }
 
 func validatePlanRequest(request v1.PlanRequest) error {

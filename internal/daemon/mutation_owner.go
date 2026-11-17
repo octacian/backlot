@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"time"
 )
 
 // Accepted lifecycle mutations participate in daemon cancellation and storage ownership just
@@ -29,7 +28,7 @@ func (s *service) stopMutations() error {
 		owner.cancel()
 	}
 	s.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), s.ownerJoin())
 	defer cancel()
 	for _, owner := range owners {
 		select {

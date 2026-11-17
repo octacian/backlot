@@ -38,9 +38,21 @@ import (
 type dockerEngine struct {
 	*client.Client
 	stopClient *client.Client
+	// stopSlack extends a stop request beyond the engine grace; zero selects dockerStopSlack.
+	stopSlack time.Duration
 }
 
+const (
+	dockerHeaderTimeout = 5 * time.Second
+	dockerStopSlack     = 10 * time.Second
+)
+
 func newDocker(endpoint string) (*dockerEngine, error) {
+	return newDockerWithBounds(endpoint, dockerHeaderTimeout, dockerStopSlack)
+}
+
+// newDockerWithBounds exists so tests can shorten the transport bounds.
+func newDockerWithBounds(endpoint string, header, stopSlack time.Duration) (*dockerEngine, error) {
 	parsed, parseErr := url.Parse(endpoint)
 	if parseErr != nil || parsed.Scheme != "unix" || parsed.Host != "" || !filepath.IsAbs(parsed.Path) || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return nil, problem("missing_provider", "Docker work requires a local Unix socket endpoint")
@@ -48,7 +60,7 @@ func newDocker(endpoint string) (*dockerEngine, error) {
 	endpoint = "unix://" + parsed.Path
 	// Bound response headers while leaving collected streams unbounded. The
 	// explicit HTTP scheme is local Unix-socket transport, without TLS inference.
-	c, err := client.New(client.WithHTTPClient(&http.Client{Transport: &http.Transport{ResponseHeaderTimeout: 5 * time.Second}}), client.WithHost(endpoint), client.WithScheme("http"))
+	c, err := client.New(client.WithHTTPClient(&http.Client{Transport: &http.Transport{ResponseHeaderTimeout: header}}), client.WithHost(endpoint), client.WithScheme("http"))
 	if err != nil {
 		return nil, problem("missing_provider", "cannot configure local Docker client")
 	}
@@ -56,7 +68,7 @@ func newDocker(endpoint string) (*dockerEngine, error) {
 	if err != nil {
 		return nil, errors.Join(problem("missing_provider", "cannot configure local Docker stop client"), c.Close())
 	}
-	return &dockerEngine{Client: c, stopClient: stop}, nil
+	return &dockerEngine{Client: c, stopClient: stop, stopSlack: stopSlack}, nil
 }
 
 // Close releases both operation-specific transports.
@@ -68,7 +80,11 @@ func (d *dockerEngine) Close() error {
 func (d *dockerEngine) ContainerStop(ctx context.Context, id string, options client.ContainerStopOptions) (client.ContainerStopResult, error) {
 	if options.Timeout != nil && *options.Timeout >= 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(*options.Timeout)*time.Second+10*time.Second)
+		slack := d.stopSlack
+		if slack <= 0 {
+			slack = dockerStopSlack
+		}
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(*options.Timeout)*time.Second+slack)
 		defer cancel()
 	} else if _, bounded := ctx.Deadline(); !bounded {
 		return client.ContainerStopResult{}, errors.New("docker stop with default or indefinite grace requires a context deadline")

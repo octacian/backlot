@@ -180,7 +180,7 @@ func (s *service) startBulk(q v1.StopAllRequest) (*bulkOperation, error) {
 	o.emit(accepted)
 	go func() {
 		out := v1.StopAllResponse{APIVersion: v1.Version, DaemonGeneration: accepted.DaemonGeneration, OperationID: accepted.OperationID, Targets: []v1.StopAllTarget{}, AdmissionsJoined: true}
-		joinCtx, joinCancel := context.WithTimeout(owned, 20*time.Second)
+		joinCtx, joinCancel := context.WithTimeout(owned, s.ownerJoin())
 		for _, owner := range preceding {
 			select {
 			case <-owner.done:
@@ -424,7 +424,7 @@ func (s *service) writeBulk(w http.ResponseWriter, r *http.Request, operation *b
 			return
 		}
 		// A blocked observer releases its connection; mutation ownership is independent.
-		if err := controller.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		if err := controller.SetWriteDeadline(time.Now().Add(s.bulkWriteDeadline())); err != nil && !errors.Is(err, http.ErrNotSupported) {
 			return
 		}
 		if err := json.NewEncoder(w).Encode(event); err != nil {

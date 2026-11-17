@@ -845,6 +845,7 @@ func TestBulkSceneDiscoveryAdmissionSurvivesReopen(t *testing.T) {
 	for _, attached := range []bool{false, true} {
 		t.Run(map[bool]string{false: "named", true: "attached"}[attached], func(t *testing.T) {
 			s, q := attachedCoordinator(t)
+			s.ownerJoinWait = 300 * time.Millisecond
 			reached, release, joined := make(chan struct{}), make(chan struct{}), make(chan struct{})
 			var once sync.Once
 			s.beforeSceneDiscovery = func() { close(reached); <-release }

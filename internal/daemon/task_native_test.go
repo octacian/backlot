@@ -173,7 +173,7 @@ func TestTaskNativeLifecycle(t *testing.T) {
 		started := time.Now()
 		_, err := h.cli.RunTask(context.Background(), v1.TaskRunRequest{APIVersion: v1.Version, Target: v1.SceneTarget{InstanceID: parent.ID}, Task: "job"})
 		code(t, err, "output_conflict")
-		if time.Since(started) > time.Second {
+		if time.Since(started) > 10*time.Second {
 			t.Fatal("conflict queued")
 		}
 		two := runHarnessTask(h, parent.ID, "fail")

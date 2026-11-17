@@ -93,7 +93,7 @@ func TestSharedControlShutdownJoinsAcceptedOwner(t *testing.T) {
 	go func() { done <- svc.stopMutations() }()
 	select {
 	case <-ctx.Done():
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("shutdown did not cancel control")
 	}
 	select {

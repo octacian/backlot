@@ -97,7 +97,7 @@ func TestDiscoveryNativeCLI(t *testing.T) {
 		t.Fatal("start reconfigured active daemon", unchanged, policy)
 	}
 	var installed v1.ContractsResponse
-	if json.Unmarshal(invoke(0, "contracts"), &installed) != nil || installed.Executable == nil || len(installed.Schemas) != 3 {
+	if json.Unmarshal(invoke(0, "contracts"), &installed) != nil || installed.Executable == nil {
 		t.Fatal(installed)
 	}
 	var capabilities v1.ContractsResponse

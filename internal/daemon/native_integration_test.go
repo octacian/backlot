@@ -1029,7 +1029,7 @@ func TestNativeRuntime(t *testing.T) {
 		h.write()
 		r := h.run("dev")
 		var port int
-		deadline := time.Now().Add(time.Second)
+		deadline := time.Now().Add(20 * time.Second)
 		for port == 0 && time.Now().Before(deadline) {
 			current, err := h.cli.Inspect(context.Background(), r.Instance.ID)
 			if err != nil {
@@ -1037,6 +1037,10 @@ func TestNativeRuntime(t *testing.T) {
 			}
 			port = current.Instance.Execution.Ports["port"]
 			time.Sleep(5 * time.Millisecond)
+		}
+		// Without an observed allocation the listener below would bind an arbitrary port and prove nothing.
+		if port == 0 {
+			t.Fatal("port allocation not observed before readiness")
 		}
 		sentinel, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 		if err != nil {
@@ -1129,18 +1133,21 @@ func TestNativeRuntime(t *testing.T) {
 		h.manifest.Components["job"] = job
 		h.write()
 		r := h.run("test")
-		deadline := time.Now().Add(time.Second)
-		var current v1.InstanceResponse
-		for time.Now().Before(deadline) {
-			var err error
-			current, err = h.cli.Inspect(context.Background(), r.Instance.ID)
+		deadline := time.Now().Add(20 * time.Second)
+		jobRunning := false
+		for !jobRunning && time.Now().Before(deadline) {
+			current, err := h.cli.Inspect(context.Background(), r.Instance.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(current.Instance.Execution.Components) == 2 && current.Instance.Execution.Components[1].Status == "running" {
-				break
+			jobRunning = len(current.Instance.Execution.Components) == 2 && current.Instance.Execution.Components[1].Status == "running"
+			if !jobRunning {
+				time.Sleep(10 * time.Millisecond)
 			}
-			time.Sleep(10 * time.Millisecond)
+		}
+		// Crashing the service before the job runs would not exercise cancellation of a running terminal.
+		if !jobRunning {
+			t.Fatal("job never observed running before root-crash")
 		}
 		h.retainGuardianCleanup(r.Instance.ID)
 		h.fixtureAction("root-crash")
@@ -1686,10 +1693,16 @@ func TestNativeRuntime(t *testing.T) {
 						t.Fatal("inactive cancellation lost status", result)
 					}
 				}
-				if err != nil || group.PGID() != 0 || group.Alive() {
+				if err != nil || group.PGID() != 0 {
 					t.Fatal("never-activated stop failed or launched work", err)
 				}
-				if time.Since(start) > 4*time.Second {
+				// Alive reads a channel closed by a goroutine after cmd.Wait, so it can trail Stop's return.
+				for aliveDeadline := time.Now().Add(10 * time.Second); group.Alive(); time.Sleep(10 * time.Millisecond) {
+					if time.Now().After(aliveDeadline) {
+						t.Fatal("never-activated guardian still joined after stop")
+					}
+				}
+				if time.Since(start) > 10*time.Second {
 					t.Fatal("inactive cancellation did not join promptly")
 				}
 			})

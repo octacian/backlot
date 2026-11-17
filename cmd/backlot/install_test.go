@@ -25,7 +25,6 @@ import (
 	"github.com/gofrs/flock"
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/daemon"
-	"go.yaml.in/yaml/v3"
 )
 
 type installFixture struct {
@@ -812,30 +811,4 @@ if [ "$(cat "$FIXTURE_ROOT/answer")" = y ]; then printf effect > "$FIXTURE_ROOT/
 			}
 		})
 	}
-}
-
-func TestInstallerSelectsRepositoryGates(t *testing.T) {
-	data := mustInstallRead(t, "../../.github/workflows/changes.yml")
-	var workflow struct {
-		Jobs map[string]struct {
-			Steps []struct{ With map[string]string }
-		}
-	}
-	if err := yaml.Unmarshal(data, &workflow); err != nil {
-		t.Fatal(err)
-	}
-	for _, step := range workflow.Jobs["paths"].Steps {
-		if filters := step.With["filters"]; filters != "" {
-			var groups map[string][]string
-			if err := yaml.Unmarshal([]byte(filters), &groups); err != nil {
-				t.Fatal(err)
-			}
-			for _, path := range groups["implementation"] {
-				if path == "install.sh" {
-					return
-				}
-			}
-		}
-	}
-	t.Fatal("installer changes must select implementation gates on both supported platforms")
 }

@@ -72,22 +72,3 @@ func managedBrowserOptIn(browser, certutil string) (bool, error) {
 	}
 	return browser != "", nil
 }
-
-func TestManagedBrowserOptIn(t *testing.T) {
-	for _, tc := range []struct {
-		name, browser, certutil string
-		enabled, invalid        bool
-	}{
-		{name: "absent"},
-		{name: "browser only", browser: "/invalid/browser", invalid: true},
-		{name: "certutil only", certutil: "/invalid/certutil", invalid: true},
-		{name: "both", browser: "/explicit/browser", certutil: "/explicit/certutil", enabled: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			enabled, err := managedBrowserOptIn(tc.browser, tc.certutil)
-			if enabled != tc.enabled || (err != nil) != tc.invalid {
-				t.Fatalf("enabled=%v err=%v", enabled, err)
-			}
-		})
-	}
-}

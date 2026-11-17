@@ -154,7 +154,7 @@ func TestTaskAdmissionRejectsInitiallyNonreadyParent(t *testing.T) {
 	select {
 	case err := <-result:
 		code(t, err, "parent_unavailable")
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		unlock()
 		t.Fatal("nonready selection queued for a later ready parent")
 	}

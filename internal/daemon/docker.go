@@ -43,7 +43,9 @@ type dockerEngine struct {
 }
 
 const (
-	dockerHeaderTimeout = 5 * time.Second
+	// Covers a cold or idle engine (e.g. Docker Desktop waking) answering create;
+	// a client-side timeout does not cancel the engine's work.
+	dockerHeaderTimeout = 30 * time.Second
 	dockerStopSlack     = 10 * time.Second
 )
 

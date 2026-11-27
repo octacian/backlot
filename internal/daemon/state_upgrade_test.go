@@ -204,3 +204,58 @@ func TestStateMissingVersionPreserved(t *testing.T) {
 		t.Fatal("versionless state adopted")
 	}
 }
+
+func TestStateRejectsMalformedLifecycleUnchanged(t *testing.T) {
+	cases := []struct{ name, bucket, key, value string }{
+		{"managed syntax", "meta", "managed_gateway", "{"},
+		{"managed shape", "meta", "managed_gateway", "[]"},
+		{"probe", "meta", "doctor_probe/invalid", `{"resource":{}}`},
+		{"runtime array", "runtime", "bad", "[]"},
+		{"runtime null", "runtime", "bad", "null"},
+		{"runtime fields", "runtime", "bad", `{"groups":{}}`},
+		{"resources fields", "resources", "bad", `{"resources":[]}`},
+		{"resources ownership", "resources", "bad", `{"id":"invalid","resources":{},"initialized":{}}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s, instance, _ := exportFixture(t)
+			dir := s.store.directory
+			sentinel := filepath.Join(dir, "retained-ca-config")
+			if err := os.WriteFile(sentinel, []byte("retained private state"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.store.db.Update(func(tx *bolt.Tx) error {
+				if err := tx.Bucket([]byte("meta")).Put([]byte("unknown_metadata"), []byte("opaque preserved")); err != nil {
+					return err
+				}
+				key := c.key
+				if c.bucket == "runtime" || c.bucket == "resources" {
+					key = instance.ID // Exercise the typed decoder, not orphan-parent rejection.
+				}
+				return tx.Bucket([]byte(c.bucket)).Put([]byte(key), []byte(c.value))
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.store.db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(filepath.Join(dir, "state.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			opened, err := openStore(dir)
+			if err == nil {
+				_ = opened.db.Close()
+				t.Fatal("malformed lifecycle state accepted")
+			}
+			after, readErr := os.ReadFile(filepath.Join(dir, "state.db"))
+			if readErr != nil || !bytes.Equal(before, after) {
+				t.Fatal("rejected state bytes changed", readErr)
+			}
+			retained, err := os.ReadFile(sentinel)
+			if err != nil || string(retained) != "retained private state" {
+				t.Fatal("retained files changed", err)
+			}
+		})
+	}
+}

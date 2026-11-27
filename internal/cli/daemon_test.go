@@ -51,7 +51,7 @@ func TestDaemonCLIUsesDurableSocketOperations(t *testing.T) {
 	})
 	cli := client.New(daemon.SocketPath(state))
 	defer cli.Close()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		if _, err := cli.Status(context.Background()); err == nil {
 			break

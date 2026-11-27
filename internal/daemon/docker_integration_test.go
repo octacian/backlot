@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -1973,4 +1974,61 @@ func (h *dockerHarness) engineAlive(r ownedResource) bool {
 	}
 	inspect, err := h.engine.ContainerInspect(context.Background(), r.ID, client.ContainerInspectOptions{})
 	return err == nil && inspect.Container.State != nil && inspect.Container.State.Running
+}
+
+func TestDestroyActiveKeptDocker(t *testing.T) {
+	endpoint := os.Getenv("BACKLOT_DOCKER_TEST_ENDPOINT")
+	if endpoint == "" {
+		t.Skip("requires explicit owned Docker fixture endpoint")
+	}
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
+	for _, complete := range []bool{false, true} {
+		t.Run(fmt.Sprintf("completion-race-%v", complete), func(t *testing.T) {
+			h := newDockerHarness(t, binary, endpoint)
+			h.alpine()
+			job := h.manifest.Components["each"]
+			job.Args = v1.StringArguments("sh", "-c", "echo waiting; while [ ! -f /private/release ]; do sleep 0.01; done; exit 23")
+			job.Fixtures = map[string]v1.Fixture{"data": {Value: fixtureRef("resource", "directory", "path")}}
+			h.manifest.Components["each"] = job
+			h.write()
+			request := h.request("test")
+			request.Options.KeepOnFailure = true
+			request.Options.JobTimeout = "0"
+			r, err := h.cli.Run(context.Background(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := r.Instance.ID
+			waitComponentLog(t, h.nativeHarness, id, "each", "waiting")
+			server := h.container(id, "server")
+			fixtures, err := h.cli.Fixtures(context.Background(), v1.FixturesRequest{APIVersion: v1.Version, InstanceID: id, Component: "each"})
+			if err != nil || len(fixtures.Fixtures) != 1 {
+				t.Fatal("data fixture", err)
+			}
+			data := fixtures.Fixtures[0].Value
+			released := make(chan error, 1)
+			if complete {
+				go func() { released <- os.WriteFile(filepath.Join(data, "release"), nil, 0600) }()
+			}
+			destroyed, err := h.cli.Destroy(context.Background(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if complete {
+				if err := <-released; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if destroyed.Instance.Status != v1.Destroyed || destroyed.Instance.Execution != nil || h.engineAlive(server) {
+				t.Fatal("retained container owner survived destroy")
+			}
+			if _, err := os.Stat(data); !os.IsNotExist(err) {
+				t.Fatal("destroy data", err)
+			}
+			logs, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id})
+			if err != nil || len(logs.Records) != 0 {
+				t.Fatal("destroy retained evidence", err)
+			}
+		})
+	}
 }

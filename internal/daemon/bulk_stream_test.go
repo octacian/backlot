@@ -43,6 +43,7 @@ func TestBulkHTTPProgressBeforeLaterTargetCompletes(t *testing.T) {
 			lock.Lock()
 			var unlock sync.Once
 			defer unlock.Do(lock.Unlock)
+			s.bulkWriteWait = 500 * time.Millisecond
 			server := httptest.NewServer(handler(s, v1.DaemonStatusResponse{}, func() {}))
 			defer server.Close()
 			data, _ := json.Marshal(bulkRequest())
@@ -88,9 +89,9 @@ func TestBulkHTTPProgressBeforeLaterTargetCompletes(t *testing.T) {
 				}
 				return
 			}
-			// Idle progress may outlast the five-second slow-write deadline.
+			// Idle progress may outlast the slow-write deadline.
 			// Waiting on a workload must not consume that transport-only budget.
-			delay := time.NewTimer(6 * time.Second)
+			delay := time.NewTimer(4 * s.bulkWriteWait)
 			defer delay.Stop()
 			select {
 			case <-delay.C:

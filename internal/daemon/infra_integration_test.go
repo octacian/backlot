@@ -200,6 +200,7 @@ func TestInfraOwnerProcess(t *testing.T) {
 		return
 	}
 	err := Serve(context.Background(), Options{Directory: directory, serviceReady: func(s *service) {
+		s.ownerJoinWait = 300 * time.Millisecond
 		_, finish, err := s.beginMutation(context.Background())
 		if err != nil {
 			os.Exit(4)

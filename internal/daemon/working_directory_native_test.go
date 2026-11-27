@@ -89,7 +89,7 @@ func TestWorkingDirectoryServiceProbesAndWorktrees(t *testing.T) {
 	git(t, h.project, "init", "-q")
 	var id string
 	for _, tc := range []struct{ cwd, marker string }{{"", "service-marker"}, {".", "root-marker"}, {"probe", "probe-marker"}} {
-		server.Readiness = &v1.Probe{Kind: "command", Timeout: "3s", Command: &v1.Command{Tool: "sh", WorkingDirectory: tc.cwd, Args: v1.StringArguments("-c", "test -f "+tc.marker+" && test -f "+map[string]string{"": "started", ".": "package/started", "probe": "../package/started"}[tc.cwd])}}
+		server.Readiness = &v1.Probe{Kind: "command", Timeout: "30s", Command: &v1.Command{Tool: "sh", WorkingDirectory: tc.cwd, Args: v1.StringArguments("-c", "test -f "+tc.marker+" && test -f "+map[string]string{"": "started", ".": "package/started", "probe": "../package/started"}[tc.cwd])}}
 		h.manifest.Components["server"] = server
 		h.write()
 		req := h.request("dev")

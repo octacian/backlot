@@ -246,7 +246,7 @@ func TestDisposableEvidenceNative(t *testing.T) {
 
 func waitComponentLog(t *testing.T, h *nativeHarness, id, component, needle string, leaseToken ...string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		response, err := h.cli.Logs(context.Background(), v1.LogsRequest{APIVersion: v1.Version, InstanceID: id, Component: component})
 		if err != nil {

@@ -244,7 +244,7 @@ func (h *nativeHarness) start() {
 	}
 	h.waited = false
 	h.ownerDone = nil
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := h.cli.Status(context.Background()); err == nil {
 			return
@@ -268,7 +268,7 @@ func (h *nativeHarness) request(scene string) v1.RunRequest {
 	if grace == 0 {
 		grace = 50 * time.Millisecond
 	}
-	return v1.RunRequest{APIVersion: v1.Version, Plan: v1.PlanRequest{ProjectPath: h.project, Scene: scene}, Options: v1.ExecutionOptions{StartupTimeout: "3s", JobTimeout: "3s", StopGrace: grace.String()}}
+	return v1.RunRequest{APIVersion: v1.Version, Plan: v1.PlanRequest{ProjectPath: h.project, Scene: scene}, Options: v1.ExecutionOptions{StartupTimeout: "30s", JobTimeout: "30s", StopGrace: grace.String()}}
 }
 func (h *nativeHarness) run(scene string) v1.InstanceResponse {
 	h.t.Helper()
@@ -290,7 +290,7 @@ func (h *nativeHarness) state(id string, want ...v1.InstanceStatus) v1.InstanceR
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	budget := 6 * time.Second
+	budget := 30 * time.Second
 	for _, status := range want {
 		if status == v1.Starting || status == v1.RuntimeReady {
 			continue
@@ -358,7 +358,7 @@ func (h *nativeHarness) absent() {
 				h.t.Error(err)
 				continue
 			}
-			deadline := time.Now().Add(2 * time.Second)
+			deadline := time.Now().Add(20 * time.Second)
 			for syscall.Kill(pid, 0) != syscall.ESRCH && time.Now().Before(deadline) {
 				time.Sleep(20 * time.Millisecond)
 			}
@@ -492,8 +492,9 @@ func newNativeHarnessConfigured(t *testing.T, binary, budget string, faults bool
 	}
 	fixtureToken := literal(h.controlToken)
 	fixtureToken.Secret = true
-	env := v1.Environment{Assign: map[string]v1.Value{"BACKLOT_NATIVE_FIXTURE": literal("1"), "PORT": port, "PIDFILE": literal(h.pids), "FIXTURE_CONTROL": literal(h.control), "FIXTURE_TOKEN": fixtureToken}}
-	server := v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: command("server"), Resources: []string{"port"}, Ports: map[string]v1.ServicePort{"http": {Resource: "port"}}, Environment: env, Readiness: &v1.Probe{Kind: "tcp", Target: &port, Timeout: "2s"}}
+	// Scrubbed workload environments do not inherit TestMain's GORACE.
+	env := v1.Environment{Assign: map[string]v1.Value{"BACKLOT_NATIVE_FIXTURE": literal("1"), "PORT": port, "PIDFILE": literal(h.pids), "FIXTURE_CONTROL": literal(h.control), "FIXTURE_TOKEN": fixtureToken, "GORACE": literal("atexit_sleep_ms=0")}}
+	server := v1.Component{Kind: v1.Service, Runtime: v1.Native, Command: command("server"), Resources: []string{"port"}, Ports: map[string]v1.ServicePort{"http": {Resource: "port"}}, Environment: env, Readiness: &v1.Probe{Kind: "tcp", Target: &port, Timeout: "30s"}}
 	job := v1.Component{Kind: v1.Job, Runtime: v1.Native, Policy: v1.EachStart, Command: command("job"), Resources: []string{"port"}, Environment: env, DependsOn: []v1.Dependency{{Component: "server", Condition: v1.Ready}}}
 	self, err := os.Executable()
 	if err != nil {

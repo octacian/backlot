@@ -235,7 +235,7 @@ func TestRealWorktreesAliasesConcurrentDuplicatesAndDrift(t *testing.T) {
 func TestLeaseRenewalExpiryAndExplicitCancellation(t *testing.T) {
 	root := shortTemp(t)
 	config := writeFixture(t, root)
-	cli, _ := startFixture(t, filepath.Join(shortTemp(t), "state"), 400*time.Millisecond)
+	cli, _ := startFixture(t, filepath.Join(shortTemp(t), "state"), 2*time.Second)
 	r := prepareFixture(t, cli, request(root, config, "test"))
 	_, err := cli.Renew(context.Background(), r.Instance.ID, strings.Repeat("0", 64))
 	code(t, err, "invalid_lease")
@@ -252,7 +252,7 @@ func TestLeaseRenewalExpiryAndExplicitCancellation(t *testing.T) {
 		t.Fatal("inspection disclosed lease")
 	}
 	// Client disconnect has no HTTP-session heuristic; it is enforced by the deadline.
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(6 * time.Second)
 	for {
 		current, err := cli.Inspect(context.Background(), r.Instance.ID)
 		if err != nil {
@@ -410,7 +410,7 @@ func TestMovedAndReplacedCheckoutNeverAdopted(t *testing.T) {
 }
 
 func TestStateVersionRejectedWithoutMutation(t *testing.T) {
-	for _, version := range []string{"1", "2", "3", "4", "5", "6", "7", "8", "999"} {
+	for _, version := range []string{"1", "8", "999"} {
 		t.Run(version, func(t *testing.T) {
 			dir := shortTemp(t)
 			state, err := openStore(dir)

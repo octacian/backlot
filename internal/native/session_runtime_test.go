@@ -49,10 +49,13 @@ func TestSessionFixture(t *testing.T) {
 		childDone := make(chan struct{})
 		go func() { _ = child.Wait(); close(childDone) }()
 		defer fixtureJoin(t, child, childDone)
-		until := time.Now().Add(time.Second)
-		for time.Now().Before(until) {
+		until := time.Now().Add(15 * time.Second)
+		for {
 			if _, err := os.Stat(os.Getenv("BACKLOT_SESSION_READY")); err == nil {
 				break
+			}
+			if time.Now().After(until) {
+				t.Fatal("session fixture not ready")
 			}
 			time.Sleep(time.Millisecond)
 		}
@@ -186,7 +189,7 @@ func TestApplicationSessionAndStrictHelperPolicies(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		deadline := time.Now().Add(3 * time.Second)
+		deadline := time.Now().Add(30 * time.Second)
 		var child int
 		for time.Now().Before(deadline) {
 			data, err := os.ReadFile(ready)

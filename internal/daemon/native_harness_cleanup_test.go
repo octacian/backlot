@@ -4,6 +4,8 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -179,4 +182,93 @@ func TestNativeHarnessShutdownBudgets(t *testing.T) {
 			t.Fatal("owner exit suppressed", result)
 		}
 	})
+}
+
+func TestNativeMixedRecoveryCleanupAfterFatal(t *testing.T) {
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
+	record := filepath.Join(t.TempDir(), "record")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, self, "-test.run=^TestNativeMixedRecoveryFailurePath$", "-test.v", "-test.timeout=40s")
+	command.Env = append(os.Environ(), "BACKLOT_MIXED_FAILURE_BINARY="+binary, "BACKLOT_MIXED_FAILURE_RECORD="+record)
+	output, err := command.CombinedOutput()
+	if ctx.Err() != nil || err == nil || !strings.Contains(string(output), "intentional assertion after daemon kill and join") {
+		t.Fatalf("intentional subprocess: %v %s", err, output)
+	}
+	for _, failure := range []string{"DATA RACE", "unverified", "survives acknowledged"} {
+		if strings.Contains(string(output), failure) {
+			t.Fatalf("cleanup failed: %s", output)
+		}
+	}
+	data, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var witnesses struct {
+		Root string
+		PIDs []int
+	}
+	if err := json.Unmarshal(data, &witnesses); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(witnesses.Root); !os.IsNotExist(err) {
+		t.Fatal("owned state removed before verified cleanup", err, string(output))
+	}
+	if len(witnesses.PIDs) < 4 || witnesses.Root == "" {
+		t.Fatal("missing retained owner/workload witnesses")
+	}
+	for _, pid := range witnesses.PIDs {
+		if syscall.Kill(pid, 0) != syscall.ESRCH {
+			t.Fatal("failure path owner/workload remains", pid)
+		}
+	}
+	t.Log("intentional failure ran retained authenticated cleanup and joined all owners before removing state")
+}
+
+func TestNativeMixedRecoveryFailurePath(t *testing.T) {
+	binary := os.Getenv("BACKLOT_MIXED_FAILURE_BINARY")
+	if binary == "" {
+		return
+	}
+	h := newNativeHarness(t, binary)
+	r := h.run("dev")
+	h.state(r.Instance.ID, v1.RuntimeReady)
+	h.retainGuardianCleanup(r.Instance.ID)
+	identities := h.guardianCapabilities(r.Instance.ID)
+	data, err := os.ReadFile(h.pids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	witnesses := struct {
+		Root string
+		PIDs []int
+	}{Root: filepath.Dir(h.dir)}
+	for _, identity := range identities {
+		witnesses.PIDs = append(witnesses.PIDs, identity.PID)
+	}
+	for _, field := range strings.Fields(string(data)) {
+		var pid int
+		if _, err := fmt.Sscan(field, &pid); err != nil {
+			t.Fatal(err)
+		}
+		witnesses.PIDs = append(witnesses.PIDs, pid)
+	}
+	data, err = json.Marshal(witnesses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("BACKLOT_MIXED_FAILURE_RECORD"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.process.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = h.process.Wait()
+	h.waited = true
+	// Deliberately before openStore or post-fault journal acquisition.
+	t.Fatal("intentional assertion after daemon kill and join")
 }

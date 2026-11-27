@@ -51,20 +51,52 @@ Run these from the repository root:
 Before committing Go/tooling changes, run `make check`. Documentation changes
 require `make check-docs`, `git diff --check`, and manual checking of links,
 commands, and consistency with current behavior and applicable decisions. Run
-additional focused checks when changed behavior warrants them; do not add tests that merely
-duplicate implementation details.
+additional focused checks when changed behavior warrants them. Follow
+[Writing tests](#writing-tests) before adding one.
 
 ## Writing tests
 
 Tests exist to fail when application behaviour breaks. Before adding one, check
 that the behaviour is not already covered at the same level.
 
+- **Not every check needs a permanent test.** Add one when the behaviour is a
+  documented contract, a safety guarantee (isolation, cleanup, authorization,
+  data loss, recovery), or a failure that ordinary edits are likely to
+  reintroduce. Otherwise, such as for a one-off workflow on one platform, an
+  incidental path, or a check whose outcome depends only on code this repository
+  no longer changes (an old release binary), prove it once by hand or with an
+  agent driving the real binary. Record the evidence listed under
+  [useful evidence](release-acceptance/README.md#safe-execution-and-useful-evidence)
+  in the PR, including what was not covered, and name the bar condition the
+  behaviour does not meet. CI cost never overrides the bar: make a slow safety
+  test faster or move it to a runtime job (Linux runtime, or a named macOS step)
+  instead of dropping it. A safety guarantee's test runs in CI wherever CI can
+  provide its prerequisites. A recurring release or provider risk whose
+  prerequisites CI lacks gets a documented manual diagnostic below, not one-off
+  PR evidence. PR evidence is not regression protection; say so under
+  Limitations.
+- **A review finding needs a fix and evidence, not always a test.** Add a test
+  only when the finding meets the bar above, and put it in the feature's test
+  file, not a review-named one.
+- **Watch a new test fail once.** Break or stub the path it guards, confirm it
+  fails, restore it, and say how in the PR. Clear witnesses between phases so a
+  test cannot pass on evidence from an earlier step.
+- **A test that passes on rerun is broken.** Fix it, or file an issue and link
+  it from the PR; do not rerun to green silently.
 - **Assert behaviour, not shape.** Do not count commands, records or schemas,
   snapshot incidental structure, or match prose and markup that no guide
   documents as a contract. Assert typed codes and structured fields.
-- **Do not test the harness.** Fixture and helper code fails loudly in the tests
-  that use it. The exception is harness cleanup that protects the operator's
-  machine.
+- **Test boundaries, not every value.** One case per boundary and per distinct
+  class; more members of the same class add time, not coverage. Each retained
+  migration step is its own class.
+- **Do not test the harness or repository configuration.** Fixture and helper
+  code fails loudly in the tests that use it when it breaks, and a workflow
+  proves the branch it takes when it runs. Do not assert which files or names a
+  workflow or Makefile lists; move logic that needs a test into a script the
+  workflow calls. Exceptions: a fixture lenient enough to let its users pass
+  vacuously, harness cleanup or ownership whose failure would touch resources
+  outside the test's private root, and job predicates whose mistake would
+  silently skip a gate.
 - **A timed-out poll fails the test.** A loop that falls through on timeout lets
   the test pass without exercising anything.
 - **Only the path under test gets a short budget.** Waits for success return as
@@ -75,10 +107,18 @@ that the behaviour is not already covered at the same level.
   its neighbours do. Never use a package-level variable; tests share the process.
 - **No wall-clock upper bounds, and no sleep as synchronisation.** Assert the
   outcome, or wait on an event. Where a bound must distinguish "prompt" from
-  "blocked", make it generous.
-- **Review-driven regression tests live in the feature's test file.**
+  "blocked", make it at least 10 seconds.
+- **State the cost of a slow test.** A PR that adds a test taking more than 10
+  seconds under `go test -race -count=1 ./pkg -run '^TestName$' -v` names it and
+  its runtime.
 - **A test that skips in every CI job protects nothing automatically.** Name it
   in a workflow, or document it in this guide as a manual diagnostic.
+
+Rules apply to new tests and to tests a change touches; fix older violations
+when you edit them. Packages whose tests launch race-built subprocesses
+should set `GORACE=atexit_sleep_ms=0` for them when unset, as the `TestMain`
+functions in `internal/daemon`, `internal/native` and `internal/acceptance` do;
+the default one-second exit sleep otherwise dominates their runtime.
 
 `make race` fails when any package takes more than half its timeout (900 of
 1800 seconds). Shorten or split the suite; raise the timeout only with a reason.

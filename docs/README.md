@@ -9,7 +9,8 @@ Before planning or editing, read:
 
 - [Contribution workflow](contributing.md).
 - [Go practices](go-practices.md).
-- Testing and tooling: [Setup](testing.md#setup), [Commands](testing.md#commands)
+- Testing and tooling: [Setup](testing.md#setup), [Commands](testing.md#commands),
+  [Writing tests](testing.md#writing-tests)
   and [CI and platform evidence](testing.md#ci-and-platform-evidence), including
   uncached runtime tests and crash-fixture ownership/cleanup safety.
 - [Architecture decisions](adr/README.md), then relevant records.

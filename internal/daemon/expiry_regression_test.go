@@ -5,6 +5,9 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -316,5 +319,227 @@ func TestDestroyedAcceptanceCannotResurrect(t *testing.T) {
 	next, err := f.s.prepare(context.Background(), request(f.root, f.config, "dev"))
 	if err != nil || next.Instance.ID == prepared.Instance.ID {
 		t.Fatal("fresh run did not get a new identity", err)
+	}
+}
+
+func TestExecutionAcceptanceRechecksCancellationAndLease(t *testing.T) {
+	for _, action := range []string{"cancel", "expire", "expired-without-reconcile"} {
+		t.Run(action, func(t *testing.T) {
+			root := shortTemp(t)
+			config := writeFixture(t, root)
+			store, err := openStore(shortTemp(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = store.db.Close() }()
+			reached := make(chan string, 1)
+			release := make(chan struct{})
+			s := &service{store: store, lease: time.Minute, beforeExecution: func(id string) { reached <- id; <-release }}
+			result := make(chan error, 1)
+			go func() {
+				_, err := s.run(context.Background(), v1.RunRequest{APIVersion: v1.Version, Plan: request(root, config, "test").Plan, Options: v1.ExecutionOptions{StartupTimeout: "0s", JobTimeout: "0s"}})
+				result <- err
+			}()
+			id := <-reached
+			if action == "cancel" {
+				if _, err := s.cancelRuntime(id); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				err := store.db.Update(func(tx *bolt.Tx) error {
+					r, err := load(tx, id)
+					if err != nil {
+						return err
+					}
+					r.Instance.LeaseExpiresAt = time.Now().Add(-time.Second).Format(time.RFC3339Nano)
+					return put(tx, "instances", id, r)
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if action == "expire" {
+					if err := s.expire(); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			close(release)
+			if err := <-result; err == nil {
+				t.Fatal("stale prepared response resurrected rejected work")
+			}
+			instance, err := store.inspect(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instance.Execution != nil || len(s.executions) != 0 {
+				t.Fatal("rejected acceptance launched an execution", instance)
+			}
+			journal, err := store.runtime(id)
+			if err != nil || len(journal.Groups) != 0 || journal.LaunchPending {
+				t.Fatal("rejected acceptance recorded launch", journal, err)
+			}
+			if action == "cancel" && instance.Status != v1.Cancelled {
+				t.Fatal(instance.Status)
+			}
+		})
+	}
+}
+
+func TestCancellationRechecksRegisteredOwner(t *testing.T) {
+	root := shortTemp(t)
+	config := writeFixture(t, root)
+	store, err := openStore(shortTemp(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.db.Close() }()
+	s := &service{store: store, lease: time.Minute}
+	response, err := s.prepare(context.Background(), request(root, config, "test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := response.Instance.ID
+	// Hold the same instance mutation lock used by run acceptance. Cancellation
+	// must examine the execution owner only after acquiring it.
+	unlock := s.lockMutation(id)
+	done := make(chan struct{})
+	cancelled := make(chan struct{})
+	entry := &execution{done: done, cancel: func() { close(cancelled); close(done) }}
+	result := make(chan error, 1)
+	go func() { _, err := s.cancelRuntime(id); result <- err }()
+	select {
+	case err := <-result:
+		unlock()
+		t.Fatalf("cancellation bypassed acceptance mutation lock: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	s.mu.Lock()
+	s.executions = map[string]*execution{id: entry}
+	s.mu.Unlock()
+	unlock()
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-cancelled:
+	default:
+		t.Fatal("registered owner missed by cancellation")
+	}
+}
+
+func TestLeaseCollectionFailureIsInstanceLocal(t *testing.T) {
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
+	h := newNativeHarness(t, binary, "500ms")
+	// Separate witnesses/control paths keep cleanup attribution exact for both owners.
+	other := h.manifest.Components["server"]
+	other.Environment.Assign = map[string]v1.Value{}
+	for key, value := range h.manifest.Components["server"].Environment.Assign {
+		other.Environment.Assign[key] = value
+	}
+	otherPIDs := filepath.Join(filepath.Dir(h.dir), "other-pids")
+	other.Environment.Assign["PIDFILE"] = fixtureLiteral(otherPIDs)
+	other.Environment.Assign["FIXTURE_CONTROL"] = fixtureLiteral(filepath.Join(filepath.Dir(h.dir), "other.sock"))
+	h.extraPIDFiles = append(h.extraPIDFiles, otherPIDs)
+	h.manifest.Components["other"] = other
+	dev := h.manifest.Scenes["dev"]
+	dev.Components = []string{"other"}
+	h.manifest.Scenes["dev"] = dev
+	h.manifest.Tools["sh"] = "/bin/sh"
+	job := h.manifest.Components["job"]
+	job.Command = &v1.Command{Tool: "sh", Args: v1.StringArguments("-c", "echo waiting; exec sleep 60")}
+	job.Artifacts = map[string]v1.ArtifactSource{"missing": {Path: "not-produced"}}
+	h.manifest.Components["job"] = job
+	h.write()
+	unrelated := h.run("dev")
+	h.state(unrelated.Instance.ID, v1.RuntimeReady)
+	request := h.request("test")
+	request.Options.KeepOnFailure = true
+	request.Options.JobTimeout = "0"
+	r, err := h.cli.Run(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitComponentLog(t, h, r.Instance.ID, "job", "waiting", r.LeaseToken)
+	deadline := time.Now().Add(30 * time.Second)
+	var final v1.Instance
+	for time.Now().Before(deadline) {
+		if _, err := h.cli.Status(context.Background()); err != nil {
+			t.Fatal("unrelated lease", err)
+		}
+		got, err := h.cli.Inspect(context.Background(), r.Instance.ID)
+		if err != nil {
+			t.Fatal("daemon unavailable", err)
+		}
+		final = got.Instance
+		if final.Execution != nil && final.Execution.CompletedAt != "" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if final.Execution == nil || !final.Execution.Cancelled || !final.Execution.Kept || final.Execution.CollectionFailure == "" || final.Execution.CleanupFailure != "" {
+		t.Fatal("lease/collection outcome missing")
+	}
+	// Continue through subsequent sweeps, the point where the prior fatal error escaped.
+	for range 10 {
+		time.Sleep(50 * time.Millisecond)
+		if _, err := h.cli.Status(context.Background()); err != nil {
+			t.Fatal("daemon or unrelated owner lost", err)
+		}
+	}
+
+	for _, id := range []string{r.Instance.ID, unrelated.Instance.ID} {
+		got, err := h.cli.Inspect(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", got.Instance.Execution.Ports["port"]), time.Second)
+		if err != nil {
+			t.Fatal("healthy service lost", err)
+		}
+		_ = conn.Close()
+		if _, err := h.cli.Destroy(context.Background(), id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.absent()
+}
+
+func TestLeaseCollectorOutcomeDoesNotPoisonSweeper(t *testing.T) {
+	f := newControlledExpiry(t)
+	f.allowError = true // explicit shutdown still reports the retained per-instance gap.
+	owner := f.owner(t, true, time.Millisecond)
+	observed, _ := f.s.store.inspect(owner.id)
+	result := &v1.ExecutionResult{Attempt: observed.Execution.Attempt, CollectionFailure: "application output collection failed", CompletedAt: time.Now().UTC().Format(time.RFC3339Nano), Cancelled: true}
+	var cancelled sync.Once
+	owner.entry.cancel = func() {
+		cancelled.Do(func() {
+			if _, err := f.s.store.execution(owner.id, v1.Failed, result); err != nil {
+				panic(err)
+			}
+			close(owner.done)
+		})
+	}
+	if err := f.s.expireOwners(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		f.s.mu.Lock()
+		joined := len(f.s.expiryWorkers) == 0
+		f.s.mu.Unlock()
+		if joined {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expiry worker did not join")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := f.s.expireOwners(); err != nil {
+		t.Fatal("persisted collector failure became fatal", err)
+	}
+	got, err := f.s.store.inspect(owner.id)
+	if err != nil || got.Execution.CollectionFailure != result.CollectionFailure {
+		t.Fatal("collector outcome lost", err)
 	}
 }

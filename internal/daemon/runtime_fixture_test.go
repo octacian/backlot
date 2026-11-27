@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	v1 "github.com/octacian/backlot/api/v1"
 )
 
 // The caller owns the directory lifetime, including retention on uncertainty.
@@ -100,4 +102,13 @@ func finishNativeHarnessOwner(stop func(context.Context) error, done <-chan erro
 		result.ownerErr = errors.Join(failure, owner.killErr, owner.waitErr)
 	}
 	return result
+}
+
+func cloneFixtureEnvironment(environment v1.Environment) v1.Environment {
+	copy := environment
+	copy.Assign = map[string]v1.Value{}
+	for key, value := range environment.Assign {
+		copy.Assign[key] = value
+	}
+	return copy
 }

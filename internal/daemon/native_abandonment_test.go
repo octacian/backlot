@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"html"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -293,5 +296,142 @@ func TestNativeWaiverCorruptionPreservesIntent(t *testing.T) {
 	after, _ := s.store.runtime(instance.ID)
 	if !after.LaunchPending {
 		t.Fatal("preflight corruption erased intent")
+	}
+}
+
+func storedBytes(t *testing.T, s *store, bucket, key string) []byte {
+	t.Helper()
+	var data []byte
+	if err := s.db.View(func(tx *bolt.Tx) error { data = bytes.Clone(tx.Bucket([]byte(bucket)).Get([]byte(key))); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func TestForceHTTPRejectsReplacedClaimBeforeCleanup(t *testing.T) {
+	for _, managed := range []bool{false, true} {
+		name := "scene"
+		if managed {
+			name = "managed"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, instance, _ := exportFixture(t)
+			path := "/v1/runtime/stop"
+			bucket, key := "instances", instance.ID
+			var payload any = v1.StopRequest{APIVersion: v1.Version, InstanceID: instance.ID, Force: true, ExpectedAttempt: instance.Execution.Attempt}
+			if managed {
+				// A pending legacy claim also needs a stable public revision before any save.
+				a := managedRecord{Scope: newID(), Config: manifest.CaddyDefaults(v1.CaddyConfig{Mode: "managed", Executable: "/explicit/caddy"}), Pending: true, Status: "uncertain"}
+				if err := s.store.saveManaged(a); err != nil {
+					t.Fatal(err)
+				}
+				selected, err := s.store.managed()
+				if err != nil {
+					t.Fatal(err)
+				}
+				again, err := s.store.managed()
+				if err != nil || again.ClaimRevision != selected.ClaimRevision {
+					t.Fatal("legacy revision unstable", err)
+				}
+				payload = v1.GatewayRequest{APIVersion: v1.Version, Force: true, ExpectedClaimRevision: selected.ClaimRevision}
+				path, bucket, key = "/v1/gateway/stop", "meta", "managed_gateway"
+				// Replacement B has authenticated launch intent provenance of its own.
+				a.ClaimRevision = newID()
+				if err := s.store.saveManaged(a); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				b := &v1.ExecutionResult{Attempt: newID()}
+				if _, err := s.store.replaceTestExecution(instance.ID, v1.RuntimeReady, b); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.store.saveRuntime(instance.ID, runtimeRecord{Attempt: b.Attempt, LaunchPending: true}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := storedBytes(t, s.store, bucket, key)
+			journal := storedBytes(t, s.store, "runtime", instance.ID)
+			handler := handler(s, v1.DaemonStatusResponse{APIVersion: v1.Version, StateVersion: v1.StateVersion}, func() {})
+			data, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(data))
+				req.Header.Set("X-Backlot-API-Version", v1.Version)
+				req.Header.Set("Content-Type", "application/json")
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+				if rec.Code == http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"conflict"`)) {
+					t.Fatal(rec.Code, rec.Body.String())
+				}
+				if !bytes.Equal(before, storedBytes(t, s.store, bucket, key)) || !bytes.Equal(journal, storedBytes(t, s.store, "runtime", instance.ID)) {
+					t.Fatal("stale public payload stopped or waived replacement")
+				}
+			}
+		})
+	}
+}
+
+func TestWaiverAfterWritesRollsBack(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		managed, cancel bool
+	}{
+		{name: "scene-error"},
+		{name: "scene-cancel", cancel: true},
+		{name: "managed-error", managed: true},
+		{name: "managed-cancel", managed: true, cancel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, instance, _ := exportFixture(t)
+			j := runtimeRecord{Attempt: instance.Execution.Attempt, LaunchPending: true}
+			if err := s.store.saveRuntime(instance.ID, j); err != nil {
+				t.Fatal(err)
+			}
+			r := managedRecord{Scope: newID(), Config: manifest.CaddyDefaults(v1.CaddyConfig{Mode: "managed", Executable: "/explicit/caddy"}), Pending: true, Status: "uncertain"}
+			if err := s.store.saveManaged(r); err != nil {
+				t.Fatal(err)
+			}
+			r, err := s.store.managed()
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeInstance := storedBytes(t, s.store, "instances", instance.ID)
+			beforeRuntime := storedBytes(t, s.store, "runtime", instance.ID)
+			beforeManaged := storedBytes(t, s.store, "meta", "managed_gateway")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			injected := errors.New("waiver commit failure")
+			// Runs after actual bbolt Put calls; nil must not hide cancellation.
+			s.store.waiverCheckpoint = func() error {
+				if tc.cancel {
+					cancel()
+					return nil
+				}
+				return injected
+			}
+			waive := func(ctx context.Context) error {
+				if tc.managed {
+					return s.store.abandonManaged(ctx, &r, r, nil, errors.New("missing authority"))
+				}
+				_, err := s.store.abandonNative(ctx, instance.ID, j.Attempt)
+				return err
+			}
+			err = waive(ctx)
+			if tc.cancel {
+				injected = context.Canceled
+			}
+			if !errors.Is(err, injected) {
+				t.Fatal("failed transaction claimed success", err)
+			}
+			if !bytes.Equal(beforeInstance, storedBytes(t, s.store, "instances", instance.ID)) || !bytes.Equal(beforeRuntime, storedBytes(t, s.store, "runtime", instance.ID)) || !bytes.Equal(beforeManaged, storedBytes(t, s.store, "meta", "managed_gateway")) {
+				t.Fatal("failed transaction released claim/history")
+			}
+			s.store.waiverCheckpoint = nil
+			if err := waive(context.Background()); err != nil {
+				t.Fatal("retry after rollback failed", err)
+			}
+		})
 	}
 }

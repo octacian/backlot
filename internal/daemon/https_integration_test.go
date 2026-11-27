@@ -13,7 +13,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/gateway/gatewaytest"
@@ -292,6 +294,106 @@ func TestHTTPSRuntime(t *testing.T) {
 			}
 			t.Log("multipart publication succeeded at /api/value and HTTP probe at /ws failed with owned route cleanup")
 			t.Log("real daemon TLS/SSR; stop/start/restart/reset invariant; crash intent-effect recovery; disposable container origin client; destroy replacement verified")
+		})
+	}
+}
+
+func TestPublicationReadinessSignals(t *testing.T) {
+	if os.Getenv("BACKLOT_CADDY_TEST_BINARY") == "" {
+		t.Skip("requires explicit owned Caddy fixture binary")
+	}
+	binary := buildFixtureBinary(t, t.TempDir(), "../../cmd/backlot")
+	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGTERM} {
+		t.Run(sig.String(), func(t *testing.T) {
+			f := gatewaytest.Start(t, "fixture.localhost")
+			t.Setenv("SSL_CERT_FILE", f.Cert)
+			h := newNativeHarness(t, binary, "20s")
+			server := h.manifest.Components["server"]
+			server.Environment.Assign["HTTP_STATUS"] = fixtureLiteral("503")
+			h.manifest.Components["server"] = server
+			origin := fixtureRef("resource", "origin", "url")
+			h.manifest.Resources["origin"] = v1.Resource{Kind: "origin"}
+			scene := h.manifest.Scenes["dev"]
+			scene.Resources = append(scene.Resources, "origin")
+			scene.Publish = &v1.Publication{Resource: "origin", Routes: []v1.Route{{Path: "/", Service: "server", Port: "http", Prefix: "preserve"}}, Probe: v1.Probe{Kind: "http", Target: &origin, Timeout: "20s"}}
+			h.manifest.Scenes["dev"] = scene
+			h.write()
+			config := filepath.Join(h.project, "machine.json")
+			raw, err := json.Marshal(v1.MachineConfig{Version: v1.ManifestVersion, Caddy: &v1.CaddyConfig{Endpoint: f.Endpoint, Scope: "backlot", DomainSuffix: "fixture.localhost", HostAddress: "127.0.0.1", HTTPSPort: &f.Port}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(config, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			prepared, err := h.cli.Prepare(context.Background(), v1.PrepareRequest{APIVersion: v1.Version, Plan: v1.PlanRequest{ProjectPath: h.project, Scene: "dev", ConfigPath: config}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(binary, "run", "dev", "--project", h.project, "--config", config, "--state-dir", h.dir, "--startup-timeout", "20s", "--stop-grace", "50ms", "--json")
+			var output strings.Builder
+			cmd.Stdout = &output
+			cmd.Stderr = &strings.Builder{}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			joined := false
+			t.Cleanup(func() {
+				if !joined {
+					_ = cmd.Process.Kill()
+					_ = cmd.Wait()
+				}
+			})
+			transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: f.Pool, MinVersion: tls.VersionTLS12}}
+			defer transport.CloseIdleConnections()
+			httpClient := &http.Client{Transport: transport, Timeout: time.Second}
+			deadline := time.Now().Add(30 * time.Second)
+			probing := false
+			for time.Now().Before(deadline) {
+				got, err := h.cli.Inspect(context.Background(), prepared.Instance.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got.Instance.Execution != nil && got.Instance.Execution.Origin != "" {
+					response, err := httpClient.Get(got.Instance.Execution.Origin)
+					if err == nil {
+						_ = response.Body.Close()
+						if response.StatusCode == http.StatusServiceUnavailable && got.Instance.Status == v1.Starting && response.Header.Get("Backlot-Instance") == "bl-"+prepared.Instance.ID[:40]+".fixture.localhost" {
+							probing = true
+							break
+						}
+					}
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			if !probing {
+				t.Fatal("did not reach aggregate readiness")
+			}
+			if err := cmd.Process.Signal(sig); err != nil {
+				t.Fatal(err)
+			}
+			err = cmd.Wait()
+			joined = true
+			want := 130
+			if sig == syscall.SIGTERM {
+				want = 143
+			}
+			exit, ok := err.(*exec.ExitError)
+			if !ok || exit.ExitCode() != want {
+				t.Fatalf("signal exit %v want %d", err, want)
+			}
+			var final v1.InstanceResponse
+			if err := json.Unmarshal([]byte(output.String()), &final); err != nil {
+				t.Fatal(err)
+			}
+			result := final.Instance.Execution
+			if !result.Cancelled || result.Failure != "" || result.CleanupFailure != "" || result.CollectionFailure != "" {
+				t.Fatal("publication cancellation misclassified")
+			}
+			if _, err := h.cli.Destroy(context.Background(), prepared.Instance.ID); err != nil {
+				t.Fatal(err)
+			}
+			h.absent()
 		})
 	}
 }

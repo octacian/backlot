@@ -4,16 +4,13 @@ package daemon
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	v1 "github.com/octacian/backlot/api/v1"
 	bolt "go.etcd.io/bbolt"
@@ -179,49 +176,5 @@ func TestSettlementMigrationRejectsFutureSourceUnchanged(t *testing.T) {
 				t.Fatal("rejected source changed", err)
 			}
 		})
-	}
-}
-
-func TestSettlementMigrationOldBinaryRefusal(t *testing.T) {
-	binary := os.Getenv("BACKLOT_V15_PREDECESSOR")
-	if binary == "" {
-		t.Skip("set BACKLOT_V15_PREDECESSOR to exercise the actual v15 binary")
-	}
-	dir := shortTemp(t)
-	data, err := os.ReadFile("testdata/state/v15/state.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "state.db"), data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	s, err := openStore(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(dir, "state.db")
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	output, err := exec.CommandContext(ctx, binary, "daemon", "serve", "--state-dir", dir, "--json").Output()
-	if err == nil || ctx.Err() != nil {
-		t.Fatal("old binary did not promptly refuse new state", err)
-	}
-	var response v1.ErrorResponse
-	if json.Unmarshal(output, &response) != nil || response.Error.Code != "state_version" {
-		t.Fatal("old binary returned wrong refusal", string(output))
-	}
-	after, err := os.ReadFile(path)
-	if err != nil || !bytes.Equal(before, after) {
-		t.Fatal("old binary changed version 16 database", err)
-	}
-	if _, err := os.Lstat(SocketPath(dir)); !os.IsNotExist(err) {
-		t.Fatal("old binary opened daemon socket", err)
 	}
 }

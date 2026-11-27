@@ -103,7 +103,7 @@ func TestSharedWaitingCancellation(t *testing.T) {
 					if !errors.Is(err, expected) {
 						t.Errorf("wanted cancellation, got %v", err)
 					}
-				case <-time.After(time.Second):
+				case <-time.After(10 * time.Second):
 					t.Error("canceled operation waited for serialization owner")
 					unlock()
 					held = false

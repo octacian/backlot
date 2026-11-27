@@ -85,7 +85,7 @@ func testConsumedPortConflict(t *testing.T, binary, kind, reference string) {
 		t.Fatal(err)
 	}
 	originalPort := 0
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for originalPort == 0 && time.Now().Before(deadline) {
 		current, err := h.cli.Inspect(context.Background(), response.Instance.ID)
 		if err != nil {
@@ -100,7 +100,7 @@ func testConsumedPortConflict(t *testing.T, binary, kind, reference string) {
 	// Hold the real root before bind, rather than assuming that activation has
 	// emitted output when allocation first becomes visible. An early conflict
 	// may legitimately cancel a root before its first application instruction.
-	if err := gate.SetDeadline(time.Now().Add(4 * time.Second)); err != nil {
+	if err := gate.SetDeadline(time.Now().Add(20 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	connection, err := gate.AcceptUnix()
@@ -109,7 +109,7 @@ func testConsumedPortConflict(t *testing.T, binary, kind, reference string) {
 	}
 	t.Cleanup(func() { _ = connection.Close() })
 	fixtureNumbers(t, h.pids)
-	witnessDeadline := time.NewTimer(4 * time.Second)
+	witnessDeadline := time.NewTimer(20 * time.Second)
 	defer witnessDeadline.Stop()
 	witnessPoll := time.NewTicker(10 * time.Millisecond)
 	defer witnessPoll.Stop()

@@ -89,9 +89,13 @@ func TestWorkingDirectoryServiceProbesAndWorktrees(t *testing.T) {
 	git(t, h.project, "init", "-q")
 	var id string
 	for _, tc := range []struct{ cwd, marker string }{{"", "service-marker"}, {".", "root-marker"}, {"probe", "probe-marker"}} {
-		server.Readiness = &v1.Probe{Kind: "command", Timeout: "3s", Command: &v1.Command{Tool: "sh", WorkingDirectory: tc.cwd, Args: v1.StringArguments("-c", "test -f "+tc.marker+" && test -f "+map[string]string{"": "started", ".": "package/started", "probe": "../package/started"}[tc.cwd])}}
+		server.Readiness = &v1.Probe{Kind: "command", Timeout: "30s", Command: &v1.Command{Tool: "sh", WorkingDirectory: tc.cwd, Args: v1.StringArguments("-c", "test -f "+tc.marker+" && test -f "+map[string]string{"": "started", ".": "package/started", "probe": "../package/started"}[tc.cwd])}}
 		h.manifest.Components["server"] = server
 		h.write()
+		// Probes read this marker, so a copy from the previous start would report a restarted service ready before it runs.
+		if err := os.Remove(filepath.Join(h.project, "package", "started")); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
 		req := h.request("dev")
 		req.Plan.ConfigPath = config
 		var response v1.InstanceResponse

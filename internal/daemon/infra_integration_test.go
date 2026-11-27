@@ -107,7 +107,11 @@ func TestInfraCLI(t *testing.T) {
 		}
 		records = append(records, r)
 	}
-	if len(records) < 15 || records[0].Type != "accepted" || records[len(records)-2].Type != "cleanup" || records[len(records)-1].State != "complete" {
+	progress := false
+	for _, r := range records {
+		progress = progress || r.Type == "phase"
+	}
+	if len(records) < 3 || !progress || records[0].Type != "accepted" || records[len(records)-2].Type != "cleanup" || records[len(records)-1].State != "complete" {
 		t.Fatal(string(data))
 	}
 	infraJoin(t, h)
@@ -204,6 +208,7 @@ func TestInfraOwnerProcess(t *testing.T) {
 		return
 	}
 	err := Serve(context.Background(), Options{Directory: directory, serviceReady: func(s *service) {
+		s.ownerJoinWait = 300 * time.Millisecond
 		_, finish, err := s.beginMutation(context.Background())
 		if err != nil {
 			os.Exit(4)
@@ -271,7 +276,6 @@ func TestInfraProcessRetainsUnjoinedOwner(t *testing.T) {
 		case <-time.After(20 * time.Millisecond):
 		}
 	}
-	started := time.Now()
 	stopDone := make(chan error, 1)
 	go func() { _, err := cli.Stop(ctx); stopDone <- err }()
 	var terminal, completion v1.InfraStopRecord
@@ -284,7 +288,7 @@ func TestInfraProcessRetainsUnjoinedOwner(t *testing.T) {
 		}
 		return nil
 	})
-	if err == nil || terminal.Error == nil || completion.State != "unknown" || time.Since(started) > 30*time.Second {
+	if err == nil || terminal.Error == nil || completion.State != "unknown" {
 		t.Fatal("finite cleanup failure missing", terminal, completion, err)
 	}
 	if err := <-stopDone; err == nil {

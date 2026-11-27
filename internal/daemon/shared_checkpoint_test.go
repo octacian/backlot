@@ -199,6 +199,11 @@ func TestSharedDaemonDiagnostics(t *testing.T) {
 // Match the production executable's private TLS/supervisor/anchor entry points, so
 // the test-only checkpoint daemon can exercise real native consumers too.
 func TestMain(m *testing.M) {
+	// Race-built processes sleep ~1s at exit by default; children inherit this.
+	// Reports print when a race is detected, so detected races are not lost.
+	if _, ok := os.LookupEnv("GORACE"); !ok {
+		_ = os.Setenv("GORACE", "atexit_sleep_ms=0")
+	}
 	if tlsverify.Helper() {
 		os.Exit(0)
 	}

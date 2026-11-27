@@ -150,7 +150,7 @@ func TestNativeHarnessShutdownBudgets(t *testing.T) {
 		default:
 			t.Fatal("no actual authenticated stop request")
 		}
-		if result.stopErr == nil || !result.joined || time.Since(start) > time.Second {
+		if result.stopErr == nil || !result.joined || time.Since(start) > 10*time.Second {
 			t.Fatal("stop request unbounded", result)
 		}
 		releaseHandler()
@@ -166,7 +166,7 @@ func TestNativeHarnessShutdownBudgets(t *testing.T) {
 		kills := 0
 		start := time.Now()
 		result := finishNativeHarnessOwner(func(context.Context) error { return nil }, done, func() error { kills++; return nil }, 20*time.Millisecond, 20*time.Millisecond, 20*time.Millisecond)
-		if result.joined || result.ownerErr == nil || !result.killed || kills != 1 || time.Since(start) > time.Second {
+		if result.joined || result.ownerErr == nil || !result.killed || kills != 1 || time.Since(start) > 10*time.Second {
 			t.Fatal("post-kill join unbounded", result)
 		}
 	})

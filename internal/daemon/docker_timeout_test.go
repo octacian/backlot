@@ -35,7 +35,7 @@ func TestDockerStopDeadline(t *testing.T) {
 				default:
 				}
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 			defer cancel()
 			_, err := engine.ContainerStop(ctx, "owned", client.ContainerStopOptions{Timeout: timeout})
 			if !errors.Is(err, context.DeadlineExceeded) {
@@ -89,7 +89,7 @@ func TestDockerRequestBounds(t *testing.T) {
 			name = "stop-without-caller-deadline"
 		}
 		t.Run(name, func(t *testing.T) {
-			engine := forceEngine(t, func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
+			engine := forceEngineWithBounds(t, 300*time.Millisecond, 300*time.Millisecond, func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
 			done := make(chan error, 1)
 			go func() {
 				var err error
@@ -108,7 +108,7 @@ func TestDockerRequestBounds(t *testing.T) {
 				if stop && !errors.Is(err, context.DeadlineExceeded) {
 					t.Fatal("stop request deadline lost", err)
 				}
-			case <-time.After(15 * time.Second):
+			case <-time.After(10 * time.Second):
 				t.Fatal("stalled engine exceeded request budget")
 			}
 		})

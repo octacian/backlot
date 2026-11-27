@@ -209,36 +209,4 @@ func TestPublicHelpMetadata(t *testing.T) {
 	}
 	root := NewCommand(v1.VersionResponse{}, io.Discard, io.Discard)
 	visit(root, "backlot")
-	for _, tc := range []struct {
-		path    []string
-		args    string
-		phrases []string
-	}{
-		{[]string{"secret"}, "<instance-id> <fixture-name>", []string{"requires --component", "backlot secret --component db INSTANCE_ID password"}},
-		{[]string{"fixtures"}, "<instance-id>", []string{"redacted", "backlot fixtures --component db INSTANCE_ID"}},
-		{[]string{"project", "diagnose"}, " ", []string{"without mutation", "preserves service/instance IDs"}},
-		{[]string{"project", "reassociate"}, " ", []string{"--apply", "--preview", "Private setup is a separate prerequisite"}},
-		{[]string{"project", "setup"}, " ", []string{"Inspect registered setup", "--edit", "--from private.yaml --reassociate", "does not import old credentials"}},
-		{[]string{"scene", "start"}, "<scene>", []string{"--attached owns", "backlot scene start dev"}},
-		{[]string{"scene", "status"}, "<scene>", []string{"without lifecycle ownership", "backlot scene status dev"}},
-		{[]string{"scene", "stop"}, "<scene>", []string{"retaining data", "backlot scene stop dev"}},
-	} {
-		c := root
-		for _, name := range tc.path {
-			for _, child := range c.Commands {
-				if child.Name == name {
-					c = child
-					break
-				}
-			}
-		}
-		if c.ArgsUsage != tc.args {
-			t.Errorf("%v target = %q", tc.path, c.ArgsUsage)
-		}
-		for _, phrase := range tc.phrases {
-			if !strings.Contains(c.Usage+" "+c.Description, phrase) {
-				t.Errorf("%v missing %q", tc.path, phrase)
-			}
-		}
-	}
 }

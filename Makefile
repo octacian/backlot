@@ -54,8 +54,11 @@ test:
 
 # The native integration suite builds an external CLI; its sources are not
 # dependencies of Go's cached parent test binary. Always execute this gate.
+# The pipe fails the gate when a package takes more than half its timeout;
+# pipefail keeps a failing `go test` fatal.
 race:
-	go test -race -count=1 -timeout=20m ./...
+	bash .github/scripts/test-budget.sh --self-test
+	bash -o pipefail -c 'go test -race -count=1 -timeout=30m ./... 2>&1 | bash .github/scripts/test-budget.sh 900'
 
 tools: $(LINT)
 

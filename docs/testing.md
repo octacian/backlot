@@ -54,6 +54,35 @@ commands, and consistency with current behavior and applicable decisions. Run
 additional focused checks when changed behavior warrants them; do not add tests that merely
 duplicate implementation details.
 
+## Writing tests
+
+Tests exist to fail when application behaviour breaks. Before adding one, check
+that the behaviour is not already covered at the same level.
+
+- **Assert behaviour, not shape.** Do not count commands, records or schemas,
+  snapshot incidental structure, or match prose and markup that no guide
+  documents as a contract. Assert typed codes and structured fields.
+- **Do not test the harness.** Fixture and helper code fails loudly in the tests
+  that use it. The exception is harness cleanup that protects the operator's
+  machine.
+- **A timed-out poll fails the test.** A loop that falls through on timeout lets
+  the test pass without exercising anything.
+- **Only the path under test gets a short budget.** Waits for success return as
+  soon as the condition holds, so give them 15 seconds or more. Set a short
+  timeout explicitly at the call site when its expiry is what the test proves.
+- **Do not wait out a production timeout.** Inject a short duration through an
+  unexported field with a zero-means-default rule, as `service.checkpoint` and
+  its neighbours do. Never use a package-level variable; tests share the process.
+- **No wall-clock upper bounds, and no sleep as synchronisation.** Assert the
+  outcome, or wait on an event. Where a bound must distinguish "prompt" from
+  "blocked", make it generous.
+- **Review-driven regression tests live in the feature's test file.**
+- **A test that skips in every CI job protects nothing automatically.** Name it
+  in a workflow, or document it in this guide as a manual diagnostic.
+
+`make race` fails when any package takes more than half its timeout (900 of
+1800 seconds). Shorten or split the suite; raise the timeout only with a reason.
+
 ## CI and platform evidence
 
 GitHub Actions runs shared checks on macOS ARM64 and Ubuntu 24.04 amd64. A separate
@@ -118,7 +147,7 @@ provider suites below for those boundaries. Runtime integration tests must use
 owned resources and must never modify an operator's unrelated containers, routes,
 files, or databases.
 
-The race gate disables Go test result caching with `-count=1` and allows 20 minutes
+The race gate disables Go test result caching with `-count=1` and allows 30 minutes
 for each complete package suite. This whole-suite runner budget leaves application,
 fixture, lease and cleanup deadlines unchanged. Native integration
 builds and executes a separate CLI/guardian binary; changes to that subprocess's

@@ -456,7 +456,7 @@ func (s *service) startCleanup(ctx context.Context, q v1.CleanupRequest) (*clean
 		summary := v1.CleanupSummary{Preview: preview.digest, Targets: len(preview.targets)}
 		unjoined := map[string]bool{}
 		for _, owner := range preceding {
-			wait, cancel := context.WithTimeout(owned, 20*time.Second)
+			wait, cancel := context.WithTimeout(owned, s.ownerJoin())
 			select {
 			case <-owner.done:
 			case <-wait.Done():
@@ -490,7 +490,7 @@ func (s *service) startCleanup(ctx context.Context, q v1.CleanupRequest) (*clean
 				progress.Outcome = "stopping"
 				operation.emit(progress)
 				observed := map[string]bool{}
-				step := &cleanupSteps{reviewed: selected.resources, before: func() error {
+				step := &cleanupSteps{budget: s.cleanupCallBudget, reviewed: selected.resources, before: func() error {
 					if err := owned.Err(); err != nil {
 						return err
 					}
@@ -614,6 +614,8 @@ type cleanupSteps struct {
 	reviewed resourceGeneration
 	before   func() error
 	emit     func(string, string, string)
+	// budget, when positive, replaces every caller's cleanupCallContext budget; tests only.
+	budget time.Duration
 }
 
 func cleanupBefore(ctx context.Context) error {
@@ -784,6 +786,9 @@ func cleanupPathAbsent(path string) (bool, error) {
 // a target or operation. Other lifecycle callers retain their existing budgets.
 func cleanupCallContext(ctx context.Context, budget time.Duration) (context.Context, context.CancelFunc) {
 	if step, _ := ctx.Value(cleanupStepsKey{}).(*cleanupSteps); step != nil {
+		if step.budget > 0 {
+			budget = step.budget
+		}
 		return context.WithTimeout(ctx, budget)
 	}
 	return ctx, func() {}

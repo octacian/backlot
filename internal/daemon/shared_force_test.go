@@ -135,6 +135,11 @@ func TestForceCollisionAndDurableAuthority(t *testing.T) {
 // forceEngine is a private bounded Engine protocol fixture, not a real provider.
 func forceEngine(t *testing.T, handle http.HandlerFunc) *dockerEngine {
 	t.Helper()
+	return forceEngineWithBounds(t, dockerHeaderTimeout, dockerStopSlack, handle)
+}
+
+func forceEngineWithBounds(t *testing.T, header, stopSlack time.Duration, handle http.HandlerFunc) *dockerEngine {
+	t.Helper()
 	listener, err := net.Listen("unix", filepath.Join(shortTemp(t), "engine.sock"))
 	if err != nil {
 		t.Fatal(err)
@@ -151,7 +156,7 @@ func forceEngine(t *testing.T, handle http.HandlerFunc) *dockerEngine {
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	t.Cleanup(func() { _ = server.Close(); _ = listener.Close(); <-done })
-	d, err := newDocker("unix://" + listener.Addr().String())
+	d, err := newDockerWithBounds("unix://"+listener.Addr().String(), header, stopSlack)
 	if err != nil {
 		t.Fatal(err)
 	}

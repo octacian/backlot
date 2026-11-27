@@ -30,7 +30,7 @@ func TestNativeRecoveryRetainsObservations(t *testing.T) {
 			component.Resources = append(component.Resources, "data")
 			component.Outputs = []string{"build"}
 			component.Fixtures = map[string]v1.Fixture{"data": {Value: fixtureRef("resource", "data", "path")}}
-			component.Readiness = &v1.Probe{Kind: "command", Timeout: "2s", Command: &v1.Command{Tool: "fixture", Args: v1.StringArguments("-test.run=TestNativeFixtureProcess", "--", "probe")}}
+			component.Readiness = &v1.Probe{Kind: "command", Timeout: "30s", Command: &v1.Command{Tool: "fixture", Args: v1.StringArguments("-test.run=TestNativeFixtureProcess", "--", "probe")}}
 			h.manifest.Components["server"] = component
 			for name, scene := range h.manifest.Scenes {
 				scene.Resources = append(scene.Resources, "data")

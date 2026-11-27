@@ -117,6 +117,133 @@ jobs:
           GOBIN="$RUNNER_TEMP/backlot-tools" go install -ldflags '-X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.7' github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.7
           "$RUNNER_TEMP/backlot-tools/caddy" version
           go version -m "$RUNNER_TEMP/backlot-tools/caddy"
+      # TEMPORARY E1 witness: remove this step and artifact glob after the actual run.
+      - name: Witness broken pin refusal on disposable host (temporary)
+        shell: bash
+        env:
+          BACKLOT_HOST_TRUST_TEST: install-status-retire
+          BACKLOT_DISPOSABLE_HOST_GRANT: github-hosted-ephemeral
+        run: |
+          set -euo pipefail
+          test -z "${GOFLAGS:-}"
+          witness_dir=$(mktemp -d "$RUNNER_TEMP/host-witness.XXXXXX")
+          trap 'rm -rf -- "$witness_dir"' EXIT
+          export WITNESS_DIR="$witness_dir"
+          python3 - <<'PYGEN'
+          import json, os
+          from pathlib import Path
+          root, temp = Path.cwd(), Path(os.environ['WITNESS_DIR'])
+          replacements = {}
+          def overlay(relative, old, new):
+              original = root / relative
+              text = original.read_text()
+              assert text.count(old) == 1, relative
+              text = text.replace(old, new)
+              target = temp / original.name
+              target.write_text(text)
+              replacements[str(original)] = str(target)
+              return target
+          overlay('internal/cli/gateway_trust.go',
+              'return output(c, nil, &v1.PlanError{Code: "gateway_ca", Message: "selected managed CA fingerprint changed or mismatches; inspect trust status before authorizing installation"})',
+              'return nil')
+          fixture = root / 'internal/daemon/host_trust_integration_test.go'
+          text = fixture.read_text()
+          start = text.index('\tt.Cleanup(func() {')
+          end = text.index('\n\tcommand :=', start)
+          cleanup = text[start:end]
+          # Observe every other cleanup error without changing its assertion or effects.
+          lines = cleanup.splitlines(keepends=True)
+          for i, line in enumerate(lines):
+              if 't.Error' in line and not any(s in line for s in (
+                  '"cleanup product retirement failed"', '"cleanup root rejection unproven:')):
+                  indent = line[:len(line) - len(line.lstrip())]
+                  lines[i] = indent + 't.Log("WITNESS unexpected cleanup diagnostic")\n' + line
+          observed = ''.join(lines)
+          observed = observed.replace('\tt.Cleanup(func() {', '''\tt.Cleanup(func() {
+          \t\tconfigRoot, configErr := os.UserConfigDir()
+          \t\treceipt := filepath.Join(configRoot, "backlot", "trust", ca.Fingerprint+".json")
+          \t\tfor _, path := range []string{source, link, hookLog, receipt} {
+          \t\t\t_, err := os.Lstat(path)
+          \t\t\tt.Logf("WITNESS before recovery absence %s=%t", path, configErr == nil && path != "" && os.IsNotExist(err))
+          \t\t}
+          \t\tmissingReceipt := func(out []byte, err error) bool {
+          \t\t\tvar result v1.GatewayTrustResult
+          \t\t\tvar exit *exec.ExitError
+          \t\t\t_, absent := os.Lstat(receipt)
+          \t\t\treturn configErr == nil && os.IsNotExist(absent) && errors.As(err, &exit) && exit.ExitCode() == 1 && json.Unmarshal(out, &result) == nil && result.Error != nil && result.Error.Code == "gateway_trust" && result.Error.Message == "trust tracking failed: lstat "+receipt+": no such file or directory"
+          \t\t}''', 1)
+          observed = observed.replace('t.Error("cleanup product retirement failed", err)',
+              't.Logf("WITNESS allowed missing-receipt retirement diagnostic=%t", missingReceipt(out, err))\n\t\t\t\tt.Error("cleanup product retirement failed", err)')
+          observed = observed.replace('t.Errorf("cleanup root rejection unproven: %v %s", err, observed)',
+              't.Logf("WITNESS allowed missing-receipt stored-status diagnostic=%t", missingReceipt(observed, err))\n\t\t\t\tt.Errorf("cleanup root rejection unproven: %v %s", err, observed)')
+          before_close = '''\t\tfor _, path := range []string{source, link, hook} {
+          \t\t\t_, err := os.Lstat(path)
+          \t\t\tt.Logf("WITNESS exact absence %s=%t", path, path != "" && os.IsNotExist(err))
+          \t\t}
+          \t\tout, observeErr := stock(binary, "gateway", "trust", "status", "--state-dir", h.dir, "--json")
+          \t\tvar live v1.GatewayTrustResult
+          \t\tt.Logf("WITNESS live exact-root untrusted=%t fingerprint=%s", observeErr == nil && json.Unmarshal(out, &live) == nil && live.CA.Fingerprint == ca.Fingerprint && live.Host.Status == "untrusted", ca.Fingerprint)
+          \t\th.close()'''
+          assert observed.count('\t\th.close()') == 1
+          observed = observed.replace('\t\th.close()', before_close)
+          observed = observed.replace('\n\t})', '\n\t\tt.Logf("WITNESS owned cleanup joined=%t verified=%t", h.waited, !h.cleanupUnverified && err == nil)\n\t})')
+          assert observed != cleanup
+          overlay(str(fixture.relative_to(root)), cleanup, observed)
+          (temp / 'overlay.json').write_text(json.dumps({'Replace': replacements}))
+          print('Temporary overlay prepared: pin refusal returns before trust.Install; cleanup assertions retained')
+          PYGEN
+          export BACKLOT_CADDY_TEST_BINARY="$RUNNER_TEMP/backlot-tools/caddy"
+          set +e
+          GOFLAGS="-overlay=$witness_dir/overlay.json" go test -race ./internal/daemon -run '^TestOwnedHostTrust$' -count=1 -v -timeout=20m 2>&1 | tee "$RUNNER_TEMP/owned-host-trust-mutant.log"
+          outcome=("${PIPESTATUS[@]}")
+          set -e
+          printf 'Witness revision=%s go-test-exit=%s tee-exit=%s\n' "$(git rev-parse HEAD)" "${outcome[0]}" "${outcome[1]}" | tee -a "$RUNNER_TEMP/owned-host-trust-mutant.log"
+          test "${outcome[0]}" -eq 1
+          test "${outcome[1]}" -eq 0
+          python3 - <<'PYVERIFY'
+          import os, re
+          from pathlib import Path
+          log = (Path(os.environ['RUNNER_TEMP']) / 'owned-host-trust-mutant.log').read_text()
+          assert len(re.findall(r'host_trust_integration_test.go:\d+: unexpected CLI outcome: <nil> *$', log, re.M)) == 1
+          for marker in (
+              'WITNESS allowed missing-receipt retirement diagnostic=true',
+              'WITNESS allowed missing-receipt stored-status diagnostic=true',
+              'WITNESS owned cleanup joined=true verified=true',
+          ):
+              assert log.count(marker) == 1, marker
+          fingerprints = re.findall(r'WITNESS live exact-root untrusted=true fingerprint=([0-9a-f]{64})', log)
+          assert len(fingerprints) == 1
+          fingerprint = fingerprints[0]
+          for path in (
+              '/usr/local/share/ca-certificates/backlot-' + fingerprint + '.crt',
+              '/etc/ssl/certs/backlot-' + fingerprint + '.pem',
+              '/etc/ca-certificates/update.d/backlot-fixture-' + fingerprint,
+          ):
+              assert log.count('WITNESS exact absence ' + path + '=true') == 1, path
+          before = re.findall(r'WITNESS before recovery absence (.+)=(true|false)', log)
+          assert len(before) == 4 and all(value == 'true' for _, value in before)
+          assert before[0][0] == '/usr/local/share/ca-certificates/backlot-' + fingerprint + '.crt'
+          assert before[1][0] == '/etc/ssl/certs/backlot-' + fingerprint + '.pem'
+          assert before[2][0].endswith('/hook.log')
+          assert before[3][0].endswith('/backlot/trust/' + fingerprint + '.json')
+          for forbidden in ('WITNESS unexpected cleanup diagnostic', 'DATA RACE', 'panic:', 'test timed out', 'preserved owned fixture state'):
+              assert forbidden not in log, forbidden
+          assert log.count('cleanup product retirement failed exit status 1') == 1
+          assert log.count('cleanup root rejection unproven: exit status 1') == 1
+          assert '--- FAIL: TestOwnedHostTrust ' in log
+          # Later registered fixture/TempDir cleanup must not hide behind the expected failure.
+          for diagnostic in re.findall(r'^\s+[\w./-]+\.go:\d+: (.*)$', log, re.M):
+              assert diagnostic.startswith((
+                  'CLI ', 'cleanup product retirement exit=',
+                  'cleanup product retirement failed exit status 1',
+                  'cleanup root rejection unproven: exit status 1',
+                  'unexpected CLI outcome: <nil>', 'WITNESS ', 'native diagnostic: ',
+              )), diagnostic
+          print('Witness: broken pin refusal detected; missing-receipt diagnostics retained; exact absence, live root rejection and owned join proved')
+          PYVERIFY
+          rm -rf -- "$witness_dir"
+          test ! -e "$witness_dir"
+          echo 'Temporary overlay files removed; GOFLAGS remains unset for normal acceptance' | tee -a "$RUNNER_TEMP/owned-host-trust-mutant.log"
       - name: Accept owned trust effects on disposable host
         shell: bash
         env:
@@ -131,5 +258,5 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: owned-host-trust-${{ matrix.os }}
-          path: ${{ runner.temp }}/owned-host-trust.log
+          path: ${{ runner.temp }}/owned-host-trust*.log
           if-no-files-found: warn

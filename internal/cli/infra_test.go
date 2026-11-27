@@ -17,7 +17,7 @@ func TestInfraGatewayTrustOutput(t *testing.T) {
 	if err := infraOutput(c, r); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Infrastructure", "Gateway running", "exact-root", "Host trust: unknown", "selected-domain", g.HostTrust.Message, g.TrustCommand, r.Guidance} {
+	for _, want := range []string{g.Status, "exact-root", g.HostTrust.Status, "selected-domain", g.HostTrust.Message, g.TrustCommand, r.Guidance} {
 		if !strings.Contains(text.String(), want) {
 			t.Fatal(want, text.String())
 		}

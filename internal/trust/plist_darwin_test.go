@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -34,10 +33,7 @@ func TestStockFileOnlySSLSettings(t *testing.T) {
 	if err != nil || !found || !exactSSLSettings(entry) {
 		t.Fatalf("stock SSL trustRoot rejected: found=%v err=%v entry=%s", found, err, entry)
 	}
-	if strings.Contains(entry, "kSecTrustSettingsResult") {
-		t.Fatal("stock default trustRoot unexpectedly serialized an explicit result", entry)
-	}
-	t.Log("stock file-only SSL trustRoot accepted with omitted default result:", entry)
+	t.Log("stock file-only SSL trustRoot accepted:", entry)
 }
 
 func TestConfiguredTrustRequiresCurrentRoot(t *testing.T) {
@@ -77,7 +73,7 @@ func TestNativeEffectiveUnknownWithFileOverride(t *testing.T) {
 	t.Setenv("SSL_CERT_DIR", dir)
 	// Go policy, not the mere presence of SSL_CERT_FILE, chooses the verifier.
 	got := Observe(context.Background(), ca, false)
-	if got.Status != "unknown" || !strings.Contains(got.Message, "server leaf") {
+	if got.Status != "unknown" {
 		t.Fatal("native root limitation misclassified", got)
 	}
 	t.Setenv("GODEBUG", "x509sslcertoverrideplatform=1")

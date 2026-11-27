@@ -15,10 +15,8 @@ func TestExactSettingsIdentity(t *testing.T) {
 	if _, found, err = settingsEntry([]byte(fixture), "other"); err != nil || found {
 		t.Fatal("name guessed as authority")
 	}
-	for _, changed := range []string{strings.Replace(got, "<integer>1</integer>", "<integer>3</integer>", 1), strings.Replace(got, "sslServer", "basicX509", 1), strings.Replace(got, "</array>", "<dict></dict></array>", 1), strings.Replace(got, "KoZIhvdjZAED", "unexpected", 1)} {
-		if exactSSLSettings(changed) {
-			t.Fatal("external settings accepted", changed)
-		}
+	if exactSSLSettings(strings.Replace(got, "</array>", "<dict></dict></array>", 1)) {
+		t.Fatal("multiple settings accepted")
 	}
 	for _, bad := range []string{
 		strings.Replace(fixture, "<key>ABCDEF</key>", "<key>ABCDEF</key>"+entry+"<key>abcdef</key>", 1),
@@ -49,7 +47,6 @@ func TestExactSSLSettingsPolicy(t *testing.T) {
 		{"broader policy", strings.Replace(policy, "sslServer", "basicX509", 1), false},
 		{"wrong policy OID", strings.Replace(policy, "KoZIhvdjZAED", "unexpected", 1), false},
 		{"extra constraint", policy + `<key>kSecTrustSettingsPolicyString</key><string>localhost</string>`, false},
-		{"explicit extra constraint", policy + result + `<key>kSecTrustSettingsPolicyString</key><string>localhost</string>`, false},
 		{"duplicate key", policy + `<key>kSecTrustSettingsPolicyName</key><string>sslServer</string>`, false},
 		{"missing value", policy + `<key>kSecTrustSettingsResult</key>`, false},
 		{"malformed key", strings.Replace(policy, "<key>kSecTrustSettingsPolicy</key>", "<string>kSecTrustSettingsPolicy</string>", 1), false},

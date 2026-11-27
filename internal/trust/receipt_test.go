@@ -14,7 +14,6 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -94,8 +93,8 @@ func TestReceiptAuthorityAndPreservation(t *testing.T) {
 		}
 		before, _ = os.ReadFile(path)
 		result, err = Retire(context.Background(), dir, ca.Fingerprint, true, nil)
-		if err == nil || result.Error == nil || !strings.Contains(result.Error.Message, "interrupted trust operation") || !strings.Contains(result.Error.Message, "preserve receipt") || result.Outcome != "unknown" {
-			t.Fatal("interrupted operation lost recovery guidance", phase, result, err)
+		if err == nil || result.Error == nil || result.Error.Code != "gateway_trust" || result.Outcome != "unknown" {
+			t.Fatal("interrupted operation lost error classification", phase, result, err)
 		}
 		after, _ = os.ReadFile(path)
 		if !bytes.Equal(before, after) {

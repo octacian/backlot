@@ -168,42 +168,34 @@ or preserve diagnostic state and report residuals.
 ## Disposable host trust acceptance
 
 The Check workflow's `Owned host trust` job runs `TestOwnedHostTrust` serially
-on GitHub-hosted Ubuntu 24.04 amd64. It installs stock Caddy 2.11.7 into runner
-temporary storage and exercises the production foreground CLI with ordinary sudo,
-a private unprivileged daemon and dynamic gateway ports. Linux coverage retains
-install/status/retire, wrong-pin and missing-impact-acknowledgement rejection,
-receipt-only retirement, exact withdrawal, identical external-root preservation,
-positive fresh effective-root verification, distribution hooks and cleanup.
-One uniquely owned update hook logs invocation/change and a bounded exit-7 case.
-Stock refresh can accept a failing hook; this does not establish a failed command
-or partial product result. A later refresh checks hook recovery; other hooks stay
-enabled. Cleanup is registered before effects and reports uncertain residuals as
-failures. Only public diagnostics are uploaded, never private state or keys.
+on GitHub-hosted Ubuntu 24.04 amd64 with stock Caddy 2.11.7, ordinary sudo, a
+private unprivileged daemon and dynamic gateway ports. It covers foreground
+install/status/retire, pin/impact-acknowledgement rejection, receipt-only retirement,
+exact withdrawal, identical external-root preservation, fresh effective-root
+verification and distro hooks. An owned hook exercises failure/recovery while
+other hooks remain enabled; stock refresh may accept its failure, which does not
+prove a partial product result. Register cleanup before effects; uncertain
+residuals fail the job. Upload only public diagnostics, never private state or keys.
 
 The fixture requires both `BACKLOT_HOST_TRUST_TEST=install-status-retire` and
-`BACKLOT_DISPOSABLE_HOST_GRANT=github-hosted-ephemeral`, and rejects other runner
+`BACKLOT_DISPOSABLE_HOST_GRANT=github-hosted-ephemeral`, rejecting other runner
 identities/platforms. **Never set these on a normal workstation.** Default
-`make check` skips it before allocating resources or changing host trust.
-The retained macOS fixture branch still requires a disposable GitHub-hosted
-runner; it is not a usable interactive manual path. Do not spoof its grant.
+`make check` skips before allocation or host mutation. The retained macOS branch
+also requires a disposable hosted runner; do not spoof its grant for manual use.
 
-macOS remains in normal nonmutating repository CI, but is excluded from unattended
-owned-host mutation CI. Stock retirement can require interactive Security
-administrator authentication even under sudo; unattended completion is unproven.
-macOS retirement is an owner-accepted manual acceptance limit. Use the
-[interactive disposable-host sequence](https.md#manual-macos-verification-and-recovery)
-and retain exact settings/entry/receipt and cleanup evidence before claiming
-acceptance. A passing Linux job or macOS repository check is not full macOS trust
-acceptance. The previous hosted macOS removal timeout does not conclusively
-identify its wait cause or prove settings withdrawal.
+macOS remains in nonmutating repository CI; unattended owned-host mutation CI is
+Ubuntu-only. macOS retirement has an owner-accepted manual acceptance boundary:
+use the [interactive disposable-host sequence](https.md#manual-macos-verification-and-recovery)
+and retain exact settings/entry/receipt and cleanup evidence. Linux success or
+macOS repository checks do not prove macOS trust acceptance. The hosted removal
+timeout proves neither its wait cause nor settings withdrawal.
 
-Root observations do not prove normal leaf TLS or application readiness. The
-fixture waits for admin readiness, not wildcard certificate issuance, and does
-not test normal-chain OS-root TLS. Optional application-leaf TLS proof remains
-separate. Fixture code and skipped/local checks are not platform evidence; the
-published Ubuntu job must pass including cleanup before claiming Linux effects.
-Interactive authorization denial/interruption and rare partial failures remain
-separate acceptance gaps.
+Root observations and admin readiness do not prove wildcard issuance, normal
+OS-root leaf TLS or application readiness. Optional application-leaf proof remains
+separate, deferred for its fixture cost/fragility. Fixture code and skipped/local
+checks are not platform evidence: require the published Ubuntu job, including
+cleanup, before claiming Linux effects. Interactive authorization denial/interruption
+and rare partial failures remain acceptance gaps.
 
 ## Release packaging and publication
 

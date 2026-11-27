@@ -14,18 +14,11 @@ project scope due to limited demand. Reconsider with sufficient interest and
 contributors willing to share ongoing maintenance and native Windows testing.
 WSL guidance below is configuration guidance only, with no WSL QA or support guarantee.
 
-Debian 13.4 is the historical target baseline. Issue 95's reported actual-host
-trust run used Debian 13.7 and Caddy 2.11.7; its temporary raw evidence was lost
-in a power interruption. That report does not prove an exact Debian 13.4 run or
-replace retained acceptance evidence. Ubuntu CI results remain distinct.
-
-macOS host-trust retirement uses normal foreground Security authorization and may
-require interactive administrator authentication even under sudo. Unattended
-headless completion is unproven; retirement has an owner-accepted manual
-acceptance boundary. Normal macOS repository CI remains enabled, while only
-Ubuntu runs unattended owned-host mutation acceptance. See the
-[platform evidence limits](testing.md#disposable-host-trust-acceptance) and
-[manual macOS sequence](https.md#manual-macos-verification-and-recovery).
+macOS host-trust retirement has an owner-accepted manual acceptance boundary;
+unattended headless completion is unproven. Follow the
+[interactive verification/recovery procedure](https.md#manual-macos-verification-and-recovery)
+for stock Security authorization and the
+[platform evidence limits](testing.md#disposable-host-trust-acceptance) for CI scope.
 
 macOS and Linux use permissioned Unix sockets and authenticated guardians.
 Application native work may create process groups inside its guardian's session,

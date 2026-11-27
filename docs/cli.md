@@ -720,17 +720,15 @@ Gateway start/restart add `root_fingerprint`, `host_trust` and an exact scoped
 read-only `/v1/gateway/ca` POST accepts the API version and returns validated public
 certificate/pin/source provenance and a fresh daemon-effective observation.
 
-Trust JSON is one `GatewayTrustResult` document with `action`, public `ca`,
-`host`, `effective`, `outcome`, optional `receipt`, `entry`, `retained`, `warnings`
-and `error`. Host/effective statuses are trusted/untrusted/unknown and identify
-store, context, observation time and a message explaining proof limits (also
-printed in human output). macOS host `trusted` means configured admin TLS settings,
-exact System public entry and current CA dates; native daemon-effective standalone
-root acceptance may remain `unknown`. Verify actual application TLS separately.
-OS proof excludes file overrides; effective
-proof uses the daemon's retained environment. These observations do not attest
-published readiness or browser/application trust. Retained source observations
-are incomplete and historical. Failed observations remain unknown.
+Trust JSON is one `GatewayTrustResult` with `action`, public `ca`, `host`,
+`effective`, `outcome`, optional `receipt`, `entry`, `retained`, `warnings` and
+`error`. Host/effective observations give trusted/untrusted/unknown, store,
+context, time and proof limits (also printed in human output). Failed observations
+stay unknown. OS proof excludes file overrides; effective proof uses the daemon's
+retained environment. Retained sources are incomplete historical observations.
+See [platform trust proofs](https.md#explicit-host-trust-and-retirement) for macOS
+configured trust versus daemon-effective acceptance; neither establishes
+application/browser trust or publication readiness.
 
 Argument and pre-selection failures use the usual typed error envelope. Once
 foreground processing has a result, partial/unknown effects remain in that result
@@ -742,9 +740,8 @@ authorization can prompt only in the explicit foreground mutation, never at
 startup. On macOS, retirement emits a foreground stderr warning: Security may
 require interactive administrator authentication even under sudo. Use an
 interactive login session; unattended headless retirement is unproven. Interrupted
-operations retain their receipt and require exact-root manual inspection/recovery;
-Ctrl-C does not prove descendant termination. No browser automation or implicit
-elevation occurs.
+operations retain receipts; follow [exact-root inspection/recovery](https.md#manual-macos-verification-and-recovery).
+Ctrl-C does not prove descendant termination. No implicit elevation occurs.
 
 The [HTTPS guide](https.md#explicit-host-trust-and-retirement) owns target stores,
 permissioned receipt placement, ownership limits, distro-hook effects,

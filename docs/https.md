@@ -59,50 +59,44 @@ installation. Published-scene readiness still requires normally verified HTTPS.
 
 ### Explicit host trust and retirement
 
-`gateway trust status` obtains a read-only public root snapshot validated against
-the selected daemon's protected managed configuration, CA key pairs and DER
-SHA-256 pin. It reports `trusted`, `untrusted` or `unknown` for that exact root in
-the selected OS store, separately from a fresh observation under the daemon's
-retained environment. Unavailable observations mean unknown. Neither certificate
-presence, stock-tool success nor a successful request through another root is
-proof of trust. The public snapshot contains no signing keys or private scope
-capabilities. External gateways retain operator-owned trust management.
+`gateway trust status` validates a read-only public root snapshot against the
+selected daemon's protected managed configuration, CA key pairs and DER SHA-256
+pin. It reports exact-root OS trust (`trusted`, `untrusted` or `unknown`) separately
+from a fresh daemon-effective observation under its retained environment.
+Unavailable observations mean unknown; certificate presence, tool success or TLS
+through another root is insufficient. The snapshot excludes keys and private
+capabilities. External gateway trust remains operator-owned.
 
-On macOS, host `trusted` means **configured OS trust**: the exact supported admin
-TLS root settings, exact System public certificate entry and current CA dates.
-It does not prove source-account acceptance, override a user deny or other stores,
-or establish application TLS readiness. Native Go SSL policy may not establish
-standalone CA acceptance, so daemon-effective trust can remain `unknown` after
-successful installation. Verify the actual application origin with normal TLS.
-File overrides still follow Go policy; their presence alone does not select a
-verifier or prove acceptance. Ubuntu/Debian retain fresh exact-root Go verification.
+On macOS, host `trusted` means **configured OS trust**: exact supported admin TLS
+root settings, exact System public entry and current CA dates. It does not prove
+source-account acceptance, override user deny/other stores or establish application
+TLS readiness. Native Go SSL policy may leave daemon-effective standalone CA trust
+`unknown` after installation; verify the actual application origin normally.
+File overrides follow Go policy and alone prove neither verifier selection nor
+acceptance. Ubuntu/Debian use fresh exact-root Go verification.
 
-`install` requires the displayed fingerprint and runs stock OS tools in the
-foreground with normal administrator authorization. On macOS it selects the
-System keychain and admin TLS trust domain, using `security`; on Ubuntu/Debian it
-uses `/usr/local/share/ca-certificates/backlot-FINGERPRINT.crt` and stock
-`update-ca-certificates`, including normal distribution hooks. Retirement also
-uses stock OpenSSL to refresh derived certificate indices when owned links are
-removed. Preserved external/legacy links can retain dangling references for
-explicit manual review. These hooks can
-have effects beyond one root. Backlot preserves pre-existing identical entries
-and settings, rejects conflicts and verifies exact postconditions. Unsupported or
-ambiguous macOS policy/settings require manual handling. The daemon remains
-unprivileged and configures Caddy with `install_trust:false`.
+`install` requires the displayed fingerprint and foreground stock-tool
+administrator authorization: macOS `security` targets the System keychain/admin
+TLS domain; Ubuntu/Debian use
+`/usr/local/share/ca-certificates/backlot-FINGERPRINT.crt` and
+`update-ca-certificates`, including distribution hooks that can affect more than
+one root. Retirement uses stock OpenSSL to refresh indices after removing owned
+links; preserved external/legacy links may retain dangling references for manual
+review. Backlot preserves pre-existing identical entries/settings, rejects
+conflicts and verifies exact postconditions. Ambiguous/unsupported macOS settings
+require manual handling. The unprivileged daemon sets Caddy `install_trust:false`.
 
 Permissioned version-1 public receipts live in
 `~/Library/Application Support/backlot/trust` on macOS or
 `${XDG_CONFIG_HOME:-$HOME/.config}/backlot/trust` on Linux. Only foreground trust
-commands write them, using atomic replacement and a narrow cooperative lock.
-They retain the validated public snapshot, exact store/effects, pre-existing versus
-new effects and useful known source observations. Linux-owned source receipts
-also bind filesystem identity and change time for newly created sources and
-exact generated `.pem` links; replacing an identical entry does not transfer its
-old removal authority. Pre-existing or legacy links stay preserved. They contain no keys and survive
-daemon-state erasure. Status lists bounded retained-root summaries; source
-observations are incomplete consumer information, not enrollment or a guarantee
-that no application still depends on a root. Status and gateway startup do not
-acquire the trust mutation lock. Receipt damage does not prevent ordinary starts.
+commands write them, atomically under a cooperative mutation lock. They retain
+the validated snapshot, exact store/effects, pre-existing versus new effects and
+known sources, without keys, and survive daemon erasure. Linux receipts bind new
+source filesystem identity/change time and exact generated `.pem` links;
+identical replacement does not inherit removal authority. External/legacy links
+stay preserved. Status lists bounded retained-root summaries: source observations
+are incomplete consumer information, not enrollment. Status/startup neither take
+the mutation lock nor depend on healthy receipts.
 
 To replace a root, first install the new selected daemon's root and verify its OS
 trust, then select the old receipt fingerprint:
@@ -112,46 +106,41 @@ backlot gateway trust retire --fingerprint OLD_ROOT_SHA256 \
   --replacement --state-dir /absolute/new-daemon-state --acknowledge-impact --json
 ```
 
-`--replacement` revalidates the selected replacement root and proves OS trust
-before removing old effects. Standalone removal omits `--replacement` and still
-requires `--acknowledge-impact`. Review known sources and accept possible breakage
-of unknown scopes, browsers and applications. Acknowledgement never waives
-ownership: only verifiably Backlot-provisioned CAs **and exact Backlot-provisioned
-trust effects** can be retired. Certificate names, arbitrary paths and manual
-imports grant no retirement authority. Pre-existing external entries/settings
-remain preserved even for the same root. Retained public identity can authorize
-retirement after the source daemon/keys are gone or the old certificate expires.
-Use `status --fingerprint OLD_ROOT_SHA256` to observe a retained root without its
-daemon. Legacy/manual effects without sufficient receipts require manual OS work.
+`--replacement` revalidates the selected new root and proves its OS trust before
+retirement. Omit it for standalone removal; both require `--acknowledge-impact`.
+Review known sources and accept possible breakage of unknown consumers.
+Acknowledgement never waives ownership: only verifiably Backlot-provisioned CAs
+**and exact Backlot-provisioned trust effects** can be retired. Names, arbitrary
+paths and manual imports grant no authority; preserve external entries/settings
+even for the same root. Retained public identity permits retirement after source
+daemon/key loss or certificate expiry. `status --fingerprint OLD_ROOT_SHA256`
+observes a retained root without its daemon. Insufficient legacy/manual receipts
+require manual OS work.
 
-On macOS, run retirement in a usable interactive login session. Normal Security
-administrator authentication may be required even under `sudo`, including when
-removing the last admin trust entry. Backlot warns on stderr before retirement;
-JSON stdout remains a single result. Unattended headless removal has not been
-established and is not an automated acceptance guarantee. A waiting command does
-not establish success or failure. Interruption can leave uncertain effects;
-Ctrl-C is not proof that all privileged descendants have terminated.
+On macOS, use an interactive login session: Security may require administrator
+authentication even under `sudo`. Retirement warns on stderr while JSON stdout
+remains one result. Headless completion is unproven. Waiting does not establish
+success/failure; interruption can leave uncertain effects, and Ctrl-C does not
+prove all privileged descendants terminated.
 
-Interrupted/denied operations report partial or unknown effects and preserve
-intent/evidence. Do not blindly retry them. Changed targets/settings stop further
-destructive work. Restore compatible tracking or deliberately use
+Interrupted/denied operations retain evidence and report partial/unknown effects;
+do not blindly retry. Changed targets/settings stop further destructive work.
+Restore compatible tracking or use
 `install --new-tracking --fingerprint ROOT_SHA256_FROM_STATUS` to preserve old
-receipts and track only newly validated future effects. This never adopts old
-unknown effects. Unsupported writers preserve evidence unchanged, even with `--new-tracking`;
-use a compatible executable or a separate clean tracking location. Receipt backup
-restoration can make authority stale: use manual recovery or clean tracking when
-restoration is known. The lock coordinates Backlot commands, not unrelated
-administrators; use a controlled maintenance window. Exact pre/post checks cannot
-make OS effects atomic against an external path or policy change.
+receipts and track only newly validated future effects, never adopt old unknown
+effects. Unsupported writers preserve evidence even with `--new-tracking`; use a
+compatible executable or separate clean tracking location. Known receipt backup
+restoration can leave stale authority: use manual recovery or clean tracking.
+The cooperative lock excludes no unrelated administrator; use a maintenance
+window. Exact pre/post checks cannot make effects atomic against external changes.
 
-Retirement distinguishes trust withdrawal, entry deletion/preservation and current
-root trust. On macOS it withdraws only proven admin TLS settings and preserves the
-public certificate entry for manual review: stock observations cannot prove stable
-entry identity after an identical external re-import. Residual trust in another store/domain or an explicit application
-root can remain after the selected owned effects are removed. Browser/application
-trust is separate: configure it explicitly and verify the actual origin without
-warnings. Backlot does not automate browser stores, DNS, CA regeneration or a
-privileged service.
+Retirement reports trust withdrawal, entry deletion/preservation and current root
+trust separately. macOS withdraws only proven admin TLS settings and preserves
+the public entry for review: stock observations cannot prove stable entry identity
+after an identical external re-import. Other stores/domains or explicit application
+roots may retain trust. Configure browser/application trust separately and verify
+the actual origin without warnings. Backlot does not automate browser stores,
+DNS, CA regeneration or privileged services.
 
 #### Manual macOS verification and recovery
 
@@ -188,8 +177,8 @@ pre-existing settings/entry and retained receipt before effects.
    for manual review; never delete by name or erase/rewrite the receipt to regain
    automated authority. Record residuals and preserve evidence if uncertain.
 
-This sequence defines manual acceptance work, not a claim that it has passed.
-Optional normal application-leaf TLS proof remains separate.
+This is an acceptance procedure, not evidence of a pass. Optional normal
+application-leaf TLS proof remains separate.
 
 Publication readiness, doctor system TLS and HTTPS probes use bounded, joined,
 unprivileged invocations of the same executable to refresh Go trust policy.

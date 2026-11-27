@@ -16,147 +16,129 @@ implemented_by: ["https://github.com/octacian/backlot/pull/148"]
 
 ## Context and Problem Statement
 
-Managed HTTPS needs explicit host trust installation and retirement.
-[Issue 94](https://github.com/octacian/backlot/issues/94#issuecomment-6839378023)
-closed without reproducing root replacement; repeated installation must not conceal
-CA drift. Replace the earlier prohibition on Backlot-driven host trust effects
-with foreground operator authority. This narrowly amends the inherited host-trust
-prohibition in the related current history decision; its unrelated lifecycle and
-erasure decisions remain in force. Preserve root pinning, private CA ownership,
+Managed HTTPS needs explicit host trust installation and retirement without
+concealing CA drift. Replace the inherited host-trust prohibition in the related
+history decision with foreground operator authority; its lifecycle and erasure
+rules remain in force. Preserve root pinning, private CA ownership,
 application-selected trust and external gateway ownership.
 
 ## Considered Options
 
-- Manual stock commands plus better hints and a daemon-cache fix: smallest surface,
-  but leaves operators to assemble provenance, exact targeting and recovery.
+- Manual stock commands plus hints and a daemon-cache fix: smallest surface, but
+  leaves operators to assemble provenance, exact targeting and recovery.
 - Wrap [Caddy trust/untrust](https://github.com/caddyserver/caddy/blob/v2.11.7/modules/caddypki/command.go):
-  also targets Firefox/Java, fetches installation roots from a mutable endpoint and
-  uses name/serial-derived Linux removal paths; insufficient exact-effect control.
+  also targets Firefox/Java, fetches roots from a mutable endpoint and uses
+  name/serial-derived Linux removal paths; insufficient exact-effect control.
 - Foreground stock OS tools, provisioning receipts and fresh verification: chosen
-  to provide the workflow with bounded ownership and best-effort consumer warnings.
+  for bounded ownership and best-effort consumer warnings.
 - Mandatory gateway enrollment or a privileged broker: stronger coordination costs
   more than the accepted best-effort consumer protection requires.
 
 ## Decision Outcome
 
-Expose gateway trust status/install/retire through the CLI and named shared result
-contracts. The daemon supplies a read-only public-root snapshot validated against
-its managed identity, protected CA state and pinned DER SHA-256. Keep keys and
-private scope capabilities private. Results identify fingerprint, state/source,
-store/domain, provenance and observation context. Distinguish trusted, untrusted
-and unknown from gateway readiness, certificate presence and command success;
-observation failures mean unknown.
+Expose gateway trust status/install/retire through the CLI and named shared
+result contracts. The unprivileged daemon supplies a read-only public-root
+snapshot validated against its managed identity, protected CA state and pinned
+DER SHA-256; keys and private
+capabilities stay private. Report root-specific trusted/untrusted/unknown
+observations separately from certificate presence, tool success and readiness.
+Observation failures mean unknown.
 
-Gateway start reports fingerprint and host trust status, with the exact Backlot
-trust command for the selected state/root and necessary follow-up when untrusted
-or unknown. This bounded observation is independent of receipt health and trust
-mutation locks. Installation remains an explicit foreground action, without an
-interactive startup offer. Missing host trust does not fail an otherwise valid
-gateway start; existing integrity checks and published-scene verified TLS remain.
+Gateway start reports the fingerprint, bounded host observation and exact state-scoped
+trust command without depending on receipt health or mutation locks. Installation
+requires explicit foreground authorization, never a startup offer. Missing host
+trust does not fail gateway start; integrity and published-scene TLS checks remain.
 
 ### Authority and consumer impact
 
-Retirement requires both verifiable Backlot-managed CA provenance and evidence
-that Backlot provisioned the exact trust effect. At installation, retain the
-validated daemon snapshot and bind intent/outcome to its public certificate bytes
-and OS target, distinguishing pre-existing entries/settings from newly created
-effects. Preserve external effects even for an identical root. Certificate names,
-arbitrary paths and user acknowledgement confer no ownership. Permissioned receipts
-use the existing trusted-local-operator boundary, not attestation against that user.
+Retirement requires verifiable Backlot-managed CA provenance **and exact
+Backlot-provisioned trust effects**. Receipts bind validated public certificate
+bytes, OS target and intent/outcome, distinguishing new effects from pre-existing
+entries/settings. Preserve external effects even for an identical root. Names,
+arbitrary paths and acknowledgement confer no ownership. Permissioned receipts
+use the trusted-local-operator boundary, not attestation against that operator.
 
-Revalidate the pin, public snapshot and target before effects. Retained public
-evidence can authorize retirement after the source daemon, private keys or scope
-are gone; certificate expiry does not erase proven identity. Ambiguous provenance
-or indistinguishable external effects require manual handling.
+Revalidate the pin, snapshot and target before effects. Retained public evidence
+can authorize retirement after the source daemon, keys or scope are gone, or the
+certificate expires. Ambiguous provenance or indistinguishable external effects
+require manual handling.
 
-Known source/dependency observations support warnings, not complete discovery.
-There is no gateway enrollment, daemon receipt writer, requirement-release
-lifecycle or cross-daemon start lock. Users may acknowledge consumer impact and
-proceed, potentially breaking unobserved scopes or applications; acknowledgement
-cannot waive provenance. Replacement verifies the selected new root's OS trust
-before retiring the old root, using the platform proof below. Standalone retirement
-acknowledges loss of dependent HTTPS trust.
+Known sources support best-effort warnings, not complete discovery or enrollment.
+Acknowledging impact permits breakage of unobserved scopes/applications, never
+waives ownership and adds no cross-daemon start lock or requirement-release
+lifecycle. Replacement first proves the selected new root's OS trust under the
+platform rules below; standalone retirement accepts loss of dependent HTTPS trust.
 
 ### Effects, receipts and recovery
 
-Foreground commands use normal OS authorization and stock tools: exact public
-certificate bytes and an explicit keychain/trust domain with macOS `security`;
-a fingerprint-addressed local CA source and `update-ca-certificates` on
-Ubuntu/Debian. Conflicting entries are preserved. Linux authorization includes
-the normal collection refresh and configured distribution hooks, whose effects
-can extend beyond one root. Trust commands do not add browser-specific automation,
-DNS changes, CA regeneration, privileged services or infrastructure orchestration.
-The separate [infrastructure lifecycle decision](/docs/adr/20261112T235351793Z-compose-infrastructure-controls-with-verified-shutdown-completion.md)
-composes the existing gateway lifecycle without installing host trust.
-Unavailable authorization produces actionable instructions. On macOS, normal
-Security authorization may require interactive administrator authentication even
-under sudo. Retain the foreground stock commands and warn before retirement;
-unattended headless completion is unproven. Accept macOS retirement as a manual
-acceptance boundary, with exact-root recovery and preserved receipts after
-interruption, while Ubuntu retains automated owned-host mutation coverage.
-This does not establish the exact cause of a hosted removal wait, promise
-privileged descendant termination on cancellation or authorize broader effects.
+Use foreground stock tools with normal OS authorization: exact certificate bytes
+and explicit keychain/trust domain with macOS `security`; a fingerprint-addressed
+CA source and `update-ca-certificates` on Ubuntu/Debian. Preserve conflicts. Linux
+collection refresh and configured distribution hooks can affect more than one
+root. Browser automation, DNS changes, CA regeneration and privileged services
+remain outside this decision. [Infrastructure controls](/docs/adr/20261112T235351793Z-compose-infrastructure-controls-with-verified-shutdown-completion.md)
+do not install host trust.
 
-Serialize foreground mutations and receipt updates with the existing file-lock
-library. Store permissioned, atomic, versioned receipts and public certificates
-outside daemon-state erasure in one documented account-local location per operation.
-Retain only authority, exact target, intent/outcome and useful warning/recovery
-observations. Unsupported writers preserve receipts unchanged. This adds neither
-daemon bbolt migration nor a background registry, scanner or collector; bbolt
-transactions never span OS authorization.
+macOS Security may require interactive administrator authentication even under
+sudo. Warn before retirement and retain stock foreground authorization. Accept
+retirement as a manual acceptance boundary with exact-root recovery and preserved
+receipts after interruption; unattended headless completion is unproven. A hosted
+wait does not establish its cause, withdrawal or descendant termination on
+cancellation. Ubuntu retains automated owned-host mutation coverage.
 
-Journal intent before effects and observed outcomes afterward. Verify results:
-stock success alone is insufficient. Report interrupted/denied operations as
-partial or unknown, and distinguish trust withdrawal, entry deletion and residual
-trust in other stores/domains. Cooperative locks and exact pre/post checks do not
-exclude unrelated administrators; effects assume an operator-controlled maintenance
-window, with manual fallback for uncertain targeting. Drift stops further
-destructive effects; detecting it afterward cannot undo an external race.
+Only foreground commands write permissioned, atomic, versioned public receipts
+in one documented account-local location outside daemon erasure, serializing
+mutations and updates with the existing
+file-lock library. Journal intent before effects and observations afterward;
+retain authority, exact targets and useful warning/recovery observations. No
+daemon receipt writer, bbolt migration or background registry is needed.
 
-Receipt loss, corruption, unsupported versions or known restoration leave status
-and gateway start usable. Preserve damaged evidence; restore compatible receipts
-or explicitly start clean tracking for new validated installations. Neither fresh
-tracking nor reconciliation invents old removal authority. Legacy/manual installs
-remain observable with safe installation guidance and manual OS recovery. Some
-old roots may therefore require deliberate manual retirement.
+Verify postconditions: stock success alone is insufficient. Report interrupted
+or denied operations as partial/unknown, separating trust withdrawal, entry
+deletion and residual trust. Cooperative locks and exact pre/post checks cannot
+exclude unrelated administrators; use a controlled maintenance window. Drift
+stops further destructive work but cannot undo an external race.
+
+Receipt loss, corruption, unsupported versions or known restoration must not
+block status or gateway start. Preserve damaged evidence; restore compatible
+tracking or explicitly start clean tracking for future validated effects.
+Unsupported writers preserve receipts unchanged. Restoration can leave stale
+authority; neither clean tracking nor reconciliation invents old removal rights.
+Legacy/manual or uncertain effects require manual OS recovery.
 
 ### Fresh verification
 
-Installation/replacement proof is root-specific in the selected OS domain,
-independent of certificate-file overrides. On macOS, accept configured OS trust:
-exact supported admin TLS root settings, exact System public root entry and
-current CA dates. Native Go SSL evaluation of a standalone CA cannot reliably
-establish root acceptance, even for stock trusted roots. Requiring that evaluation
-would block valid installation; adding a leaf acquisition contract is unnecessary
-for this selected-domain guarantee. Configuration does not establish source-account
-acceptance or dominance over user deny/other stores. Ubuntu/Debian retain fresh
-exact-root Go verification. File presence alone, a supplied-root pool, override-only
-acceptance or TLS through another root is insufficient.
+Installation/replacement proof is root-specific in the selected OS domain and
+excludes certificate-file overrides. macOS accepts configured OS trust: exact
+supported admin TLS root settings, exact System public entry and current CA
+dates. Native Go SSL evaluation cannot reliably prove standalone CA acceptance;
+requiring it would block valid installation. Configured trust does not establish
+source-account acceptance or override user deny/other stores. Ubuntu/Debian use
+fresh exact-root Go verification. File presence, supplied-root pools,
+override-only acceptance or TLS through another root are insufficient.
 
-Separately report daemon-effective standalone root acceptance under its retained
-environment, preserving Go's verifier selection and file overrides. Unsupported
-native proof remains unknown, never copied from configured OS trust. Browser and
-application trust remain independent; normal server-leaf TLS readiness is verified
-separately. This accepts a narrower macOS observation instead of new provider,
-private-key or root-loader contracts.
+Report daemon-effective standalone root acceptance separately under its retained
+environment and Go verifier/file-override policy. Unsupported native proof stays
+unknown. Browser/application trust and normal server-leaf readiness remain
+separate; this narrower macOS guarantee avoids a new leaf-acquisition, provider,
+private-key or root-loader contract.
 
-Use bounded, joined, unprivileged invocations of the same executable for fresh
-Go observations, shared with publication readiness, doctor system-TLS
-and daemon HTTPS probes. Preserve hostname/date/chain checks, owned destinations,
-publication markers, redirects, cancellation and readiness semantics. Explicit-root
-diagnostics remain labeled separately. A new transport or clone of
-[Go's cached SystemCertPool](https://pkg.go.dev/crypto/x509#SystemCertPool) cannot
-refresh Linux roots; macOS normally verifies live, but Go 1.27 file overrides can
-also cache roots. Fresh processes reuse Go policy rather than maintaining another
-root loader or bypassing TLS.
+Use bounded, joined, unprivileged invocations of the same executable for fresh Go
+observations, publication readiness, doctor system TLS and daemon HTTPS probes.
+Preserve hostname/date/chain checks, owned destinations, publication markers,
+redirects, cancellation and readiness semantics; label explicit-root diagnostics
+separately. A new transport or clone of [Go's cached SystemCertPool](https://pkg.go.dev/crypto/x509#SystemCertPool)
+cannot refresh Linux roots; macOS normally verifies live, but Go 1.27 file
+overrides can also cache roots. Fresh processes reuse Go policy without another
+root loader or TLS bypass.
 
 ### Consequences
 
-Receipts add durable foreground ownership/recovery metadata and stock-platform
-adapters, with no new library dependency or work while unused. Best-effort warnings
-can miss consumers; lost authority can leave manual cleanup. These limits avoid
-making ordinary gateway use depend on a second coordinated state system.
+Receipts add durable ownership/recovery metadata and stock-platform adapters,
+without a new library dependency or work while unused. Best-effort warnings can
+miss consumers and lost authority can require manual cleanup, avoiding a second
+coordinated state system for ordinary gateway use.
 
 Targets remain macOS ARM64, Ubuntu 24.04 amd64 and Debian 13.4 amd64. Stock-tool
-source/help establishes plausibility; owned platform evidence must establish actual
-trust effects, recovery and fresh verification before delivery claims.
+source/help establishes plausibility; owned platform evidence must establish
+actual effects, recovery and fresh verification before delivery claims.

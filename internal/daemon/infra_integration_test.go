@@ -154,7 +154,11 @@ func TestInfraManagedRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		infraCLI(t, binary, h.dir, true, "infra", "start", "--config", config)
+		var started v1.InfraResponse
+		data := infraCLI(t, binary, h.dir, true, "infra", "start", "--config", config)
+		if json.Unmarshal(data, &started) != nil || started.Gateway == nil || started.Gateway.Validate() != nil || started.Gateway.RootFingerprint == "" || started.Gateway.HostTrust == nil || started.Gateway.TrustCommand == "" {
+			t.Fatal("infra start lost gateway trust guidance", string(data))
+		}
 	}
 	_, _, storage := managedPaths(h.dir)
 	rootPath := filepath.Join(storage, "pki", "authorities", "local", "root.crt")

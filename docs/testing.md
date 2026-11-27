@@ -144,7 +144,7 @@ multi-commit pushes.
 | Changed files | Jobs that run |
 | --- | --- |
 | Every change, including code-only changes | Docs workflow: Corestack record and local file-link verification |
-| Go/runtime sources, schemas, non-CI examples, `install.sh`, module/build/lint configuration | macOS/Ubuntu repository checks, Linux runtime, current-head scenes and project inputs |
+| Go/runtime sources, schemas, non-CI examples, `install.sh`, module/build/lint configuration | macOS/Ubuntu repository checks, Ubuntu owned host trust checks, Linux runtime, current-head scenes and project inputs |
 | `THIRD_PARTY_NOTICES.md` | Repository and Linux installation checks, plus Docs |
 | `actions/` implementation | Current-head scenes and project inputs |
 | `examples/ci-scenes/` implementation | Scenes |
@@ -204,6 +204,38 @@ workload activation environment cannot enable it. Full receiver identity and
 capability checks precede self-fault. Capability data stays in private temporary
 state and is excluded from reports. Failure paths join owners and prove absence,
 or preserve diagnostic state and report residuals.
+
+## Disposable host trust acceptance
+
+The Check workflow's `Owned host trust` job runs `TestOwnedHostTrust` serially
+on GitHub-hosted Ubuntu 24.04 amd64 with stock Caddy 2.11.7, ordinary sudo, a
+private unprivileged daemon and dynamic gateway ports. It covers foreground
+install/status/retire, pin/impact-acknowledgement rejection, receipt-only retirement,
+exact withdrawal, identical external-root preservation, fresh effective-root
+verification and distro hooks. An owned hook exercises failure/recovery while
+other hooks remain enabled; stock refresh may accept its failure, which does not
+prove a partial product result. Register cleanup before effects; uncertain
+residuals fail the job. Upload only public diagnostics, never private state or keys.
+
+The fixture requires both `BACKLOT_HOST_TRUST_TEST=install-status-retire` and
+`BACKLOT_DISPOSABLE_HOST_GRANT=github-hosted-ephemeral`, rejecting other runner
+identities/platforms. **Never set these on a normal workstation.** Default
+`make check` skips before allocation or host mutation. The retained macOS branch
+also requires a disposable hosted runner; do not spoof its grant for manual use.
+
+macOS remains in nonmutating repository CI; unattended owned-host mutation CI is
+Ubuntu-only. macOS retirement has an owner-accepted manual acceptance boundary:
+use the [interactive disposable-host sequence](https.md#manual-macos-verification-and-recovery)
+and retain exact settings/entry/receipt and cleanup evidence. Linux success or
+macOS repository checks do not prove macOS trust acceptance. The hosted removal
+timeout proves neither its wait cause nor settings withdrawal.
+
+Root observations and admin readiness do not prove wildcard issuance, normal
+OS-root leaf TLS or application readiness. Optional application-leaf proof remains
+separate, deferred for its fixture cost/fragility. Fixture code and skipped/local
+checks are not platform evidence: require the published Ubuntu job, including
+cleanup, before claiming Linux effects. Interactive authorization denial/interruption
+and rare partial failures remain acceptance gaps.
 
 ## Release packaging and publication
 

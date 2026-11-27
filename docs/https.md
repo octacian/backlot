@@ -43,28 +43,150 @@ Docker may supply dependencies or loopback-mapped HTTP upstreams. Explicitly
 configured Docker Desktop bridge consumers can use the same canonical HTTPS
 hostname; see [container trust and mapping](#public-root-file-mounts-for-containers).
 
-Start the daemon and configured gateway with `infra start`, then install trust as a separate operator
-action using the configured stock executable and **owned managed admin endpoint**:
+Start the daemon and configured gateway with `infra start`, then authorize host
+trust separately:
 
 ```sh
 backlot infra start --json
-/opt/homebrew/bin/caddy trust --address 127.0.0.1:2020 --ca local
-backlot gateway status --json
+backlot gateway trust status --json
+backlot gateway trust install --fingerprint ROOT_SHA256_FROM_STATUS --json
 ```
 
-[Caddy trust](https://caddyserver.com/docs/command-line#caddy-trust) fetches the CA
-from that running endpoint and may request administrator authorization. Approve
-this separate command according to your machine policy. Do not point it at an
-unrelated Caddy server. The daemon runs unprivileged and sets `install_trust:false`;
-it never changes system/browser trust. Configure trust explicitly for each consumer; native applications can use the
-[public CA reference](#explicit-application-trust), while standard system/browser
-trust setup is a separate operator action. Browsers can use different trust stores: verify your
-browser accepts the origin without a warning; no universal browser guarantee is
-made. Missing/wrong trust fails normal TLS readiness, never invokes a bypass. The daemon
-aggregate probe also needs system trust independently of Node/browser settings. If
-it attempted HTTPS before trust installation, stop/start the daemon and explicitly
-start the gateway again to refresh cached certificate roots; retained CA identity
-is preserved.
+Gateway start (including through `infra start`) reports the actual pinned root
+fingerprint, an informational host trust observation and the exact state-scoped install command. Missing or unknown
+trust does not fail an otherwise valid gateway start or offer an interactive
+installation. Published-scene readiness still requires normally verified HTTPS.
+
+### Explicit host trust and retirement
+
+`gateway trust status` validates a read-only public root snapshot against the
+selected daemon's protected managed configuration, CA key pairs and DER SHA-256
+pin. It reports exact-root OS trust (`trusted`, `untrusted` or `unknown`) separately
+from a fresh daemon-effective observation under its retained environment.
+Unavailable observations mean unknown; certificate presence, tool success or TLS
+through another root is insufficient. The snapshot excludes keys and private
+capabilities. External gateway trust remains operator-owned.
+
+On macOS, host `trusted` means **configured OS trust**: exact supported admin TLS
+root settings, exact System public entry and current CA dates. It does not prove
+source-account acceptance, override user deny/other stores or establish application
+TLS readiness. Native Go SSL policy may leave daemon-effective standalone CA trust
+`unknown` after installation; verify the actual application origin normally.
+File overrides follow Go policy and alone prove neither verifier selection nor
+acceptance. Ubuntu/Debian use fresh exact-root Go verification.
+
+`install` requires the displayed fingerprint and foreground stock-tool
+administrator authorization: macOS `security` targets the System keychain/admin
+TLS domain; Ubuntu/Debian use
+`/usr/local/share/ca-certificates/backlot-FINGERPRINT.crt` and
+`update-ca-certificates`, including distribution hooks that can affect more than
+one root. Retirement uses stock OpenSSL to refresh indices after removing owned
+links; preserved external/legacy links may retain dangling references for manual
+review. Backlot preserves pre-existing identical entries/settings, rejects
+conflicts and verifies exact postconditions. Ambiguous/unsupported macOS settings
+require manual handling. The unprivileged daemon sets Caddy `install_trust:false`.
+
+Permissioned version-1 public receipts live in
+`~/Library/Application Support/backlot/trust` on macOS or
+`${XDG_CONFIG_HOME:-$HOME/.config}/backlot/trust` on Linux. Only foreground trust
+commands write them, atomically under a cooperative mutation lock. They retain
+the validated snapshot, exact store/effects, pre-existing versus new effects and
+known sources, without keys, and survive daemon erasure. Linux receipts bind new
+source filesystem identity/change time and exact generated `.pem` links;
+identical replacement does not inherit removal authority. External/legacy links
+stay preserved. Status lists bounded retained-root summaries: source observations
+are incomplete consumer information, not enrollment. Status/startup neither take
+the mutation lock nor depend on healthy receipts.
+
+To replace a root, first install the new selected daemon's root and verify its OS
+trust, then select the old receipt fingerprint:
+
+```sh
+backlot gateway trust retire --fingerprint OLD_ROOT_SHA256 \
+  --replacement --state-dir /absolute/new-daemon-state --acknowledge-impact --json
+```
+
+`--replacement` revalidates the selected new root and proves its OS trust before
+retirement. Omit it for standalone removal; both require `--acknowledge-impact`.
+Review known sources and accept possible breakage of unknown consumers.
+Acknowledgement never waives ownership: only verifiably Backlot-provisioned CAs
+**and exact Backlot-provisioned trust effects** can be retired. Names, arbitrary
+paths and manual imports grant no authority; preserve external entries/settings
+even for the same root. Retained public identity permits retirement after source
+daemon/key loss or certificate expiry. `status --fingerprint OLD_ROOT_SHA256`
+observes a retained root without its daemon. Insufficient legacy/manual receipts
+require manual OS work.
+
+On macOS, use an interactive login session: Security may require administrator
+authentication even under `sudo`. Retirement warns on stderr while JSON stdout
+remains one result. Headless completion is unproven. Waiting does not establish
+success/failure; interruption can leave uncertain effects, and Ctrl-C does not
+prove all privileged descendants terminated.
+
+Interrupted/denied operations retain evidence and report partial/unknown effects;
+do not blindly retry. Changed targets/settings stop further destructive work.
+Restore compatible tracking or use
+`install --new-tracking --fingerprint ROOT_SHA256_FROM_STATUS` to preserve old
+receipts and track only newly validated future effects, never adopt old unknown
+effects. Unsupported writers preserve evidence even with `--new-tracking`; use a
+compatible executable or separate clean tracking location. Known receipt backup
+restoration can leave stale authority: use manual recovery or clean tracking.
+The cooperative lock excludes no unrelated administrator; use a maintenance
+window. Exact pre/post checks cannot make effects atomic against external changes.
+
+Retirement reports trust withdrawal, entry deletion/preservation and current root
+trust separately. macOS withdraws only proven admin TLS settings and preserves
+the public entry for review: stock observations cannot prove stable entry identity
+after an identical external re-import. Other stores/domains or explicit application
+roots may retain trust. Configure browser/application trust separately and verify
+the actual origin without warnings. Backlot does not automate browser stores,
+DNS, CA regeneration or privileged services.
+
+#### Manual macOS verification and recovery
+
+Use an explicitly authorized disposable macOS host with an interactive administrator
+session and a maintenance window. The hosted-only fixture is not an interactive
+manual execution path; do not spoof its runner grant. Record the revision, tool
+versions, exact DER SHA-256 fingerprint, selected admin domain/System keychain,
+pre-existing settings/entry and retained receipt before effects.
+
+1. Start a private managed gateway, inspect `gateway trust status --json`, then
+   install only its pinned root using the foreground command above. Inspect status
+   again from the same live daemon. Configured host trust and daemon-effective
+   observations are separate; neither proves application-leaf TLS.
+2. Check wrong-pin installation and retirement without `--acknowledge-impact`
+   refuse effects. In a controlled maintenance window, retire the receipt-pinned
+   root with acknowledgement and complete normal Security authentication. Verify
+   exact admin TLS settings are absent, the System public entry is preserved and
+   the receipt reports the observed outcome. Check external pre-existing effects
+   remain unchanged. Record failures, unknowns and residuals as such.
+3. If denied, interrupted or still waiting, retain the receipt and public snapshot
+   unchanged. Determine whether the original privileged operation is still active
+   before any further effects; do not infer descendant completion from Ctrl-C.
+   Compare the retained certificate's DER SHA-256 with the pinned fingerprint and
+   inspect `security dump-trust-settings -d` and the exact System keychain entry.
+   A matching name, a missing public entry or an `untrusted` observation alone does
+   not prove admin settings were withdrawn.
+4. Only after separately authorizing manual recovery and establishing that the
+   exact settings were Backlot-created and remain unchanged, an administrator can
+   run `sudo security remove-trusted-cert -d /absolute/verified-public-root.pem`
+   interactively. The file must contain the verified retained public certificate,
+   never a name-selected replacement. Reinspect the exact settings and public
+   entry afterward; stock exit success alone is insufficient. Preserve external
+   or ambiguous effects, including identical re-imports. Keep the public entry
+   for manual review; never delete by name or erase/rewrite the receipt to regain
+   automated authority. Record residuals and preserve evidence if uncertain.
+
+This is an acceptance procedure, not evidence of a pass. Optional normal
+application-leaf TLS proof remains separate.
+
+Publication readiness, doctor system TLS and HTTPS probes use bounded, joined,
+unprivileged invocations of the same executable to refresh Go trust policy.
+No daemon restart is needed merely to refresh system roots. `SSL_CERT_FILE` and
+`SSL_CERT_DIR` retained by the daemon still apply to its effective TLS; the separate
+OS observation removes these overrides. If they disagree, deliberately update
+consumer configuration (and restart a daemon to change its retained environment),
+then retry the failed scene. No CA injection or TLS bypass is used.
 
 Run a published scene using the existing scene contract below. Its canonical
 origin is `https://bl-<instance-label>.backlot.localhost:8443`; different worktrees

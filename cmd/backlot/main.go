@@ -12,6 +12,7 @@ import (
 	apiv1 "github.com/octacian/backlot/api/v1"
 	"github.com/octacian/backlot/internal/cli"
 	"github.com/octacian/backlot/internal/native"
+	"github.com/octacian/backlot/internal/tlsverify"
 )
 
 // Build metadata can be supplied with linker -X flags for release builds.
@@ -22,6 +23,9 @@ var (
 )
 
 func main() {
+	if tlsverify.Helper() {
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "__native-anchor" {
 		if native.Anchor() != nil {
 			os.Exit(1)

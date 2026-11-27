@@ -58,7 +58,11 @@ func TestAggregateRequiresPublishedRoute(t *testing.T) {
 				w.WriteHeader(200)
 			}))
 			defer server.Close()
-			err := awaitPublication(context.Background(), server.URL, "50ms", nil)
+			budget := "50ms"
+			if owned {
+				budget = "15s"
+			}
+			err := awaitPublication(context.Background(), server.URL, budget, nil)
 			if (err == nil) != owned {
 				t.Fatal("unrelated fallback satisfied publication readiness", owned, err)
 			}

@@ -182,6 +182,7 @@ func TestNativeFixtureProcess(t *testing.T) {
 	}
 	listener, err := net.Listen("tcp", net.JoinHostPort(host, os.Getenv("PORT")))
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "fixture TCP listener:", err)
 		os.Exit(22)
 	}
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {

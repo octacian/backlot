@@ -219,6 +219,7 @@ type nativeHarness struct {
 	manifest                   v1.Manifest
 	tokens                     map[string]string
 	daemonLog                  bytes.Buffer
+	daemonResult               bytes.Buffer
 }
 
 func (h *nativeHarness) start() {
@@ -227,12 +228,13 @@ func (h *nativeHarness) start() {
 		h.cleanupUnverified = true
 		h.t.Fatal("previous daemon owner not joined; preserve handle and state", h.dir)
 	}
-	h.process = exec.Command(h.binary, "daemon", "serve", "--state-dir", h.dir, "--lease-duration", h.lease)
+	h.process = exec.Command(h.binary, "daemon", "serve", "--state-dir", h.dir, "--lease-duration", h.lease, "--json")
 	h.process.Env = append(os.Environ(), "BACKLOT_NATIVE_TEST_FAULTS=0")
 	if h.faultMode {
 		h.process.Env = append(h.process.Env, "BACKLOT_NATIVE_TEST_FAULTS=1")
 	}
-	h.process.Stdout = io.Discard
+	h.daemonResult.Reset()
+	h.process.Stdout = &h.daemonResult
 	if strings.Contains(h.daemonLog.String(), "DATA RACE") {
 		h.t.Fatal("race-instrumented daemon reported a data race", h.daemonLog.String())
 	}
@@ -424,6 +426,18 @@ func (h *nativeHarness) close() {
 			} else {
 				h.cleanupUnverified = true
 				h.t.Error("unverified daemon shutdown; preserving", h.dir, result.stopErr, result.ownerErr)
+				if result.joined {
+					// Only joined output is stable; messages and context may contain private fixture state.
+					code := "unavailable; inspect preserved private state"
+					var response v1.ErrorResponse
+					if err := json.NewDecoder(io.LimitReader(bytes.NewReader(h.daemonResult.Bytes()), 4096)).Decode(&response); err == nil && response.APIVersion == v1.Version {
+						switch response.Error.Code {
+						case "daemon_failed", "evidence_retention_failed", "cleanup_failed":
+							code = response.Error.Code
+						}
+					}
+					h.t.Log("daemon fatal code:", code)
+				}
 			}
 		}
 		if result.joined {
